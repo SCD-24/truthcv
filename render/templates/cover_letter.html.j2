@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Cover Letter — {{ name | default("") }}</title>
+  <style>
+    @page { size: A4; margin: 22mm; }
+    body {
+      font-family: "Source Sans 3", Arial, sans-serif;
+      font-size: 11pt;
+      line-height: 1.5;
+      color: #111;
+    }
+    header { margin-bottom: 18pt; }
+    h1 { font-size: 15pt; margin: 0 0 2pt; }
+    .contact { font-size: 9.5pt; color: #333; }
+    p { margin: 0 0 10pt; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{{ name | default("Your Name") }}</h1>
+    <div class="contact">{{ contact | default("") }}</div>
+  </header>
+  {% for p in paragraphs %}
+  <p>{{ p }}</p>
+  {% endfor %}
+</body>
+</html>

@@ -32,6 +32,8 @@ from api import secrets as secrets_store
 from .schemas import (
     AtsWarning,
     ConfirmInferencesRequest,
+    CoverLetterRequest,
+    CoverLetterResult,
     EntriesResponse,
     JobFetchRequest,
     JobFetchResponse,
@@ -125,6 +127,9 @@ def tailor_route(body: TailorRequest) -> TailorResult:
             status_code=502,
             detail=f"The language model call failed: {type(e).__name__}: {e}",
         ) from e
+    from truth.store import data_dir
+
+    (data_dir() / "posting.txt").write_text(body.posting, encoding="utf-8")
     return TailorResult.model_validate(
         {"keywords": result["keywords"], "inferences": result["inferences"]}
     )
@@ -192,6 +197,56 @@ def _settings_status() -> SettingsStatus:
 @router.get("/profile", response_model=ProfileStatus)
 def profile() -> ProfileStatus:
     return ProfileStatus(has_profile=has_profile())
+
+
+@router.post("/cover-letter", response_model=CoverLetterResult)
+def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
+    from truth.store import data_dir
+
+    posting_file = data_dir() / "posting.txt"
+    if not posting_file.exists():
+        raise HTTPException(
+            status_code=400, detail="Tailor a posting before generating a cover letter."
+        )
+
+    from coverletter import build_letter
+    from render.cover_letter import render_letter_html
+
+    try:
+        letter = build_letter(
+            posting_file.read_text(encoding="utf-8"),
+            body.tone,
+            body.length,
+            load(),
+            get_provider(),
+        )
+    except ProviderError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502,
+            detail=f"The language model call failed: {type(e).__name__}: {e}",
+        ) from e
+
+    if letter["blocked"]:
+        return CoverLetterResult(blocked=True, unverifiable=letter["unverifiable"])
+
+    html = render_letter_html(letter["text"])
+    pdf_url = docx_url = None
+    try:
+        pdf_url = f"/api/download/{render_pdf(html, 'cover_letter.pdf').name}"
+    except RenderUnavailable:
+        pass
+    try:
+        docx_url = f"/api/download/{render_docx(html, 'cover_letter.docx').name}"
+    except RenderUnavailable:
+        pass
+    if pdf_url is None and docx_url is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Rendering backend unavailable (WeasyPrint/pandoc not installed).",
+        )
+    return CoverLetterResult(blocked=False, pdf_url=pdf_url, docx_url=docx_url)
 
 
 @router.get("/settings", response_model=SettingsStatus)
