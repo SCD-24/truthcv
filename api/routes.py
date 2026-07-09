@@ -18,7 +18,14 @@ from render.pdf import RenderUnavailable
 from truth import load, save
 from truth.extract import build_truth_from_text, write_confirmed
 from truth.model import TruthEntry
-from truth.pdf import PdfExtractError, extract_text, load_source_text, persist_source_text
+from truth.pdf import (
+    PdfExtractError,
+    extract_text,
+    has_profile,
+    load_source_text,
+    persist_profile,
+    persist_source_text,
+)
 
 from api import secrets as secrets_store
 
@@ -28,6 +35,7 @@ from .schemas import (
     EntriesResponse,
     JobFetchRequest,
     JobFetchResponse,
+    ProfileStatus,
     PutTruthRequest,
     RenderResult,
     SettingsStatus,
@@ -55,6 +63,7 @@ async def upload(file: UploadFile = File(...)) -> None:
     except PdfExtractError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     persist_source_text(text)
+    persist_profile(data)
 
 
 @router.post("/extract", response_model=EntriesResponse)
@@ -178,6 +187,11 @@ def _settings_status() -> SettingsStatus:
         openai_key_set=bool(creds["openaiApiKey"]),
         ollama_host=creds["ollamaHost"],
     )
+
+
+@router.get("/profile", response_model=ProfileStatus)
+def profile() -> ProfileStatus:
+    return ProfileStatus(has_profile=has_profile())
 
 
 @router.get("/settings", response_model=SettingsStatus)
