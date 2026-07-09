@@ -1,0 +1,94 @@
+/* TruthCV design tokens
+ *
+ * Design thesis: this product exists because every fact on a CV has a SOURCE.
+ * The interface is a "provenance ledger" — facts are presented as auditable
+ * entries, each carrying a visible stamp of where it came from. The one bold
+ * move is that provenance is the interface, not decoration.
+ *
+ * Deliberately NOT the three generic AI-design defaults:
+ *  - not cream(#F4F1EA)+high-contrast-serif+terracotta
+ *  - not near-black + acid accent
+ *  - not broadsheet hairlines + zero-radius + newspaper columns
+ * Register: iron-indigo ink on a cool document ground. Verification green is
+ * reserved strictly for attested/confirmed provenance; rust flags the
+ * unverified. The accent always carries meaning.
+ */
+
+:root {
+  /* Palette */
+  --ink: #1b2a4a;        /* iron-indigo — primary text & structure */
+  --ink-soft: #4a5876;   /* muted ink — secondary text */
+  --ground: #eef1f5;     /* cool document ground — app background */
+  --surface: #fbfcfd;    /* raised card surface */
+  --line: #d7dde6;       /* soft rule — used sparingly, never as the whole look */
+  --attest: #3a6b5e;     /* verification green — ATTESTED / user-confirmed only */
+  --attest-wash: #e6efec;/* attested background wash */
+  --flag: #b4532a;       /* rust — inference / unverified / needs attention */
+  --flag-wash: #f7ebe4;  /* rust background wash */
+  --focus: #2f6db0;      /* keyboard focus ring — distinct from both accents */
+
+  /* Type roles */
+  --font-display: "Space Grotesk", system-ui, sans-serif;      /* headings, used with restraint */
+  --font-body: "Source Sans 3", system-ui, sans-serif;         /* body copy, controls */
+  --font-mono: "Space Mono", ui-monospace, "SFMono-Regular", monospace; /* provenance stamps, ids, data */
+
+  /* Type scale (major third-ish, intentional) */
+  --step--1: 0.833rem;
+  --step-0: 1rem;
+  --step-1: 1.25rem;
+  --step-2: 1.6rem;
+  --step-3: 2.1rem;
+  --step-4: 2.9rem;
+
+  --leading-tight: 1.15;
+  --leading-body: 1.55;
+
+  /* Weight & tracking */
+  --w-regular: 400;
+  --w-medium: 500;
+  --w-bold: 700;
+  --track-eyebrow: 0.14em;   /* provenance stamps / eyebrows only */
+
+  /* Space scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-8: 3rem;
+  --space-10: 4rem;
+
+  /* Shape & depth — soft, not the zero-radius broadsheet look */
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-lg: 14px;
+  --shadow-card: 0 1px 2px rgba(27, 42, 74, 0.06), 0 8px 24px -12px rgba(27, 42, 74, 0.18);
+  --shadow-focus: 0 0 0 3px rgba(47, 109, 176, 0.35);
+
+  /* Motion — deliberate, reduced-motion honoured in globals */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-fast: 130ms;
+  --dur: 240ms;
+  --dur-slow: 520ms;
+
+  /* Layout */
+  --rail-w: 264px;
+  --stage-max: 760px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e7ecf4;
+    --ink-soft: #9aa7c0;
+    --ground: #131a2a;
+    --surface: #1b2436;
+    --line: #2b3750;
+    --attest: #7fc4b1;
+    --attest-wash: #1c2f2b;
+    --flag: #e08a63;
+    --flag-wash: #2f2019;
+    --focus: #6aa8e6;
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  }
+}

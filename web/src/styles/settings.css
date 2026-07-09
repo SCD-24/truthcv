@@ -1,0 +1,133 @@
+/* Provider settings modal + the footer that opens it.
+ * The modal reuses .field/.input/.notice/.btn from step + global styles; this
+ * file only adds the dialog frame, the scrim, and the footer control. */
+
+/* ---- Footer bar (holds the Settings control, docked bottom of the rail-less
+ * region). Kept quiet: the app's boldness lives in the provenance ledger, not
+ * here. ---- */
+.footer {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6);
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.footer__settings {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  font: inherit;
+  font-family: var(--font-display);
+  font-weight: var(--w-medium);
+  font-size: var(--step--1);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.footer__settings:hover {
+  color: var(--ink);
+  border-color: var(--ink-soft);
+}
+.footer__gear {
+  font-size: 1.05em;
+  line-height: 1;
+}
+
+/* ---- Modal ---- */
+.modal__scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(27, 42, 74, 0.42);
+  display: grid;
+  place-items: center;
+  padding: var(--space-5);
+  z-index: 50;
+  animation: scrim-in var(--dur-fast) var(--ease) both;
+}
+.modal {
+  width: min(480px, 100%);
+  max-height: 90dvh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  animation: modal-in var(--dur) var(--ease) both;
+}
+.modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-5) var(--space-6) var(--space-3);
+}
+.modal__title {
+  font-family: var(--font-display);
+  font-weight: var(--w-bold);
+  font-size: var(--step-2);
+  color: var(--ink);
+  margin: 0;
+}
+.modal__close {
+  background: none;
+  border: 0;
+  color: var(--ink-soft);
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+}
+.modal__close:hover {
+  color: var(--ink);
+}
+.modal__body {
+  padding: 0 var(--space-6) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.modal__loading {
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+}
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6) var(--space-6);
+  border-top: 1px solid var(--line);
+}
+
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal__scrim,
+  .modal {
+    animation: none;
+  }
+}

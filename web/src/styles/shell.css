@@ -1,0 +1,178 @@
+.shell {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: var(--rail-w) 1fr;
+  grid-template-rows: 1fr auto;
+}
+.shell > .stage {
+  grid-row: 1;
+}
+.footer {
+  grid-row: 2;
+}
+
+/* ---- Step rail: the wizard as a record of progress ---- */
+.rail {
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  padding: var(--space-6) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+}
+.rail__brand {
+  font-family: var(--font-display);
+  font-weight: var(--w-bold);
+  font-size: var(--step-1);
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.rail__brand span {
+  color: var(--attest);
+}
+.rail__steps {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.rail__step {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.rail__step[disabled] {
+  cursor: not-allowed;
+}
+.rail__step[data-state="current"] {
+  color: var(--ink);
+  background: var(--ground);
+}
+.rail__step[data-state="done"] {
+  color: var(--ink);
+}
+.rail__marker {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+}
+.rail__step[data-state="current"] .rail__marker {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.rail__step[data-state="done"] .rail__marker {
+  border-color: var(--attest);
+  background: var(--attest);
+  color: var(--surface);
+}
+.rail__label {
+  font-family: var(--font-display);
+  font-weight: var(--w-medium);
+  font-size: var(--step-0);
+}
+.rail__foot {
+  margin-top: auto;
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}
+
+/* ---- Stage ---- */
+.stage {
+  padding: var(--space-10) var(--space-8);
+  display: flex;
+  justify-content: center;
+}
+.stage__inner {
+  width: 100%;
+  max-width: var(--stage-max);
+}
+.stage__head {
+  margin-bottom: var(--space-6);
+}
+.stage__title {
+  font-size: var(--step-3);
+  margin-top: var(--space-2);
+}
+.stage__lede {
+  color: var(--ink-soft);
+  margin-top: var(--space-3);
+  max-width: 52ch;
+}
+.stage__actions {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: flex-end;
+  margin-top: var(--space-8);
+  flex-wrap: wrap;
+}
+
+/* Step content enters deliberately (one motion, honours reduced-motion) */
+.stage__step {
+  animation: stage-in var(--dur) var(--ease) both;
+}
+@keyframes stage-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---- Responsive: rail collapses to a top progress strip ---- */
+@media (max-width: 720px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+  .rail {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-5);
+    padding: var(--space-4) var(--space-5);
+    overflow-x: auto;
+  }
+  .rail__steps {
+    flex-direction: row;
+    gap: var(--space-2);
+  }
+  .rail__label {
+    display: none;
+  }
+  .rail__step {
+    grid-template-columns: 24px;
+  }
+  .rail__foot {
+    display: none;
+  }
+  .stage {
+    padding: var(--space-6) var(--space-4);
+  }
+  .stage__title {
+    font-size: var(--step-2);
+  }
+}
