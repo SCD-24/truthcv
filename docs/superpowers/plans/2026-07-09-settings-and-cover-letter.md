@@ -582,12 +582,13 @@ _SCHEMA: dict[str, Any] = {
 }
 
 def _system(tone: str, length: str) -> str:
+    from tailor.style import LETTER_STYLE
     return (
         f"Write a {tone.lower()} cover letter of {length.lower()} length. For every "
         "sentence that states a FACT about the candidate (employer, title, date, "
         "metric, skill, achievement), list that fact verbatim in 'claims'. Do NOT "
         "invent any fact not supported by the candidate's truth. Connective/"
-        "narrative sentences need no claims."
+        "narrative sentences need no claims." + LETTER_STYLE
     )
 
 def build_letter(posting, tone, length, truth: list[TruthEntry], provider: LLMProvider) -> dict:
