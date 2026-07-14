@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Alert from "@mui/material/Alert";
+import AlertTitle from "@mui/material/AlertTitle";
+import Typography from "@mui/material/Typography";
 import type { StepProps } from "../wizard/steps";
 import { useWizard } from "../wizard/store";
 import { generateCoverLetter, render as renderCv } from "../api/client";
+import { DocumentEditor } from "./DocumentEditor";
 import "../styles/step.css";
 
 const TONES = ["Professional", "Warm", "Concise"] as const;
@@ -22,6 +28,10 @@ export function DownloadStep({ onBack }: StepProps) {
   const [length, setLength] = useState<(typeof LENGTHS)[number]>("Standard");
   const [letterBusy, setLetterBusy] = useState(false);
   const [letterError, setLetterError] = useState<string | null>(null);
+  // Per-claim approve/deny decisions, keyed by claimId. Render-scoped only —
+  // approving never writes to the truth file, so the same truth can back many
+  // tailored CVs.
+  const [decisions, setDecisions] = useState<Record<string, "approve" | "deny">>({});
 
   // Run the guardrail + ATS review and render as soon as we arrive.
   useEffect(() => {
@@ -34,6 +44,26 @@ export function DownloadStep({ onBack }: StepProps) {
   }, []);
 
   const blocked = result?.blocked === true;
+  const claims = result?.blockedClaims ?? [];
+  const allDecided = claims.every((c) => decisions[c.claimId]);
+
+  const decide = (claimId: string, choice: "approve" | "deny") =>
+    setDecisions((d) => ({ ...d, [claimId]: choice }));
+
+  // Re-render with the decisions applied. Approved claims are allowed for this
+  // render; denied claims are dropped from the CV. Any still-undecided claim
+  // will simply block again, so the user can resolve them in another pass.
+  const recheck = () =>
+    run(async () => {
+      const approvedClaimIds = claims
+        .filter((c) => decisions[c.claimId] === "approve")
+        .map((c) => c.claimId);
+      const deniedClaimIds = claims
+        .filter((c) => decisions[c.claimId] === "deny")
+        .map((c) => c.claimId);
+      setRender(await renderCv({ approvedClaimIds, deniedClaimIds }));
+      return true;
+    });
 
   const makeLetter = async () => {
     setLetterBusy(true);
@@ -53,7 +83,7 @@ export function DownloadStep({ onBack }: StepProps) {
   return (
     <section>
       <div className="stage__head">
-        <p className="eyebrow">Step 5 of 5</p>
+        <Typography variant="overline" className="eyebrow">Step 5 of 5</Typography>
         <h1 className="stage__title">
           {blocked ? "One more check before you download" : "A CV you can stand behind"}
         </h1>
@@ -64,48 +94,104 @@ export function DownloadStep({ onBack }: StepProps) {
         </p>
       </div>
 
-      {loading && <p className="busy">Checking every fact against your truth file…</p>}
+      {loading && (
+        <Typography variant="body2" className="busy" sx={{ color: "text.secondary" }}>
+          Checking every fact against your truth file…
+        </Typography>
+      )}
       {error && (
-        <p className="notice notice--error" role="alert">
+        <Alert severity="error" sx={{ mb: 3 }}>
           {error}
-        </p>
+        </Alert>
       )}
 
       {blocked && result && (
-        <div className="notice notice--warn" role="alert">
-          <strong>Couldn&apos;t verify:</strong>
-          <ul className="notice__list">
-            {result.unverifiable.map((u, i) => (
-              <li key={i}>{u}</li>
-            ))}
-          </ul>
+        <div className="claims" role="group" aria-label="Claims to approve or deny">
+          <p className="claims__lede">
+            Approve a claim to confirm it&apos;s a true fact about you (it&apos;s
+            allowed for this CV only — your truth file is never changed), or deny
+            it to leave it out.
+          </p>
+          {claims.map((c) => {
+            const choice = decisions[c.claimId];
+            return (
+              <div className="claim" key={c.claimId} data-choice={choice ?? ""}>
+                <p className="claim__text">{c.text}</p>
+                {c.tokens.length > 0 && (
+                  <p className="claim__tokens">
+                    Couldn&apos;t trace:{" "}
+                    {c.tokens.map((t) => (
+                      <span className="claim__token" key={t}>
+                        {t}
+                      </span>
+                    ))}
+                  </p>
+                )}
+                <div className="claim__actions">
+                  <button
+                    type="button"
+                    className="claim__btn claim__btn--approve"
+                    data-active={choice === "approve"}
+                    aria-pressed={choice === "approve"}
+                    onClick={() => decide(c.claimId, "approve")}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    className="claim__btn claim__btn--deny"
+                    data-active={choice === "deny"}
+                    aria-pressed={choice === "deny"}
+                    onClick={() => decide(c.claimId, "deny")}
+                  >
+                    Deny
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+          <Button
+            variant="contained"
+            disabled={loading || !allDecided}
+            onClick={recheck}
+          >
+            {loading
+              ? "Re-checking…"
+              : allDecided
+                ? "Re-check & continue"
+                : "Decide every claim to continue"}
+          </Button>
         </div>
       )}
 
       {!blocked && result && result.atsWarnings.length > 0 && (
-        <div className="notice notice--warn">
-          <strong>ATS review:</strong>
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          <AlertTitle>ATS review</AlertTitle>
           <ul className="notice__list">
             {result.atsWarnings.map((w) => (
               <li key={w.code}>{w.message}</li>
             ))}
           </ul>
-        </div>
+        </Alert>
       )}
 
       {!blocked && result && (
-        <div className="downloads">
+        <Box className="downloads" sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
           {result.pdfUrl && (
-            <a className="download" href={result.pdfUrl} download>
+            <Button variant="outlined" component="a" href={result.pdfUrl} download>
               Download PDF
-            </a>
+            </Button>
           )}
           {result.docxUrl && (
-            <a className="download" href={result.docxUrl} download>
+            <Button variant="outlined" component="a" href={result.docxUrl} download>
               Download DOCX
-            </a>
+            </Button>
           )}
-        </div>
+        </Box>
+      )}
+
+      {!blocked && result && (
+        <DocumentEditor kind="cv" initial={result.html ?? ""} />
       )}
 
       {!blocked && result && (
@@ -154,59 +240,61 @@ export function DownloadStep({ onBack }: StepProps) {
           </div>
 
           {letterError && (
-            <p className="notice notice--error" role="alert">
+            <Alert severity="error" sx={{ mb: 3 }}>
               {letterError}
-            </p>
+            </Alert>
           )}
 
           {letterBlocked && coverLetter && (
-            <div className="notice notice--warn" role="alert">
-              <strong>Couldn&apos;t verify:</strong>
+            <Alert severity="warning" sx={{ mb: 3 }}>
+              <AlertTitle>Couldn&apos;t verify</AlertTitle>
               <ul className="notice__list">
                 {coverLetter.unverifiable.map((u, i) => (
                   <li key={i}>{u}</li>
                 ))}
               </ul>
-            </div>
+            </Alert>
           )}
 
           {!letterBlocked && coverLetter && (
-            <div className="downloads">
+            <Box className="downloads" sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
               {coverLetter.pdfUrl && (
-                <a className="download" href={coverLetter.pdfUrl} download>
+                <Button variant="outlined" component="a" href={coverLetter.pdfUrl} download>
                   Cover letter (PDF)
-                </a>
+                </Button>
               )}
               {coverLetter.docxUrl && (
-                <a className="download" href={coverLetter.docxUrl} download>
+                <Button variant="outlined" component="a" href={coverLetter.docxUrl} download>
                   Cover letter (DOCX)
-                </a>
+                </Button>
               )}
-            </div>
+            </Box>
           )}
 
-          <div className="stage__actions">
-            <button
-              type="button"
-              className="btn btn--primary"
-              disabled={letterBusy}
-              onClick={makeLetter}
-            >
+          {!letterBlocked && coverLetter && (
+            <DocumentEditor
+              kind="cover-letter"
+              initial={coverLetter.text ?? ""}
+            />
+          )}
+
+          <Box className="stage__actions" sx={{ display: "flex", gap: 2 }}>
+            <Button variant="contained" disabled={letterBusy} onClick={makeLetter}>
               {letterBusy
                 ? "Writing…"
                 : coverLetter
                   ? "Regenerate letter"
                   : "Generate cover letter"}
-            </button>
-          </div>
+            </Button>
+          </Box>
         </section>
       )}
 
-      <div className="stage__actions">
-        <button type="button" className="btn btn--ghost" onClick={() => onBack("confirm")}>
+      <Box className="stage__actions" sx={{ display: "flex", gap: 2 }}>
+        <Button variant="outlined" onClick={() => onBack("confirm")}>
           {blocked ? "Review inferences" : "Back"}
-        </button>
-      </div>
+        </Button>
+      </Box>
     </section>
   );
 }

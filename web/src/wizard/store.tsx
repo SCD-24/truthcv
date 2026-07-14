@@ -12,9 +12,33 @@ import type {
   Inference,
   RenderResult,
   TailorResult,
-  TruthEntry,
+  TruthDoc,
 } from "../api/types";
-import { getProfile } from "../api/client";
+
+const emptyProfile = {
+  name: "",
+  email: "",
+  phone: "",
+  location: "",
+  links: [],
+  summary: "",
+};
+const emptyTruth: TruthDoc = {
+  experiences: [],
+  education: [],
+  skills: [],
+  profile: emptyProfile,
+};
+import { extractTruth, getProfile } from "../api/client";
+
+/**
+ * Where the wizard should open once startup checks finish.
+ * - "pending": still checking for a saved profile (show a splash, not the form)
+ * - "upload": no saved profile — begin at step 1 as usual
+ * - "posting": a saved profile was found and its truth loaded — skip to step 3,
+ *   leaving Upload/Review reachable behind the user via back-navigation.
+ */
+export type Bootstrap = "pending" | "upload" | "posting";
 
 /**
  * Shared wizard state. Holds the truth file, the posting, the inferences the
@@ -22,28 +46,35 @@ import { getProfile } from "../api/client";
  * that step components drive through the `run` helper so async UI is consistent.
  */
 interface WizardState {
-  truth: TruthEntry[];
+  truth: TruthDoc;
   posting: string;
   keywords: string[];
   inferences: Inference[];
   approvals: Record<string, boolean>;
+  /** Per-inference edited claim text (id -> text). Absent keys use the
+   * original claim; lets the user reword an inferred claim before confirming. */
+  edits: Record<string, string>;
   render: RenderResult | null;
   coverLetter: CoverLetterResult | null;
   /** Whether a profile PDF is already saved server-side (skip re-upload). */
   hasProfile: boolean;
+  /** Resolved startup destination; drives the wizard's opening step. */
+  bootstrap: Bootstrap;
   loading: boolean;
   error: string | null;
 }
 
 const initialState: WizardState = {
-  truth: [],
+  truth: emptyTruth,
   posting: "",
   keywords: [],
   inferences: [],
   approvals: {},
+  edits: {},
   render: null,
   coverLetter: null,
   hasProfile: false,
+  bootstrap: "pending",
   loading: false,
   error: null,
 };
@@ -51,13 +82,15 @@ const initialState: WizardState = {
 type Action =
   | { type: "loading" }
   | { type: "error"; error: string | null }
-  | { type: "setTruth"; truth: TruthEntry[] }
+  | { type: "setTruth"; truth: TruthDoc }
   | { type: "setPosting"; posting: string }
   | { type: "setTailor"; result: TailorResult }
   | { type: "setApproval"; id: string; approved: boolean }
+  | { type: "setEdit"; id: string; claim: string }
   | { type: "setRender"; result: RenderResult }
   | { type: "setCoverLetter"; result: CoverLetterResult }
-  | { type: "setHasProfile"; hasProfile: boolean };
+  | { type: "setHasProfile"; hasProfile: boolean }
+  | { type: "setBootstrap"; bootstrap: Bootstrap };
 
 function reducer(state: WizardState, action: Action): WizardState {
   switch (action.type) {
@@ -77,6 +110,9 @@ function reducer(state: WizardState, action: Action): WizardState {
         // Undecided by default: keys appear only once the user chooses, so the
         // Confirm step can distinguish "not yet decided" from an explicit reject.
         approvals: {},
+        // A fresh tailor run replaces the inferences, so any earlier edits no
+        // longer refer to anything — clear them alongside approvals.
+        edits: {},
         // A re-tailor invalidates any earlier render/letter drafts.
         render: null,
         coverLetter: null,
@@ -88,22 +124,30 @@ function reducer(state: WizardState, action: Action): WizardState {
         ...state,
         approvals: { ...state.approvals, [action.id]: action.approved },
       };
+    case "setEdit":
+      return {
+        ...state,
+        edits: { ...state.edits, [action.id]: action.claim },
+      };
     case "setRender":
       return { ...state, render: action.result, loading: false, error: null };
     case "setCoverLetter":
       return { ...state, coverLetter: action.result };
     case "setHasProfile":
       return { ...state, hasProfile: action.hasProfile };
+    case "setBootstrap":
+      return { ...state, bootstrap: action.bootstrap };
     default:
       return state;
   }
 }
 
 interface WizardApi extends WizardState {
-  setTruth: (truth: TruthEntry[]) => void;
+  setTruth: (truth: TruthDoc) => void;
   setPosting: (posting: string) => void;
   setTailor: (result: TailorResult) => void;
   setApproval: (id: string, approved: boolean) => void;
+  setEdit: (id: string, claim: string) => void;
   setRender: (result: RenderResult) => void;
   setCoverLetter: (result: CoverLetterResult) => void;
   /** Run an async task, driving loading/error and returning its result or null. */
@@ -130,15 +174,33 @@ export function WizardProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // On load, learn whether a profile PDF is already saved so Upload can offer
-  // to skip straight past re-uploading. Best-effort: failure just means "no".
+  // On load, decide the opening step from the cheap profile check ALONE, so the
+  // splash can never hang: only /api/profile gates the splash. If a profile
+  // exists we open straight at Posting (step 3) and load its truth in the
+  // background — the extract is free when the source is unchanged, so returning
+  // users skip re-upload without re-spending tokens, and a slow/failed extract
+  // surfaces on the step (never as a stuck splash). Any profile-check failure
+  // falls back to Upload so the user is never stranded.
   useEffect(() => {
     let alive = true;
     getProfile()
-      .then((p) => alive && dispatch({ type: "setHasProfile", hasProfile: p.hasProfile }))
-      .catch(() => {
-        /* treat as no saved profile */
-      });
+      .then((p) => {
+        if (!alive) return;
+        dispatch({ type: "setHasProfile", hasProfile: p.hasProfile });
+        dispatch({
+          type: "setBootstrap",
+          bootstrap: p.hasProfile ? "posting" : "upload",
+        });
+        if (p.hasProfile) {
+          // Background: populate truth for the Review step. Non-blocking — the
+          // user is already on Posting; a failure just leaves truth to be
+          // (re)loaded when they navigate.
+          extractTruth()
+            .then((truth) => alive && dispatch({ type: "setTruth", truth }))
+            .catch(() => {});
+        }
+      })
+      .catch(() => alive && dispatch({ type: "setBootstrap", bootstrap: "upload" }));
     return () => {
       alive = false;
     };
@@ -152,6 +214,7 @@ export function WizardProvider({ children }: { children: ReactNode }) {
       setTailor: (result) => dispatch({ type: "setTailor", result }),
       setApproval: (id, approved) =>
         dispatch({ type: "setApproval", id, approved }),
+      setEdit: (id, claim) => dispatch({ type: "setEdit", id, claim }),
       setRender: (result) => dispatch({ type: "setRender", result }),
       setCoverLetter: (result) => dispatch({ type: "setCoverLetter", result }),
       run,

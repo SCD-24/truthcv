@@ -15,6 +15,15 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 
+# Generous ceiling on output tokens. A full profile extracts to a long JSON
+# entries list; too small a cap truncates it mid-array and JSON parsing fails.
+# A ceiling only — shorter replies cost nothing extra. Anthropic requires an
+# explicit max; Ollama's default can be small, so we set it there too. OpenAI is
+# intentionally left uncapped (its default is already the model's full budget,
+# and forcing max_tokens would break the o-series, which rejects it).
+MAX_OUTPUT_TOKENS = 16000
+
+
 def env_model(default: str, override: str | None = None) -> str:
     """Resolve a model id: explicit override, else LLM_MODEL, else default.
 
@@ -63,6 +72,14 @@ class LLMProvider(ABC):
         self, system: str, messages: list[dict[str, str]], schema: dict[str, Any]
     ) -> dict[str, Any]:
         """Return a JSON object conforming to `schema` (a JSON Schema dict)."""
+
+    def list_models(self) -> list[dict[str, str]]:
+        """Discover selectable models as ``[{"id": ..., "label": ...}]``.
+
+        Pulled live from the provider's API/SDK by concrete implementations.
+        Default: nothing discoverable (caller falls back to free-text entry).
+        """
+        return []
 
 
 class ProviderError(RuntimeError):

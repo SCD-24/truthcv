@@ -1,17 +1,30 @@
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Alert from "@mui/material/Alert";
+import Typography from "@mui/material/Typography";
 import type { StepProps } from "../wizard/steps";
 import { useWizard } from "../wizard/store";
 import { confirmInferences } from "../api/client";
 import "../styles/step.css";
 
 export function ConfirmStep({ onAdvance, onBack }: StepProps) {
-  const { inferences, approvals, setApproval, run, loading, error } = useWizard();
+  const { inferences, approvals, edits, setApproval, setEdit, run, loading, error } =
+    useWizard();
+
+  // The claim the user is vouching for: their edit if present, else the original.
+  const claimOf = (id: string, original: string) => edits[id] ?? original;
 
   const submit = async () => {
-    const approvedIds = inferences
+    const approved = inferences
       .filter((i) => approvals[i.id])
-      .map((i) => i.id);
+      .map((i) => ({
+        id: i.id,
+        claim: claimOf(i.id, i.claim).trim(),
+        experienceId: i.experienceId,
+      }))
+      .filter((a) => a.claim.length > 0);
     const ok = await run(async () => {
-      await confirmInferences(approvedIds);
+      await confirmInferences(approved);
       return true;
     });
     if (ok) onAdvance("download");
@@ -20,18 +33,19 @@ export function ConfirmStep({ onAdvance, onBack }: StepProps) {
   return (
     <section>
       <div className="stage__head">
-        <p className="eyebrow">Step 4 of 5</p>
+        <Typography variant="overline" className="eyebrow">Step 4 of 5</Typography>
         <h1 className="stage__title">Confirm anything we inferred</h1>
         <p className="stage__lede">
           Tailoring suggested a few claims that aren&apos;t in your truth file yet.
-          Approve the ones that are true; the rest never reach your CV.
+          Approve the ones that are true — reword them to match your own experience
+          — and the rest never reach your CV.
         </p>
       </div>
 
       {error && (
-        <p className="notice notice--error" role="alert">
+        <Alert severity="error" sx={{ mb: 3 }}>
           {error}
-        </p>
+        </Alert>
       )}
 
       {inferences.length === 0 ? (
@@ -50,7 +64,22 @@ export function ConfirmStep({ onAdvance, onBack }: StepProps) {
                 key={inf.id}
                 data-approved={decided ? String(approved) : undefined}
               >
-                <p className="inference__claim">{inf.claim}</p>
+                {approved ? (
+                  <label className="inference__edit">
+                    <span className="inference__editLabel">
+                      Your words — this is what goes on the CV
+                    </span>
+                    <textarea
+                      className="input inference__claimInput"
+                      value={claimOf(inf.id, inf.claim)}
+                      onChange={(e) => setEdit(inf.id, e.target.value)}
+                      rows={2}
+                      aria-label={`Edit claim: ${inf.claim}`}
+                    />
+                  </label>
+                ) : (
+                  <p className="inference__claim">{claimOf(inf.id, inf.claim)}</p>
+                )}
                 <p className="inference__rationale">{inf.rationale}</p>
                 <div
                   className="choice"
@@ -82,19 +111,14 @@ export function ConfirmStep({ onAdvance, onBack }: StepProps) {
         </div>
       )}
 
-      <div className="stage__actions">
-        <button type="button" className="btn btn--ghost" onClick={() => onBack("posting")}>
+      <Box className="stage__actions" sx={{ display: "flex", gap: 2 }}>
+        <Button variant="outlined" onClick={() => onBack("posting")}>
           Back
-        </button>
-        <button
-          type="button"
-          className="btn btn--primary"
-          disabled={loading}
-          onClick={submit}
-        >
+        </Button>
+        <Button variant="contained" disabled={loading} onClick={submit}>
           {loading ? "Saving…" : "Confirm & continue"}
-        </button>
-      </div>
+        </Button>
+      </Box>
     </section>
   );
 }

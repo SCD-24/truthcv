@@ -10,10 +10,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from guardrail import validate
+from guardrail import Scope, validate
 from providers.base import LLMProvider
-from tailor.style import LETTER_STYLE
-from truth.model import TruthEntry
+from truth.model import Truth
+
+import prompts
 
 _SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -34,33 +35,37 @@ _SCHEMA: dict[str, Any] = {
 }
 
 
-def _system(tone: str, length: str) -> str:
-    return (
-        f"Write a {tone.lower()} cover letter of {length.lower()} length. For every "
-        "sentence that states a FACT about the candidate (employer, title, date, "
-        "metric, skill, achievement), list that fact verbatim in 'claims'. Do NOT "
-        "invent any fact not supported by the candidate's truth. Connective/"
-        "narrative sentences need no claims." + LETTER_STYLE
-    )
+def _all_values(truth: Truth) -> list[str]:
+    """Every factual value in the truth — the letter may reference any of them
+    (a cover letter weaves the whole career, so validation is global here)."""
+    vals: list[str] = []
+    for e in truth.experiences:
+        vals += [e.role, e.company, e.start, e.end]
+        vals += [b.value for b in e.bullets]
+    for ed in truth.education:
+        vals += [ed.degree, ed.school, ed.start, ed.end]
+    vals += [s.value for s in truth.skills]
+    return [v for v in vals if v]
 
 
 def build_letter(
     posting: str,
     tone: str,
     length: str,
-    truth: list[TruthEntry],
+    truth: Truth,
     provider: LLMProvider,
 ) -> dict:
     """Return {blocked, unverifiable, text}. text is "" when blocked."""
-    user = (
-        f"POSTING:\n{posting}\n\nCANDIDATE FACTS:\n"
-        + "\n".join(f"- {e.value}" for e in truth)
+    user = f"POSTING:\n{posting}\n\nCANDIDATE FACTS:\n{prompts.cover_letter_facts_block(truth)}"
+    result = provider.extract_json(
+        prompts.cover_letter_system(tone, length),
+        [{"role": "user", "content": user}],
+        _SCHEMA,
     )
-    result = provider.extract_json(_system(tone, length), [{"role": "user", "content": user}], _SCHEMA)
     paragraphs = result.get("paragraphs", []) if isinstance(result, dict) else []
 
     claims = [c for para in paragraphs for c in para.get("claims", []) if c]
-    check = validate(claims, [e.value for e in truth])
+    check = validate([Scope(texts=claims, allowed=_all_values(truth))])
     if not check.ok:
         return {"blocked": True, "unverifiable": check.unverifiable, "text": ""}
 

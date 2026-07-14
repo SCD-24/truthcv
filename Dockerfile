@@ -21,12 +21,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY secretstore/ ./secretstore/
+COPY prompts/ ./prompts/
 COPY providers/ ./providers/
 COPY truth/ ./truth/
 COPY tailor/ ./tailor/
 COPY guardrail/ ./guardrail/
 COPY render/ ./render/
 COPY coverletter/ ./coverletter/
+COPY applications/ ./applications/
 COPY api/ ./api/
 
 # Built frontend bundle from stage 1.

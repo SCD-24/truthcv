@@ -1,9 +1,11 @@
 """Provider layer: select an LLMProvider from the resolved credentials.
 
-The active provider and its credentials come from api.secrets.resolve_credentials
-(encrypted secrets.enc, falling back to environment variables). Adding a new
-provider later is one new file + one branch here. Nothing in the truthfulness
-path depends on which provider is returned.
+The active provider and its credentials come from
+secretstore.resolve_credentials (encrypted secrets.enc, falling back to
+environment variables). Resolving credentials through the neutral secretstore
+package — rather than api — keeps this layer a leaf that depends only downward.
+Adding a new provider later is one new file + one branch here. Nothing in the
+truthfulness path depends on which provider is returned.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ def get_provider(refresh: bool = False) -> LLMProvider:
     if _cached is not None and not refresh:
         return _cached
 
-    from api.secrets import resolve_credentials
+    from secretstore import resolve_credentials
 
     creds = resolve_credentials()
     name = creds["activeProvider"].strip().lower()

@@ -1,5 +1,79 @@
 /* Shared step UI: dropzone, ledger cards, fields, warnings. */
 
+/* Download-step claim ledger: approve/deny each guardrail-blocked claim.
+   Quiet by default; the chosen decision is the only strong signal per row. */
+.claims {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: var(--space-5) 0;
+}
+.claims__lede {
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}
+.claim {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.claim[data-choice="approve"] {
+  border-left-color: var(--attest);
+}
+.claim[data-choice="deny"] {
+  border-left-color: var(--ink-soft);
+  opacity: 0.6;
+}
+.claim__text {
+  font-family: var(--font-display);
+  font-size: var(--step-0);
+  line-height: 1.45;
+}
+.claim__tokens {
+  margin-top: var(--space-2);
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+}
+.claim__token {
+  display: inline-block;
+  font-family: var(--font-mono);
+  background: var(--surface-sunk, rgba(0, 0, 0, 0.05));
+  border-radius: 3px;
+  padding: 0 var(--space-1);
+  margin-left: var(--space-1);
+}
+.claim__actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.claim__btn {
+  font: inherit;
+  font-family: var(--font-display);
+  font-weight: var(--w-medium);
+  font-size: var(--step--1);
+  padding: var(--space-1) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease);
+}
+.claim__btn--approve[data-active="true"] {
+  background: var(--attest);
+  border-color: var(--attest);
+  color: var(--surface, #fff);
+}
+.claim__btn--deny[data-active="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface, #fff);
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -64,7 +138,108 @@
 .ledger {
   display: flex;
   flex-direction: column;
+  gap: var(--space-6);
+}
+
+/* Grouped review: each kind of fact is its own labelled section. */
+.group {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-3);
+}
+.group__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line);
+}
+.group__title {
+  font-family: var(--font-display);
+  font-size: var(--step-1);
+  font-weight: var(--w-bold);
+}
+.group__count {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--ink-soft);
+}
+.group__note {
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+  max-width: 60ch;
+}
+.group__items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Structured review: an editable card per experience / education. */
+.exp {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.exp__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.exp__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+.exp__grid .field {
+  margin-bottom: 0;
+}
+.exp__bullets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.bullet-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+.skills-edit {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-2);
+}
+.skill-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+.mini-btn {
+  align-self: flex-start;
+  background: none;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+}
+.mini-btn:hover {
+  border-color: var(--ink-soft);
+  color: var(--ink);
+}
+@media (max-width: 720px) {
+  .exp__grid {
+    grid-template-columns: 1fr;
+  }
 }
 .entry {
   background: var(--surface);
@@ -120,6 +295,39 @@
   color: var(--flag);
 }
 
+/* Profile links editor */
+.link-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+  margin-bottom: var(--space-2);
+}
+.btn--sm {
+  font-size: var(--step--1);
+  padding: var(--space-2) var(--space-3);
+}
+
+/* The summary is the one profile field the guardrail checks — the attest accent
+   marks it apart from the free-to-edit identity fields around it. */
+.field--summary {
+  padding: var(--space-3);
+  border-left: 2px solid var(--attest);
+  background: var(--attest-wash);
+  border-radius: var(--radius);
+}
+.field__textarea {
+  resize: vertical;
+  min-height: unset;
+  font-family: var(--font-body);
+  line-height: var(--leading-body);
+}
+.field__hint {
+  font-size: var(--step--1);
+  color: var(--ink-soft);
+  line-height: var(--leading-body);
+}
+
 /* Inference decision row */
 .inference {
   background: var(--surface);
@@ -135,6 +343,26 @@
 }
 .inference__claim {
   font-size: var(--step-1);
+}
+/* When an inference is approved it becomes editable — the claim turns into the
+   user's own words, so the field reads as an act of vouching, not a form. */
+.inference__edit {
+  display: grid;
+  gap: var(--space-2);
+}
+.inference__editLabel {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--attest);
+}
+.inference__claimInput {
+  font-size: var(--step-1);
+  font-family: var(--font-body);
+  line-height: var(--leading-body);
+  min-height: unset;
+  resize: vertical;
 }
 .inference__rationale {
   color: var(--ink-soft);
@@ -201,24 +429,6 @@
   line-height: 1.45;
 }
 
-/* Saved-profile shortcut on the upload step */
-.saved-profile {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-4) var(--space-5);
-  margin-bottom: var(--space-5);
-  background: var(--attest-wash);
-  border: 1px solid var(--attest);
-  border-radius: var(--radius);
-}
-.saved-profile__hint {
-  color: var(--ink-soft);
-  font-size: var(--step--1);
-  margin-top: var(--space-1);
-}
-
 /* Cover-letter section on the download step */
 .coverletter {
   margin-top: var(--space-8);
@@ -277,4 +487,175 @@
   border-radius: var(--radius);
   font-family: var(--font-display);
   font-weight: var(--w-medium);
+}
+
+/* ============================================================= *
+ * Upload hero — the source-trace signature.
+ * One source (root), every claim branching from it on a spine,
+ * each stamped with its provenance. Green = proven, rust = untraced.
+ * ============================================================= */
+
+.hero__title {
+  font-size: var(--step-4);
+  letter-spacing: -0.02em;
+  margin-top: var(--space-2);
+}
+
+.trace {
+  margin: var(--space-8) 0 var(--space-6);
+  max-width: 33rem;
+}
+
+.trace__list {
+  position: relative;
+  list-style: none;
+  padding-left: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* The spine: one origin, drawn downward on load. */
+.trace__list::before {
+  content: "";
+  position: absolute;
+  left: 13px;
+  top: 10px;
+  bottom: 24px;
+  width: 2px;
+  background: var(--line);
+  transform-origin: top center;
+}
+
+/* Root node = the source document. */
+.trace__root {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-bottom: var(--space-1);
+}
+.trace__root::after {
+  content: "";
+  position: absolute;
+  left: -31px;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+.trace__doc {
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--ink-soft);
+}
+.trace__source {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+/* Each claim branches off the spine. */
+.claim {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  transition: border-color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+.claim:hover {
+  border-color: var(--ink-soft);
+  transform: translateX(1px);
+}
+
+/* Branch tick from spine to card. */
+.claim::before {
+  content: "";
+  position: absolute;
+  left: -27px;
+  top: 50%;
+  width: 25px;
+  border-top: 2px solid var(--attest);
+}
+/* Node dot on the spine. */
+.claim::after {
+  content: "";
+  position: absolute;
+  left: -31px;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  background: var(--attest);
+}
+/* Untraced claim: the link is broken until the user confirms it. */
+.claim--inferred::before {
+  border-top-style: dashed;
+  border-top-color: var(--flag);
+}
+.claim--inferred::after {
+  background: var(--surface);
+  border: 2px solid var(--flag);
+}
+
+.claim__text {
+  font-weight: var(--w-medium);
+}
+
+.trace__caption {
+  margin-top: var(--space-4);
+  padding-left: 40px;
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+}
+
+@keyframes trace-spine {
+  to {
+    transform: scaleY(1);
+  }
+}
+@keyframes trace-claim {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Entrance is enhancement only — the trace is fully visible without it, so a
+ * disabled-animation or reduced-motion context never hides the content. */
+@media (prefers-reduced-motion: no-preference) {
+  .trace__list::before {
+    transform: scaleY(0);
+    animation: trace-spine var(--dur-slow) var(--ease) 100ms forwards;
+  }
+  .claim {
+    opacity: 0;
+    animation: trace-claim var(--dur) var(--ease) forwards;
+  }
+  .claim:nth-child(2) {
+    animation-delay: 260ms;
+  }
+  .claim:nth-child(3) {
+    animation-delay: 380ms;
+  }
+  .claim:nth-child(4) {
+    animation-delay: 500ms;
+  }
 }

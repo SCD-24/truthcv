@@ -17,7 +17,9 @@ def _reset(monkeypatch):
     reset_provider()
 
 
-def test_get_provider_defaults_and_selects(monkeypatch):
+def test_get_provider_defaults_and_selects(data_dir, monkeypatch):
+    # data_dir isolates the data volume so a developer's real secrets.enc
+    # (which may pin activeProvider=anthropic) can't override LLM_PROVIDER here.
     monkeypatch.setenv("LLM_PROVIDER", "fake")
     from providers import reset_provider
 

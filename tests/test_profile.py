@@ -36,3 +36,16 @@ def test_profile_absent_then_present(client):
     )
     assert r.status_code == 204, r.text
     assert client.get("/api/profile").json()["hasProfile"] is True
+
+
+def test_upload_records_source_hash(client):
+    from truth.store import loaded_source_hash
+
+    assert loaded_source_hash() is None
+    client.post(
+        "/api/upload",
+        files={"file": ("cv.pdf", io.BytesIO(_PDF), "application/pdf")},
+    )
+    # Upload persists the hash so a later /extract can detect an unchanged
+    # profile and skip the LLM pass.
+    assert loaded_source_hash() is not None

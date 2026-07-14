@@ -1,23 +1,40 @@
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Typography from "@mui/material/Typography";
+import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
+import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import { STEPS, stepIndex, type StepId } from "./steps";
 
 interface Props {
   current: StepId;
   reached: StepId;
   onNavigate: (to: StepId) => void;
+  onOpenSettings: () => void;
+  onOpenApplications: () => void;
 }
 
-/** The step rail — the wizard presented as an auditable record of progress. */
-export function StepRail({ current, reached, onNavigate }: Props) {
+/**
+ * The step rail — the wizard presented as an auditable record of progress.
+ * Structure/layout stays in shell.css (a CSS-grid sidebar the theme can't
+ * express); the interactive marks are MUI so they inherit the ledger theme.
+ */
+export function StepRail({
+  current,
+  reached,
+  onNavigate,
+  onOpenSettings,
+  onOpenApplications,
+}: Props) {
   const reachedIdx = stepIndex(reached);
   const currentIdx = stepIndex(current);
 
   return (
-    <nav className="rail" aria-label="Wizard steps">
+    <Box component="nav" className="rail" aria-label="Wizard steps">
       <div className="rail__brand">
         Truth<span>CV</span>
       </div>
 
-      <ol className="rail__steps">
+      <Box component="ol" className="rail__steps">
         {STEPS.map((step, i) => {
           const state =
             i === currentIdx ? "current" : i < reachedIdx ? "done" : "upcoming";
@@ -40,11 +57,32 @@ export function StepRail({ current, reached, onNavigate }: Props) {
             </li>
           );
         })}
-      </ol>
+      </Box>
 
-      <p className="rail__foot">
-        Every fact traces back to a source. Nothing reaches your CV unless it does.
-      </p>
-    </nav>
+      <Box className="rail__bottom">
+        <Typography variant="body2" className="rail__foot" sx={{ color: "text.secondary" }}>
+          Every fact traces back to a source. Nothing reaches your CV unless it
+          does.
+        </Typography>
+        <Button
+          fullWidth
+          variant="outlined"
+          startIcon={<DescriptionOutlinedIcon fontSize="small" />}
+          onClick={onOpenApplications}
+          sx={{ justifyContent: "flex-start" }}
+        >
+          Applications
+        </Button>
+        <Button
+          fullWidth
+          variant="outlined"
+          startIcon={<SettingsOutlinedIcon fontSize="small" />}
+          onClick={onOpenSettings}
+          sx={{ justifyContent: "flex-start" }}
+        >
+          Settings
+        </Button>
+      </Box>
+    </Box>
   );
 }

@@ -15,22 +15,25 @@
  */
 
 :root {
-  /* Palette */
-  --ink: #1b2a4a;        /* iron-indigo — primary text & structure */
-  --ink-soft: #4a5876;   /* muted ink — secondary text */
-  --ground: #eef1f5;     /* cool document ground — app background */
-  --surface: #fbfcfd;    /* raised card surface */
-  --line: #d7dde6;       /* soft rule — used sparingly, never as the whole look */
-  --attest: #3a6b5e;     /* verification green — ATTESTED / user-confirmed only */
-  --attest-wash: #e6efec;/* attested background wash */
-  --flag: #b4532a;       /* rust — inference / unverified / needs attention */
-  --flag-wash: #f7ebe4;  /* rust background wash */
-  --focus: #2f6db0;      /* keyboard focus ring — distinct from both accents */
+  color-scheme: light dark;
+
+  /* Palette — "certified record": ink on cool archival paper, stamped.
+   * Deliberately NOT warm cream (#F4F1EA): greyer, a whisper of green. */
+  --ink: #1a211c;        /* green-graphite ledger ink — text & structure */
+  --ink-soft: #59615a;   /* muted ink — secondary text */
+  --ground: #ecede6;     /* cool archival paper — app background */
+  --surface: #f6f7f2;    /* raised card surface, a shade lighter than paper */
+  --line: #d2d5cc;       /* hairline — used sparingly, never the whole look */
+  --attest: #2f5d3e;     /* seal green — ATTESTED / user-confirmed provenance only */
+  --attest-wash: #e4ebe3;/* attested background wash */
+  --flag: #9c3b2c;       /* oxblood stamp — inference / unverified only */
+  --flag-wash: #f1e6e2;  /* oxblood background wash */
+  --focus: #356fa6;      /* keyboard focus ring — distinct from both accents */
 
   /* Type roles */
-  --font-display: "Space Grotesk", system-ui, sans-serif;      /* headings, used with restraint */
-  --font-body: "Source Sans 3", system-ui, sans-serif;         /* body copy, controls */
-  --font-mono: "Space Mono", ui-monospace, "SFMono-Regular", monospace; /* provenance stamps, ids, data */
+  --font-display: "Schibsted Grotesk", system-ui, sans-serif;  /* headings, brand — editorial grotesque */
+  --font-body: "IBM Plex Sans", system-ui, sans-serif;         /* body copy, controls — institutional legibility */
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace; /* provenance stamps, ids, dates — the record voice */
 
   /* Type scale (major third-ish, intentional) */
   --step--1: 0.833rem;
@@ -63,8 +66,8 @@
   --radius-sm: 4px;
   --radius: 8px;
   --radius-lg: 14px;
-  --shadow-card: 0 1px 2px rgba(27, 42, 74, 0.06), 0 8px 24px -12px rgba(27, 42, 74, 0.18);
-  --shadow-focus: 0 0 0 3px rgba(47, 109, 176, 0.35);
+  --shadow-card: 0 1px 2px rgba(26, 33, 28, 0.06), 0 10px 28px -14px rgba(26, 33, 28, 0.22);
+  --shadow-focus: 0 0 0 3px rgba(53, 111, 166, 0.35);
 
   /* Motion — deliberate, reduced-motion honoured in globals */
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
@@ -77,18 +80,21 @@
   --stage-max: 760px;
 }
 
+/* Dark scheme — the same record read after hours: deep graphite-green ground,
+ * the seal and oxblood lifted just enough to stay legible. Quality-floor parity,
+ * not the primary direction. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --ink: #e7ecf4;
-    --ink-soft: #9aa7c0;
-    --ground: #131a2a;
-    --surface: #1b2436;
-    --line: #2b3750;
-    --attest: #7fc4b1;
-    --attest-wash: #1c2f2b;
-    --flag: #e08a63;
-    --flag-wash: #2f2019;
+    --ink: #e8eae2;
+    --ink-soft: #9aa197;
+    --ground: #151814;
+    --surface: #1e221c;
+    --line: #313629;
+    --attest: #8fc39c;
+    --attest-wash: #1d2a20;
+    --flag: #d98a76;
+    --flag-wash: #2c1e19;
     --focus: #6aa8e6;
-    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45), 0 10px 28px -14px rgba(0, 0, 0, 0.65);
   }
 }

@@ -1,12 +1,20 @@
 import type {
-  TruthEntry,
+  ApprovedInference,
+  TruthDoc,
   TailorResult,
+  RenderApprovals,
   RenderResult,
+  ModelInfo,
+  ModelList,
   SettingsStatus,
   SettingsUpdate,
   TestResult,
   ProfileStatus,
   CoverLetterResult,
+  Application,
+  ApplicationCreate,
+  ApplicationUpdate,
+  SaveDocumentResult,
 } from "./types";
 
 /**
@@ -16,14 +24,29 @@ import type {
  * step components surface that message directly.
  */
 
+/** Requests abort after this long so a hung backend never freezes the UI.
+ * LLM-backed routes (tailor runs two sequential model calls) routinely take
+ * 30s+, so this must comfortably exceed real model latency — otherwise a slow
+ * but healthy call aborts and is misreported as an unreachable server. */
+const REQUEST_TIMEOUT_MS = 120_000;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let res: Response;
   try {
-    res = await fetch(path, init);
+    res = await fetch(path, { ...init, signal: controller.signal });
   } catch {
+    // An abort (our timeout) is distinct from a genuine connection failure —
+    // reporting a slow model call as "server down" sends the user chasing the
+    // wrong problem.
     throw new Error(
-      "Can't reach the server. Check that TruthCV is running, then try again.",
+      controller.signal.aborted
+        ? "The server took too long to respond. It may still be working — wait a moment and try again."
+        : "Can't reach the server. Check that TruthCV is running, then try again.",
     );
+  } finally {
+    clearTimeout(timer);
   }
   if (!res.ok) {
     const detail = await res
@@ -45,30 +68,21 @@ export async function uploadPdf(file: File): Promise<void> {
 }
 
 /** Step 1 — run structured extraction into the truth file. */
-export function extractTruth(): Promise<{ entries: TruthEntry[] }> {
+export function extractTruth(): Promise<TruthDoc> {
   return request("/api/extract", { method: "POST" });
 }
 
 /** Step 2 — load the current truth file for review. */
-export function getTruth(): Promise<{ entries: TruthEntry[] }> {
+export function getTruth(): Promise<TruthDoc> {
   return request("/api/truth");
 }
 
 /** Step 2 — persist the user's corrections. After this, the facts are trusted. */
-export function saveTruth(entries: TruthEntry[]): Promise<void> {
+export function saveTruth(truth: TruthDoc): Promise<void> {
   return request<void>("/api/truth", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ entries }),
-  });
-}
-
-/** Step 3 — best-effort fetch of a posting from a URL to pre-fill the box. */
-export function fetchPosting(url: string): Promise<{ text: string }> {
-  return request("/api/job/fetch", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify(truth),
   });
 }
 
@@ -81,18 +95,33 @@ export function tailor(posting: string): Promise<TailorResult> {
   });
 }
 
-/** Step 4 — approve/reject inferences; approved become source:user-confirmed. */
-export function confirmInferences(approvedIds: string[]): Promise<void> {
+/** Step 4 — confirm approved inferences; each becomes a source:user-confirmed
+ * bullet. Sends the (possibly edited) claim text and target experience per
+ * item, so what the user typed at Confirm is exactly what's written. */
+export function confirmInferences(approved: ApprovedInference[]): Promise<void> {
   return request<void>("/api/confirm-inferences", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ approvedIds }),
+    body: JSON.stringify({ approved }),
   });
 }
 
-/** Step 5 — run guardrail + ATS review and render PDF/DOCX. */
-export function render(): Promise<RenderResult> {
-  return request("/api/render", { method: "POST" });
+/** Step 5 — run guardrail + ATS review and render PDF/DOCX.
+ * Pass render-scoped approvals to approve/deny individually blocked claims;
+ * approvals apply to this render only and never touch the truth file. */
+export function render(
+  approvals?: RenderApprovals,
+  applicationId?: string,
+): Promise<RenderResult> {
+  const payload: Record<string, unknown> = {};
+  if (approvals) payload.approvals = approvals;
+  if (applicationId) payload.applicationId = applicationId;
+  const hasBody = Object.keys(payload).length > 0;
+  return request("/api/render", {
+    method: "POST",
+    headers: hasBody ? { "Content-Type": "application/json" } : undefined,
+    body: hasBody ? JSON.stringify(payload) : undefined,
+  });
 }
 
 /** Whether a profile PDF is already saved on the server. */
@@ -114,6 +143,16 @@ export function saveSettings(body: SettingsUpdate): Promise<SettingsStatus> {
   });
 }
 
+/** List the selected provider's models, pulled live from its API/SDK. Uses a
+ * typed-but-unsaved key/host if present, else the saved credential. */
+export function listModels(body: SettingsUpdate): Promise<ModelInfo[]> {
+  return request<ModelList>("/api/models", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then((r) => r.models);
+}
+
 /** Test the provider connection with saved/submitted credentials. */
 export function testConnection(body: SettingsUpdate): Promise<TestResult> {
   return request("/api/settings/test", {
@@ -127,10 +166,67 @@ export function testConnection(body: SettingsUpdate): Promise<TestResult> {
 export function generateCoverLetter(
   tone: string,
   length: string,
+  applicationId?: string,
 ): Promise<CoverLetterResult> {
   return request("/api/cover-letter", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tone, length }),
+    body: JSON.stringify({ tone, length, applicationId }),
+  });
+}
+
+/** Every tracked job application, most recent first. */
+export function listApplications(): Promise<Application[]> {
+  return request("/api/applications");
+}
+
+/** Create a new application record from user-entered fields. */
+export function createApplication(body: ApplicationCreate): Promise<Application> {
+  return request("/api/applications", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Patch an application's editable fields (only the ones you pass change). */
+export function updateApplication(
+  id: string,
+  body: ApplicationUpdate,
+): Promise<Application> {
+  return request(`/api/applications/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Delete an application and the CV/cover-letter files it owns. */
+export function deleteApplication(id: string): Promise<void> {
+  return request<void>(`/api/applications/${id}`, { method: "DELETE" });
+}
+
+/** Save edited CV HTML onto an application: guardrail-checked, then rendered.
+ * A blocked result means an edit strayed from the truth file — nothing saved. */
+export function saveApplicationCv(
+  id: string,
+  html: string,
+): Promise<SaveDocumentResult> {
+  return request(`/api/applications/${id}/cv`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ html }),
+  });
+}
+
+/** Save edited cover-letter text onto an application (guardrail-checked). */
+export function saveApplicationCoverLetter(
+  id: string,
+  text: string,
+): Promise<SaveDocumentResult> {
+  return request(`/api/applications/${id}/cover-letter`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
   });
 }

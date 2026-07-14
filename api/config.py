@@ -20,15 +20,10 @@ def port() -> int:
     return int(os.environ.get("PORT", "8080"))
 
 
-def encryption_key() -> str:
-    """Fernet master key from the environment (empty if unset)."""
-    return os.environ.get("ENCRYPTION_KEY", "").strip()
-
-
-def secrets_path() -> Path:
-    from truth.store import data_dir
-
-    return data_dir() / "secrets.enc"
+# Credential/secret config moved to the neutral `secretstore` package so the
+# provider layer can reach it without importing api. Re-exported here for the
+# existing `from api.config import encryption_key/secrets_path` callers.
+from secretstore import encryption_key, secrets_path  # noqa: E402,F401
 
 
 def profile_pdf_path() -> Path:

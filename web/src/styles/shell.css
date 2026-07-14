@@ -2,13 +2,69 @@
   min-height: 100dvh;
   display: grid;
   grid-template-columns: var(--rail-w) 1fr;
-  grid-template-rows: 1fr auto;
+  grid-template-rows: 1fr;
 }
-.shell > .stage {
+
+/* Startup splash: shown only while we check for a saved profile and load its
+   truth. Echoes the source-trace signature — one origin, a spine drawn
+   downward — so the wait reads as "finding your record", not a blank spinner. */
+.shell--booting {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  place-items: center;
+}
+.boot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-5);
+  text-align: center;
+}
+.boot__dot {
+  position: relative;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+.boot__dot::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 2px;
+  height: 40px;
+  margin-left: -1px;
+  background: var(--attest);
+  transform-origin: top center;
+}
+.boot__text {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .boot__dot::after {
+    transform: scaleY(0);
+    animation: boot-spine 900ms var(--ease) infinite alternate;
+  }
+}
+@keyframes boot-spine {
+  to {
+    transform: scaleY(1);
+  }
+}
+/* Rail is the full-height sidebar; the stage fills the main column. The
+   Settings control now lives docked at the bottom of the rail. */
+.rail {
+  grid-column: 1;
   grid-row: 1;
 }
-.footer {
-  grid-row: 2;
+.shell > .stage {
+  grid-column: 2;
+  grid-row: 1;
 }
 
 /* ---- Step rail: the wizard as a record of progress ---- */
@@ -90,11 +146,44 @@
   font-weight: var(--w-medium);
   font-size: var(--step-0);
 }
-.rail__foot {
+/* Bottom-docked group: the source-trace tagline and the Settings control,
+   pinned to the foot of the rail so Settings lives on the left panel. */
+.rail__bottom {
   margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.rail__foot {
   color: var(--ink-soft);
   font-size: var(--step--1);
   line-height: 1.5;
+}
+.rail__settings {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  align-self: flex-start;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  font: inherit;
+  font-family: var(--font-display);
+  font-weight: var(--w-medium);
+  font-size: var(--step--1);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.rail__settings:hover {
+  color: var(--ink);
+  border-color: var(--ink-soft);
+}
+.rail__gear {
+  font-size: 1.05em;
+  line-height: 1;
 }
 
 /* ---- Stage ---- */
@@ -146,6 +235,21 @@
 @media (max-width: 720px) {
   .shell {
     grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr auto;
+  }
+  /* Single-column stack: rail strip on top, stage, then footer. Reset the
+     desktop row-span so the rail no longer covers the stage. */
+  .rail {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .shell > .stage {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .footer {
+    grid-column: 1;
+    grid-row: 3;
   }
   .rail {
     position: static;
@@ -165,6 +269,14 @@
   }
   .rail__step {
     grid-template-columns: 24px;
+  }
+  /* Mobile: rail is a horizontal strip. Drop the tagline but keep Settings
+     reachable, pushed to the end of the strip as a compact control. */
+  .rail__bottom {
+    margin-top: 0;
+    margin-left: auto;
+    flex-direction: row;
+    align-items: center;
   }
   .rail__foot {
     display: none;

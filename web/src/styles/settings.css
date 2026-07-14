@@ -2,44 +2,8 @@
  * The modal reuses .field/.input/.notice/.btn from step + global styles; this
  * file only adds the dialog frame, the scrim, and the footer control. */
 
-/* ---- Footer bar (holds the Settings control, docked bottom of the rail-less
- * region). Kept quiet: the app's boldness lives in the provenance ledger, not
- * here. ---- */
-.footer {
-  grid-column: 1 / -1;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-6);
-  border-top: 1px solid var(--line);
-  background: var(--surface);
-}
-.footer__settings {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  background: none;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  color: var(--ink-soft);
-  font: inherit;
-  font-family: var(--font-display);
-  font-weight: var(--w-medium);
-  font-size: var(--step--1);
-  padding: var(--space-2) var(--space-3);
-  cursor: pointer;
-  transition: color var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease);
-}
-.footer__settings:hover {
-  color: var(--ink);
-  border-color: var(--ink-soft);
-}
-.footer__gear {
-  font-size: 1.05em;
-  line-height: 1;
-}
+/* The Settings control now lives at the bottom of the step rail (see
+ * .rail__settings in shell.css). This file provides only the modal it opens. */
 
 /* ---- Modal ---- */
 .modal__scrim {
@@ -130,4 +94,32 @@
   .modal {
     animation: none;
   }
+}
+
+/* Model field: label with a quiet "Reload" that refetches the provider's list.
+ * Kept muted on purpose — green stays reserved for attested provenance. */
+.field__labelrow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.field__reload {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.field__reload:hover:not(:disabled) {
+  color: var(--ink);
+  text-decoration: underline;
+}
+.field__reload:disabled {
+  cursor: default;
+  opacity: 0.6;
 }

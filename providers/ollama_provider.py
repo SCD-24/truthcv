@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from .base import LLMProvider, ProviderError, env_model
+from .base import MAX_OUTPUT_TOKENS, LLMProvider, ProviderError, env_model
 from ._json import parse_json_object
 
 
@@ -24,6 +24,9 @@ class OllamaProvider(LLMProvider):
             "model": self._model,
             "messages": [{"role": "system", "content": system}, *messages],
             "stream": False,
+            # Ollama's default num_predict can be small; set a generous ceiling
+            # so a long extraction isn't truncated mid-JSON. See base.py.
+            "options": {"num_predict": MAX_OUTPUT_TOKENS},
         }
         if fmt_json:
             payload["format"] = "json"
@@ -33,6 +36,20 @@ class OllamaProvider(LLMProvider):
         except httpx.HTTPError as exc:
             raise ProviderError(f"Ollama request failed: {exc}") from exc
         return resp.json().get("message", {}).get("content", "")
+
+    def list_models(self) -> list[dict[str, str]]:
+        """Models currently pulled on the local Ollama host (GET /api/tags)."""
+        try:
+            resp = httpx.get(f"{self._host}/api/tags", timeout=10)
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise ProviderError(f"Ollama request failed: {exc}") from exc
+        out: list[dict[str, str]] = []
+        for m in resp.json().get("models", []):
+            name = m.get("name")
+            if name:
+                out.append({"id": name, "label": name})
+        return out
 
     def complete(self, system: str, messages: list[dict[str, str]]) -> str:
         return self._chat(system, messages, fmt_json=False)

@@ -6,7 +6,7 @@ import json
 import os
 from typing import Any
 
-from .base import LLMProvider, ProviderError, env_model
+from .base import MAX_OUTPUT_TOKENS, LLMProvider, ProviderError, env_model
 from ._json import parse_json_object
 
 
@@ -23,12 +23,22 @@ class AnthropicProvider(LLMProvider):
         if not key:
             raise ProviderError("ANTHROPIC_API_KEY is not set.")
         self._client = anthropic.Anthropic(api_key=key)
-        self._model = env_model("claude-3-5-sonnet-latest", model)
+        self._model = env_model("claude-opus-4-8", model)
+
+    def list_models(self) -> list[dict[str, str]]:
+        """Live model list from the Anthropic Models API (auto-paginates)."""
+        out: list[dict[str, str]] = []
+        for m in self._client.models.list():
+            out.append({"id": m.id, "label": getattr(m, "display_name", "") or m.id})
+        return out
 
     def complete(self, system: str, messages: list[dict[str, str]]) -> str:
         resp = self._client.messages.create(
             model=self._model,
-            max_tokens=4096,
+            # Generous ceiling so a long extraction isn't truncated mid-JSON;
+            # stays under the SDK's non-streaming timeout guard. See base.py.
+            max_tokens=MAX_OUTPUT_TOKENS,
+            thinking={"type": "disabled"},
             system=system,
             messages=messages,
         )

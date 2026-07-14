@@ -1,10 +1,26 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
+import Box from "@mui/material/Box";
+import Stack from "@mui/material/Stack";
+import Button from "@mui/material/Button";
+import IconButton from "@mui/material/IconButton";
+import CloseIcon from "@mui/icons-material/Close";
+import Alert from "@mui/material/Alert";
+import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
+import InputAdornment from "@mui/material/InputAdornment";
+import Typography from "@mui/material/Typography";
 import {
   getSettings,
+  listModels,
   saveSettings,
   testConnection,
 } from "../api/client";
 import type {
+  ModelInfo,
   ProviderName,
   SettingsStatus,
   SettingsUpdate,
@@ -16,6 +32,9 @@ const PROVIDERS: { id: ProviderName; label: string }[] = [
   { id: "openai", label: "OpenAI" },
   { id: "ollama", label: "Ollama" },
 ];
+
+/** Sentinel select value that reveals the free-text model field. */
+const CUSTOM_MODEL = "__custom__";
 
 /** Is this provider one that authenticates with an API key (vs. a local host)? */
 function usesApiKey(provider: string): boolean {
@@ -37,7 +56,7 @@ type TestState =
   | { kind: "fail"; detail: string };
 
 /**
- * The provider settings modal, opened from the footer. Reads current status
+ * The provider settings modal, opened from the rail's Settings control. Reads current status
  * (secrets are never sent back — the API only reports whether a key is set),
  * lets the user pick the active provider, enter a key (blank leaves it as is),
  * set an optional model, test the connection, and save. Encrypted at rest by
@@ -48,6 +67,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [provider, setProvider] = useState<string>("anthropic");
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
+  const [customModel, setCustomModel] = useState(false);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
   const [ollamaHost, setOllamaHost] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -55,7 +78,32 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [saved, setSaved] = useState(false);
   const [test, setTest] = useState<TestState>({ kind: "idle" });
 
-  const dialogRef = useRef<HTMLDivElement>(null);
+  // Pull the provider's model list live (uses a typed-but-unsaved key/host if
+  // present, else the saved credential). Returns the list so callers can decide
+  // whether the current model is a known option or a custom id.
+  async function loadModels(
+    prov: string,
+    key: string,
+    host: string,
+  ): Promise<ModelInfo[]> {
+    setModelsLoading(true);
+    setModelsError(null);
+    try {
+      const list = await listModels({
+        activeProvider: prov,
+        apiKey: key.trim() || undefined,
+        ollamaHost: host.trim() || undefined,
+      });
+      setModels(list);
+      return list;
+    } catch (e) {
+      setModels([]);
+      setModelsError(e instanceof Error ? e.message : "Couldn't load models.");
+      return [];
+    } finally {
+      setModelsLoading(false);
+    }
+  }
 
   // Load current status once when the modal opens.
   useEffect(() => {
@@ -63,10 +111,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     getSettings()
       .then((s) => {
         if (!alive) return;
+        const prov = s.activeProvider || "anthropic";
         setStatus(s);
-        setProvider(s.activeProvider || "anthropic");
+        setProvider(prov);
         setModel(s.model || "");
         setOllamaHost(s.ollamaHost || "");
+        // A saved model that isn't in the live list is treated as custom (so it
+        // survives even if the list can't be fetched — e.g. no key yet).
+        loadModels(prov, "", s.ollamaHost || "").then((list) => {
+          if (!alive) return;
+          setCustomModel(!!s.model && !list.some((m) => m.id === s.model));
+        });
       })
       .catch((e: unknown) =>
         setError(e instanceof Error ? e.message : "Couldn't load settings."),
@@ -76,16 +131,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       alive = false;
     };
   }, []);
-
-  // Close on Escape; trap initial focus into the dialog.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    dialogRef.current?.querySelector<HTMLElement>("select,input,button")?.focus();
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   function buildUpdate(): SettingsUpdate {
     const body: SettingsUpdate = { activeProvider: provider };
@@ -135,151 +180,169 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const keySet = keyIsSet(status, provider);
 
   return (
-    <div
-      className="modal__scrim"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settings-title"
-        ref={dialogRef}
+    <Dialog open onClose={onClose} maxWidth="sm" fullWidth aria-labelledby="settings-title">
+      <DialogTitle
+        id="settings-title"
+        sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}
       >
-        <header className="modal__head">
-          <h2 id="settings-title" className="modal__title">
-            Provider settings
-          </h2>
-          <button
-            type="button"
-            className="modal__close"
-            onClick={onClose}
-            aria-label="Close settings"
-          >
-            ×
-          </button>
-        </header>
+        Provider settings
+        <IconButton onClick={onClose} aria-label="Close settings" edge="end">
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
 
+      <DialogContent dividers>
         {loading ? (
-          <p className="modal__body modal__loading">Loading settings…</p>
+          <Typography color="text.secondary" sx={{ py: 2 }}>
+            Loading settings…
+          </Typography>
         ) : (
-          <div className="modal__body">
+          <Stack spacing={2}>
             {encryptionOff && (
-              <p className="notice notice--warn" role="status">
+              <Alert severity="warning">
                 Set <code>ENCRYPTION_KEY</code> in your <code>.env</code> to save
                 keys securely. Until then TruthCV falls back to keys in the
                 environment.
-              </p>
+              </Alert>
             )}
 
-            <label className="field">
-              <span className="field__label">Provider</span>
-              <select
-                className="input"
-                value={provider}
-                onChange={(e) => {
-                  setProvider(e.target.value);
-                  setApiKey("");
-                  setTest({ kind: "idle" });
-                }}
-              >
-                {PROVIDERS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <TextField
+              select
+              label="Provider"
+              value={provider}
+              onChange={(e) => {
+                const next = e.target.value;
+                setProvider(next);
+                setApiKey("");
+                // A model from one provider doesn't apply to another —
+                // fall back to that provider's default and reload the list.
+                setModel("");
+                setCustomModel(false);
+                setTest({ kind: "idle" });
+                loadModels(next, "", ollamaHost);
+              }}
+            >
+              {PROVIDERS.map((p) => (
+                <MenuItem key={p.id} value={p.id}>
+                  {p.label}
+                </MenuItem>
+              ))}
+            </TextField>
 
             {usesApiKey(provider) ? (
-              <label className="field">
-                <span className="field__label">API key</span>
-                <input
-                  className="input"
-                  type="password"
-                  autoComplete="off"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={keySet ? "•••••  key saved" : "Paste your API key"}
-                  disabled={encryptionOff && !keySet}
-                />
-                <span className="field__hint">
-                  {keySet
+              <TextField
+                label="API key"
+                type="password"
+                autoComplete="off"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={keySet ? "•••••  key saved" : "Paste your API key"}
+                disabled={encryptionOff && !keySet}
+                helperText={
+                  keySet
                     ? "A key is saved. Leave blank to keep it, or type a new one to replace it."
-                    : "Stored encrypted on the server — never sent back to the browser."}
-                </span>
-              </label>
-            ) : (
-              <label className="field">
-                <span className="field__label">Host</span>
-                <input
-                  className="input"
-                  type="text"
-                  value={ollamaHost}
-                  onChange={(e) => setOllamaHost(e.target.value)}
-                  placeholder="http://localhost:11434"
-                />
-                <span className="field__hint">
-                  Where your local Ollama server is running.
-                </span>
-              </label>
-            )}
-
-            <label className="field">
-              <span className="field__label">Model</span>
-              <input
-                className="input"
-                type="text"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder="Leave blank for the provider default"
+                    : "Stored encrypted on the server — never sent back to the browser."
+                }
               />
-            </label>
+            ) : (
+              <TextField
+                label="Host"
+                type="text"
+                value={ollamaHost}
+                onChange={(e) => setOllamaHost(e.target.value)}
+                placeholder="http://localhost:11434"
+                helperText="Where your local Ollama server is running."
+              />
+            )}
 
-            {test.kind === "ok" && (
-              <p className="notice notice--ok" role="status">
-                {test.detail}
-              </p>
-            )}
-            {test.kind === "fail" && (
-              <p className="notice notice--error" role="status">
-                {test.detail}
-              </p>
-            )}
-            {error && (
-              <p className="notice notice--error" role="status">
-                {error}
-              </p>
-            )}
-            {saved && !error && (
-              <p className="notice notice--ok" role="status">
-                Settings saved.
-              </p>
-            )}
-          </div>
+            <Box>
+              <TextField
+                select
+                fullWidth
+                label="Model"
+                value={customModel ? CUSTOM_MODEL : model}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === CUSTOM_MODEL) {
+                    setCustomModel(true);
+                    setModel("");
+                  } else {
+                    setCustomModel(false);
+                    setModel(v);
+                  }
+                }}
+                slotProps={{
+                  input: {
+                    endAdornment: (
+                      <InputAdornment position="end" sx={{ mr: 2 }}>
+                        <Button
+                          size="small"
+                          onClick={() => loadModels(provider, apiKey, ollamaHost)}
+                          disabled={modelsLoading}
+                        >
+                          {modelsLoading ? "Loading…" : "Reload"}
+                        </Button>
+                      </InputAdornment>
+                    ),
+                  },
+                }}
+                helperText={
+                  modelsError
+                    ? `${modelsError} You can still pick Custom or enter a key and reload.`
+                    : "Pulled live from the provider. Blank uses its default; choose Custom for an id not listed."
+                }
+              >
+                <MenuItem value="">Provider default</MenuItem>
+                {models.map((m) => (
+                  <MenuItem key={m.id} value={m.id}>
+                    {m.label}
+                  </MenuItem>
+                ))}
+                <MenuItem value={CUSTOM_MODEL}>Custom…</MenuItem>
+              </TextField>
+              {customModel && (
+                <TextField
+                  fullWidth
+                  type="text"
+                  value={model}
+                  // eslint-disable-next-line jsx-a11y/no-autofocus
+                  autoFocus
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder={
+                    provider === "ollama"
+                      ? "e.g. llama3.2:latest"
+                      : "Exact model id"
+                  }
+                  aria-label="Custom model id"
+                  sx={{ mt: 1.5 }}
+                />
+              )}
+            </Box>
+
+            {test.kind === "ok" && <Alert severity="success">{test.detail}</Alert>}
+            {test.kind === "fail" && <Alert severity="error">{test.detail}</Alert>}
+            {error && <Alert severity="error">{error}</Alert>}
+            {saved && !error && <Alert severity="success">Settings saved.</Alert>}
+          </Stack>
         )}
+      </DialogContent>
 
-        <footer className="modal__actions">
-          <button
-            type="button"
-            className="btn btn--ghost"
-            onClick={handleTest}
-            disabled={loading || test.kind === "testing"}
-          >
-            {test.kind === "testing" ? "Testing…" : "Test connection"}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={handleSave}
-            disabled={loading || saving}
-          >
-            {saving ? "Saving…" : "Save"}
-          </button>
-        </footer>
-      </div>
-    </div>
+      <DialogActions>
+        <Button
+          variant="outlined"
+          onClick={handleTest}
+          disabled={loading || test.kind === "testing"}
+        >
+          {test.kind === "testing" ? "Testing…" : "Test connection"}
+        </Button>
+        <Button
+          variant="contained"
+          onClick={handleSave}
+          disabled={loading || saving}
+        >
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }

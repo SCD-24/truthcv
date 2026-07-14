@@ -9,7 +9,11 @@ import api.routes as routes
 from api.main import app
 from providers.fake import FakeProvider
 from truth import save
-from truth.model import TruthEntry
+from truth.model import Experience, Skill, Truth
+
+
+def _truth_with(skills, experiences=None) -> Truth:
+    return Truth(experiences=experiences or [], education=[], skills=skills)
 
 
 @pytest.fixture()
@@ -23,10 +27,19 @@ def client(data_dir, monkeypatch):
 
     monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
     save(
-        [
-            TruthEntry("s1", "skill", "Python", "linkedin-pdf"),
-            TruthEntry("c1", "company", "Acme Corp", "linkedin-pdf"),
-        ]
+        _truth_with(
+            skills=[Skill(id="s1", value="Python", source="linkedin-pdf")],
+            experiences=[
+                Experience(
+                    id="c1",
+                    role="Engineer",
+                    company="Acme Corp",
+                    start="2020",
+                    end="2023",
+                    source="linkedin-pdf",
+                )
+            ],
+        )
     )
     from truth.store import data_dir as dd
 
@@ -55,7 +68,7 @@ def test_cover_letter_blocks_fabrication(data_dir, monkeypatch):
         return {"paragraphs": [{"text": "I led 500 people.", "claims": ["Led 500 people at NASA"]}]}
 
     monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
-    save([TruthEntry("s1", "skill", "Python", "linkedin-pdf")])
+    save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
     from truth.store import data_dir as dd
 
     (dd() / "posting.txt").write_text("a role")

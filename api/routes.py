@@ -7,17 +7,16 @@ the unverifiable tokens.
 
 from __future__ import annotations
 
-import httpx
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 import tailor as tailor_engine
-from guardrail import validate
+from guardrail import Scope, validate
 from providers import ProviderError, get_provider
 from render import lint, render_docx, render_html, render_pdf
 from render.pdf import RenderUnavailable
-from truth import load, save
+from truth import load, persist_source_hash, save
 from truth.extract import build_truth_from_text, write_confirmed
-from truth.model import TruthEntry
+from truth.model import Truth
 from truth.pdf import (
     PdfExtractError,
     extract_text,
@@ -27,34 +26,40 @@ from truth.pdf import (
     persist_source_text,
 )
 
+import applications as app_store
 from api import secrets as secrets_store
 
 from .schemas import (
+    ApplicationCreate,
+    ApplicationDocument,
+    ApplicationModel,
+    ApplicationUpdate,
     AtsWarning,
     ConfirmInferencesRequest,
     CoverLetterRequest,
     CoverLetterResult,
-    EntriesResponse,
-    JobFetchRequest,
-    JobFetchResponse,
+    ModelInfo,
+    ModelList,
+    BlockedClaimModel,
     ProfileStatus,
-    PutTruthRequest,
+    RenderRequest,
     RenderResult,
+    SaveCoverLetterRequest,
+    SaveCvRequest,
+    SaveDocumentResult,
     SettingsStatus,
     SettingsUpdate,
     TailorRequest,
     TailorResult,
     TestResult,
-    TruthEntryModel,
+    TruthDoc,
 )
 
 router = APIRouter(prefix="/api")
 
 
-def _entries_response(entries: list[TruthEntry]) -> EntriesResponse:
-    return EntriesResponse(
-        entries=[TruthEntryModel(**e.to_dict()) for e in entries]
-    )
+def _truth_doc(truth: Truth) -> TruthDoc:
+    return TruthDoc.model_validate(truth.to_dict())
 
 
 @router.post("/upload", status_code=204)
@@ -65,16 +70,17 @@ async def upload(file: UploadFile = File(...)) -> None:
     except PdfExtractError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     persist_source_text(text)
+    persist_source_hash(text)  # keyed cache: lets /extract skip a repeat LLM pass
     persist_profile(data)
 
 
-@router.post("/extract", response_model=EntriesResponse)
-def extract() -> EntriesResponse:
+@router.post("/extract", response_model=TruthDoc)
+def extract() -> TruthDoc:
     text = load_source_text()
     if not text.strip():
         raise HTTPException(status_code=400, detail="Upload a PDF before extracting.")
     try:
-        entries = build_truth_from_text(text, get_provider())
+        truth = build_truth_from_text(text, get_provider())
     except ProviderError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001 — surface upstream LLM/SDK errors cleanly
@@ -82,38 +88,21 @@ def extract() -> EntriesResponse:
             status_code=502,
             detail=f"The language model call failed: {type(e).__name__}: {e}",
         ) from e
-    return _entries_response(entries)
+    return _truth_doc(truth)
 
 
-@router.get("/truth", response_model=EntriesResponse)
-def get_truth() -> EntriesResponse:
-    return _entries_response(load())
+@router.get("/truth", response_model=TruthDoc)
+def get_truth() -> TruthDoc:
+    return _truth_doc(load())
 
 
 @router.put("/truth", status_code=204)
-def put_truth(body: PutTruthRequest) -> None:
-    entries = [TruthEntry.from_dict(e.model_dump(by_alias=False)) for e in body.entries]
+def put_truth(body: TruthDoc) -> None:
+    truth = Truth.from_dict(body.model_dump(by_alias=False))
     try:
-        save(entries)
+        save(truth)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-
-
-@router.post("/job/fetch", response_model=JobFetchResponse)
-def job_fetch(body: JobFetchRequest) -> JobFetchResponse:
-    """Best-effort: always 200. On any failure return empty text."""
-    text = ""
-    try:
-        resp = httpx.get(body.url, timeout=8.0, follow_redirects=True)
-        if resp.status_code == 200:
-            import re
-
-            stripped = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", resp.text, flags=re.I | re.S)
-            text = re.sub(r"<[^>]+>", " ", stripped)
-            text = re.sub(r"\s+", " ", text).strip()
-    except Exception:  # noqa: BLE001
-        text = ""
-    return JobFetchResponse(text=text)
 
 
 @router.post("/tailor", response_model=TailorResult)
@@ -137,36 +126,168 @@ def tailor_route(body: TailorRequest) -> TailorResult:
 
 @router.post("/confirm-inferences", status_code=204)
 def confirm_inferences(body: ConfirmInferencesRequest) -> None:
-    claims = tailor_engine.claims_for_ids(body.approved_ids)
+    # Prefer the user-edited claims: the Confirm step lets the user reword an
+    # inferred claim (and re-target its experience) before it becomes a fact, so
+    # what they typed is what we persist. Fall back to the deprecated
+    # approved_ids path, which writes each id's original draft claim.
+    if body.approved:
+        # A re-targeted experienceId the client made up (not in the draft) is
+        # dropped to "" so write_confirmed attaches it to a safe default rather
+        # than trusting an id that points nowhere.
+        known = tailor_engine.valid_experience_ids()
+        claims = [
+            (a.experience_id if a.experience_id in known else "", a.claim)
+            for a in body.approved
+        ]
+    else:
+        claims = tailor_engine.claims_for_ids(body.approved_ids)
     write_confirmed(claims)
 
 
+def _claim_id(scope_id: str, text: str) -> str:
+    """Deterministic id for a blocked claim so the UI can round-trip decisions."""
+    import hashlib
+
+    return hashlib.sha256(f"{scope_id}\n{text}".encode("utf-8")).hexdigest()[:16]
+
+
+def _contact_line(profile) -> str:
+    """Compose the header's single contact line from identity fields.
+
+    Identity is guardrail-exempt, so this is presentation only: email, phone,
+    location and any link urls, joined with a middot, skipping blanks.
+    """
+    parts = [profile.email, profile.phone, profile.location]
+    parts += [link.url for link in profile.links if link.url]
+    return " · ".join(p for p in parts if p)
+
+
+def _render_scopes(draft, truth) -> list[Scope]:
+    """One guardrail scope per draft block, keyed by its truth source id."""
+    exp_by_id = {e.id: e for e in truth.experiences}
+    edu_by_id = {e.id: e for e in truth.education}
+    scopes: list[Scope] = []
+    for de in draft.experiences:
+        te = exp_by_id.get(de.source_id)
+        allowed = (
+            [te.role, te.company, te.start, te.end] + [b.value for b in te.bullets]
+            if te else []
+        )
+        scopes.append(
+            Scope(id=de.source_id, texts=[de.role, de.company, de.dates, *de.bullets], allowed=allowed)
+        )
+    for de in draft.education:
+        te = edu_by_id.get(de.source_id)
+        allowed = [te.degree, te.school, te.start, te.end] if te else []
+        scopes.append(Scope(id=de.source_id, texts=[de.degree, de.school, de.dates], allowed=allowed))
+    scopes.append(Scope(id="skills", texts=list(draft.skills), allowed=[s.value for s in truth.skills]))
+    # The profile summary is a claim: validate it (in its own scope) against
+    # every truth fact it may legitimately draw on — role/company/dates/bullets
+    # across all experiences and education. Identity fields (name/contact/links)
+    # are exempt and never enter a scope. Skills flow in via global_values.
+    summary = truth.profile.summary.strip()
+    if summary:
+        allowed_summary: list[str] = []
+        for te in truth.experiences:
+            allowed_summary += [te.role, te.company, te.start, te.end]
+            allowed_summary += [b.value for b in te.bullets]
+        for te in truth.education:
+            allowed_summary += [te.degree, te.school, te.start, te.end]
+        scopes.append(Scope(id="summary", texts=[summary], allowed=allowed_summary))
+    return scopes
+
+
+def _apply_approvals(scopes: list[Scope], approved: set[str], denied: set[str]) -> None:
+    """Render-scoped only: approve => allow the claim's text here (NO truth
+    write); deny => remove it from the draft texts so it can't ship."""
+    for scope in scopes:
+        kept: list[str] = []
+        for text in scope.texts:
+            cid = _claim_id(scope.id, text)
+            if cid in denied:
+                continue  # dropped from this render entirely
+            if cid in approved:
+                scope.allowed.append(text)  # traceable for THIS render only
+            kept.append(text)
+        scope.texts = kept
+
+
+def _filter_denied_draft(draft, denied: set[str]):
+    """Rebuild the draft without denied claims so the rendered CV omits them."""
+    from copy import deepcopy
+
+    out = deepcopy(draft)
+    for de in out.experiences:
+        de.bullets = [b for b in de.bullets if _claim_id(de.source_id, b) not in denied]
+    out.skills = [s for s in out.skills if _claim_id("skills", s) not in denied]
+    return out
+
+
 @router.post("/render", response_model=RenderResult)
-def render_route() -> RenderResult:
+def render_route(body: RenderRequest | None = None) -> RenderResult:
     draft = tailor_engine.load_draft()
     if draft is None:
         raise HTTPException(status_code=400, detail="Tailor a posting before rendering.")
 
-    truth_values = [e.value for e in load()]
-    draft_texts = [line.text for line in draft.lines]
+    truth = load()
+    skill_values = [s.value for s in truth.skills]
+
+    approved: set[str] = set()
+    denied: set[str] = set()
+    if body and body.approvals:
+        approved = set(body.approvals.approved_claim_ids)
+        denied = set(body.approvals.denied_claim_ids)
+
+    scopes = _render_scopes(draft, truth)
+    _apply_approvals(scopes, approved, denied)
 
     # Guardrail FIRST — nothing renders unless it passes.
-    result = validate(draft_texts, truth_values)
+    result = validate(scopes, global_values=skill_values)
     if not result.ok:
-        return RenderResult(blocked=True, unverifiable=result.unverifiable)
+        # Return whole flagged claims (bullets), each with a stable id, so the
+        # download step can offer per-claim approve/deny instead of dead-ending.
+        blocked = [
+            BlockedClaimModel(
+                claim_id=_claim_id(c.scope_id, c.text),
+                experience_id=c.scope_id,
+                text=c.text,
+                tokens=c.tokens,
+            )
+            for c in result.blocked_claims
+        ]
+        return RenderResult(blocked=True, unverifiable=result.unverifiable, blocked_claims=blocked)
 
-    lines = [line.to_dict() for line in draft.lines]
-    html = render_html(lines)
+    draft = _filter_denied_draft(draft, denied)
+    html = render_html(
+        draft,
+        name=truth.profile.name or "Your Name",
+        contact=_contact_line(truth.profile),
+        summary=truth.profile.summary,
+        email=truth.profile.email,
+        phone=truth.profile.phone,
+        location=truth.profile.location,
+        links=[{"label": link.label, "url": link.url} for link in truth.profile.links],
+    )
     ats = [AtsWarning(**w) for w in lint(html, draft.keywords)]
+
+    # Attach to an application when asked: render to that application's own files
+    # (retained + traceable) and persist the CV document; otherwise use the
+    # shared scratch filenames (today's preview behavior).
+    app_id = body.application_id if body else None
+    if app_id and app_store.get(app_id) is not None:
+        pdf_name, docx_name = app_store.cv_filenames(app_id)
+    else:
+        app_id = None
+        pdf_name, docx_name = "cv.pdf", "cv.docx"
 
     pdf_url = docx_url = None
     try:
-        pdf_path = render_pdf(html)
+        pdf_path = render_pdf(html, pdf_name)
         pdf_url = f"/api/download/{pdf_path.name}"
     except RenderUnavailable:
         pass
     try:
-        docx_path = render_docx(html)
+        docx_path = render_docx(html, docx_name)
         docx_url = f"/api/download/{docx_path.name}"
     except RenderUnavailable:
         pass
@@ -177,9 +298,199 @@ def render_route() -> RenderResult:
             detail="Rendering backend unavailable (WeasyPrint/pandoc not installed).",
         )
 
+    if app_id:
+        app_store.save_cv_document(app_id, html)
+
     return RenderResult(
-        blocked=False, ats_warnings=ats, pdf_url=pdf_url, docx_url=docx_url
+        blocked=False,
+        ats_warnings=ats,
+        pdf_url=pdf_url,
+        docx_url=docx_url,
+        html=html,
     )
+
+
+def _download_url(name: str) -> str | None:
+    """Download URL for a rendered file, or None if it isn't on the volume.
+
+    Why check existence: a file may be recorded on the application but missing in
+    an environment where WeasyPrint/pandoc wasn't available at save time.
+    """
+    if not name:
+        return None
+    from truth.store import data_dir
+
+    return f"/api/download/{name}" if (data_dir() / name).exists() else None
+
+
+def _document_model(doc) -> ApplicationDocument | None:
+    """Map a stored Document to its wire model (filenames -> download URLs)."""
+    if doc is None:
+        return None
+    return ApplicationDocument(
+        source=doc.source,
+        pdf_url=_download_url(doc.pdf_filename),
+        docx_url=_download_url(doc.docx_filename),
+        updated_at=doc.updated_at,
+    )
+
+
+def _application_model(app) -> ApplicationModel:
+    """Map a stored Application to its wire model."""
+    data = {f: getattr(app, f) for f in app.EDITABLE}
+    return ApplicationModel(
+        id=app.id,
+        created_at=app.created_at,
+        updated_at=app.updated_at,
+        cv_document=_document_model(app.cv_document),
+        cover_letter_document=_document_model(app.cover_letter_document),
+        **data,
+    )
+
+
+@router.get("/applications", response_model=list[ApplicationModel])
+def list_applications() -> list[ApplicationModel]:
+    """Every tracked job application, most recent first."""
+    apps = sorted(app_store.load_all(), key=lambda a: a.created_at, reverse=True)
+    return [_application_model(a) for a in apps]
+
+
+@router.post("/applications", response_model=ApplicationModel, status_code=201)
+def create_application(body: ApplicationCreate) -> ApplicationModel:
+    """Create a new application record from client-supplied fields."""
+    app = app_store.create(body.model_dump(by_alias=False))
+    return _application_model(app)
+
+
+@router.put("/applications/{app_id}", response_model=ApplicationModel)
+def update_application(app_id: str, body: ApplicationUpdate) -> ApplicationModel:
+    """Patch an application's editable fields (None fields are left unchanged)."""
+    patch = body.model_dump(by_alias=False, exclude_none=True)
+    app = app_store.update(app_id, patch)
+    if app is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    return _application_model(app)
+
+
+@router.delete("/applications/{app_id}", status_code=204)
+def delete_application(app_id: str) -> None:
+    """Delete an application and remove its owned document files."""
+    if not app_store.delete(app_id):
+        raise HTTPException(status_code=404, detail="Application not found.")
+
+
+def _strip_html(text: str) -> str:
+    """Drop tags/entities so the guardrail sees prose, not markup.
+
+    Why: an edited CV arrives as HTML; tag names like `p`/`div` are not claims
+    and must not be diffed against the truth. Cover-letter text passes through
+    unchanged (it has no markup).
+    """
+    import html as html_lib
+    import re
+
+    without_tags = re.sub(r"<[^>]+>", " ", text or "")
+    return html_lib.unescape(without_tags)
+
+
+def _guardrail_free_text(text: str) -> list[BlockedClaimModel]:
+    """Guardrail an edited free-text document against the WHOLE truth.
+
+    An edited CV/cover letter is free-form prose, so there is no per-experience
+    draft structure to scope by: every factual token must trace to *some* truth
+    value. Returns the blocked claims (empty when it passes).
+    """
+    truth = load()
+    from coverletter.generate import _all_values
+
+    prose = _strip_html(text)
+    result = validate([Scope(id="edited", texts=[prose], allowed=_all_values(truth))])
+    if result.ok:
+        return []
+    return [
+        BlockedClaimModel(
+            claim_id=_claim_id(c.scope_id, c.text),
+            experience_id=c.scope_id,
+            text=c.text,
+            tokens=c.tokens,
+        )
+        for c in result.blocked_claims
+    ]
+
+
+def _render_to_files(html: str, pdf_name: str, docx_name: str) -> None:
+    """Render HTML to the named per-application PDF and DOCX on the volume.
+
+    Tolerates a missing render backend the same way /render does: if neither
+    format can be produced, raise 500 so the caller doesn't record a phantom
+    document.
+    """
+    produced = False
+    try:
+        render_pdf(html, pdf_name)
+        produced = True
+    except RenderUnavailable:
+        pass
+    try:
+        render_docx(html, docx_name)
+        produced = True
+    except RenderUnavailable:
+        pass
+    if not produced:
+        raise HTTPException(
+            status_code=500,
+            detail="Rendering backend unavailable (WeasyPrint/pandoc not installed).",
+        )
+
+
+@router.put("/applications/{app_id}/cv", response_model=SaveDocumentResult)
+def save_application_cv(app_id: str, body: SaveCvRequest) -> SaveDocumentResult:
+    """Guardrail-check, render, and save edited CV HTML onto an application.
+
+    The truthfulness guardrail runs BEFORE anything renders: an edit that
+    introduces a claim absent from the truth file is blocked and no file is
+    written — the same hard rule as /render.
+    """
+    if app_store.get(app_id) is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+
+    blocked = _guardrail_free_text(body.html)
+    if blocked:
+        return SaveDocumentResult(
+            blocked=True,
+            unverifiable=[t for c in blocked for t in c.tokens],
+            blocked_claims=blocked,
+        )
+
+    pdf_name, docx_name = app_store.cv_filenames(app_id)
+    _render_to_files(body.html, pdf_name, docx_name)
+    app = app_store.save_cv_document(app_id, body.html)
+    return SaveDocumentResult(blocked=False, application=_application_model(app))
+
+
+@router.put("/applications/{app_id}/cover-letter", response_model=SaveDocumentResult)
+def save_application_cover_letter(
+    app_id: str, body: SaveCoverLetterRequest
+) -> SaveDocumentResult:
+    """Guardrail-check, render, and save edited cover-letter text on an app."""
+    if app_store.get(app_id) is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+
+    blocked = _guardrail_free_text(body.text)
+    if blocked:
+        return SaveDocumentResult(
+            blocked=True,
+            unverifiable=[t for c in blocked for t in c.tokens],
+            blocked_claims=blocked,
+        )
+
+    from render.cover_letter import render_letter_html
+
+    html = render_letter_html(body.text)
+    pdf_name, docx_name = app_store.cover_letter_filenames(app_id)
+    _render_to_files(html, pdf_name, docx_name)
+    app = app_store.save_cover_letter_document(app_id, body.text)
+    return SaveDocumentResult(blocked=False, application=_application_model(app))
 
 
 def _settings_status() -> SettingsStatus:
@@ -232,13 +543,23 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
         return CoverLetterResult(blocked=True, unverifiable=letter["unverifiable"])
 
     html = render_letter_html(letter["text"])
+
+    # Attach to an application when asked (per-application files + persisted
+    # document); otherwise render to the shared scratch filenames.
+    app_id = body.application_id if body.application_id else None
+    if app_id and app_store.get(app_id) is not None:
+        pdf_name, docx_name = app_store.cover_letter_filenames(app_id)
+    else:
+        app_id = None
+        pdf_name, docx_name = "cover_letter.pdf", "cover_letter.docx"
+
     pdf_url = docx_url = None
     try:
-        pdf_url = f"/api/download/{render_pdf(html, 'cover_letter.pdf').name}"
+        pdf_url = f"/api/download/{render_pdf(html, pdf_name).name}"
     except RenderUnavailable:
         pass
     try:
-        docx_url = f"/api/download/{render_docx(html, 'cover_letter.docx').name}"
+        docx_url = f"/api/download/{render_docx(html, docx_name).name}"
     except RenderUnavailable:
         pass
     if pdf_url is None and docx_url is None:
@@ -246,7 +567,11 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
             status_code=500,
             detail="Rendering backend unavailable (WeasyPrint/pandoc not installed).",
         )
-    return CoverLetterResult(blocked=False, pdf_url=pdf_url, docx_url=docx_url)
+    if app_id:
+        app_store.save_cover_letter_document(app_id, letter["text"])
+    return CoverLetterResult(
+        blocked=False, pdf_url=pdf_url, docx_url=docx_url, text=letter["text"]
+    )
 
 
 @router.get("/settings", response_model=SettingsStatus)
@@ -288,3 +613,44 @@ def test_settings(body: SettingsUpdate) -> TestResult:
         return TestResult(ok=False, detail=str(e.detail))
     except Exception as e:  # noqa: BLE001
         return TestResult(ok=False, detail=f"{type(e).__name__}: {e}")
+
+
+def _provider_from_update(body: SettingsUpdate):
+    """Build a provider from the submitted settings WITHOUT persisting anything.
+
+    Uses a key/host typed in the form if present, otherwise the saved credential
+    — so the model list can load with an unsaved key (like Test connection) and
+    without writing secrets just to populate a dropdown.
+    """
+    name = (body.active_provider or "").strip().lower()
+    creds = secrets_store.resolve_credentials()
+    if name == "anthropic":
+        from providers.anthropic_provider import AnthropicProvider
+
+        return AnthropicProvider(api_key=body.api_key or creds["anthropicApiKey"] or None)
+    if name == "openai":
+        from providers.openai_provider import OpenAIProvider
+
+        return OpenAIProvider(api_key=body.api_key or creds["openaiApiKey"] or None)
+    if name == "ollama":
+        from providers.ollama_provider import OllamaProvider
+
+        return OllamaProvider(host=body.ollama_host or creds["ollamaHost"] or None)
+    raise HTTPException(status_code=400, detail=f"Unknown provider '{name}'.")
+
+
+@router.post("/models", response_model=ModelList)
+def list_models(body: SettingsUpdate) -> ModelList:
+    """Live model list for the selected provider, pulled from its API/SDK."""
+    try:
+        provider = _provider_from_update(body)
+        models = provider.list_models()
+    except HTTPException:
+        raise
+    except ProviderError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}") from e
+    return ModelList(
+        models=[ModelInfo(id=m["id"], label=m.get("label") or m["id"]) for m in models]
+    )
