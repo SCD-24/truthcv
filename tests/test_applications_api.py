@@ -100,21 +100,27 @@ def test_update_unknown_returns_404(client):
 
 # --- Edited-document guardrail -------------------------------------------------
 
-def test_edited_cv_blocked_when_it_strays_from_truth(client):
+def test_manual_cv_edit_is_trusted_and_saved(client):
+    """A manual edit is a deliberate human decision, so it is saved as-is —
+    the truthfulness guardrail no longer gates hand-edited documents, only the
+    automatic AI generation. Even tokens absent from the truth file persist.
+    """
     _seed_truth()
     app_id = client.post("/api/applications", json={"company": "Acme"}).json()["id"]
 
-    # "Rust" and "Kubernetes" are not in the truth -> must be blocked, no render.
     r = client.put(
         f"/api/applications/{app_id}/cv",
         json={"html": "<p>Expert in Rust and Kubernetes orchestration</p>"},
     )
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     body = r.json()
-    assert body["blocked"] is True
-    assert body["application"] is None
-    tokens = {t for c in body["blockedClaims"] for t in c["tokens"]}
-    assert "rust" in tokens and "kubernetes" in tokens
+    assert body["blocked"] is False
+    assert body["application"] is not None
+    assert body["application"]["cvDocument"]["source"].startswith("<p>Expert")
+    # And it shows as attached in the ledger.
+    listed = client.get("/api/applications").json()
+    saved = next(a for a in listed if a["id"] == app_id)
+    assert saved["cvDocument"] is not None
 
 
 def test_edited_cv_passes_and_saves_when_truthful(client):
@@ -133,7 +139,69 @@ def test_edited_cv_passes_and_saves_when_truthful(client):
         assert body["application"]["cvDocument"]["source"].startswith("<p>Built")
 
 
-def test_edited_cover_letter_guardrail(client):
+def test_rendered_cv_with_profile_header_resaves_and_attaches(client):
+    """Re-saving a rendered CV (which always prints the profile header) must not
+    be blocked on the header's identity tokens, and must attach + appear in the
+    ledger. Regression: the header was previously omitted from the allowed set,
+    so a document TruthCV itself produced could never be re-saved.
+    """
+    from truth import Link, Profile
+
+    save(
+        Truth(
+            experiences=[
+                Experience(
+                    id="exp-1",
+                    role="Engineer",
+                    company="Acme",
+                    start="2020",
+                    end="2023",
+                    source="linkedin-pdf",
+                    bullets=[
+                        Bullet(
+                            "exp-1-b-1",
+                            "Built a payments API in Python",
+                            "linkedin-pdf",
+                        )
+                    ],
+                )
+            ],
+            skills=[Skill("sk-python", "Python", "linkedin-pdf")],
+            profile=Profile(
+                name="Jane Q. Rivera",
+                email="jane.rivera@example.com",
+                phone="+1 555 0100",
+                location="Berlin, Germany",
+                links=[Link(label="LinkedIn", url="linkedin.com/in/jrivera")],
+                summary="Engineer who built a payments API in Python at Acme.",
+            ),
+        )
+    )
+    app_id = client.post("/api/applications", json={"company": "Acme"}).json()["id"]
+
+    # A rendered-CV-shaped document: profile header + a truthful experience line.
+    html = (
+        "<h1>Jane Q. Rivera</h1>"
+        "<p>jane.rivera@example.com · +1 555 0100 · Berlin, Germany · "
+        "linkedin.com/in/jrivera</p>"
+        "<p>Engineer who built a payments API in Python at Acme.</p>"
+        "<p>Built a payments API in Python at Acme</p>"
+    )
+    r = client.put(f"/api/applications/{app_id}/cv", json={"html": html})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["blocked"] is False, body.get("unverifiable")
+    assert body["application"]["cvDocument"] is not None
+
+    # And it shows as attached in the ledger (no more "+ Add CV").
+    listed = client.get("/api/applications").json()
+    saved = next(a for a in listed if a["id"] == app_id)
+    assert saved["cvDocument"] is not None
+
+
+def test_manual_cover_letter_edit_is_trusted_and_saved(client):
+    """Manual cover-letter edits are trusted and saved as-is (guardrail no longer
+    gates hand-edited documents)."""
     _seed_truth()
     app_id = client.post("/api/applications", json={"company": "Acme"}).json()["id"]
 
@@ -141,10 +209,11 @@ def test_edited_cover_letter_guardrail(client):
         f"/api/applications/{app_id}/cover-letter",
         json={"text": "I led a blockchain migration at Acme."},
     )
-    assert r.status_code == 200
-    assert r.json()["blocked"] is True
-    tokens = {t for c in r.json()["blockedClaims"] for t in c["tokens"]}
-    assert "blockchain" in tokens
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["blocked"] is False
+    assert body["application"] is not None
+    assert body["application"]["coverLetterDocument"] is not None
 
 
 def test_save_document_unknown_application_404(client):

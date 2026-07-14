@@ -23,11 +23,11 @@ function kindLabel(kind: Kind): string {
  * Attach — or re-edit — one document on an application straight from the ledger.
  *
  * A manually-created application has no generated document to fall back on, so
- * this is the only way to give it a CV or cover letter. The backend re-runs the
- * truthfulness guardrail before rendering, so an edit that strays from the truth
- * file is BLOCKED (nothing saved) — surfaced here as an inline alert listing the
- * untraceable claims rather than shipped. The CV source is HTML; the cover
- * letter is plain text (matching PUT /cv {html} and /cover-letter {text}).
+ * this is the only way to give it a CV or cover letter. A manual edit is a
+ * deliberate human decision, so it is trusted and saved as-is (the truthfulness
+ * guardrail only gates the automatic AI generation, not hand-edited text). The
+ * CV source is HTML; the cover letter is plain text (matching PUT /cv {html}
+ * and /cover-letter {text}).
  */
 export function DocumentAttachModal({
   kind,
@@ -112,8 +112,7 @@ export function DocumentAttachModal({
           color="text.secondary"
           sx={{ mb: 2 }}
         >
-          This is checked against your truth file before anything is written — an
-          edit that strays from a real fact is blocked, not saved.
+          Your edits are trusted and saved as-is to this application.
         </Typography>
 
         <TextField
@@ -147,29 +146,6 @@ export function DocumentAttachModal({
           </Alert>
         )}
 
-        {result?.blocked && (
-          <div className="claims" role="group" aria-label="Blocked edits">
-            <p className="claims__lede">
-              These edits couldn&apos;t be traced to your truth file, so nothing
-              was saved. Revise the text to match a real fact and save again.
-            </p>
-            {result.blockedClaims.map((c) => (
-              <div className="claim" key={c.claimId}>
-                <p className="claim__text">{c.text}</p>
-                {c.tokens.length > 0 && (
-                  <p className="claim__tokens">
-                    Couldn&apos;t trace:{" "}
-                    {c.tokens.map((t) => (
-                      <span className="claim__token" key={t}>
-                        {t}
-                      </span>
-                    ))}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
       </DialogContent>
 
       <DialogActions>

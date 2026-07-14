@@ -15,6 +15,10 @@ import TableContainer from "@mui/material/TableContainer";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Link from "@mui/material/Link";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Checkbox from "@mui/material/Checkbox";
 import {
@@ -46,6 +50,7 @@ const COLUMNS = [
   "Response Received",
   "Method",
   "Notes",
+  "Posting",
   "Documents",
   "",
 ] as const;
@@ -62,6 +67,7 @@ const EMPTY: ApplicationCreate = {
   method: "",
   applicationDate: "",
   notes: "",
+  posting: "",
 };
 
 /**
@@ -97,10 +103,19 @@ export function ApplicationsPage({
   const [attach, setAttach] = useState<{ app: Application; kind: PreviewKind } | null>(
     null,
   );
+  // The application whose job posting is open in the view/edit modal.
+  const [posting, setPosting] = useState<Application | null>(null);
 
   /** Replace an application in the list after a document is attached/edited. */
   function applyAttached(updated: Application) {
     setApps((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+  }
+
+  /** Save an edited job posting onto its application from the posting modal. */
+  async function savePosting(id: string, text: string) {
+    const updated = await updateApplication(id, { posting: text });
+    applyAttached(updated);
+    setPosting(null);
   }
 
   useEffect(() => {
@@ -128,6 +143,7 @@ export function ApplicationsPage({
       method: app.method,
       applicationDate: app.applicationDate,
       notes: app.notes,
+      posting: app.posting,
     });
     setEditing(app.id);
   }
@@ -252,6 +268,7 @@ export function ApplicationsPage({
                       onEditDocument({ appId: app.id, kind, source })
                     }
                     onAttach={(kind) => setAttach({ app, kind })}
+                    onOpenPosting={() => setPosting(app)}
                   />
                 ),
               )}
@@ -268,6 +285,15 @@ export function ApplicationsPage({
           onClose={() => setAttach(null)}
         />
       )}
+
+      {posting && (
+        <PostingModal
+          app={posting}
+          saving={saving}
+          onSave={savePosting}
+          onClose={() => setPosting(null)}
+        />
+      )}
     </Box>
   );
 }
@@ -279,12 +305,14 @@ function ApplicationRow({
   onDelete,
   onOpenDocument,
   onAttach,
+  onOpenPosting,
 }: {
   app: Application;
   onEdit: () => void;
   onDelete: () => void;
   onOpenDocument: (kind: PreviewKind, source: string) => void;
   onAttach: (kind: PreviewKind) => void;
+  onOpenPosting: () => void;
 }) {
   return (
     <TableRow hover>
@@ -322,6 +350,9 @@ function ApplicationRow({
       <TableCell>{app.method || "—"}</TableCell>
       <TableCell sx={{ maxWidth: 220, whiteSpace: "normal" }}>
         {app.notes || "—"}
+      </TableCell>
+      <TableCell>
+        <PostingCell app={app} onOpen={onOpenPosting} />
       </TableCell>
       <TableCell>
         <DocumentLinks
@@ -381,6 +412,97 @@ function DocumentLinks({
         <AddDocLine label="Add cover letter" onAdd={() => onAttach("cover-letter")} />
       )}
     </Stack>
+  );
+}
+
+/**
+ * The job posting linked to this application: a link that opens the posting
+ * viewer/editor when set, or an actionable "add posting" affordance when empty
+ * — mirroring how a CV or cover letter is linked.
+ */
+function PostingCell({ app, onOpen }: { app: Application; onOpen: () => void }) {
+  if (!app.posting) {
+    return (
+      <div className="apps__docline">
+        <Link
+          component="button"
+          type="button"
+          onClick={onOpen}
+          className="apps__docadd"
+        >
+          + Add posting
+        </Link>
+      </div>
+    );
+  }
+  const firstLine = app.posting.split("\n").find((l) => l.trim()) ?? "Posting";
+  return (
+    <div className="apps__docline">
+      <Link
+        component="button"
+        type="button"
+        onClick={onOpen}
+        className="apps__doclink"
+        title="View or edit the job posting"
+      >
+        Posting
+      </Link>
+      <span className="apps__docmeta apps__postingpeek">
+        {firstLine.slice(0, 60)}
+        {firstLine.length > 60 ? "…" : ""}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * View and edit an application's job posting. The posting is a plain-text field
+ * on the record, edited here and saved via PUT /api/applications/{id}.
+ */
+function PostingModal({
+  app,
+  saving,
+  onSave,
+  onClose,
+}: {
+  app: Application;
+  saving: boolean;
+  onSave: (id: string, text: string) => void;
+  onClose: () => void;
+}) {
+  const [text, setText] = useState(app.posting);
+  return (
+    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>
+        Job posting — {app.company || "application"}
+      </DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          The posting this application is for. Paste or edit it here.
+        </Typography>
+        <TextField
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          multiline
+          minRows={8}
+          fullWidth
+          autoFocus
+          placeholder="Paste the job posting…"
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={saving}>
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          onClick={() => onSave(app.id, text)}
+          disabled={saving}
+        >
+          Save posting
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 
@@ -550,6 +672,17 @@ function ApplicationForm({
         fullWidth
         sx={{ mt: 2 }}
         placeholder="Anything worth remembering about this application…"
+      />
+
+      <TextField
+        label="Job posting"
+        value={draft.posting ?? ""}
+        onChange={(e) => set("posting", e.target.value)}
+        multiline
+        minRows={3}
+        fullWidth
+        sx={{ mt: 2 }}
+        placeholder="Paste the job posting this application is for…"
       />
 
       <Stack direction="row" spacing={2} sx={{ mt: 1, flexWrap: "wrap" }}>

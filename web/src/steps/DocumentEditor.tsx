@@ -11,6 +11,7 @@ import {
   saveApplicationCoverLetter,
 } from "../api/client";
 import type { Application, SaveDocumentResult } from "../api/types";
+import { useWizard } from "../wizard/store";
 import "../styles/editor.css";
 
 type Kind = "cv" | "cover-letter";
@@ -18,8 +19,9 @@ type Kind = "cv" | "cover-letter";
 /**
  * Edit a generated document and save it onto a tracked application. The user
  * tweaks the text, picks (or quickly creates) the application it went out with,
- * and saves — the backend re-runs the truthfulness guardrail before rendering,
- * so an edit that strays from the truth file is blocked, not shipped.
+ * and saves. A manual edit is a deliberate human decision, so it is trusted and
+ * saved as-is — the truthfulness guardrail only gates the automatic AI
+ * generation, not a document the user edited by hand.
  *
  * When `lockedAppId` is given (re-editing a document opened from the ledger),
  * the save target is fixed to that application and the picker/create-new UI is
@@ -41,6 +43,9 @@ export function DocumentEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SaveDocumentResult | null>(null);
+  // The job posting captured in the wizard, carried onto any application we
+  // create here so a freshly-tracked application is prefilled with what it's for.
+  const { posting } = useWizard();
 
   // A generated document is the natural starting point; keep the editor in sync
   // if the user regenerates upstream.
@@ -63,7 +68,10 @@ export function DocumentEditor({
   async function ensureApplication(): Promise<string | null> {
     if (appId) return appId;
     if (newCompany.trim()) {
-      const created = await createApplication({ company: newCompany.trim() });
+      const created = await createApplication({
+        company: newCompany.trim(),
+        ...(posting.trim() ? { posting: posting.trim() } : {}),
+      });
       setApps((prev) => [created, ...prev]);
       setAppId(created.id);
       setNewCompany("");
@@ -112,8 +120,8 @@ export function DocumentEditor({
       <div className="editor__head">
         <span className="editor__eyebrow">Edit &amp; save</span>
         <p className="editor__hint">
-          Tweak the {label}, then save it to an application. Edits are still
-          checked against your truth file before anything is written.
+          Tweak the {label}, then save it to an application. Manual edits are
+          trusted and saved as-is.
         </p>
       </div>
 
@@ -172,30 +180,6 @@ export function DocumentEditor({
         <Alert severity="error" sx={{ mt: 2 }}>
           {error}
         </Alert>
-      )}
-
-      {result?.blocked && (
-        <div className="claims" role="group" aria-label="Blocked edits">
-          <p className="claims__lede">
-            These edits couldn&apos;t be traced to your truth file, so nothing was
-            saved. Revise the text to match a real fact and save again.
-          </p>
-          {result.blockedClaims.map((c) => (
-            <div className="claim" key={c.claimId}>
-              <p className="claim__text">{c.text}</p>
-              {c.tokens.length > 0 && (
-                <p className="claim__tokens">
-                  Couldn&apos;t trace:{" "}
-                  {c.tokens.map((t) => (
-                    <span className="claim__token" key={t}>
-                      {t}
-                    </span>
-                  ))}
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
       )}
 
       {savedDoc && (

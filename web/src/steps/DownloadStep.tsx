@@ -111,8 +111,8 @@ export function DownloadStep({
           </Typography>
           <h1 className="stage__title">Edit saved {editLabel}</h1>
           <p className="stage__lede">
-            Re-edit the {editLabel} you saved to this application. Edits are still
-            checked against your truth file before anything is written.
+            Re-edit the {editLabel} you saved to this application. Manual edits
+            are trusted and saved as-is.
           </p>
         </div>
 
@@ -164,6 +164,15 @@ export function DownloadStep({
 
       {blocked && result && (
         <div className="claims" role="group" aria-label="Claims to approve or deny">
+          <Alert severity="error" className="claims__alert" sx={{ mb: 2 }}>
+            <AlertTitle>
+              Blocked: {claims.length}{" "}
+              {claims.length === 1 ? "claim isn't" : "claims aren't"} in your truth
+              file
+            </AlertTitle>
+            The generated CV made statements that couldn&apos;t be traced back to
+            your truth file. Nothing ships until every one is resolved below.
+          </Alert>
           <p className="claims__lede">
             Approve a claim to confirm it&apos;s a true fact about you (it&apos;s
             allowed for this CV only — your truth file is never changed), or deny
@@ -303,13 +312,23 @@ export function DownloadStep({
           )}
 
           {letterBlocked && coverLetter && (
-            <Alert severity="warning" sx={{ mb: 3 }}>
-              <AlertTitle>Couldn&apos;t verify</AlertTitle>
-              <ul className="notice__list">
-                {coverLetter.unverifiable.map((u, i) => (
-                  <li key={i}>{u}</li>
+            <Alert severity="error" className="claims__alert" sx={{ mb: 3 }}>
+              <AlertTitle>
+                Blocked: the letter has claims that aren&apos;t in your truth file
+              </AlertTitle>
+              <p className="claims__lede" style={{ marginTop: 0 }}>
+                These statements couldn&apos;t be traced back to your truth file,
+                so nothing was generated. Regenerate, or edit your truth file to
+                cover them.
+              </p>
+              <p className="claim__tokens">
+                Couldn&apos;t trace:{" "}
+                {coverLetter.unverifiable.map((u) => (
+                  <span className="claim__token" key={u}>
+                    {u}
+                  </span>
                 ))}
-              </ul>
+              </p>
             </Alert>
           )}
 

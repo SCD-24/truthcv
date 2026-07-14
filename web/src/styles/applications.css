@@ -235,6 +235,11 @@
   color: var(--ink-soft);
   margin-left: 4px;
 }
+.apps__postingpeek {
+  font-family: var(--font-mono);
+  color: var(--ink-soft);
+  font-style: italic;
+}
 
 .apps__rowactions {
   display: flex;

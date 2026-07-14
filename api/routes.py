@@ -401,31 +401,6 @@ def _strip_html(text: str) -> str:
     return html_lib.unescape(without_tags)
 
 
-def _guardrail_free_text(text: str) -> list[BlockedClaimModel]:
-    """Guardrail an edited free-text document against the WHOLE truth.
-
-    An edited CV/cover letter is free-form prose, so there is no per-experience
-    draft structure to scope by: every factual token must trace to *some* truth
-    value. Returns the blocked claims (empty when it passes).
-    """
-    truth = load()
-    from coverletter.generate import _all_values
-
-    prose = _strip_html(text)
-    result = validate([Scope(id="edited", texts=[prose], allowed=_all_values(truth))])
-    if result.ok:
-        return []
-    return [
-        BlockedClaimModel(
-            claim_id=_claim_id(c.scope_id, c.text),
-            experience_id=c.scope_id,
-            text=c.text,
-            tokens=c.tokens,
-        )
-        for c in result.blocked_claims
-    ]
-
-
 def _render_to_files(html: str, pdf_name: str, docx_name: str) -> bool:
     """Best-effort render HTML to the named PDF and DOCX on the volume.
 
@@ -450,22 +425,14 @@ def _render_to_files(html: str, pdf_name: str, docx_name: str) -> bool:
 
 @router.put("/applications/{app_id}/cv", response_model=SaveDocumentResult)
 def save_application_cv(app_id: str, body: SaveCvRequest) -> SaveDocumentResult:
-    """Guardrail-check, render, and save edited CV HTML onto an application.
+    """Render and save edited CV HTML onto an application.
 
-    The truthfulness guardrail runs BEFORE anything renders: an edit that
-    introduces a claim absent from the truth file is blocked and no file is
-    written — the same hard rule as /render.
+    A manual edit is a deliberate human decision, so it is trusted and saved
+    as-is — the truthfulness guardrail only gates the automatic AI generation
+    (/render, /tailor), not a document the user edited by hand.
     """
     if app_store.get(app_id) is None:
         raise HTTPException(status_code=404, detail="Application not found.")
-
-    blocked = _guardrail_free_text(body.html)
-    if blocked:
-        return SaveDocumentResult(
-            blocked=True,
-            unverifiable=[t for c in blocked for t in c.tokens],
-            blocked_claims=blocked,
-        )
 
     # Record the document FIRST so the link always persists, then render
     # best-effort — a missing render backend must never lose the saved CV.
@@ -483,17 +450,13 @@ def save_application_cv(app_id: str, body: SaveCvRequest) -> SaveDocumentResult:
 def save_application_cover_letter(
     app_id: str, body: SaveCoverLetterRequest
 ) -> SaveDocumentResult:
-    """Guardrail-check, render, and save edited cover-letter text on an app."""
+    """Render and save edited cover-letter text on an app.
+
+    A manual edit is trusted and saved as-is; the truthfulness guardrail only
+    gates the automatic AI generation, not a hand-edited document.
+    """
     if app_store.get(app_id) is None:
         raise HTTPException(status_code=404, detail="Application not found.")
-
-    blocked = _guardrail_free_text(body.text)
-    if blocked:
-        return SaveDocumentResult(
-            blocked=True,
-            unverifiable=[t for c in blocked for t in c.tokens],
-            blocked_claims=blocked,
-        )
 
     from render.cover_letter import render_letter_html
 
