@@ -120,7 +120,7 @@ _CV_ANTI_TELL_RULES = (
     " Hard style constraints: Do NOT use em dashes or en dashes in bullet text. Use "
     "commas, parentheses, or semicolons, or split into two sentences. (Structured "
     "date ranges are exempt.) Use straight quotes (' and \"), never curly quotes. Do "
-    "not use these words: leverage, delve, foster, unlock, harness, navigate, "
+    "not use these words: leverage, delve, foster, unlock, harness unless it's an agent harness, navigate, "
     "spearhead, orchestrate, robust, comprehensive, seamless, vibrant, intricate, "
     "transformative, synergy, paradigm, tapestry, ecosystem (as metaphor), holistic, "
     "innovative; prefer plainer verbs (built, led, shipped, owned, cut, raised, "

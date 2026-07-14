@@ -1,4 +1,5 @@
 # TruthCV
+For the friends I made along the way.
 
 Tailor your CV and cover letter to a job posting — **without inventing anything**.
 
@@ -12,6 +13,22 @@ output.
 The flow is a browser wizard: **Upload LinkedIn PDF → Review extracted truth →
 Paste job posting → Confirm inferences → Download PDF/DOCX** (plus an optional
 guardrailed cover letter).
+
+## Application tracker
+
+Beyond generating documents, TruthCV keeps a ledger of every job you're
+pursuing. The **Applications** page records each submission — company, dates,
+links, status (submitted / reached out / response received), method, notes and
+the job posting — and lets you attach the exact CV and cover letter that went
+out with it.
+
+**Export** downloads the whole ledger as a single `applications.zip`:
+
+- `applications.csv` — every tracked application as a row, with all its fields.
+- One folder per company, holding that application's rendered CV and cover-letter
+  files (PDF/DOCX).
+
+The button is on the Applications page; the browser downloads the zip directly.
 
 ## Requirements
 
