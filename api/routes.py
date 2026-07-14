@@ -37,6 +37,7 @@ from .schemas import (
     ApplicationUpdate,
     AtsWarning,
     ConfirmInferencesRequest,
+    CoverLetterApprovals,
     CoverLetterRequest,
     CoverLetterResult,
     ModelInfo,
@@ -590,6 +591,40 @@ def profile() -> ProfileStatus:
     return ProfileStatus(has_profile=has_profile())
 
 
+def _letter_approvals(
+    approvals: CoverLetterApprovals | None,
+) -> tuple[set[str], set[str], list[dict] | None]:
+    """Resolve blocked-claim ids to claim texts against the CACHED letter draft.
+
+    Mirrors /api/render: ids are recomputed from the persisted paragraphs (same
+    LETTER_SCOPE_ID + _claim_id hash), so a decision the UI made on a blocked
+    attempt re-validates the exact letter the user saw. Returns
+    (approved_texts, denied_texts, paragraphs); paragraphs is None on a first
+    generate so build_letter produces and caches a fresh letter.
+    """
+    if not approvals or not (approvals.approved_claim_ids or approvals.denied_claim_ids):
+        return set(), set(), None
+
+    from coverletter import LETTER_SCOPE_ID, load_letter_draft
+
+    paragraphs = load_letter_draft()
+    if paragraphs is None:
+        return set(), set(), None
+
+    approved_ids = set(approvals.approved_claim_ids)
+    denied_ids = set(approvals.denied_claim_ids)
+    approved: set[str] = set()
+    denied: set[str] = set()
+    for para in paragraphs:
+        for claim in para.get("claims", []):
+            cid = _claim_id(LETTER_SCOPE_ID, claim)
+            if cid in approved_ids:
+                approved.add(claim)
+            if cid in denied_ids:
+                denied.add(claim)
+    return approved, denied, paragraphs
+
+
 @router.post("/cover-letter", response_model=CoverLetterResult)
 def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
     from truth.store import data_dir
@@ -600,8 +635,10 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
             status_code=400, detail="Tailor a posting before generating a cover letter."
         )
 
-    from coverletter import build_letter
+    from coverletter import build_letter, load_letter_draft
     from render.cover_letter import render_letter_html
+
+    approved_texts, denied_texts, paragraphs = _letter_approvals(body.approvals)
 
     try:
         letter = build_letter(
@@ -610,6 +647,9 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
             body.length,
             load(),
             get_provider(),
+            approved_texts=approved_texts,
+            denied_texts=denied_texts,
+            paragraphs=paragraphs,
         )
     except ProviderError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -620,7 +660,20 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
         ) from e
 
     if letter["blocked"]:
-        return CoverLetterResult(blocked=True, unverifiable=letter["unverifiable"])
+        blocked_claims = [
+            BlockedClaimModel(
+                claim_id=_claim_id(c.scope_id, c.text),
+                experience_id=c.scope_id,
+                text=c.text,
+                tokens=c.tokens,
+            )
+            for c in letter["blocked_claims"]
+        ]
+        return CoverLetterResult(
+            blocked=True,
+            unverifiable=letter["unverifiable"],
+            blocked_claims=blocked_claims,
+        )
 
     html = render_letter_html(letter["text"])
 

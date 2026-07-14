@@ -171,10 +171,20 @@ export interface ProfileStatus {
   hasProfile: boolean;
 }
 
+/** Generation-scoped decisions on blocked cover-letter claims. Approved claims
+ * are allowed for that one generation only; never persisted to the truth file. */
+export interface CoverLetterApprovals {
+  approvedClaimIds: string[];
+  deniedClaimIds: string[];
+}
+
 /** Result of generating a cover letter. Blocked when a claim is unverifiable. */
 export interface CoverLetterResult {
   blocked: boolean;
   unverifiable: string[];
+  /** Whole flagged claims (same shape as RenderResult), each approvable/deniable
+   * on the download step instead of a loose token blob. */
+  blockedClaims: BlockedClaim[];
   pdfUrl: string | null;
   docxUrl: string | null;
   /** The generated letter text, so the download step can offer an editor. */

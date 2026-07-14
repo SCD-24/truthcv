@@ -38,6 +38,9 @@ export function DownloadStep({
     // unmount/remount on back-navigation.
     decisions,
     setDecision,
+    letterDecisions,
+    setLetterDecision,
+    clearLetterDecisions,
     run,
     loading,
     error,
@@ -85,11 +88,29 @@ export function DownloadStep({
       return true;
     });
 
-  const makeLetter = async () => {
+  // Generate the letter. On a fresh generate we clear any prior decisions; on a
+  // re-check we pass the user's approve/deny choices so the SAME letter (cached
+  // server-side) re-validates. Approvals are letter-scoped — never truth writes.
+  const makeLetter = async (withApprovals: boolean) => {
     setLetterBusy(true);
     setLetterError(null);
     try {
-      const r = await generateCoverLetter(tone.toLowerCase(), length.toLowerCase());
+      const approvals = withApprovals
+        ? {
+            approvedClaimIds: letterClaims
+              .filter((c) => letterDecisions[c.claimId] === "approve")
+              .map((c) => c.claimId),
+            deniedClaimIds: letterClaims
+              .filter((c) => letterDecisions[c.claimId] === "deny")
+              .map((c) => c.claimId),
+          }
+        : undefined;
+      if (!withApprovals) clearLetterDecisions();
+      const r = await generateCoverLetter(
+        tone.toLowerCase(),
+        length.toLowerCase(),
+        approvals,
+      );
       setCoverLetter(r);
     } catch (e) {
       setLetterError(e instanceof Error ? e.message : "Couldn't write the letter.");
@@ -99,6 +120,8 @@ export function DownloadStep({
   };
 
   const letterBlocked = coverLetter?.blocked === true;
+  const letterClaims = coverLetter?.blockedClaims ?? [];
+  const letterAllDecided = letterClaims.every((c) => letterDecisions[c.claimId]);
 
   // Edit-a-saved-document mode: show only the seeded, application-locked editor.
   if (editRequest) {
@@ -312,24 +335,73 @@ export function DownloadStep({
           )}
 
           {letterBlocked && coverLetter && (
-            <Alert severity="error" className="claims__alert" sx={{ mb: 3 }}>
-              <AlertTitle>
-                Blocked: the letter has claims that aren&apos;t in your truth file
-              </AlertTitle>
-              <p className="claims__lede" style={{ marginTop: 0 }}>
-                These statements couldn&apos;t be traced back to your truth file,
-                so nothing was generated. Regenerate, or edit your truth file to
-                cover them.
+            <div className="claims" role="group" aria-label="Cover-letter claims to approve or deny">
+              <Alert severity="error" className="claims__alert" sx={{ mb: 2 }}>
+                <AlertTitle>
+                  Blocked: {letterClaims.length}{" "}
+                  {letterClaims.length === 1 ? "claim isn't" : "claims aren't"} in
+                  your truth file
+                </AlertTitle>
+                The letter made statements that couldn&apos;t be traced back to
+                your truth file. Approve or leave out each one below, then
+                re-check.
+              </Alert>
+              <p className="claims__lede">
+                Approve a claim to confirm it&apos;s a true fact about you (it&apos;s
+                allowed for this letter only — your truth file is never changed),
+                or deny it to leave it out.
               </p>
-              <p className="claim__tokens">
-                Couldn&apos;t trace:{" "}
-                {coverLetter.unverifiable.map((u) => (
-                  <span className="claim__token" key={u}>
-                    {u}
-                  </span>
-                ))}
-              </p>
-            </Alert>
+              {letterClaims.map((c) => {
+                const choice = letterDecisions[c.claimId];
+                return (
+                  <div className="claim" key={c.claimId} data-choice={choice ?? ""}>
+                    <p className="claim__text">{c.text}</p>
+                    {c.tokens.length > 0 && (
+                      <p className="claim__tokens">
+                        Couldn&apos;t trace:{" "}
+                        {c.tokens.map((t) => (
+                          <span className="claim__token" key={t}>
+                            {t}
+                          </span>
+                        ))}
+                      </p>
+                    )}
+                    <div className="claim__actions">
+                      <button
+                        type="button"
+                        className="claim__btn claim__btn--approve"
+                        data-active={choice === "approve"}
+                        aria-pressed={choice === "approve"}
+                        onClick={() => setLetterDecision(c.claimId, "approve")}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="claim__btn claim__btn--deny"
+                        data-active={choice === "deny"}
+                        aria-pressed={choice === "deny"}
+                        onClick={() => setLetterDecision(c.claimId, "deny")}
+                      >
+                        Deny
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              <Button
+                variant="contained"
+                disabled={letterBusy || !letterAllDecided}
+                onClick={() => makeLetter(true)}
+                sx={{ mb: 3 }}
+              >
+                {letterBusy
+                  ? "Re-checking…"
+                  : letterAllDecided
+                    ? "Re-check & continue"
+                    : "Decide every claim to continue"}
+              </Button>
+            </div>
           )}
 
           {!letterBlocked && coverLetter && (
@@ -355,7 +427,11 @@ export function DownloadStep({
           )}
 
           <Box className="stage__actions" sx={{ display: "flex", gap: 2 }}>
-            <Button variant="contained" disabled={letterBusy} onClick={makeLetter}>
+            <Button
+              variant="contained"
+              disabled={letterBusy}
+              onClick={() => makeLetter(false)}
+            >
               {letterBusy
                 ? "Writing…"
                 : coverLetter

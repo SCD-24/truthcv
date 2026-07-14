@@ -58,6 +58,9 @@ interface WizardState {
    * only (never writes truth). Held here so they survive the step's remount on
    * back-navigation. */
   decisions: Record<string, "approve" | "deny">;
+  /** Per-claim guardrail decisions for the COVER LETTER (separate from the CV's
+   * `decisions`). Render-scoped only; never writes truth. */
+  letterDecisions: Record<string, "approve" | "deny">;
   render: RenderResult | null;
   coverLetter: CoverLetterResult | null;
   /** Whether a profile PDF is already saved server-side (skip re-upload). */
@@ -76,6 +79,7 @@ const initialState: WizardState = {
   approvals: {},
   edits: {},
   decisions: {},
+  letterDecisions: {},
   render: null,
   coverLetter: null,
   hasProfile: false,
@@ -93,6 +97,8 @@ type Action =
   | { type: "setApproval"; id: string; approved: boolean }
   | { type: "setEdit"; id: string; claim: string }
   | { type: "setDecision"; claimId: string; choice: "approve" | "deny" }
+  | { type: "setLetterDecision"; claimId: string; choice: "approve" | "deny" }
+  | { type: "clearLetterDecisions" }
   | { type: "setRender"; result: RenderResult }
   | { type: "setCoverLetter"; result: CoverLetterResult }
   | { type: "setHasProfile"; hasProfile: boolean }
@@ -121,6 +127,7 @@ function reducer(state: WizardState, action: Action): WizardState {
         edits: {},
         // A re-tailor invalidates prior guardrail decisions too.
         decisions: {},
+        letterDecisions: {},
         // A re-tailor invalidates any earlier render/letter drafts.
         render: null,
         coverLetter: null,
@@ -142,6 +149,16 @@ function reducer(state: WizardState, action: Action): WizardState {
         ...state,
         decisions: { ...state.decisions, [action.claimId]: action.choice },
       };
+    case "setLetterDecision":
+      return {
+        ...state,
+        letterDecisions: {
+          ...state.letterDecisions,
+          [action.claimId]: action.choice,
+        },
+      };
+    case "clearLetterDecisions":
+      return { ...state, letterDecisions: {} };
     case "setRender":
       return { ...state, render: action.result, loading: false, error: null };
     case "setCoverLetter":
@@ -162,6 +179,8 @@ interface WizardApi extends WizardState {
   setApproval: (id: string, approved: boolean) => void;
   setEdit: (id: string, claim: string) => void;
   setDecision: (claimId: string, choice: "approve" | "deny") => void;
+  setLetterDecision: (claimId: string, choice: "approve" | "deny") => void;
+  clearLetterDecisions: () => void;
   setRender: (result: RenderResult) => void;
   setCoverLetter: (result: CoverLetterResult) => void;
   /** Run an async task, driving loading/error and returning its result or null. */
@@ -231,6 +250,9 @@ export function WizardProvider({ children }: { children: ReactNode }) {
       setEdit: (id, claim) => dispatch({ type: "setEdit", id, claim }),
       setDecision: (claimId, choice) =>
         dispatch({ type: "setDecision", claimId, choice }),
+      setLetterDecision: (claimId, choice) =>
+        dispatch({ type: "setLetterDecision", claimId, choice }),
+      clearLetterDecisions: () => dispatch({ type: "clearLetterDecisions" }),
       setRender: (result) => dispatch({ type: "setRender", result }),
       setCoverLetter: (result) => dispatch({ type: "setCoverLetter", result }),
       run,

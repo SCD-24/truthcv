@@ -183,16 +183,31 @@ class ProfileStatus(_Camel):
     has_profile: bool
 
 
+class CoverLetterApprovals(_Camel):
+    """Generation-scoped decisions on blocked cover-letter claims. Approved
+    claims are allowed for that one generation only; never persisted to
+    truth.yaml (mirrors RenderApprovals)."""
+
+    approved_claim_ids: list[str] = Field(default_factory=list)
+    denied_claim_ids: list[str] = Field(default_factory=list)
+
+
 class CoverLetterRequest(_Camel):
     tone: str = "Professional"
     length: str = "Standard"
     # When present, the letter is saved as this application's owned document.
     application_id: str | None = None
+    # Decisions on claims a previous attempt blocked, so the user can approve
+    # and continue (or decline) instead of dead-ending.
+    approvals: CoverLetterApprovals | None = None
 
 
 class CoverLetterResult(_Camel):
     blocked: bool
     unverifiable: list[str] = Field(default_factory=list)
+    # Blocked claims grouped by source sentence (same shape as RenderResult), so
+    # the UI can offer per-claim approve/decline instead of a loose token blob.
+    blocked_claims: list[BlockedClaimModel] = Field(default_factory=list)
     pdf_url: str | None = None
     docx_url: str | None = None
     # The generated letter text, so the UI can pre-fill an editor with it.

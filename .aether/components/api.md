@@ -85,6 +85,12 @@ Supported tools, frameworks, and packages:
 
 ---
 
+## Render-scoped approvals for cover letters (no truth write) (NOTE)
+
+> **Render-scoped approvals for cover letters (no truth write)**: POST /api/cover-letter accepts an optional approvals:{approvedClaimIds, deniedClaimIds}. Approved claim texts are added to the guardrail's allowed set for THIS generation only (no truth.yaml write); denied claims are dropped before rendering. When blocked, the response returns grouped blockedClaims:[{claimId, text, tokens}] (same shape as POST /api/render) so the UI can offer per-claim approve/decline and re-check, instead of only a flat unverifiable token list.
+
+---
+
 ## Settings routes (ENDPOINTS)
 
 | Method | Endpoint Path | Description & Purpose |

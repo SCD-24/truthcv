@@ -11,6 +11,7 @@ import type {
   TestResult,
   ProfileStatus,
   CoverLetterResult,
+  CoverLetterApprovals,
   Application,
   ApplicationCreate,
   ApplicationUpdate,
@@ -162,16 +163,19 @@ export function testConnection(body: SettingsUpdate): Promise<TestResult> {
   });
 }
 
-/** Generate a guardrail-truthful cover letter for the current posting. */
+/** Generate a guardrail-truthful cover letter for the current posting.
+ * Pass generation-scoped approvals to approve/deny individually blocked claims;
+ * approvals apply to this generation only and never touch the truth file. */
 export function generateCoverLetter(
   tone: string,
   length: string,
+  approvals?: CoverLetterApprovals,
   applicationId?: string,
 ): Promise<CoverLetterResult> {
   return request("/api/cover-letter", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tone, length, applicationId }),
+    body: JSON.stringify({ tone, length, approvals, applicationId }),
   });
 }
 
