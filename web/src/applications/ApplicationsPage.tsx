@@ -29,6 +29,7 @@ import type {
   ApplicationDocument,
 } from "../api/types";
 import { DocumentPreviewModal } from "./DocumentPreviewModal";
+import { DocumentAttachModal } from "./DocumentAttachModal";
 import "../styles/applications.css";
 
 type PreviewKind = "cv" | "cover-letter";
@@ -86,6 +87,15 @@ export function ApplicationsPage({ onBack }: { onBack: () => void }) {
   const [preview, setPreview] = useState<{ app: Application; kind: PreviewKind } | null>(
     null,
   );
+  // The application + document kind currently open in the attach/edit modal.
+  const [attach, setAttach] = useState<{ app: Application; kind: PreviewKind } | null>(
+    null,
+  );
+
+  /** Replace an application in the list after a document is attached/edited. */
+  function applyAttached(updated: Application) {
+    setApps((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+  }
 
   useEffect(() => {
     listApplications()
@@ -233,6 +243,7 @@ export function ApplicationsPage({ onBack }: { onBack: () => void }) {
                     onEdit={() => startEdit(app)}
                     onDelete={() => remove(app.id)}
                     onPreview={(kind) => setPreview({ app, kind })}
+                    onAttach={(kind) => setAttach({ app, kind })}
                   />
                 ),
               )}
@@ -256,6 +267,15 @@ export function ApplicationsPage({ onBack }: { onBack: () => void }) {
             />
           ) : null;
         })()}
+
+      {attach && (
+        <DocumentAttachModal
+          kind={attach.kind}
+          app={attach.app}
+          onSaved={applyAttached}
+          onClose={() => setAttach(null)}
+        />
+      )}
     </Box>
   );
 }
@@ -266,11 +286,13 @@ function ApplicationRow({
   onEdit,
   onDelete,
   onPreview,
+  onAttach,
 }: {
   app: Application;
   onEdit: () => void;
   onDelete: () => void;
   onPreview: (kind: PreviewKind) => void;
+  onAttach: (kind: PreviewKind) => void;
 }) {
   return (
     <TableRow hover>
@@ -278,7 +300,7 @@ function ApplicationRow({
       <TableCell>{app.applicationDate || "—"}</TableCell>
       <TableCell>
         {app.website ? (
-          <Link href={app.website} target="_blank" rel="noreferrer">
+          <Link href={absoluteUrl(app.website)} target="_blank" rel="noreferrer">
             {hostOf(app.website)}
           </Link>
         ) : (
@@ -287,7 +309,7 @@ function ApplicationRow({
       </TableCell>
       <TableCell>
         {app.applicationUrl && app.applicationUrl !== "N/A" ? (
-          <Link href={app.applicationUrl} target="_blank" rel="noreferrer">
+          <Link href={absoluteUrl(app.applicationUrl)} target="_blank" rel="noreferrer">
             link
           </Link>
         ) : (
@@ -310,7 +332,7 @@ function ApplicationRow({
         {app.notes || "—"}
       </TableCell>
       <TableCell>
-        <DocumentLinks app={app} onPreview={onPreview} />
+        <DocumentLinks app={app} onPreview={onPreview} onAttach={onAttach} />
       </TableCell>
       <TableCell>
         <Stack direction="row" spacing={1}>
@@ -334,39 +356,66 @@ function ApplicationRow({
 function DocumentLinks({
   app,
   onPreview,
+  onAttach,
 }: {
   app: Application;
   onPreview: (kind: PreviewKind) => void;
+  onAttach: (kind: PreviewKind) => void;
 }) {
   return (
     <Stack className="apps__docs" spacing={0.75}>
       {app.cvDocument ? (
-        <DocLine label="CV" doc={app.cvDocument} onOpen={() => onPreview("cv")} />
+        <DocLine
+          label="CV"
+          doc={app.cvDocument}
+          onOpen={() => onPreview("cv")}
+          onEdit={() => onAttach("cv")}
+        />
       ) : (
-        <span className="apps__none">no CV</span>
+        <AddDocLine label="Add CV" onAdd={() => onAttach("cv")} />
       )}
       {app.coverLetterDocument ? (
         <DocLine
           label="Cover letter"
           doc={app.coverLetterDocument}
           onOpen={() => onPreview("cover-letter")}
+          onEdit={() => onAttach("cover-letter")}
         />
       ) : (
-        <span className="apps__none">no cover letter</span>
+        <AddDocLine label="Add cover letter" onAdd={() => onAttach("cover-letter")} />
       )}
     </Stack>
   );
 }
 
-/** One linked document: a preview link, quick pdf/docx downloads, saved date. */
+/** An actionable "attach a document" line when none is linked yet. */
+function AddDocLine({ label, onAdd }: { label: string; onAdd: () => void }) {
+  return (
+    <div className="apps__docline">
+      <Link
+        component="button"
+        type="button"
+        onClick={onAdd}
+        className="apps__docadd"
+      >
+        + {label}
+      </Link>
+    </div>
+  );
+}
+
+/** One linked document: a preview link, an edit affordance, quick pdf/docx
+ * downloads, and the saved date. */
 function DocLine({
   label,
   doc,
   onOpen,
+  onEdit,
 }: {
   label: string;
   doc: ApplicationDocument;
   onOpen: () => void;
+  onEdit: () => void;
 }) {
   const saved = savedShort(doc.updatedAt);
   return (
@@ -380,6 +429,15 @@ function DocLine({
         {label}
       </Link>
       <span className="apps__docmeta">
+        <Link
+          component="button"
+          type="button"
+          onClick={onEdit}
+          className="apps__docedit"
+        >
+          edit
+        </Link>
+        {doc.pdfUrl && " · "}
         {doc.pdfUrl && <Link href={doc.pdfUrl}>pdf</Link>}
         {doc.pdfUrl && doc.docxUrl ? " · " : null}
         {doc.docxUrl && <Link href={doc.docxUrl}>docx</Link>}
@@ -550,10 +608,24 @@ function ApplicationForm({
   );
 }
 
+/**
+ * Make a user-entered link safe to use as an href.
+ *
+ * Users type bare hosts like "nagarro.com"; a scheme-less value is a RELATIVE
+ * URL, so the browser would navigate inside the app instead of opening the
+ * external site. Prepend https:// when there is no scheme, leaving already-
+ * absolute URLs (and mailto:/tel:) untouched.
+ */
+function absoluteUrl(url: string): string {
+  const trimmed = url.trim();
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return trimmed; // http(s):, mailto:, tel:, …
+  return `https://${trimmed}`;
+}
+
 /** Show a website as its bare host so the ledger stays scannable. */
 function hostOf(url: string): string {
   try {
-    return new URL(url).host;
+    return new URL(absoluteUrl(url)).host;
   } catch {
     return url;
   }

@@ -1,0 +1,12 @@
+{
+  "id": "rmrkhzszq",
+  "command": "grep -n \"SaveDocumentResult\\|BlockedClaim\\|blockedClaims\\|unverifiable\\|blocked\" web/src/api/types.ts",
+  "exitCode": 0,
+  "stdout": "exit 0\n99:export interface BlockedClaim {\n108:/** Render-scoped decisions on blocked claims. Never persisted to the truth file. */\n114:/** Result of rendering. If blocked, the guardrail found unverifiable claims. */\n116:  blocked: boolean;\n117:  /** Facts the guardrail could not trace to the truth file (when blocked). */\n118:  unverifiable: string[];\n120:  blockedClaims: BlockedClaim[];\n171:/** Result of generating a cover letter. Blocked when a claim is unverifiable. */\n173:  blocked: boolean;\n174:  unverifiable: string[];\n234:/** Result of saving an edited CV/cover letter. When blocked, the guardrail\n236:export interface SaveDocumentResult {\n237:  blocked: boolean;\n238:  unverifiable: string[];\n239:  blockedClaims: BlockedClaim[];",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-14T10:18:00.710Z"
+}

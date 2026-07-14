@@ -178,9 +178,19 @@
   font-size: 0.72rem;
   min-width: 140px;
 }
-.apps__docs .apps__none {
+/* No document linked yet: an actionable "attach" affordance, not a dead hint. */
+.apps__docadd {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
   color: var(--ink-soft);
-  font-style: italic;
+  text-decoration: none;
+  cursor: pointer;
+}
+.apps__docadd:hover {
+  color: var(--focus);
+  text-decoration: underline;
 }
 
 /* One linked document: preview label on top, quick links + saved date below. */
@@ -209,6 +219,17 @@
   gap: 4px;
   color: var(--ink-soft);
   font-size: 0.68rem;
+}
+.apps__docedit {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--ink-soft);
+  text-decoration: none;
+  cursor: pointer;
+}
+.apps__docedit:hover {
+  color: var(--focus);
+  text-decoration: underline;
 }
 .apps__docdate {
   color: var(--ink-soft);

@@ -1,0 +1,12 @@
+{
+  "id": "rmrki78lc",
+  "command": "grep -n \"apps__none\\|apps__docline\\|apps__doclink\\|apps__docmeta\\|apps__docdate\\|apps__docs\" web/src/styles/applications.css",
+  "exitCode": 0,
+  "stdout": "exit 0\n173:.apps__docs {\n181:.apps__docs .apps__none {\n187:.apps__docline {\n192:.apps__doclink {\n202:.apps__doclink:hover {\n205:.apps__docmeta {\n213:.apps__docdate {",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-14T10:23:47.520Z"
+}

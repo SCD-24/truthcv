@@ -1,0 +1,172 @@
+import { useState } from "react";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
+import Button from "@mui/material/Button";
+import IconButton from "@mui/material/IconButton";
+import CloseIcon from "@mui/icons-material/Close";
+import Typography from "@mui/material/Typography";
+import TextField from "@mui/material/TextField";
+import Alert from "@mui/material/Alert";
+import { saveApplicationCv, saveApplicationCoverLetter } from "../api/client";
+import type { Application, SaveDocumentResult } from "../api/types";
+
+type Kind = "cv" | "cover-letter";
+
+/** Human label for a document kind. */
+function kindLabel(kind: Kind): string {
+  return kind === "cv" ? "CV" : "Cover letter";
+}
+
+/**
+ * Attach — or re-edit — one document on an application straight from the ledger.
+ *
+ * A manually-created application has no generated document to fall back on, so
+ * this is the only way to give it a CV or cover letter. The backend re-runs the
+ * truthfulness guardrail before rendering, so an edit that strays from the truth
+ * file is BLOCKED (nothing saved) — surfaced here as an inline alert listing the
+ * untraceable claims rather than shipped. The CV source is HTML; the cover
+ * letter is plain text (matching PUT /cv {html} and /cover-letter {text}).
+ */
+export function DocumentAttachModal({
+  kind,
+  app,
+  onSaved,
+  onClose,
+}: {
+  kind: Kind;
+  app: Application;
+  onSaved: (app: Application) => void;
+  onClose: () => void;
+}) {
+  const existing = kind === "cv" ? app.cvDocument : app.coverLetterDocument;
+  const [content, setContent] = useState(existing?.source ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<SaveDocumentResult | null>(null);
+
+  const label = kindLabel(kind);
+  const verb = existing ? "Edit" : "Add";
+  const heading = `${app.company || "Application"} — ${verb} ${label.toLowerCase()}`;
+  const placeholder =
+    kind === "cv"
+      ? "Paste the CV HTML that went out with this application…"
+      : "Paste or write the cover-letter text…";
+
+  async function save() {
+    if (!content.trim()) {
+      setError(`Enter the ${label.toLowerCase()} before saving.`);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    setResult(null);
+    try {
+      const resp =
+        kind === "cv"
+          ? await saveApplicationCv(app.id, content)
+          : await saveApplicationCoverLetter(app.id, content);
+      if (!resp.blocked && resp.application) {
+        onSaved(resp.application);
+        onClose();
+        return;
+      }
+      // Blocked: keep the dialog open so the user can revise the flagged text.
+      setResult(resp);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : `Couldn't save the ${label.toLowerCase()}.`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open onClose={onClose} maxWidth="md" fullWidth scroll="paper">
+      <DialogTitle sx={{ pr: 6 }}>
+        <Typography
+          variant="overline"
+          className="apps__eyebrow"
+          sx={{ display: "block" }}
+        >
+          {verb === "Edit" ? "Edit & save" : "Attach & save"}
+        </Typography>
+        {heading}
+        <IconButton
+          aria-label="Close"
+          onClick={onClose}
+          sx={{ position: "absolute", right: 8, top: 8 }}
+        >
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+
+      <DialogContent dividers>
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{ mb: 2 }}
+        >
+          This is checked against your truth file before anything is written — an
+          edit that strays from a real fact is blocked, not saved.
+        </Typography>
+
+        <TextField
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          aria-label={`Edit ${label.toLowerCase()}`}
+          multiline
+          minRows={kind === "cv" ? 16 : 12}
+          fullWidth
+          spellCheck
+          placeholder={placeholder}
+          sx={{
+            "& .MuiInputBase-input": {
+              fontFamily: "var(--font-mono)",
+              fontSize: "0.85rem",
+            },
+          }}
+        />
+
+        {error && (
+          <Alert severity="error" sx={{ mt: 2 }}>
+            {error}
+          </Alert>
+        )}
+
+        {result?.blocked && (
+          <div className="claims" role="group" aria-label="Blocked edits">
+            <p className="claims__lede">
+              These edits couldn&apos;t be traced to your truth file, so nothing
+              was saved. Revise the text to match a real fact and save again.
+            </p>
+            {result.blockedClaims.map((c) => (
+              <div className="claim" key={c.claimId}>
+                <p className="claim__text">{c.text}</p>
+                {c.tokens.length > 0 && (
+                  <p className="claim__tokens">
+                    Couldn&apos;t trace:{" "}
+                    {c.tokens.map((t) => (
+                      <span className="claim__token" key={t}>
+                        {t}
+                      </span>
+                    ))}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </DialogContent>
+
+      <DialogActions>
+        <Button variant="outlined" onClick={onClose} disabled={saving}>
+          Cancel
+        </Button>
+        <Button variant="contained" onClick={save} disabled={saving}>
+          {saving ? "Saving…" : `Save ${label.toLowerCase()}`}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
