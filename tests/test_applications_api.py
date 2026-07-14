@@ -152,6 +152,59 @@ def test_save_document_unknown_application_404(client):
     assert client.put("/api/applications/nope/cv", json={"html": "<p>Python</p>"}).status_code == 404
 
 
+def test_edited_cv_persists_link_when_render_unavailable(client, monkeypatch):
+    """A missing render backend must NOT lose the saved CV.
+
+    save_cv_document only records source + filenames, and _download_url nulls
+    links for files that were never produced, so the CV link persists even when
+    WeasyPrint/pandoc are both absent. This pins that best-effort contract.
+    """
+    from render.pdf import RenderUnavailable
+
+    def _unavailable(*_a, **_k):
+        raise RenderUnavailable("no backend")
+
+    monkeypatch.setattr(routes, "render_pdf", _unavailable)
+    monkeypatch.setattr(routes, "render_docx", _unavailable)
+
+    _seed_truth()
+    app_id = client.post("/api/applications", json={"company": "Acme"}).json()["id"]
+
+    r = client.put(
+        f"/api/applications/{app_id}/cv",
+        json={"html": "<p>Built a payments API in Python at Acme</p>"},
+    )
+    # Save-before-render: the request succeeds and the source is recorded even
+    # though nothing could be rendered.
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["blocked"] is False
+    assert body["application"]["cvDocument"]["source"].startswith("<p>Built")
+
+
+def test_edited_cover_letter_persists_link_when_render_unavailable(client, monkeypatch):
+    """The same best-effort save contract for an edited cover letter."""
+    from render.pdf import RenderUnavailable
+
+    def _unavailable(*_a, **_k):
+        raise RenderUnavailable("no backend")
+
+    monkeypatch.setattr(routes, "render_pdf", _unavailable)
+    monkeypatch.setattr(routes, "render_docx", _unavailable)
+
+    _seed_truth()
+    app_id = client.post("/api/applications", json={"company": "Acme"}).json()["id"]
+
+    r = client.put(
+        f"/api/applications/{app_id}/cover-letter",
+        json={"text": "Built a payments API in Python at Acme."},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["blocked"] is False
+    assert body["application"]["coverLetterDocument"]["source"].startswith("Built")
+
+
 # --- Attach on render / cover-letter ------------------------------------------
 
 def test_cover_letter_attaches_to_application(client, monkeypatch):

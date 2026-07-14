@@ -280,6 +280,11 @@ def render_route(body: RenderRequest | None = None) -> RenderResult:
         app_id = None
         pdf_name, docx_name = "cv.pdf", "cv.docx"
 
+    # When attaching to an application, record the CV FIRST so the link always
+    # persists; then render best-effort.
+    if app_id:
+        app_store.save_cv_document(app_id, html)
+
     pdf_url = docx_url = None
     try:
         pdf_path = render_pdf(html, pdf_name)
@@ -292,14 +297,14 @@ def render_route(body: RenderRequest | None = None) -> RenderResult:
     except RenderUnavailable:
         pass
 
-    if pdf_url is None and docx_url is None:
+    # A pure wizard preview (no application) has no saved document to fall back
+    # on, so an unavailable backend is still a hard error there. An attached
+    # render keeps its saved link even when nothing could be produced.
+    if pdf_url is None and docx_url is None and not app_id:
         raise HTTPException(
             status_code=500,
             detail="Rendering backend unavailable (WeasyPrint/pandoc not installed).",
         )
-
-    if app_id:
-        app_store.save_cv_document(app_id, html)
 
     return RenderResult(
         blocked=False,
@@ -418,12 +423,13 @@ def _guardrail_free_text(text: str) -> list[BlockedClaimModel]:
     ]
 
 
-def _render_to_files(html: str, pdf_name: str, docx_name: str) -> None:
-    """Render HTML to the named per-application PDF and DOCX on the volume.
+def _render_to_files(html: str, pdf_name: str, docx_name: str) -> bool:
+    """Best-effort render HTML to the named PDF and DOCX on the volume.
 
-    Tolerates a missing render backend the same way /render does: if neither
-    format can be produced, raise 500 so the caller doesn't record a phantom
-    document.
+    Returns True if at least one format was produced. It never raises on an
+    unavailable backend: callers that have already recorded the document must
+    keep the saved link even when WeasyPrint/pandoc are missing, and the
+    download-URL builder nulls links for files that were not produced.
     """
     produced = False
     try:
@@ -436,11 +442,7 @@ def _render_to_files(html: str, pdf_name: str, docx_name: str) -> None:
         produced = True
     except RenderUnavailable:
         pass
-    if not produced:
-        raise HTTPException(
-            status_code=500,
-            detail="Rendering backend unavailable (WeasyPrint/pandoc not installed).",
-        )
+    return produced
 
 
 @router.put("/applications/{app_id}/cv", response_model=SaveDocumentResult)
@@ -462,9 +464,11 @@ def save_application_cv(app_id: str, body: SaveCvRequest) -> SaveDocumentResult:
             blocked_claims=blocked,
         )
 
+    # Record the document FIRST so the link always persists, then render
+    # best-effort — a missing render backend must never lose the saved CV.
+    app = app_store.save_cv_document(app_id, body.html)
     pdf_name, docx_name = app_store.cv_filenames(app_id)
     _render_to_files(body.html, pdf_name, docx_name)
-    app = app_store.save_cv_document(app_id, body.html)
     return SaveDocumentResult(blocked=False, application=_application_model(app))
 
 
@@ -487,9 +491,11 @@ def save_application_cover_letter(
     from render.cover_letter import render_letter_html
 
     html = render_letter_html(body.text)
+    # Record the document FIRST so the link always persists, then render
+    # best-effort — a missing backend must never lose the saved cover letter.
+    app = app_store.save_cover_letter_document(app_id, body.text)
     pdf_name, docx_name = app_store.cover_letter_filenames(app_id)
     _render_to_files(html, pdf_name, docx_name)
-    app = app_store.save_cover_letter_document(app_id, body.text)
     return SaveDocumentResult(blocked=False, application=_application_model(app))
 
 
@@ -553,6 +559,11 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
         app_id = None
         pdf_name, docx_name = "cover_letter.pdf", "cover_letter.docx"
 
+    # Record the cover letter FIRST when attaching, so its link always
+    # persists; then render best-effort.
+    if app_id:
+        app_store.save_cover_letter_document(app_id, letter["text"])
+
     pdf_url = docx_url = None
     try:
         pdf_url = f"/api/download/{render_pdf(html, pdf_name).name}"
@@ -562,13 +573,13 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
         docx_url = f"/api/download/{render_docx(html, docx_name).name}"
     except RenderUnavailable:
         pass
-    if pdf_url is None and docx_url is None:
+    # Only a pure preview (no application) hard-errors on an unavailable backend;
+    # an attached save keeps its recorded link.
+    if pdf_url is None and docx_url is None and not app_id:
         raise HTTPException(
             status_code=500,
             detail="Rendering backend unavailable (WeasyPrint/pandoc not installed).",
         )
-    if app_id:
-        app_store.save_cover_letter_document(app_id, letter["text"])
     return CoverLetterResult(
         blocked=False, pdf_url=pdf_url, docx_url=docx_url, text=letter["text"]
     )

@@ -1,0 +1,12 @@
+{
+  "id": "rmrkhtb8d",
+  "command": "grep -n \"cover-letter\\|cover_letter\\|save_cover_letter_document\\|@router.post\" api/routes.py | head -30",
+  "exitCode": 0,
+  "stdout": "exit 0\n65:@router.post(\"/upload\", status_code=204)\n77:@router.post(\"/extract\", response_model=TruthDoc)\n108:@router.post(\"/tailor\", response_model=TailorResult)\n127:@router.post(\"/confirm-inferences\", status_code=204)\n226:@router.post(\"/render\", response_model=RenderResult)\n351:        cover_letter_document=_document_model(app.cover_letter_document),\n363:@router.post(\"/applications\", response_model=ApplicationModel, status_code=201)\n475:@router.put(\"/applications/{app_id}/cover-letter\", response_model=SaveDocumentResult)\n476:def save_application_cover_letter(\n479:    \"\"\"Guardrail-check, render, and save edited cover-letter text on an app.\"\"\"\n491:    from render.cover_letter import render_letter_html\n496:    app = app_store.save_cover_letter_document(app_id, body.text)\n497:    pdf_name, docx_name = app_store.cover_letter_filenames(app_id)\n519:@router.post(\"/cover-letter\", response_model=CoverLetterResult)\n520:def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:\n530:    from render.cover_letter import render_letter_html\n557:        pdf_name, docx_name = app_store.cover_letter_filenames(app_id)\n560:        pdf_name, docx_name = \"cover_letter.pdf\", \"cover_letter.docx\"\n577:        app_store.save_cover_letter_document(app_id, letter[\"text\"])\n588:@router.post(\"/settings\", response_model=SettingsStatus)\n611:@router.post(\"/settings/test\", response_model=TestResult)\n648:@router.post(\"/models\", response_model=ModelList)",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-14T10:12:57.757Z"
+}

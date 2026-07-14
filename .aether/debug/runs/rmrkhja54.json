@@ -1,0 +1,12 @@
+{
+  "id": "rmrkhja54",
+  "command": "python -c \"import weasyprint; print('weasyprint OK')\" 2>&1 | tail -1; which pandoc || echo \"pandoc MISSING\"",
+  "exitCode": 0,
+  "stdout": "exit 0\nModuleNotFoundError: No module named 'weasyprint'\npandoc MISSING\n\nwhich: no pandoc in (/tmp/.mount_Aether489dkT:/tmp/.mount_Aether489dkT/usr/sbin:/usr/local/bin:/usr/bin:/var/lib/snapd/snap/bin)",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-14T10:05:09.784Z"
+}
