@@ -180,6 +180,12 @@ def test_edited_cv_persists_link_when_render_unavailable(client, monkeypatch):
     body = r.json()
     assert body["blocked"] is False
     assert body["application"]["cvDocument"]["source"].startswith("<p>Built")
+    # Regression: the save succeeds AND signals that no PDF/DOCX was produced, so
+    # the UI can say "saved, but the PDF couldn't be generated" instead of the
+    # save silently looking like it did nothing.
+    assert body["renderUnavailable"] is True
+    assert body["application"]["cvDocument"]["pdfUrl"] is None
+    assert body["application"]["cvDocument"]["docxUrl"] is None
 
 
 def test_edited_cover_letter_persists_link_when_render_unavailable(client, monkeypatch):
@@ -203,6 +209,7 @@ def test_edited_cover_letter_persists_link_when_render_unavailable(client, monke
     body = r.json()
     assert body["blocked"] is False
     assert body["application"]["coverLetterDocument"]["source"].startswith("Built")
+    assert body["renderUnavailable"] is True
 
 
 # --- Attach on render / cover-letter ------------------------------------------

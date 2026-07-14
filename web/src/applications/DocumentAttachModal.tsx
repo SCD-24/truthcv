@@ -69,10 +69,15 @@ export function DocumentAttachModal({
           : await saveApplicationCoverLetter(app.id, content);
       if (!resp.blocked && resp.application) {
         onSaved(resp.application);
-        onClose();
-        return;
+        // The document IS saved. Only close silently when it also rendered; if
+        // the render backend was unavailable, keep the dialog open to explain
+        // why no PDF/DOCX links appeared (the source was still attached).
+        if (!resp.renderUnavailable) {
+          onClose();
+          return;
+        }
       }
-      // Blocked: keep the dialog open so the user can revise the flagged text.
+      // Blocked, or saved-without-render: keep the dialog open with the result.
       setResult(resp);
     } catch (e) {
       setError(e instanceof Error ? e.message : `Couldn't save the ${label.toLowerCase()}.`);
@@ -131,6 +136,14 @@ export function DocumentAttachModal({
         {error && (
           <Alert severity="error" sx={{ mt: 2 }}>
             {error}
+          </Alert>
+        )}
+
+        {result && !result.blocked && result.renderUnavailable && (
+          <Alert severity="warning" sx={{ mt: 2 }}>
+            Saved to this application, but its PDF/DOCX couldn&apos;t be generated
+            here — the render backend (WeasyPrint/pandoc) isn&apos;t installed. Run
+            the Docker image to get downloadable files.
           </Alert>
         )}
 

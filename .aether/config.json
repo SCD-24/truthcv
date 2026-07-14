@@ -336,6 +336,18 @@
             "data": {
               "text": "POST /api/render returns the rendered CV HTML as `html`, and POST /api/cover-letter returns the generated letter as `text`. These expose the generated content so the Web UI can pre-fill an editor; the user edits and saves it back via the guardrail-checked PUT /api/applications/{id}/cv (html) and .../cover-letter (text) routes."
             }
+          },
+          {
+            "id": "widget-1784025108420-10",
+            "type": "note",
+            "title": "renderUnavailable flag on saves",
+            "x": 130,
+            "y": 130,
+            "w": 350,
+            "h": 200,
+            "data": {
+              "text": "When attaching a document to an application (PUT /api/applications/{id}/cv, PUT /api/applications/{id}/cover-letter) or rendering to an application (POST /api/render, POST /api/cover-letter with applicationId), the guardrail runs first and the document SOURCE is saved before rendering. If WeasyPrint (PDF) and pandoc (DOCX) are both unavailable, no file is produced and download URLs are null — but the save still succeeds. Responses carry renderUnavailable:true in that case so the UI can report \"saved to the application, but its PDF/DOCX couldn't be generated in this environment (install the render backend / run the Docker image)\". Do NOT treat renderUnavailable as a save failure."
+            }
           }
         ]
       }

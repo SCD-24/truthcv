@@ -5,6 +5,7 @@ import Alert from "@mui/material/Alert";
 import AlertTitle from "@mui/material/AlertTitle";
 import Typography from "@mui/material/Typography";
 import type { StepProps } from "../wizard/steps";
+import type { EditRequest } from "../App";
 import { useWizard } from "../wizard/store";
 import { generateCoverLetter, render as renderCv } from "../api/client";
 import { DocumentEditor } from "./DocumentEditor";
@@ -13,7 +14,20 @@ import "../styles/step.css";
 const TONES = ["Professional", "Warm", "Concise"] as const;
 const LENGTHS = ["Short", "Standard"] as const;
 
-export function DownloadStep({ onBack }: StepProps) {
+/**
+ * Step 5. Normally renders the tailored CV and offers download + edit-and-save.
+ * When `editRequest` is set (the user clicked a saved document in the ledger),
+ * it instead opens ONLY a seeded editor for that document, locked to its
+ * application, and skips the render/tailor pipeline entirely.
+ */
+export function DownloadStep({
+  onBack,
+  editRequest,
+  onEditDone,
+}: StepProps & {
+  editRequest?: EditRequest | null;
+  onEditDone?: () => void;
+}) {
   const {
     render: result,
     setRender,
@@ -38,6 +52,8 @@ export function DownloadStep({ onBack }: StepProps) {
   // exists (e.g. we came back to this step), keep it and the user's decisions
   // instead of wiping them with a fresh pass.
   useEffect(() => {
+    // In edit-a-saved-document mode we never run the render/tailor pipeline.
+    if (editRequest) return;
     if (result) return;
     run(async () => {
       const r = await renderCv();
@@ -45,7 +61,7 @@ export function DownloadStep({ onBack }: StepProps) {
       return true;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [editRequest]);
 
   const blocked = result?.blocked === true;
   const claims = result?.blockedClaims ?? [];
@@ -83,6 +99,43 @@ export function DownloadStep({ onBack }: StepProps) {
   };
 
   const letterBlocked = coverLetter?.blocked === true;
+
+  // Edit-a-saved-document mode: show only the seeded, application-locked editor.
+  if (editRequest) {
+    const editLabel = editRequest.kind === "cv" ? "CV" : "cover letter";
+    return (
+      <section>
+        <div className="stage__head">
+          <Typography variant="overline" className="eyebrow">
+            Step 5 of 5
+          </Typography>
+          <h1 className="stage__title">Edit saved {editLabel}</h1>
+          <p className="stage__lede">
+            Re-edit the {editLabel} you saved to this application. Edits are still
+            checked against your truth file before anything is written.
+          </p>
+        </div>
+
+        <DocumentEditor
+          kind={editRequest.kind}
+          initial={editRequest.source}
+          lockedAppId={editRequest.appId}
+        />
+
+        <Box className="stage__actions" sx={{ display: "flex", gap: 2, mt: 2 }}>
+          <Button
+            variant="outlined"
+            onClick={() => {
+              onEditDone?.();
+              onBack("confirm");
+            }}
+          >
+            Back
+          </Button>
+        </Box>
+      </section>
+    );
+  }
 
   return (
     <section>

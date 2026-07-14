@@ -144,6 +144,9 @@ class RenderResult(_Camel):
     docx_url: str | None = None
     # The rendered CV HTML, so the UI can pre-fill an editor with what shipped.
     html: str | None = None
+    # True when attached to an application and the source was saved, but neither
+    # a PDF nor a DOCX could be produced (render backend unavailable).
+    render_unavailable: bool = False
 
 
 class SettingsStatus(_Camel):
@@ -194,6 +197,9 @@ class CoverLetterResult(_Camel):
     docx_url: str | None = None
     # The generated letter text, so the UI can pre-fill an editor with it.
     text: str | None = None
+    # True when attached to an application and the source was saved, but neither
+    # a PDF nor a DOCX could be produced (render backend unavailable).
+    render_unavailable: bool = False
 
 
 class ApplicationDocument(_Camel):
@@ -283,3 +289,7 @@ class SaveDocumentResult(_Camel):
     unverifiable: list[str] = Field(default_factory=list)
     blocked_claims: list[BlockedClaimModel] = Field(default_factory=list)
     application: ApplicationModel | None = None
+    # True when the guardrail passed and the source was saved, but the rendering
+    # backend (WeasyPrint/pandoc) produced neither a PDF nor a DOCX — so the
+    # document is attached but its download links are null. NOT a save failure.
+    render_unavailable: bool = False

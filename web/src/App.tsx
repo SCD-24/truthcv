@@ -19,6 +19,18 @@ import { ApplicationsPage } from "./applications/ApplicationsPage";
 type View = "wizard" | "applications";
 
 /**
+ * A request to open the Download step (step 5) with an already-saved document
+ * loaded for re-editing — fired when the user clicks a document in the ledger.
+ * `source` is the saved CV HTML / cover-letter text; `appId` is the application
+ * the re-save must update.
+ */
+export type EditRequest = {
+  appId: string;
+  kind: "cv" | "cover-letter";
+  source: string;
+};
+
+/**
  * Wizard shell. Holds the current step and how far the user has been allowed to
  * reach (the highest unlocked step), so the rail can offer back-navigation to
  * completed steps but never skip ahead past a guard. The real per-step data flow
@@ -30,6 +42,18 @@ export function App() {
   const [reached, setReached] = useState<StepId>("upload");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [view, setView] = useState<View>("wizard");
+  // A saved document the user chose to re-edit from the ledger, if any. When
+  // set, the Download step opens seeded with it instead of a fresh render.
+  const [editRequest, setEditRequest] = useState<EditRequest | null>(null);
+
+  // Open step 5 (Download) with a saved document loaded for re-editing. Jump
+  // straight there and mark it reached so the rail offers back-navigation.
+  const openDocumentEditor = (req: EditRequest) => {
+    setEditRequest(req);
+    setView("wizard");
+    setCurrent("download");
+    setReached("download");
+  };
 
   // Once startup resolves, open where it points. A saved profile lands the user
   // on Posting (step 3) with Upload/Review already reached, so the rail still
@@ -76,6 +100,9 @@ export function App() {
         onNavigate={(to) => {
           setView("wizard");
           setCurrent(to);
+          // Leaving via the rail abandons any ledger-driven edit request so the
+          // Download step returns to its normal generate-and-download flow.
+          if (to !== "download") setEditRequest(null);
         }}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenApplications={() => setView("applications")}
@@ -90,14 +117,23 @@ export function App() {
           }
         >
           {view === "applications" ? (
-            <ApplicationsPage onBack={() => setView("wizard")} />
+            <ApplicationsPage
+              onBack={() => setView("wizard")}
+              onEditDocument={openDocumentEditor}
+            />
           ) : (
             <div className="stage__step" key={current}>
               {current === "upload" && <UploadStep {...stepProps} />}
               {current === "review" && <ReviewStep {...stepProps} />}
               {current === "posting" && <PostingStep {...stepProps} />}
               {current === "confirm" && <ConfirmStep {...stepProps} />}
-              {current === "download" && <DownloadStep {...stepProps} />}
+              {current === "download" && (
+                <DownloadStep
+                  {...stepProps}
+                  editRequest={editRequest}
+                  onEditDone={() => setEditRequest(null)}
+                />
+              )}
             </div>
           )}
         </div>

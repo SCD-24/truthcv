@@ -28,7 +28,6 @@ import type {
   ApplicationCreate,
   ApplicationDocument,
 } from "../api/types";
-import { DocumentPreviewModal } from "./DocumentPreviewModal";
 import { DocumentAttachModal } from "./DocumentAttachModal";
 import "../styles/applications.css";
 
@@ -75,7 +74,18 @@ const EMPTY: ApplicationCreate = {
  * record is a first-class view; `onBack` returns to the wizard step the user
  * left.
  */
-export function ApplicationsPage({ onBack }: { onBack: () => void }) {
+export function ApplicationsPage({
+  onBack,
+  onEditDocument,
+}: {
+  onBack: () => void;
+  /** Open the Download step (step 5) with a saved document loaded for editing. */
+  onEditDocument: (req: {
+    appId: string;
+    kind: PreviewKind;
+    source: string;
+  }) => void;
+}) {
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -83,10 +93,6 @@ export function ApplicationsPage({ onBack }: { onBack: () => void }) {
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [draft, setDraft] = useState<ApplicationCreate>(EMPTY);
   const [saving, setSaving] = useState(false);
-  // The document currently open in the preview modal, if any.
-  const [preview, setPreview] = useState<{ app: Application; kind: PreviewKind } | null>(
-    null,
-  );
   // The application + document kind currently open in the attach/edit modal.
   const [attach, setAttach] = useState<{ app: Application; kind: PreviewKind } | null>(
     null,
@@ -242,7 +248,9 @@ export function ApplicationsPage({ onBack }: { onBack: () => void }) {
                     app={app}
                     onEdit={() => startEdit(app)}
                     onDelete={() => remove(app.id)}
-                    onPreview={(kind) => setPreview({ app, kind })}
+                    onOpenDocument={(kind, source) =>
+                      onEditDocument({ appId: app.id, kind, source })
+                    }
                     onAttach={(kind) => setAttach({ app, kind })}
                   />
                 ),
@@ -251,22 +259,6 @@ export function ApplicationsPage({ onBack }: { onBack: () => void }) {
           </Table>
         </TableContainer>
       )}
-
-      {preview &&
-        (() => {
-          const doc =
-            preview.kind === "cv"
-              ? preview.app.cvDocument
-              : preview.app.coverLetterDocument;
-          return doc ? (
-            <DocumentPreviewModal
-              kind={preview.kind}
-              company={preview.app.company}
-              doc={doc}
-              onClose={() => setPreview(null)}
-            />
-          ) : null;
-        })()}
 
       {attach && (
         <DocumentAttachModal
@@ -285,13 +277,13 @@ function ApplicationRow({
   app,
   onEdit,
   onDelete,
-  onPreview,
+  onOpenDocument,
   onAttach,
 }: {
   app: Application;
   onEdit: () => void;
   onDelete: () => void;
-  onPreview: (kind: PreviewKind) => void;
+  onOpenDocument: (kind: PreviewKind, source: string) => void;
   onAttach: (kind: PreviewKind) => void;
 }) {
   return (
@@ -332,7 +324,11 @@ function ApplicationRow({
         {app.notes || "—"}
       </TableCell>
       <TableCell>
-        <DocumentLinks app={app} onPreview={onPreview} onAttach={onAttach} />
+        <DocumentLinks
+          app={app}
+          onOpenDocument={onOpenDocument}
+          onAttach={onAttach}
+        />
       </TableCell>
       <TableCell>
         <Stack direction="row" spacing={1}>
@@ -350,16 +346,16 @@ function ApplicationRow({
 
 /**
  * The CV/cover-letter linked to this application. Each present document is a
- * clickable entry that opens its own preview; absent documents show a muted
- * hint so it is always clear what is (and isn't) linked.
+ * clickable entry that opens it in the Download step for re-editing; absent
+ * documents show a muted hint so it is always clear what is (and isn't) linked.
  */
 function DocumentLinks({
   app,
-  onPreview,
+  onOpenDocument,
   onAttach,
 }: {
   app: Application;
-  onPreview: (kind: PreviewKind) => void;
+  onOpenDocument: (kind: PreviewKind, source: string) => void;
   onAttach: (kind: PreviewKind) => void;
 }) {
   return (
@@ -368,8 +364,7 @@ function DocumentLinks({
         <DocLine
           label="CV"
           doc={app.cvDocument}
-          onOpen={() => onPreview("cv")}
-          onEdit={() => onAttach("cv")}
+          onOpen={() => onOpenDocument("cv", app.cvDocument!.source)}
         />
       ) : (
         <AddDocLine label="Add CV" onAdd={() => onAttach("cv")} />
@@ -378,8 +373,9 @@ function DocumentLinks({
         <DocLine
           label="Cover letter"
           doc={app.coverLetterDocument}
-          onOpen={() => onPreview("cover-letter")}
-          onEdit={() => onAttach("cover-letter")}
+          onOpen={() =>
+            onOpenDocument("cover-letter", app.coverLetterDocument!.source)
+          }
         />
       ) : (
         <AddDocLine label="Add cover letter" onAdd={() => onAttach("cover-letter")} />
@@ -404,18 +400,16 @@ function AddDocLine({ label, onAdd }: { label: string; onAdd: () => void }) {
   );
 }
 
-/** One linked document: a preview link, an edit affordance, quick pdf/docx
- * downloads, and the saved date. */
+/** One linked document: an open-in-editor link (jumps to the Download step with
+ * the saved content), quick pdf/docx downloads, and the saved date. */
 function DocLine({
   label,
   doc,
   onOpen,
-  onEdit,
 }: {
   label: string;
   doc: ApplicationDocument;
   onOpen: () => void;
-  onEdit: () => void;
 }) {
   const saved = savedShort(doc.updatedAt);
   return (
@@ -425,19 +419,11 @@ function DocLine({
         type="button"
         onClick={onOpen}
         className="apps__doclink"
+        title="Open in the editor to re-edit and re-save"
       >
         {label}
       </Link>
       <span className="apps__docmeta">
-        <Link
-          component="button"
-          type="button"
-          onClick={onEdit}
-          className="apps__docedit"
-        >
-          edit
-        </Link>
-        {doc.pdfUrl && " · "}
         {doc.pdfUrl && <Link href={doc.pdfUrl}>pdf</Link>}
         {doc.pdfUrl && doc.docxUrl ? " · " : null}
         {doc.docxUrl && <Link href={doc.docxUrl}>docx</Link>}

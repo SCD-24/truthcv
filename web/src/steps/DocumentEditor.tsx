@@ -20,17 +20,23 @@ type Kind = "cv" | "cover-letter";
  * tweaks the text, picks (or quickly creates) the application it went out with,
  * and saves — the backend re-runs the truthfulness guardrail before rendering,
  * so an edit that strays from the truth file is blocked, not shipped.
+ *
+ * When `lockedAppId` is given (re-editing a document opened from the ledger),
+ * the save target is fixed to that application and the picker/create-new UI is
+ * hidden, so a re-save updates the same application's document in place.
  */
 export function DocumentEditor({
   kind,
   initial,
+  lockedAppId,
 }: {
   kind: Kind;
   initial: string;
+  lockedAppId?: string;
 }) {
   const [content, setContent] = useState(initial);
   const [apps, setApps] = useState<Application[]>([]);
-  const [appId, setAppId] = useState<string>("");
+  const [appId, setAppId] = useState<string>(lockedAppId ?? "");
   const [newCompany, setNewCompany] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +45,12 @@ export function DocumentEditor({
   // A generated document is the natural starting point; keep the editor in sync
   // if the user regenerates upstream.
   useEffect(() => setContent(initial), [initial]);
+
+  // When re-editing a ledger document, keep the fixed target in sync if the
+  // user opens a different saved document without unmounting the editor.
+  useEffect(() => {
+    if (lockedAppId) setAppId(lockedAppId);
+  }, [lockedAppId]);
 
   useEffect(() => {
     listApplications()
@@ -117,31 +129,44 @@ export function DocumentEditor({
         sx={{ "& .MuiInputBase-input": { fontFamily: "var(--font-mono)", fontSize: "0.85rem" } }}
       />
 
-      <Box className="editor__attach" sx={{ display: "flex", gap: 2, flexWrap: "wrap", mt: 2 }}>
-        <TextField
-          select
-          label="Attach to application"
-          value={appId}
-          onChange={(e) => setAppId(e.target.value)}
-          sx={{ minWidth: 220 }}
+      {lockedAppId ? (
+        <Box className="editor__attach editor__attach--locked" sx={{ mt: 2 }}>
+          <span className="editor__eyebrow">Saving to</span>
+          <p className="editor__hint">
+            {apps.find((a) => a.id === lockedAppId)?.company ||
+              "this application"}
+          </p>
+        </Box>
+      ) : (
+        <Box
+          className="editor__attach"
+          sx={{ display: "flex", gap: 2, flexWrap: "wrap", mt: 2 }}
         >
-          <MenuItem value="">— choose —</MenuItem>
-          {apps.map((a) => (
-            <MenuItem key={a.id} value={a.id}>
-              {a.company || "(untitled)"}
-            </MenuItem>
-          ))}
-        </TextField>
-        {!appId && (
           <TextField
-            label="…or new company"
-            value={newCompany}
-            onChange={(e) => setNewCompany(e.target.value)}
-            placeholder="Create a new application"
+            select
+            label="Attach to application"
+            value={appId}
+            onChange={(e) => setAppId(e.target.value)}
             sx={{ minWidth: 220 }}
-          />
-        )}
-      </Box>
+          >
+            <MenuItem value="">— choose —</MenuItem>
+            {apps.map((a) => (
+              <MenuItem key={a.id} value={a.id}>
+                {a.company || "(untitled)"}
+              </MenuItem>
+            ))}
+          </TextField>
+          {!appId && (
+            <TextField
+              label="…or new company"
+              value={newCompany}
+              onChange={(e) => setNewCompany(e.target.value)}
+              placeholder="Create a new application"
+              sx={{ minWidth: 220 }}
+            />
+          )}
+        </Box>
+      )}
 
       {error && (
         <Alert severity="error" sx={{ mt: 2 }}>
@@ -175,8 +200,13 @@ export function DocumentEditor({
 
       {savedDoc && (
         <div className="editor__saved">
-          <Alert severity="success" sx={{ mt: 2, mb: 2 }}>
-            Saved to {result?.application?.company || "the application"}.
+          <Alert
+            severity={result?.renderUnavailable ? "warning" : "success"}
+            sx={{ mt: 2, mb: 2 }}
+          >
+            {result?.renderUnavailable
+              ? `Saved to ${result?.application?.company || "the application"}, but its PDF/DOCX couldn't be generated here — the render backend (WeasyPrint/pandoc) isn't installed. Run the Docker image to get downloadable files.`
+              : `Saved to ${result?.application?.company || "the application"}.`}
           </Alert>
           <Box className="downloads" sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
             {savedDoc.pdfUrl && (

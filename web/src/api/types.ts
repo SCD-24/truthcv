@@ -123,6 +123,9 @@ export interface RenderResult {
   docxUrl: string | null;
   /** The rendered CV HTML source, so the download step can offer an editor. */
   html: string | null;
+  /** True when attached to an application and the source was saved, but no
+   * PDF/DOCX could be produced (render backend unavailable). Not a failure. */
+  renderUnavailable?: boolean;
 }
 
 /** Which LLM provider is active. */
@@ -176,6 +179,9 @@ export interface CoverLetterResult {
   docxUrl: string | null;
   /** The generated letter text, so the download step can offer an editor. */
   text: string | null;
+  /** True when attached to an application and the source was saved, but no
+   * PDF/DOCX could be produced (render backend unavailable). Not a failure. */
+  renderUnavailable?: boolean;
 }
 
 /** One document an application owns: its saved editable source and the
@@ -238,4 +244,8 @@ export interface SaveDocumentResult {
   unverifiable: string[];
   blockedClaims: BlockedClaim[];
   application: Application | null;
+  /** True when the guardrail passed and the source was saved, but neither a PDF
+   * nor a DOCX could be produced (render backend unavailable). Not a failure —
+   * the document is attached; only its download links are missing. */
+  renderUnavailable?: boolean;
 }

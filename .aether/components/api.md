@@ -79,6 +79,12 @@ Supported tools, frameworks, and packages:
 
 ---
 
+## renderUnavailable flag on saves (NOTE)
+
+> **renderUnavailable flag on saves**: When attaching a document to an application (PUT /api/applications/{id}/cv, PUT /api/applications/{id}/cover-letter) or rendering to an application (POST /api/render, POST /api/cover-letter with applicationId), the guardrail runs first and the document SOURCE is saved before rendering. If WeasyPrint (PDF) and pandoc (DOCX) are both unavailable, no file is produced and download URLs are null — but the save still succeeds. Responses carry renderUnavailable:true in that case so the UI can report "saved to the application, but its PDF/DOCX couldn't be generated in this environment (install the render backend / run the Docker image)". Do NOT treat renderUnavailable as a save failure.
+
+---
+
 ## Settings routes (ENDPOINTS)
 
 | Method | Endpoint Path | Description & Purpose |

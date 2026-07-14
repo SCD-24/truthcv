@@ -312,6 +312,9 @@ def render_route(body: RenderRequest | None = None) -> RenderResult:
         pdf_url=pdf_url,
         docx_url=docx_url,
         html=html,
+        # Attached save that produced no file: the CV source is recorded but its
+        # links are null, so tell the UI rather than silently show no download.
+        render_unavailable=bool(app_id) and pdf_url is None and docx_url is None,
     )
 
 
@@ -468,8 +471,12 @@ def save_application_cv(app_id: str, body: SaveCvRequest) -> SaveDocumentResult:
     # best-effort — a missing render backend must never lose the saved CV.
     app = app_store.save_cv_document(app_id, body.html)
     pdf_name, docx_name = app_store.cv_filenames(app_id)
-    _render_to_files(body.html, pdf_name, docx_name)
-    return SaveDocumentResult(blocked=False, application=_application_model(app))
+    produced = _render_to_files(body.html, pdf_name, docx_name)
+    return SaveDocumentResult(
+        blocked=False,
+        application=_application_model(app),
+        render_unavailable=not produced,
+    )
 
 
 @router.put("/applications/{app_id}/cover-letter", response_model=SaveDocumentResult)
@@ -495,8 +502,12 @@ def save_application_cover_letter(
     # best-effort — a missing backend must never lose the saved cover letter.
     app = app_store.save_cover_letter_document(app_id, body.text)
     pdf_name, docx_name = app_store.cover_letter_filenames(app_id)
-    _render_to_files(html, pdf_name, docx_name)
-    return SaveDocumentResult(blocked=False, application=_application_model(app))
+    produced = _render_to_files(html, pdf_name, docx_name)
+    return SaveDocumentResult(
+        blocked=False,
+        application=_application_model(app),
+        render_unavailable=not produced,
+    )
 
 
 def _settings_status() -> SettingsStatus:
@@ -581,7 +592,11 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
             detail="Rendering backend unavailable (WeasyPrint/pandoc not installed).",
         )
     return CoverLetterResult(
-        blocked=False, pdf_url=pdf_url, docx_url=docx_url, text=letter["text"]
+        blocked=False,
+        pdf_url=pdf_url,
+        docx_url=docx_url,
+        text=letter["text"],
+        render_unavailable=bool(app_id) and pdf_url is None and docx_url is None,
     )
 
 
