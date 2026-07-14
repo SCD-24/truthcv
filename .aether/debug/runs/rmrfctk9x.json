@@ -1,0 +1,12 @@
+{
+  "id": "rmrfctk9x",
+  "command": "grep -n 'interface Application\\|applicationUrl\\|posting' web/src/api/types.ts",
+  "exitCode": 0,
+  "stdout": "exit 0\n84:/** Result of tailoring the truth file to a posting. */\n86:  /** Keywords extracted from the posting, for context in the UI. */\n183:export interface ApplicationDocument {\n190:/** A tracked job application. `posting` is empty for General submissions; the\n192:export interface Application {\n196:  applicationUrl: string;\n203:  posting: string;\n216:    | \"applicationUrl\"\n223:    | \"posting\"",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-10T19:54:20.517Z"
+}

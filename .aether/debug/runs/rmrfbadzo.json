@@ -1,0 +1,12 @@
+{
+  "id": "rmrfbadzo",
+  "command": "cd web && npx tsc --noEmit 2>&1 | head && node -e \"\nconst { createTheme } = require('@mui/material/styles');\ntry {\n  createTheme({\n    palette: {\n      background: { default: '#ecede6', paper: '#f6f7f2' },\n      text: { primary: '#1a211c', secondary: '#59615a' },\n      primary: { main: '#2f5d3e', contrastText: '#f6f7f2' },\n      success: { main: '#2f5d3e', contrastText: '#f6f7f2' },\n      error: { main: '#9c3b2c', contrastText: '#f6f7f2' },\n      info: { main: '#356fa6', contrastText: '#f6f7f2' },\n      divider: '#d2d5cc',\n    },\n  });\n  console.log('OK: concrete hex palette augments cleanly');\n  try { createTheme({ palette: { primary: { main: 'var(--attest)' } } }); console.log('var() also ok?!'); }\n  catch(e){ console.log('CONFIRMED old crash:', e.message.split(String.fromCharCode(10))[0]); }\n} catch(e){ console.log('STILL BROKEN:', e.message); }\n\"",
+  "exitCode": 0,
+  "stdout": "exit 0\nOK: concrete hex palette augments cleanly\nCONFIRMED old crash: MUI: Unsupported `var(--attest)` color.",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-10T19:11:26.292Z"
+}

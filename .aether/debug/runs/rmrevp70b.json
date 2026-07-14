@@ -1,0 +1,12 @@
+{
+  "id": "rmrevp70b",
+  "command": "DATA_DIR=/tmp/atrun python -c \"\nimport os,shutil; shutil.rmtree('/tmp/atrun',ignore_errors=True)\nfrom truth import Bullet,Experience,Skill,Truth,save,load\nsave(Truth(experiences=[Experience(id='exp-1',role='Engineer',company='Acme',start='2020',end='2023',source='linkedin-pdf',bullets=[Bullet('exp-1-b-1','Built a payments API in Python','linkedin-pdf')])],skills=[Skill('sk-python','Python','linkedin-pdf')]))\nfrom coverletter.generate import _all_values\nfrom guardrail import Scope, validate\nt=load()\nav=_all_values(t)\nprint('allowed',av)\nr=validate([Scope(id='edited',texts=['Built a payments API in Python at Acme'],allowed=av)])\nprint(r.ok, r.unverifiable, [(c.text,c.tokens) for c in r.blocked_claims])\n\"",
+  "exitCode": 0,
+  "stdout": "exit 0\nallowed ['Engineer', 'Acme', '2020', '2023', 'Built a payments API in Python', 'Python']\nTrue [] []",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-10T11:55:03.227Z"
+}

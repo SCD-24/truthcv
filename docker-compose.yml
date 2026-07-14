@@ -1,0 +1,31 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-anthropic}
+      - LLM_MODEL=${LLM_MODEL:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      # In-container path the app writes to — must equal the volume mount target
+      # below. Do NOT derive this from the host's .env DATA_DIR (that's a host path).
+      - DATA_DIR=/app/data
+    volumes:
+      # Host storage location (DATA_DIR from .env) mounted at the fixed
+      # in-container /app/data. Set DATA_DIR in .env to relocate host data.
+      - ${DATA_DIR:-./data}:/app/data
+
+  # Optional local model runtime: `docker compose --profile ollama up`
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+
+volumes:
+  ollama:

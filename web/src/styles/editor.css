@@ -1,0 +1,69 @@
+/* Document editor — edit a generated CV/cover letter and save it to an
+ * application. Same ledger register as the rest of the app: mono "record voice"
+ * for the editable source, so it reads as the working draft of what will ship.
+ */
+
+.editor {
+  margin-top: var(--space-6);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.editor__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.editor__eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.editor__hint {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+}
+
+.editor__area {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+}
+.editor__area:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--focus);
+}
+
+.editor__attach {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.editor__saved {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+@media (max-width: 560px) {
+  .editor__attach {
+    grid-template-columns: 1fr;
+  }
+}

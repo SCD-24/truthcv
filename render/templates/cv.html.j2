@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ name | default("Curriculum Vitae") }}</title>
+  <style>
+    /* Single-column, selectable-text, no tables, no images: ATS-safe. */
+    @page { size: A4; margin: 18mm; }
+    body {
+      font-family: "Source Sans 3", Arial, sans-serif;
+      font-size: 10.5pt;
+      line-height: 1.4;
+      color: #111;
+    }
+    header { margin-bottom: 10pt; }
+    h1 { font-size: 18pt; margin: 0 0 2pt; }
+    .contact { font-size: 9.5pt; color: #333; }
+    h2 {
+      font-size: 12pt;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border-bottom: 1px solid #999;
+      margin: 14pt 0 6pt;
+      padding-bottom: 2pt;
+    }
+    ul { margin: 0 0 6pt; padding-left: 16pt; }
+    li { margin-bottom: 3pt; }
+    p { margin: 0 0 6pt; }
+    .role-line { font-weight: 600; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{{ name | default("Your Name") }}</h1>
+    {# Prefer structured identity lines when given; fall back to the composed
+       contact string. All plain text — ATS-safe, no tables or images. #}
+    {% set details = [email, phone, location] | select | list %}
+    {% if details or links %}
+    <div class="contact">
+      {% if details %}<div>{{ details | join(" · ") }}</div>{% endif %}
+      {% if links %}
+      <div>{% for link in links %}{{ link.label or link.url }}: {{ link.url }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+      {% endif %}
+    </div>
+    {% elif contact %}
+    <div class="contact">{{ contact }}</div>
+    {% endif %}
+  </header>
+
+  {% if summary %}
+  <section>
+    <h2>Summary</h2>
+    <p>{{ summary }}</p>
+  </section>
+  {% endif %}
+
+  {% if experience %}
+  <section>
+    <h2>Experience</h2>
+    {% for item in experience %}
+    <p class="role-line">{{ item.heading }}</p>
+    {% if item.bullets %}
+    <ul>
+      {% for b in item.bullets %}<li>{{ b }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if skills %}
+  <section>
+    <h2>Skills</h2>
+    <p>{{ skills | join(", ") }}</p>
+  </section>
+  {% endif %}
+
+  {% if education %}
+  <section>
+    <h2>Education</h2>
+    <ul>
+      {% for e in education %}<li>{{ e }}</li>{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+</body>
+</html>

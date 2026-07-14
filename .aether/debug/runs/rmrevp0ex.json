@@ -1,0 +1,12 @@
+{
+  "id": "rmrevp0ex",
+  "command": "python -c \"\nfrom guardrail import Scope, validate\nallowed=['Engineer','Acme','2020','2023','Built a payments API in Python','Python']\nr=validate([Scope(id='edited',texts=['Built a payments API in Python at Acme'],allowed=allowed)])\nprint(r.ok, r.unverifiable)\n\"",
+  "exitCode": 0,
+  "stdout": "exit 0\nTrue []",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-10T11:54:54.681Z"
+}

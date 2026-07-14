@@ -1,0 +1,18 @@
+{
+  "id": "rmrf97aia",
+  "command": "cd web && npm run build 2>&1 | tail -12",
+  "exitCode": 0,
+  "stdout": "exit 0\n../api/static/assets/ibm-plex-sans-latin-500-normal-BgVn5rGT.woff            23.92 kB\n../api/static/assets/ibm-plex-sans-latin-500-normal-6ng42L7E.woff2           24.18 kB\n../api/static/assets/ibm-plex-sans-latin-600-normal-CuJfVYMP.woff2           24.25 kB\n../api/static/assets/schibsted-grotesk-latin-700-normal-BkH0uJ1o.woff2       25.15 kB\n../api/static/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2       25.18 kB\n../api/static/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2       25.22 kB\n../api/static/assets/schibsted-grotesk-latin-700-normal-Dz-okVa0.woff        30.77 kB\n../api/static/assets/schibsted-grotesk-latin-500-normal-Ba39e-CX.woff        30.80 kB\n../api/static/assets/schibsted-grotesk-latin-600-normal-BieE9YjJ.woff        30.88 kB\n../api/static/assets/index-95TfdIHi.css                                      38.24 kB │ gzip:  6.36 kB\n../api/static/assets/index-DazcOegZ.js                                      280.10 kB │ gzip: 88.66 kB\n✓ built in 2.91s",
+  "stderr": "",
+  "tests": [
+    {
+      "name": "built in 2.91s",
+      "status": "pass",
+      "message": ""
+    }
+  ],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-10T18:13:02.578Z"
+}

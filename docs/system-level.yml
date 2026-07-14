@@ -1,0 +1,12 @@
+# Generated — do not edit by hand.
+core_level: 2
+capabilities:
+  architecture/groups: true
+  architecture/interactions: true
+  architecture/overview: true
+  architecture/system-map: true
+  conventions/agent-operating-contract: true
+  domain/glossary: true
+  reference/api: true
+  reference/config: false
+  reference/data-model: true

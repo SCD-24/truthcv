@@ -1,0 +1,12 @@
+{
+  "id": "rmrew864h",
+  "command": "grep -n \"class RenderResult\" -A8 api/schemas.py",
+  "exitCode": 0,
+  "stdout": "exit 0\n138:class RenderResult(_Camel):\n139-    blocked: bool\n140-    unverifiable: list[str] = Field(default_factory=list)\n141-    blocked_claims: list[BlockedClaimModel] = Field(default_factory=list)\n142-    ats_warnings: list[AtsWarning] = Field(default_factory=list)\n143-    pdf_url: str | None = None\n144-    docx_url: str | None = None\n145-\n146-",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-10T12:09:48.545Z"
+}

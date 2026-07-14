@@ -1,0 +1,18 @@
+{
+  "id": "rmrfbamib",
+  "command": "cd web && npm run build 2>&1 | tail -4",
+  "exitCode": 0,
+  "stdout": "exit 0\n../api/static/assets/schibsted-grotesk-latin-600-normal-BieE9YjJ.woff        30.88 kB\n../api/static/assets/index-95TfdIHi.css                                      38.24 kB │ gzip:   6.36 kB\n../api/static/assets/index-DslJ2qqs.js                                      448.77 kB │ gzip: 140.28 kB\n✓ built in 2.31s",
+  "stderr": "",
+  "tests": [
+    {
+      "name": "built in 2.31s",
+      "status": "pass",
+      "message": ""
+    }
+  ],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-10T19:11:37.331Z"
+}

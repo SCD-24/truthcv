@@ -1,0 +1,12 @@
+{
+  "id": "rmrf9b31m",
+  "command": "grep -n 'className=\"btn' web/src/steps/ReviewStep.tsx",
+  "exitCode": 0,
+  "stdout": "exit 0\n246:              <button type=\"button\" className=\"btn btn--ghost btn--sm\" onClick={addLink}>",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-10T18:15:59.530Z"
+}

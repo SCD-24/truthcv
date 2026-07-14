@@ -1,0 +1,12 @@
+{
+  "id": "rmrevowxd",
+  "command": "python -m pytest tests/test_applications_api.py -q 2>&1 | tail -30",
+  "exitCode": 0,
+  "stdout": "exit 0\n...F...                                                                  [100%]\n=================================== FAILURES ===================================\n________________ test_edited_cv_passes_and_saves_when_truthful _________________\n\nclient = <starlette.testclient.TestClient object at 0x7fc3de73d480>\n\n    def test_edited_cv_passes_and_saves_when_truthful(client):\n        _seed_truth()\n        app_id = client.post(\"/api/applications\", json={\"company\": \"Acme\"}).json()[\"id\"]\n    \n        r = client.put(\n            f\"/api/applications/{app_id}/cv\",\n            json={\"html\": \"<p>Built a payments API in Python at Acme</p>\"},\n        )\n        # Passes the guardrail; render may still be unavailable in CI.\n        assert r.status_code in (200, 500), r.text\n        if r.status_code == 200:\n            body = r.json()\n>           assert body[\"blocked\"] is False\nE           assert True is False\n\ntests/test_applications_api.py:119: AssertionError\n=============================== warnings summary ===============================\n../../.local/lib/python3.14/site-packages/fastapi/testclient.py:1\n  /home/glenn/.local/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED tests/test_applications_api.py::test_edited_cv_passes_and_saves_when_truthful",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-10T11:54:50.161Z"
+}

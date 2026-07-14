@@ -1,0 +1,240 @@
+/* Applications ledger — the outbound record.
+ *
+ * Same thesis as the rest of TruthCV: this is an auditable ledger. Each row is
+ * an entry in the outbound record — which document went to which company, and
+ * the state of the conversation. Seal-green marks an attested/positive state
+ * (submitted, response received); oxblood marks the still-open ones. Ids and
+ * dates wear the mono "record voice".
+ */
+
+.apps__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--ink) 42%, transparent);
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  padding: var(--space-6);
+  animation: apps-fade var(--dur) var(--ease);
+}
+
+@keyframes apps-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.apps {
+  background: var(--ground);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  width: min(1120px, 100%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.apps__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-6);
+  border-bottom: 1px solid var(--line);
+}
+
+.apps__title {
+  font-family: var(--font-display);
+  font-size: var(--step-2);
+  font-weight: var(--w-bold);
+  color: var(--ink);
+  margin: 0;
+}
+
+.apps__eyebrow {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin-bottom: var(--space-1);
+}
+
+.apps__close {
+  background: none;
+  border: none;
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+.apps__close:hover {
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.apps__body {
+  padding: var(--space-4) var(--space-6) var(--space-6);
+  overflow: auto;
+}
+
+.apps__tablewrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.apps__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--step--1);
+}
+
+.apps__table th {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-weight: var(--w-medium);
+  font-size: 0.72rem;
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  padding: var(--space-3) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.apps__table td {
+  padding: var(--space-3) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  vertical-align: top;
+}
+
+.apps__table tr:last-child td {
+  border-bottom: none;
+}
+
+.apps__company {
+  font-weight: var(--w-medium);
+}
+
+.apps__link {
+  color: var(--focus);
+  text-decoration: none;
+  word-break: break-word;
+}
+.apps__link:hover {
+  text-decoration: underline;
+}
+
+/* Status stamp — seal-green when attested/positive, oxblood when still open. */
+.apps__stamp {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.apps__stamp[data-on="yes"] {
+  color: var(--attest);
+  background: var(--attest-wash);
+}
+.apps__stamp[data-on="no"] {
+  color: var(--flag);
+  background: var(--flag-wash);
+}
+
+.apps__docs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+.apps__docs .apps__none {
+  color: var(--ink-soft);
+}
+
+.apps__rowactions {
+  display: flex;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.apps__iconbtn {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-soft);
+  cursor: pointer;
+  padding: 2px 8px;
+  font-size: var(--step--1);
+}
+.apps__iconbtn:hover {
+  color: var(--ink);
+  border-color: var(--ink-soft);
+}
+.apps__iconbtn--danger:hover {
+  color: var(--flag);
+  border-color: var(--flag);
+}
+
+.apps__toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.apps__count {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--ink-soft);
+}
+
+.apps__empty {
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--ink-soft);
+}
+
+/* Inline edit row — a form laid out as a grid of fields. */
+.apps__form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  margin-bottom: var(--space-4);
+}
+.apps__form .field--wide {
+  grid-column: 1 / -1;
+}
+.apps__form .field--check {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+}
+.apps__formactions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+@media (max-width: 640px) {
+  .apps__form {
+    grid-template-columns: 1fr;
+  }
+}

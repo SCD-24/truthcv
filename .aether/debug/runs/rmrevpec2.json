@@ -1,0 +1,12 @@
+{
+  "id": "rmrevpec2",
+  "command": "DATA_DIR=/tmp/atrun python -c \"\nfrom coverletter.generate import _all_values\nfrom guardrail import Scope, validate\nfrom truth import load\nav=_all_values(load())\nr=validate([Scope(id='edited',texts=['<p>Built a payments API in Python at Acme</p>'],allowed=av)])\nprint(r.ok, r.unverifiable, [(c.text,c.tokens) for c in r.blocked_claims])\n\"",
+  "exitCode": 0,
+  "stdout": "exit 0\nFalse ['p'] [('<p>Built a payments API in Python at Acme</p>', ['p'])]",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-10T11:55:12.722Z"
+}

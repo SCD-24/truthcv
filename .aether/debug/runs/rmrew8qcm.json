@@ -1,0 +1,12 @@
+{
+  "id": "rmrew8qcm",
+  "command": "grep -n \"class CoverLetterResult\" -A6 api/schemas.py",
+  "exitCode": 0,
+  "stdout": "exit 0\n190:class CoverLetterResult(_Camel):\n191-    blocked: bool\n192-    unverifiable: list[str] = Field(default_factory=list)\n193-    pdf_url: str | None = None\n194-    docx_url: str | None = None\n195-\n196-",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-10T12:10:14.758Z"
+}

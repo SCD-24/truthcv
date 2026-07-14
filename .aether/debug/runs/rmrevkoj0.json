@@ -1,0 +1,12 @@
+{
+  "id": "rmrevkoj0",
+  "command": "python -m pytest tests/test_applications_store.py -q 2>&1 | tail -30",
+  "exitCode": 0,
+  "stdout": "exit 0\n............                                                             [100%]",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-10T11:51:32.652Z"
+}

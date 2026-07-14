@@ -1,0 +1,12 @@
+{
+  "id": "rmrf951cj",
+  "command": "cd web && npm install @mui/material @emotion/react @emotion/styled @mui/icons-material 2>&1 | tail -8",
+  "exitCode": 0,
+  "stdout": "exit 0\n  run `npm fund` for details\n\n2 vulnerabilities (1 moderate, 1 high)\n\nTo address all issues (including breaking changes), run:\n  npm audit fix --force\n\nRun `npm audit` for details.",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-10T18:11:17.395Z"
+}

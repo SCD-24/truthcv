@@ -1,0 +1,18 @@
+{
+  "id": "rmrf9buno",
+  "command": "cd web && npm run build 2>&1 | tail -20",
+  "exitCode": 0,
+  "stdout": "exit 0\n../api/static/assets/schibsted-grotesk-latin-ext-500-normal-BjmYCtCC.woff    15.65 kB\n../api/static/assets/schibsted-grotesk-latin-ext-600-normal-DQsnXf5q.woff    15.66 kB\n../api/static/assets/ibm-plex-sans-latin-ext-400-normal-C5H60-Va.woff2       15.98 kB\n../api/static/assets/ibm-plex-sans-latin-ext-600-normal-DOrvGEcy.woff2       16.45 kB\n../api/static/assets/ibm-plex-sans-latin-ext-500-normal-DakdToA3.woff2       16.46 kB\n../api/static/assets/ibm-plex-sans-latin-400-normal-CYLoc0-x.woff            22.10 kB\n../api/static/assets/ibm-plex-sans-latin-400-normal-CDDApCn2.woff2           22.59 kB\n../api/static/assets/ibm-plex-sans-latin-600-normal-Cu4Hd6ag.woff            23.88 kB\n../api/static/assets/ibm-plex-sans-latin-500-normal-BgVn5rGT.woff            23.92 kB\n../api/static/assets/ibm-plex-sans-latin-500-normal-6ng42L7E.woff2           24.18 kB\n../api/static/assets/ibm-plex-sans-latin-600-normal-CuJfVYMP.woff2           24.25 kB\n../api/static/assets/schibsted-grotesk-latin-700-normal-BkH0uJ1o.woff2       25.15 kB\n../api/static/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2       25.18 kB\n../api/static/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2       25.22 kB\n../api/static/assets/schibsted-grotesk-latin-700-normal-Dz-okVa0.woff        30.77 kB\n../api/static/assets/schibsted-grotesk-latin-500-normal-Ba39e-CX.woff        30.80 kB\n../api/static/assets/schibsted-grotesk-latin-600-normal-BieE9YjJ.woff        30.88 kB\n../api/static/assets/index-95TfdIHi.css                                      38.24 kB │ gzip:   6.36 kB\n../api/static/assets/index-B4pPYIu-.js                                      410.74 kB │ gzip: 129.53 kB\n✓ built in 4.61s",
+  "stderr": "",
+  "tests": [
+    {
+      "name": "built in 4.61s",
+      "status": "pass",
+      "message": ""
+    }
+  ],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-10T18:16:35.316Z"
+}
