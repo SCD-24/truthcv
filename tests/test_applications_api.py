@@ -281,6 +281,49 @@ def test_edited_cover_letter_persists_link_when_render_unavailable(client, monke
     assert body["renderUnavailable"] is True
 
 
+# --- Export --------------------------------------------------------------------
+
+def test_export_returns_zip_with_csv_and_company_folders(client):
+    """The export bundles the whole table as a CSV plus each application's
+    existing rendered files under a per-company folder, zipped for download."""
+    import io
+    import zipfile
+
+    from truth.store import data_dir
+
+    import applications as app_store
+
+    # Two applications; give the first a rendered CV file on the volume.
+    with_docs = client.post(
+        "/api/applications",
+        json={"company": "Acme Corp", "applicationDate": "2026-07-01"},
+    ).json()["id"]
+    client.post("/api/applications", json={"company": "Globex"})
+
+    cv_pdf, _ = app_store.cv_filenames(with_docs)
+    (data_dir() / cv_pdf).write_bytes(b"%PDF-1.4 fake")
+
+    r = client.get("/api/applications/export")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/zip"
+    assert 'filename="applications.zip"' in r.headers["content-disposition"]
+
+    zf = zipfile.ZipFile(io.BytesIO(r.content))
+    names = zf.namelist()
+
+    # CSV at the root, with a header row plus one row per application.
+    assert "applications.csv" in names
+    csv_text = zf.read("applications.csv").decode()
+    assert "company" in csv_text.splitlines()[0]
+    assert "Acme Corp" in csv_text
+    assert "Globex" in csv_text
+
+    # The application with a rendered file gets a per-company folder; the one
+    # without any files does not.
+    assert f"Acme Corp/{cv_pdf}" in names
+    assert not any(n.startswith("Globex/") for n in names)
+
+
 # --- Attach on render / cover-letter ------------------------------------------
 
 def test_cover_letter_attaches_to_application(client, monkeypatch):

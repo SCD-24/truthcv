@@ -8,6 +8,7 @@ the unverifiable tokens.
 from __future__ import annotations
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 
 import tailor as tailor_engine
 from guardrail import Scope, validate
@@ -361,6 +362,105 @@ def list_applications() -> list[ApplicationModel]:
     """Every tracked job application, most recent first."""
     apps = sorted(app_store.load_all(), key=lambda a: a.created_at, reverse=True)
     return [_application_model(a) for a in apps]
+
+
+_EXPORT_COLUMNS = (
+    "company",
+    "application_date",
+    "website",
+    "application_url",
+    "submitted",
+    "submission_type",
+    "reached_out",
+    "to_who",
+    "response_received",
+    "method",
+    "notes",
+    "posting",
+    "documents",
+)
+
+
+def _app_document_files(app) -> list[str]:
+    """Names of this application's rendered files that exist on the volume."""
+    from truth.store import data_dir
+
+    names = [*app_store.cv_filenames(app.id), *app_store.cover_letter_filenames(app.id)]
+    return [n for n in names if (data_dir() / n).exists()]
+
+
+def _app_csv_row(app) -> list[str]:
+    """One CSV row: editable fields plus a summary of attached document files."""
+    docs = "; ".join(_app_document_files(app))
+    values = {f: getattr(app, f) for f in app.EDITABLE}
+    values["documents"] = docs
+    return [str(values.get(col, "")) for col in _EXPORT_COLUMNS]
+
+
+def _safe_folder(name: str, fallback: str, used: set[str]) -> str:
+    """A filesystem-safe, unique folder name for a company (fallback if empty)."""
+    import re
+
+    base = re.sub(r'[<>:"/\\|?*]+', "_", (name or "").strip()) or fallback
+    candidate, n = base, 2
+    while candidate in used:
+        candidate, n = f"{base} ({n})", n + 1
+    used.add(candidate)
+    return candidate
+
+
+def _write_csv(zf, apps) -> None:
+    """Write applications.csv (header + one row per application) into the zip."""
+    import csv
+    import io
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(_EXPORT_COLUMNS)
+    for app in apps:
+        writer.writerow(_app_csv_row(app))
+    zf.writestr("applications.csv", buffer.getvalue())
+
+
+def _write_documents(zf, apps) -> None:
+    """Add each application's existing files under a per-company folder."""
+    from truth.store import data_dir
+
+    used: set[str] = set()
+    for app in apps:
+        files = _app_document_files(app)
+        if not files:
+            continue
+        folder = _safe_folder(app.company, app.id, used)
+        for name in files:
+            zf.write(str(data_dir() / name), arcname=f"{folder}/{name}")
+
+
+def _build_export_zip(apps):
+    """Build the export zip in memory and return a rewound BytesIO stream."""
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        _write_csv(zf, apps)
+        _write_documents(zf, apps)
+    buffer.seek(0)
+    return buffer
+
+
+@router.get("/applications/export")
+def export_applications() -> StreamingResponse:
+    """Download every application as a CSV plus per-company document folders.
+
+    Bundled as one zip so a user gets an offline, portable record of the whole
+    tracker: the table as `applications.csv`, and each application's rendered
+    files grouped under a folder named for its company.
+    """
+    apps = sorted(app_store.load_all(), key=lambda a: a.created_at, reverse=True)
+    archive = _build_export_zip(apps)
+    headers = {"Content-Disposition": 'attachment; filename="applications.zip"'}
+    return StreamingResponse(archive, media_type="application/zip", headers=headers)
 
 
 @router.post("/applications", response_model=ApplicationModel, status_code=201)

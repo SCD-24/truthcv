@@ -206,6 +206,14 @@ export function deleteApplication(id: string): Promise<void> {
   return request<void>(`/api/applications/${id}`, { method: "DELETE" });
 }
 
+/**
+ * URL for the applications export (a CSV of the table plus each application's
+ * documents in per-company folders, zipped). It is a plain browser navigation,
+ * not a fetch: the backend sets Content-Disposition so the browser downloads
+ * the zip directly, avoiding holding the whole archive in memory as a blob.
+ */
+export const APPLICATIONS_EXPORT_URL = "/api/applications/export";
+
 /** Save edited CV HTML onto an application: guardrail-checked, then rendered.
  * A blocked result means an edit strayed from the truth file — nothing saved. */
 export function saveApplicationCv(

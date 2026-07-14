@@ -22,6 +22,7 @@ import DialogActions from "@mui/material/DialogActions";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Checkbox from "@mui/material/Checkbox";
 import {
+  APPLICATIONS_EXPORT_URL,
   createApplication,
   deleteApplication,
   listApplications,
@@ -125,6 +126,12 @@ export function ApplicationsPage({
       .finally(() => setLoading(false));
   }, []);
 
+  /** Download the whole ledger as a zip (CSV + per-company document folders).
+   * A plain navigation lets the browser stream the file straight to disk. */
+  function exportApplications() {
+    window.location.assign(APPLICATIONS_EXPORT_URL);
+  }
+
   function startAdd() {
     setDraft(EMPTY);
     setEditing("new");
@@ -209,9 +216,19 @@ export function ApplicationsPage({
         <Typography variant="body2" color="text.secondary">
           {loading ? "Loading…" : `${apps.length} tracked`}
         </Typography>
-        <Button variant="contained" onClick={startAdd} disabled={editing === "new"}>
-          + Add application
-        </Button>
+        <Stack direction="row" spacing={1}>
+          <Button
+            variant="outlined"
+            onClick={exportApplications}
+            disabled={apps.length === 0}
+            title="Download the whole table as a CSV with documents grouped by company, zipped"
+          >
+            Export
+          </Button>
+          <Button variant="contained" onClick={startAdd} disabled={editing === "new"}>
+            + Add application
+          </Button>
+        </Stack>
       </Stack>
 
       {error && (
