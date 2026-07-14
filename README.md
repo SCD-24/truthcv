@@ -67,19 +67,18 @@ You can leave the API key blank in `.env` and instead enter/save it from the
 in-app **Settings** modal — but that feature only turns on if `ENCRYPTION_KEY`
 is set.
 
-Generating a key needs the `cryptography` package (it's in `requirements.txt`),
-so run one of the following:
+Generate a key with either of the following and copy the printed value into
+`ENCRYPTION_KEY`:
 
 ```bash
-# If you already run the app locally (deps installed):
-python -m api.genkey
+# No dependencies — works with any Python 3 install, before you build anything:
+python -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
 
-# Docker-only, no local Python deps — generate it inside the built image:
-docker compose run --rm app python -m api.genkey
+# Or, once the app's dependencies are installed (local dev, or after `docker compose up --build`):
+python -m api.genkey
 ```
 
-Copy the printed value into `ENCRYPTION_KEY`. Saved keys are encrypted (Fernet)
-into `./data/secrets.enc`.
+Saved keys are encrypted (Fernet) into `./data/secrets.enc`.
 
 ## Local development (without Docker)
 
