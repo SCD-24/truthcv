@@ -196,6 +196,10 @@
   width: 100%;
   max-width: var(--stage-max);
 }
+/* The applications ledger is a wide table view — let it use the full stage. */
+.stage__inner--wide {
+  max-width: none;
+}
 .stage__head {
   margin-bottom: var(--space-6);
 }

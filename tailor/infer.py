@@ -37,6 +37,38 @@ _SCHEMA: dict[str, Any] = {
     "required": ["inferences"],
 }
 
+def _uncovered_keywords(keywords: list[str], existing: set[str]) -> list[str]:
+    """Keywords not already stated in truth — the real gaps worth inferring.
+
+    Pre-filtering here focuses the model on genuine coverage gaps so it does not
+    waste effort (or hallucinate) re-proposing keywords the CV already backs.
+    """
+    out: list[str] = []
+    for kw in keywords:
+        low = kw.strip().lower()
+        if low and not any(low in fact or fact in low for fact in existing):
+            out.append(kw.strip())
+    return out
+
+
+def _infer_user_message(keywords: list[str], truth: Truth) -> str:
+    """Build the keyword-driven user message for the inference request.
+
+    We list each uncovered keyword explicitly so the model walks them one by one
+    (matching infer_system); with no keywords it falls back to a general scan so
+    the step still works when the posting yielded nothing screenable.
+    """
+    block = prompts.infer_truth_block(truth)
+    if not keywords:
+        return f"POSTING KEYWORDS: (none extracted)\n\n{block}"
+    listed = "\n".join(f"- {kw}" for kw in keywords)
+    return (
+        "For EACH posting keyword below, decide whether an existing experience "
+        "bullet genuinely supports it; propose an inference only when it does.\n"
+        f"POSTING KEYWORDS:\n{listed}\n\n{block}"
+    )
+
+
 def detect_inferences(
     keywords: list[str], truth: Truth, provider: LLMProvider
 ) -> list[Inference]:
@@ -47,7 +79,7 @@ def detect_inferences(
     exp_ids = {e.id for e in truth.experiences}
     default_exp = truth.experiences[0].id if truth.experiences else ""
 
-    user = f"KEYWORDS: {', '.join(keywords)}\n\n{prompts.infer_truth_block(truth)}"
+    user = _infer_user_message(_uncovered_keywords(keywords, existing), truth)
     result = provider.extract_json(
         prompts.infer_system(), [{"role": "user", "content": user}], _SCHEMA
     )

@@ -1,0 +1,12 @@
+{
+  "id": "rmrkf2abr",
+  "command": "cd web && npx tsc --noEmit 2>&1 | head -40; echo \"EXIT: ${PIPESTATUS[0]}\"",
+  "exitCode": 0,
+  "stdout": "exit 0\nEXIT: 0",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-14T08:55:57.639Z"
+}

@@ -49,6 +49,10 @@
   display: flex;
   gap: var(--space-2);
   margin-top: var(--space-3);
+  /* Pin the decision buttons to the right so a tall "Couldn't trace" token
+     list above them never leaves them stranded under the text. */
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 .claim__btn {
   font: inherit;

@@ -1,0 +1,12 @@
+{
+  "id": "rmrkh7g8c",
+  "command": "grep -c \"^def test_\" tests/test_tailor.py; python -m pytest tests/test_tailor.py --collect-only -q 2>&1 | grep -c \"::\"",
+  "exitCode": 1,
+  "stdout": "exit 1\n7\n0",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-14T09:55:57.804Z"
+}

@@ -1,0 +1,12 @@
+{
+  "id": "rmrkg2vyv",
+  "command": "grep -n \"claim__actions\\|claim__btn\\|choice\\b\\|\\.choice \\|\\.choice{\\|claim__tokens\\|\\.claim \" web/src/styles/step.css | head -40",
+  "exitCode": 0,
+  "stdout": "exit 0\n16:.claim {\n23:.claim[data-choice=\"approve\"] {\n26:.claim[data-choice=\"deny\"] {\n35:.claim__tokens {\n48:.claim__actions {\n53:.claim__btn {\n66:.claim__btn--approve[data-active=\"true\"] {\n71:.claim__btn--deny[data-active=\"true\"] {\n371:.choice {\n447:.choice-group {\n453:.choice-row {\n563:.claim {\n648:  .claim {",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-14T09:24:25.303Z"
+}

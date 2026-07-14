@@ -13,7 +13,10 @@ import { PostingStep } from "./steps/PostingStep";
 import { ConfirmStep } from "./steps/ConfirmStep";
 import { DownloadStep } from "./steps/DownloadStep";
 import { SettingsModal } from "./settings/SettingsModal";
-import { ApplicationsModal } from "./applications/ApplicationsModal";
+import { ApplicationsPage } from "./applications/ApplicationsPage";
+
+/** Top-level view: the wizard, or the full-page applications ledger. */
+type View = "wizard" | "applications";
 
 /**
  * Wizard shell. Holds the current step and how far the user has been allowed to
@@ -26,7 +29,7 @@ export function App() {
   const [current, setCurrent] = useState<StepId>("upload");
   const [reached, setReached] = useState<StepId>("upload");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [applicationsOpen, setApplicationsOpen] = useState(false);
+  const [view, setView] = useState<View>("wizard");
 
   // Once startup resolves, open where it points. A saved profile lands the user
   // on Posting (step 3) with Upload/Review already reached, so the rail still
@@ -70,26 +73,37 @@ export function App() {
       <StepRail
         current={current}
         reached={reached}
-        onNavigate={setCurrent}
+        onNavigate={(to) => {
+          setView("wizard");
+          setCurrent(to);
+        }}
         onOpenSettings={() => setSettingsOpen(true)}
-        onOpenApplications={() => setApplicationsOpen(true)}
+        onOpenApplications={() => setView("applications")}
+        applicationsActive={view === "applications"}
       />
       <main className="stage">
-        <div className="stage__inner">
-          <div className="stage__step" key={current}>
-            {current === "upload" && <UploadStep {...stepProps} />}
-            {current === "review" && <ReviewStep {...stepProps} />}
-            {current === "posting" && <PostingStep {...stepProps} />}
-            {current === "confirm" && <ConfirmStep {...stepProps} />}
-            {current === "download" && <DownloadStep {...stepProps} />}
-          </div>
+        <div
+          className={
+            view === "applications"
+              ? "stage__inner stage__inner--wide"
+              : "stage__inner"
+          }
+        >
+          {view === "applications" ? (
+            <ApplicationsPage onBack={() => setView("wizard")} />
+          ) : (
+            <div className="stage__step" key={current}>
+              {current === "upload" && <UploadStep {...stepProps} />}
+              {current === "review" && <ReviewStep {...stepProps} />}
+              {current === "posting" && <PostingStep {...stepProps} />}
+              {current === "confirm" && <ConfirmStep {...stepProps} />}
+              {current === "download" && <DownloadStep {...stepProps} />}
+            </div>
+          )}
         </div>
       </main>
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
-      {applicationsOpen && (
-        <ApplicationsModal onClose={() => setApplicationsOpen(false)} />
-      )}
     </div>
   );
 }

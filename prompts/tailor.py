@@ -17,25 +17,59 @@ from .style import CV_STYLE
 # --- Keyword extraction -----------------------------------------------------
 
 def keywords_system() -> str:
-    """System prompt: pull screenable keywords out of a job posting."""
+    """System prompt: pull screenable keywords out of a job posting.
+
+    Restricted to real, screenable skills because these keywords later drive both
+    the inference step and the ATS 'missing keyword' review — feeding in job
+    titles or locations there would flag the CV for things a CV body should never
+    contain (nobody writes 'Remote in Germany' as a skill).
+    """
     return (
-        "Extract the concrete skills, technologies, requirements, and role titles a "
-        "candidate would be screened on from this job posting. Return a deduplicated "
-        "list of short keyword phrases. Do not invent anything not implied by the text."
+        "Extract ONLY the concrete, screenable skills a candidate is judged on from "
+        "this job posting: technologies, tools, programming languages, frameworks, "
+        "platforms, methodologies, and hard requirements (e.g. specific certifications "
+        "or years with a named tool). Return a deduplicated list of short keyword "
+        "phrases.\n"
+        "EXCLUDE, do not return any of these: job titles and seniority labels (e.g. "
+        "'Senior Data Engineer', 'Lead', 'Junior'); locations and work arrangement "
+        "(e.g. 'Remote in Germany', 'hybrid', 'onsite', 'relocation', city or country "
+        "names); company or team names; salary, benefits, and perks; and generic soft "
+        "phrases (e.g. 'team player', 'fast-paced environment', 'communication "
+        "skills'). Do not invent anything not implied by the text."
     )
 
 
 # --- Missing-qualification inference ----------------------------------------
 
 def infer_system() -> str:
-    """System prompt: propose plausible qualifications the truth does not cover."""
+    """System prompt: surface truthful, inferable skills for the user to confirm.
+
+    This is the ONLY stage allowed to relabel real experience in the posting's
+    vocabulary (selection never adds information). It exists so a keyword the
+    candidate can legitimately claim — 'ETL' for someone whose bullets describe
+    moving data between systems — reaches the confirmation gate instead of being
+    silently dropped. Keyword-driven so real coverage gaps get proposed, and
+    strictly gated so nothing unsupported is ever invented.
+    """
     return (
         "You are given a job posting's keywords and a candidate's existing verified "
-        "experiences (each with an id). Identify qualifications the posting asks for "
-        "that are PLAUSIBLE but NOT present in the facts. For each, give the claim, a "
-        "short rationale, and the experienceId of the job it most plausibly belongs "
-        "to. These are NOT facts — they are proposals the candidate must confirm. Do "
-        "not repeat anything already in the facts."
+        "experiences (each with an id and its bullets).\n"
+        "Walk through EACH keyword that is NOT already present in the facts and decide "
+        "whether an existing experience bullet genuinely SUPPORTS or IMPLIES it. "
+        "Examples of legitimate support: a bullet describing moving or converting data "
+        "between systems supports 'ETL' and 'Data transformation'; building checks on "
+        "input data supports 'Data validation'; tuning a system for speed supports "
+        "'Performance optimization'.\n"
+        "When (and only when) a bullet genuinely supports the keyword, propose it as an "
+        "inference: give the claim phrased in the posting's vocabulary, a short "
+        "rationale naming the real experience that implies it, and the experienceId of "
+        "the job it belongs to.\n"
+        "HARD RULES: these are PROPOSALS the candidate must confirm, not facts. NEVER "
+        "invent experience the bullets do not support — if no bullet implies a keyword, "
+        "omit it. Do not repeat anything already stated in the facts. Only relabel or "
+        "generalize what the existing bullets genuinely imply; the goal is to surface "
+        "truthful, defensible skills the candidate can legitimately claim, never to "
+        "stuff unsupported keywords."
     )
 
 

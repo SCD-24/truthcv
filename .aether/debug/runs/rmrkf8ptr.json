@@ -1,0 +1,12 @@
+{
+  "id": "rmrkf8ptr",
+  "command": "cd web && grep -n \"stage\" src/styles/shell.css",
+  "exitCode": 0,
+  "stdout": "exit 0\n59:/* Rail is the full-height sidebar; the stage fills the main column. The\n65:.shell > .stage {\n190:.stage {\n195:.stage__inner {\n197:  max-width: var(--stage-max);\n199:.stage__head {\n202:.stage__title {\n206:.stage__lede {\n211:.stage__actions {\n220:.stage__step {\n221:  animation: stage-in var(--dur) var(--ease) both;\n223:@keyframes stage-in {\n240:  /* Single-column stack: rail strip on top, stage, then footer. Reset the\n241:     desktop row-span so the rail no longer covers the stage. */\n246:  .shell > .stage {\n284:  .stage {\n287:  .stage__title {",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-14T09:00:57.664Z"
+}

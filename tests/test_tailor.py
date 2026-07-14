@@ -6,6 +6,8 @@ from __future__ import annotations
 from providers.fake import FakeProvider
 from truth.model import Bullet, Experience, Skill, Truth
 from tailor import tailor, claims_for_ids
+from tailor.keywords import extract_keywords, _is_junk_token
+from tailor.infer import _uncovered_keywords, _infer_user_message
 
 
 def _truth() -> Truth:
@@ -93,6 +95,43 @@ def test_claims_for_ids_maps_approved_inferences(data_dir):
     # persisted draft's inference id is inf-1; maps to (experience_id, claim)
     assert claims_for_ids(["inf-1"]) == [("exp-acme-1", "Experience with Kubernetes")]
     assert claims_for_ids(["nope"]) == []
+
+
+def test_junk_tokens_are_filtered_but_skills_kept():
+    """Location/arrangement/title tokens are dropped; real skills survive."""
+    assert _is_junk_token("Remote in Germany") is True
+    assert _is_junk_token("Hybrid") is True
+    assert _is_junk_token("Senior Data Engineer") is True
+    assert _is_junk_token("Lead Engineer") is True
+    # genuine skills must never be dropped
+    assert _is_junk_token("ETL") is False
+    assert _is_junk_token("Python") is False
+    assert _is_junk_token("Distributed systems") is False
+
+
+def test_extract_keywords_drops_junk(data_dir):
+    """The junk filter runs inside extract_keywords, preserving skill order."""
+
+    def router(system, messages, schema):
+        return {"keywords": ["Senior Data Engineer", "ETL", "Remote in Germany", "Python"]}
+
+    provider = FakeProvider(router=router)
+    assert extract_keywords("some posting", provider) == ["ETL", "Python"]
+
+
+def test_uncovered_keywords_skips_facts_already_present():
+    """Keywords already backed by truth are not re-proposed for inference."""
+    existing = {"python", "built a payments api in python"}
+    assert _uncovered_keywords(["Python", "Kubernetes"], existing) == ["Kubernetes"]
+
+
+def test_infer_message_lists_keywords_and_falls_back_when_empty():
+    """The inference message is keyword-driven, with a safe empty fallback."""
+    truth = _truth()
+    with_kw = _infer_user_message(["Kubernetes"], truth)
+    assert "- Kubernetes" in with_kw
+    assert "EACH posting keyword" in with_kw
+    assert "(none extracted)" in _infer_user_message([], truth)
 
 
 def test_empty_provider_falls_back_to_verbatim_truth(data_dir):

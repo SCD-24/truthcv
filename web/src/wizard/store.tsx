@@ -54,6 +54,10 @@ interface WizardState {
   /** Per-inference edited claim text (id -> text). Absent keys use the
    * original claim; lets the user reword an inferred claim before confirming. */
   edits: Record<string, string>;
+  /** Per-claim guardrail decisions at step 5, keyed by claimId. Render-scoped
+   * only (never writes truth). Held here so they survive the step's remount on
+   * back-navigation. */
+  decisions: Record<string, "approve" | "deny">;
   render: RenderResult | null;
   coverLetter: CoverLetterResult | null;
   /** Whether a profile PDF is already saved server-side (skip re-upload). */
@@ -71,6 +75,7 @@ const initialState: WizardState = {
   inferences: [],
   approvals: {},
   edits: {},
+  decisions: {},
   render: null,
   coverLetter: null,
   hasProfile: false,
@@ -87,6 +92,7 @@ type Action =
   | { type: "setTailor"; result: TailorResult }
   | { type: "setApproval"; id: string; approved: boolean }
   | { type: "setEdit"; id: string; claim: string }
+  | { type: "setDecision"; claimId: string; choice: "approve" | "deny" }
   | { type: "setRender"; result: RenderResult }
   | { type: "setCoverLetter"; result: CoverLetterResult }
   | { type: "setHasProfile"; hasProfile: boolean }
@@ -113,6 +119,8 @@ function reducer(state: WizardState, action: Action): WizardState {
         // A fresh tailor run replaces the inferences, so any earlier edits no
         // longer refer to anything — clear them alongside approvals.
         edits: {},
+        // A re-tailor invalidates prior guardrail decisions too.
+        decisions: {},
         // A re-tailor invalidates any earlier render/letter drafts.
         render: null,
         coverLetter: null,
@@ -128,6 +136,11 @@ function reducer(state: WizardState, action: Action): WizardState {
       return {
         ...state,
         edits: { ...state.edits, [action.id]: action.claim },
+      };
+    case "setDecision":
+      return {
+        ...state,
+        decisions: { ...state.decisions, [action.claimId]: action.choice },
       };
     case "setRender":
       return { ...state, render: action.result, loading: false, error: null };
@@ -148,6 +161,7 @@ interface WizardApi extends WizardState {
   setTailor: (result: TailorResult) => void;
   setApproval: (id: string, approved: boolean) => void;
   setEdit: (id: string, claim: string) => void;
+  setDecision: (claimId: string, choice: "approve" | "deny") => void;
   setRender: (result: RenderResult) => void;
   setCoverLetter: (result: CoverLetterResult) => void;
   /** Run an async task, driving loading/error and returning its result or null. */
@@ -215,6 +229,8 @@ export function WizardProvider({ children }: { children: ReactNode }) {
       setApproval: (id, approved) =>
         dispatch({ type: "setApproval", id, approved }),
       setEdit: (id, claim) => dispatch({ type: "setEdit", id, claim }),
+      setDecision: (claimId, choice) =>
+        dispatch({ type: "setDecision", claimId, choice }),
       setRender: (result) => dispatch({ type: "setRender", result }),
       setCoverLetter: (result) => dispatch({ type: "setCoverLetter", result }),
       run,

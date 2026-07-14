@@ -82,6 +82,24 @@
   overflow: auto;
 }
 
+/* Applications as a full page inside the wizard stage (no longer a modal). */
+.apps-page {
+  width: 100%;
+}
+
+.apps-page__head {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: var(--space-4);
+}
+
+.apps-page__title {
+  font-family: var(--font-display);
+  font-size: var(--step-2);
+  font-weight: var(--w-bold);
+  color: var(--ink);
+  margin: 0;
+}
+
 .apps__tablewrap {
   overflow-x: auto;
   border: 1px solid var(--line);
@@ -155,12 +173,46 @@
 .apps__docs {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-2);
   font-family: var(--font-mono);
   font-size: 0.72rem;
+  min-width: 140px;
 }
 .apps__docs .apps__none {
   color: var(--ink-soft);
+  font-style: italic;
+}
+
+/* One linked document: preview label on top, quick links + saved date below. */
+.apps__docline {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.apps__doclink {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: var(--w-medium);
+  letter-spacing: 0.02em;
+  color: var(--focus);
+  text-decoration: none;
+  cursor: pointer;
+}
+.apps__doclink:hover {
+  text-decoration: underline;
+}
+.apps__docmeta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+}
+.apps__docdate {
+  color: var(--ink-soft);
+  margin-left: 4px;
 }
 
 .apps__rowactions {

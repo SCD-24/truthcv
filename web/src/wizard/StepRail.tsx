@@ -11,6 +11,8 @@ interface Props {
   onNavigate: (to: StepId) => void;
   onOpenSettings: () => void;
   onOpenApplications: () => void;
+  /** True when the applications page (not the wizard) is the active view. */
+  applicationsActive?: boolean;
 }
 
 /**
@@ -24,6 +26,7 @@ export function StepRail({
   onNavigate,
   onOpenSettings,
   onOpenApplications,
+  applicationsActive = false,
 }: Props) {
   const reachedIdx = stepIndex(reached);
   const currentIdx = stepIndex(current);
@@ -66,9 +69,10 @@ export function StepRail({
         </Typography>
         <Button
           fullWidth
-          variant="outlined"
+          variant={applicationsActive ? "contained" : "outlined"}
           startIcon={<DescriptionOutlinedIcon fontSize="small" />}
           onClick={onOpenApplications}
+          aria-current={applicationsActive ? "page" : undefined}
           sx={{ justifyContent: "flex-start" }}
         >
           Applications

@@ -1,0 +1,12 @@
+{
+  "id": "rmrkh6m0y",
+  "command": "python -m pytest tests/test_tailor.py --collect-only -q 2>&1 | tail -20",
+  "exitCode": 0,
+  "stdout": "exit 0\ntests/test_tailor.py: 7",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-14T09:55:18.658Z"
+}

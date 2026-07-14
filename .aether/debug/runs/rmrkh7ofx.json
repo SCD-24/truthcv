@@ -1,0 +1,12 @@
+{
+  "id": "rmrkh7ofx",
+  "command": "python -m pytest tests/test_tailor.py -v 2>&1 | grep -E \"PASSED|FAILED|passed|failed\"; echo \"EXIT: ${PIPESTATUS[0]}\"",
+  "exitCode": 0,
+  "stdout": "exit 0\n============================== 7 passed in 0.06s ===============================\nEXIT: 0",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-14T09:56:08.445Z"
+}

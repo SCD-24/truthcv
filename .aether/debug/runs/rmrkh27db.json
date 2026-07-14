@@ -1,0 +1,12 @@
+{
+  "id": "rmrkh27db",
+  "command": "python -c \"import prompts.tailor; prompts.tailor.keywords_system(); prompts.tailor.infer_system(); print('OK')\" 2>&1 | tail -5; echo \"EXIT: ${PIPESTATUS[0]}\"",
+  "exitCode": 0,
+  "stdout": "exit 0\nOK\nEXIT: 0",
+  "stderr": "",
+  "tests": [],
+  "stackFrames": [],
+  "probes": [],
+  "parseError": null,
+  "timestamp": "2026-07-14T09:51:53.039Z"
+}

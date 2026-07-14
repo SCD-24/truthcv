@@ -19,6 +19,11 @@ export function DownloadStep({ onBack }: StepProps) {
     setRender,
     coverLetter,
     setCoverLetter,
+    // Per-claim approve/deny decisions live in the store (render-scoped only —
+    // approving never writes to the truth file) so they survive this step's
+    // unmount/remount on back-navigation.
+    decisions,
+    setDecision,
     run,
     loading,
     error,
@@ -28,13 +33,12 @@ export function DownloadStep({ onBack }: StepProps) {
   const [length, setLength] = useState<(typeof LENGTHS)[number]>("Standard");
   const [letterBusy, setLetterBusy] = useState(false);
   const [letterError, setLetterError] = useState<string | null>(null);
-  // Per-claim approve/deny decisions, keyed by claimId. Render-scoped only —
-  // approving never writes to the truth file, so the same truth can back many
-  // tailored CVs.
-  const [decisions, setDecisions] = useState<Record<string, "approve" | "deny">>({});
 
-  // Run the guardrail + ATS review and render as soon as we arrive.
+  // Render + guardrail + ATS review on first arrival ONLY. If a render already
+  // exists (e.g. we came back to this step), keep it and the user's decisions
+  // instead of wiping them with a fresh pass.
   useEffect(() => {
+    if (result) return;
     run(async () => {
       const r = await renderCv();
       setRender(r);
@@ -48,7 +52,7 @@ export function DownloadStep({ onBack }: StepProps) {
   const allDecided = claims.every((c) => decisions[c.claimId]);
 
   const decide = (claimId: string, choice: "approve" | "deny") =>
-    setDecisions((d) => ({ ...d, [claimId]: choice }));
+    setDecision(claimId, choice);
 
   // Re-render with the decisions applied. Approved claims are allowed for this
   // render; denied claims are dropped from the CV. Any still-undecided claim
