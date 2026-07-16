@@ -8,6 +8,7 @@ import type { StepProps } from "../wizard/steps";
 import type { EditRequest } from "../App";
 import { useWizard } from "../wizard/store";
 import { generateCoverLetter, render as renderCv } from "../api/client";
+import { ButtonSpinner } from "../components/ButtonSpinner";
 import { DocumentEditor } from "./DocumentEditor";
 import "../styles/step.css";
 
@@ -244,6 +245,7 @@ export function DownloadStep({
             disabled={loading || !allDecided}
             onClick={recheck}
           >
+            {loading && <ButtonSpinner />}
             {loading
               ? "Re-checking…"
               : allDecided
@@ -395,6 +397,7 @@ export function DownloadStep({
                 onClick={() => makeLetter(true)}
                 sx={{ mb: 3 }}
               >
+                {letterBusy && <ButtonSpinner />}
                 {letterBusy
                   ? "Re-checking…"
                   : letterAllDecided
@@ -432,6 +435,7 @@ export function DownloadStep({
               disabled={letterBusy}
               onClick={() => makeLetter(false)}
             >
+              {letterBusy && <ButtonSpinner />}
               {letterBusy
                 ? "Writing…"
                 : coverLetter

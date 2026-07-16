@@ -57,6 +57,7 @@ class Application:
     method: str = ""
     posting: str = ""
     application_date: str = ""
+    status: str = ""
     notes: str = ""
     cv_document: Document | None = None
     cover_letter_document: Document | None = None
@@ -77,6 +78,7 @@ class Application:
         "method",
         "posting",
         "application_date",
+        "status",
         "notes",
     )
 

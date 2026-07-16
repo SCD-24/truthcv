@@ -1,4 +1,236 @@
 {
   "version": 1,
-  "components": {}
+  "components": {
+    "web-ui": {
+      "plans": [
+        {
+          "planId": "p-1",
+          "name": "web-ui",
+          "feature": null,
+          "tasks": [
+            {
+              "id": "t-1",
+              "title": "Add reusable ButtonSpinner component",
+              "description": "Create web/src/components/ButtonSpinner.tsx: a tiny wrapper around MUI CircularProgress sized for inline button use (size={16}, thickness ~5, color inherits or var(--attest) on contained/seal-green buttons, sx marginRight to sit before the label). Accept optional size/color props. This is the single spinner reused by every LLM button so the treatment is consistent. No new state — it's a pure presentational glyph shown when the caller's existing loading flag is true. CircularProgress is already a dependency (imported in App.tsx).",
+              "complexity": "low",
+              "status": "done"
+            },
+            {
+              "id": "t-2",
+              "title": "Spinner on Upload 'Continue to review' (extract, LLM)",
+              "description": "In steps/UploadStep.tsx, render <ButtonSpinner/> inside the Button before the label when the store `loading` flag is true (button already disabled + shows 'Reading your profile…'). Keep existing text; spinner sits beside it. No state change.",
+              "complexity": "low",
+              "status": "done"
+            },
+            {
+              "id": "t-3",
+              "title": "Spinner on Posting 'Tailor my CV' (tailor, LLM)",
+              "description": "In steps/PostingStep.tsx, add <ButtonSpinner/> to the 'Tailor my CV' button when store `loading` is true (label already swaps to 'Tailoring…'). No state change.",
+              "complexity": "low",
+              "status": "done"
+            },
+            {
+              "id": "t-4",
+              "title": "Spinner on DownloadStep cover-letter buttons (cover-letter, LLM)",
+              "description": "In steps/DownloadStep.tsx, add <ButtonSpinner/> to the 'Generate cover letter' / 'Regenerate letter' button and the cover-letter blocked 're-check' button when the component-local `letterBusy` flag is true (labels already swap to 'Writing…' / 'Re-checking…'). Drive off letterBusy, not the store flag. No state change.",
+              "complexity": "low",
+              "status": "done"
+            },
+            {
+              "id": "t-5",
+              "title": "Spinner on SettingsModal 'Test connection' (settings/test, LLM)",
+              "description": "In settings/SettingsModal.tsx, add <ButtonSpinner/> to the 'Test connection' button when test.kind === 'testing' (label already swaps to 'Testing…'). No state change.",
+              "complexity": "low",
+              "status": "done"
+            },
+            {
+              "id": "t-6",
+              "title": "Spinner on SettingsModal model 'Reload' (models, LLM)",
+              "description": "In settings/SettingsModal.tsx, add <ButtonSpinner/> to the model-list 'Reload' button when the component-local `modelsLoading` flag is true (label already swaps to 'Loading…'). This button lives in an InputAdornment and is small — size the spinner to match. No state change.",
+              "complexity": "low",
+              "status": "done"
+            },
+            {
+              "id": "t-7",
+              "title": "Consistency spinners on Confirm & CV render/re-check (not LLM, same wizard)",
+              "description": "So the wizard isn't half-spinnered: add <ButtonSpinner/> to steps/ConfirmStep.tsx 'Confirm & continue' (store `loading`, label 'Saving…') and to steps/DownloadStep.tsx CV 'Re-check & continue' button (store `loading`, label 'Re-checking…'). These are guardrail/file/render ops, not LLM — included only for visual consistency across the wizard's async actions. If the user prefers LLM-only, this task can be dropped without affecting the others.",
+              "complexity": "low",
+              "status": "done"
+            },
+            {
+              "id": "t-8",
+              "title": "Verify: type-check and build",
+              "description": "Run `cd web && npx tsc --noEmit` then `npm run build` and confirm both pass. web/ has no test runner, so type-check + build is the verification gate. Spot-check that CircularProgress import paths resolve and no unused-import lint errors were introduced.",
+              "complexity": "low",
+              "status": "done"
+            }
+          ],
+          "status": "planned",
+          "attention": null,
+          "forestId": null,
+          "createdAt": "2026-07-15T09:05:01.149Z"
+        }
+      ],
+      "status": "planned",
+      "tasks": [
+        {
+          "id": "t-1",
+          "title": "Add reusable ButtonSpinner component",
+          "description": "Create web/src/components/ButtonSpinner.tsx: a tiny wrapper around MUI CircularProgress sized for inline button use (size={16}, thickness ~5, color inherits or var(--attest) on contained/seal-green buttons, sx marginRight to sit before the label). Accept optional size/color props. This is the single spinner reused by every LLM button so the treatment is consistent. No new state — it's a pure presentational glyph shown when the caller's existing loading flag is true. CircularProgress is already a dependency (imported in App.tsx).",
+          "complexity": "low",
+          "status": "done"
+        },
+        {
+          "id": "t-2",
+          "title": "Spinner on Upload 'Continue to review' (extract, LLM)",
+          "description": "In steps/UploadStep.tsx, render <ButtonSpinner/> inside the Button before the label when the store `loading` flag is true (button already disabled + shows 'Reading your profile…'). Keep existing text; spinner sits beside it. No state change.",
+          "complexity": "low",
+          "status": "done"
+        },
+        {
+          "id": "t-3",
+          "title": "Spinner on Posting 'Tailor my CV' (tailor, LLM)",
+          "description": "In steps/PostingStep.tsx, add <ButtonSpinner/> to the 'Tailor my CV' button when store `loading` is true (label already swaps to 'Tailoring…'). No state change.",
+          "complexity": "low",
+          "status": "done"
+        },
+        {
+          "id": "t-4",
+          "title": "Spinner on DownloadStep cover-letter buttons (cover-letter, LLM)",
+          "description": "In steps/DownloadStep.tsx, add <ButtonSpinner/> to the 'Generate cover letter' / 'Regenerate letter' button and the cover-letter blocked 're-check' button when the component-local `letterBusy` flag is true (labels already swap to 'Writing…' / 'Re-checking…'). Drive off letterBusy, not the store flag. No state change.",
+          "complexity": "low",
+          "status": "done"
+        },
+        {
+          "id": "t-5",
+          "title": "Spinner on SettingsModal 'Test connection' (settings/test, LLM)",
+          "description": "In settings/SettingsModal.tsx, add <ButtonSpinner/> to the 'Test connection' button when test.kind === 'testing' (label already swaps to 'Testing…'). No state change.",
+          "complexity": "low",
+          "status": "done"
+        },
+        {
+          "id": "t-6",
+          "title": "Spinner on SettingsModal model 'Reload' (models, LLM)",
+          "description": "In settings/SettingsModal.tsx, add <ButtonSpinner/> to the model-list 'Reload' button when the component-local `modelsLoading` flag is true (label already swaps to 'Loading…'). This button lives in an InputAdornment and is small — size the spinner to match. No state change.",
+          "complexity": "low",
+          "status": "done"
+        },
+        {
+          "id": "t-7",
+          "title": "Consistency spinners on Confirm & CV render/re-check (not LLM, same wizard)",
+          "description": "So the wizard isn't half-spinnered: add <ButtonSpinner/> to steps/ConfirmStep.tsx 'Confirm & continue' (store `loading`, label 'Saving…') and to steps/DownloadStep.tsx CV 'Re-check & continue' button (store `loading`, label 'Re-checking…'). These are guardrail/file/render ops, not LLM — included only for visual consistency across the wizard's async actions. If the user prefers LLM-only, this task can be dropped without affecting the others.",
+          "complexity": "low",
+          "status": "done"
+        },
+        {
+          "id": "t-8",
+          "title": "Verify: type-check and build",
+          "description": "Run `cd web && npx tsc --noEmit` then `npm run build` and confirm both pass. web/ has no test runner, so type-check + build is the verification gate. Spot-check that CircularProgress import paths resolve and no unused-import lint errors were introduced.",
+          "complexity": "low",
+          "status": "done"
+        }
+      ],
+      "forestId": null,
+      "attention": null,
+      "updatedAt": "2026-07-15T09:05:01.149Z"
+    },
+    "api": {
+      "plans": [
+        {
+          "planId": "p-1",
+          "name": "api",
+          "feature": null,
+          "tasks": [
+            {
+              "id": "t-1",
+              "title": "Add status to application API schemas",
+              "description": "In api/schemas.py add `status: str = \"\"` to ApplicationModel and ApplicationCreate, and `status: str | None = None` to ApplicationUpdate (None = leave as-is), matching the existing camelCase alias pattern. Verify api/routes.py create/update handlers pass status through generically (they map EDITABLE / update fields); adjust only if a field is enumerated explicitly.",
+              "complexity": "low",
+              "status": "done"
+            },
+            {
+              "id": "t-2",
+              "title": "Update data-model docs for status",
+              "description": "In docs/reference/data-model.md, add `status` to the Application record field list (optional, one of Draft|Applied|Waiting|Interviewing|Offer|Rejected, blank when unset). Keep the Application record schema description consistent with the model.",
+              "complexity": "low",
+              "status": "done"
+            }
+          ],
+          "status": "planned",
+          "attention": null,
+          "forestId": null,
+          "createdAt": "2026-07-15T09:12:59.225Z"
+        }
+      ],
+      "status": "planned",
+      "tasks": [
+        {
+          "id": "t-1",
+          "title": "Add status to application API schemas",
+          "description": "In api/schemas.py add `status: str = \"\"` to ApplicationModel and ApplicationCreate, and `status: str | None = None` to ApplicationUpdate (None = leave as-is), matching the existing camelCase alias pattern. Verify api/routes.py create/update handlers pass status through generically (they map EDITABLE / update fields); adjust only if a field is enumerated explicitly.",
+          "complexity": "low",
+          "status": "done"
+        },
+        {
+          "id": "t-2",
+          "title": "Update data-model docs for status",
+          "description": "In docs/reference/data-model.md, add `status` to the Application record field list (optional, one of Draft|Applied|Waiting|Interviewing|Offer|Rejected, blank when unset). Keep the Application record schema description consistent with the model.",
+          "complexity": "low",
+          "status": "done"
+        }
+      ],
+      "forestId": null,
+      "attention": null,
+      "updatedAt": "2026-07-15T09:12:59.225Z"
+    },
+    "application-tracker": {
+      "plans": [
+        {
+          "planId": "p-1",
+          "name": "application-tracker",
+          "feature": null,
+          "tasks": [
+            {
+              "id": "t-1",
+              "title": "Add status field to Application model",
+              "description": "In applications/model.py, add `status: str = \"\"` to the Application dataclass (place near submission_type). Add \"status\" to the EDITABLE tuple so clients can set it on create/update. from_dict/to_dict already iterate dataclass fields, so no further change; confirm a missing status in stored JSON defaults to \"\".",
+              "complexity": "low",
+              "status": "done"
+            },
+            {
+              "id": "t-2",
+              "title": "Cover status in application store tests",
+              "description": "In tests/test_applications_store.py, extend existing create/update tests to assert status round-trips: default \"\" when unset, settable via create and via partial update, and preserved on unrelated updates. Follow the existing test style/fixtures.",
+              "complexity": "low",
+              "status": "done"
+            }
+          ],
+          "status": "planned",
+          "attention": null,
+          "forestId": null,
+          "createdAt": "2026-07-15T09:12:59.154Z"
+        }
+      ],
+      "status": "planned",
+      "tasks": [
+        {
+          "id": "t-1",
+          "title": "Add status field to Application model",
+          "description": "In applications/model.py, add `status: str = \"\"` to the Application dataclass (place near submission_type). Add \"status\" to the EDITABLE tuple so clients can set it on create/update. from_dict/to_dict already iterate dataclass fields, so no further change; confirm a missing status in stored JSON defaults to \"\".",
+          "complexity": "low",
+          "status": "done"
+        },
+        {
+          "id": "t-2",
+          "title": "Cover status in application store tests",
+          "description": "In tests/test_applications_store.py, extend existing create/update tests to assert status round-trips: default \"\" when unset, settable via create and via partial update, and preserved on unrelated updates. Follow the existing test style/fixtures.",
+          "complexity": "low",
+          "status": "done"
+        }
+      ],
+      "forestId": null,
+      "attention": null,
+      "updatedAt": "2026-07-15T09:12:59.154Z"
+    }
+  }
 }

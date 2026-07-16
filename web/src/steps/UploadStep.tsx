@@ -6,6 +6,7 @@ import Typography from "@mui/material/Typography";
 import type { StepProps } from "../wizard/steps";
 import { useWizard } from "../wizard/store";
 import { extractTruth, uploadPdf } from "../api/client";
+import { ButtonSpinner } from "../components/ButtonSpinner";
 import "../styles/step.css";
 
 export function UploadStep({ onAdvance }: StepProps) {
@@ -123,6 +124,7 @@ export function UploadStep({ onAdvance }: StepProps) {
           </Typography>
         )}
         <Button variant="contained" disabled={!file || loading} onClick={submit}>
+          {loading && <ButtonSpinner />}
           Continue to review
         </Button>
       </Box>
