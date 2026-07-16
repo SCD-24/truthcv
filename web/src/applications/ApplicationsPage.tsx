@@ -366,6 +366,7 @@ function ApplicationRow({
             className="apps__stamp"
             size="small"
             variant="outlined"
+            color={statusColor(app.status)}
             label={app.status}
           />
         ) : (
@@ -597,17 +598,43 @@ function savedShort(iso: string): string {
 /**
  * A ledger status stamp. Seal-green (success) marks an attested/completed
  * state, oxblood (error) marks a still-open one — the project's semantic colors.
+ * A "waiting" negative is amber instead: nothing is wrong yet, it is only unresolved.
  */
 function Stamp({ on, yes, no }: { on: boolean; yes: string; no: string }) {
+  const off = no === "Waiting" ? "warning" : "error";
   return (
     <Chip
       className="apps__stamp"
       size="small"
       variant="outlined"
-      color={on ? "success" : "error"}
+      color={on ? "success" : off}
       label={on ? yes : no}
     />
   );
+}
+
+/**
+ * Maps a free-text status onto the ledger's semantic stamp colors so the column
+ * reads like the rest of the row instead of defaulting to grey. Waiting states
+ * are amber; anything unrecognised stays neutral.
+ */
+function statusColor(
+  status: string,
+): "default" | "success" | "error" | "warning" | "info" {
+  switch (status) {
+    case "Offer":
+      return "success";
+    case "Rejected":
+    case "Draft":
+      return "error";
+    case "Waiting":
+      return "warning";
+    case "Applied":
+    case "Interviewing":
+      return "info";
+    default:
+      return "default";
+  }
 }
 
 /** Add/edit form shared by the "new" row and inline row editing. */

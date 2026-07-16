@@ -28,6 +28,8 @@
   --attest-wash: #e4ebe3;/* attested background wash */
   --flag: #9c3b2c;       /* oxblood stamp — inference / unverified only */
   --flag-wash: #f1e6e2;  /* oxblood background wash */
+  --pending: #a35b12;    /* amber stamp — awaiting an outcome, neither attested nor flagged */
+  --pending-wash: #f4e9db;/* amber background wash */
   --focus: #356fa6;      /* keyboard focus ring — distinct from both accents */
 
   /* Type roles */
@@ -94,6 +96,8 @@
     --attest-wash: #1d2a20;
     --flag: #d98a76;
     --flag-wash: #2c1e19;
+    --pending: #e0a561;
+    --pending-wash: #2e2317;
     --focus: #6aa8e6;
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45), 0 10px 28px -14px rgba(0, 0, 0, 0.65);
   }

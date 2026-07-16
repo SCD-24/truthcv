@@ -34,6 +34,7 @@ export const theme = createTheme({
     primary: { main: '#2f5d3e', contrastText: '#f6f7f2' },
     success: { main: '#2f5d3e', contrastText: '#f6f7f2' },
     error: { main: '#9c3b2c', contrastText: '#f6f7f2' },
+    warning: { main: '#a35b12', contrastText: '#f6f7f2' },
     info: { main: '#356fa6', contrastText: '#f6f7f2' },
     divider: '#d2d5cc',
   },
@@ -121,7 +122,30 @@ export const theme = createTheme({
         },
       ],
     },
-    MuiChip: { styleOverrides: { root: { fontFamily: mono, letterSpacing: '0.06em', textTransform: 'uppercase', fontSize: '0.68rem' } } },
+    MuiChip: {
+      styleOverrides: { root: { fontFamily: mono, letterSpacing: '0.06em', textTransform: 'uppercase', fontSize: '0.68rem' } },
+      // The palette above is light-mode-only (see the note there), which leaves
+      // outlined stamps unreadable on the dark ground. Restate them as tokens so
+      // they flip with prefers-color-scheme.
+      variants: [
+        {
+          props: { variant: 'outlined', color: 'success' },
+          style: { color: 'var(--attest)', borderColor: 'var(--attest)', backgroundColor: 'var(--attest-wash)' },
+        },
+        {
+          props: { variant: 'outlined', color: 'error' },
+          style: { color: 'var(--flag)', borderColor: 'var(--flag)', backgroundColor: 'var(--flag-wash)' },
+        },
+        {
+          props: { variant: 'outlined', color: 'warning' },
+          style: { color: 'var(--pending)', borderColor: 'var(--pending)', backgroundColor: 'var(--pending-wash)' },
+        },
+        {
+          props: { variant: 'outlined', color: 'info' },
+          style: { color: 'var(--focus)', borderColor: 'var(--focus)' },
+        },
+      ],
+    },
     MuiTableCell: {
       styleOverrides: {
         root: { borderColor: 'var(--line)', color: 'var(--ink)' },
