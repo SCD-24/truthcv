@@ -46,6 +46,7 @@ const COLUMNS = [
   "Application URL",
   "Submitted",
   "Submission Type",
+  "Status",
   "Reached Out",
   "To Who",
   "Response Received",
@@ -62,6 +63,7 @@ const EMPTY: ApplicationCreate = {
   applicationUrl: "",
   submitted: false,
   submissionType: "General",
+  status: "",
   reachedOut: false,
   toWho: "",
   responseReceived: false,
@@ -144,6 +146,7 @@ export function ApplicationsPage({
       applicationUrl: app.applicationUrl,
       submitted: app.submitted,
       submissionType: app.submissionType,
+      status: app.status,
       reachedOut: app.reachedOut,
       toWho: app.toWho,
       responseReceived: app.responseReceived,
@@ -357,6 +360,18 @@ function ApplicationRow({
         <Stamp on={app.submitted} yes="Submitted" no="Draft" />
       </TableCell>
       <TableCell>{app.submissionType || "—"}</TableCell>
+      <TableCell>
+        {app.status ? (
+          <Chip
+            className="apps__stamp"
+            size="small"
+            variant="outlined"
+            label={app.status}
+          />
+        ) : (
+          "—"
+        )}
+      </TableCell>
       <TableCell>
         <Stamp on={app.reachedOut} yes="Yes" no="No" />
       </TableCell>
@@ -665,6 +680,20 @@ function ApplicationForm({
         >
           <MenuItem value="General">General</MenuItem>
           <MenuItem value="Tailored">Tailored (to a posting)</MenuItem>
+        </TextField>
+        <TextField
+          select
+          label="Status"
+          value={draft.status ?? ""}
+          onChange={(e) => set("status", e.target.value)}
+        >
+          <MenuItem value="">Unset</MenuItem>
+          <MenuItem value="Draft">Draft</MenuItem>
+          <MenuItem value="Applied">Applied</MenuItem>
+          <MenuItem value="Waiting">Waiting</MenuItem>
+          <MenuItem value="Interviewing">Interviewing</MenuItem>
+          <MenuItem value="Offer">Offer</MenuItem>
+          <MenuItem value="Rejected">Rejected</MenuItem>
         </TextField>
         <TextField
           label="To who"

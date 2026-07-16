@@ -6,6 +6,7 @@ import TextField from "@mui/material/TextField";
 import type { StepProps } from "../wizard/steps";
 import { useWizard } from "../wizard/store";
 import { tailor } from "../api/client";
+import { ButtonSpinner } from "../components/ButtonSpinner";
 import "../styles/step.css";
 
 export function PostingStep({ onAdvance, onBack }: StepProps) {
@@ -59,6 +60,7 @@ export function PostingStep({ onAdvance, onBack }: StepProps) {
           disabled={!posting.trim() || loading}
           onClick={submit}
         >
+          {loading && <ButtonSpinner />}
           {loading ? "Tailoring…" : "Tailor my CV"}
         </Button>
       </Box>

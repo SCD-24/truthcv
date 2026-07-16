@@ -218,6 +218,7 @@ export interface Application {
   method: string;
   posting: string;
   applicationDate: string;
+  status: string;
   notes: string;
   cvDocument: ApplicationDocument | null;
   coverLetterDocument: ApplicationDocument | null;
@@ -240,6 +241,7 @@ export type ApplicationCreate = Partial<
     | "method"
     | "posting"
     | "applicationDate"
+    | "status"
     | "notes"
   >
 >;

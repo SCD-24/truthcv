@@ -19,6 +19,7 @@ import {
   saveSettings,
   testConnection,
 } from "../api/client";
+import { ButtonSpinner } from "../components/ButtonSpinner";
 import type {
   ModelInfo,
   ProviderName,
@@ -280,6 +281,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                           onClick={() => loadModels(provider, apiKey, ollamaHost)}
                           disabled={modelsLoading}
                         >
+                          {modelsLoading && <ButtonSpinner size={12} />}
                           {modelsLoading ? "Loading…" : "Reload"}
                         </Button>
                       </InputAdornment>
@@ -333,6 +335,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           onClick={handleTest}
           disabled={loading || test.kind === "testing"}
         >
+          {test.kind === "testing" && <ButtonSpinner />}
           {test.kind === "testing" ? "Testing…" : "Test connection"}
         </Button>
         <Button

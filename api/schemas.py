@@ -243,6 +243,7 @@ class ApplicationModel(_Camel):
     method: str = ""
     posting: str = ""
     application_date: str = ""
+    status: str = ""
     notes: str = ""
     cv_document: ApplicationDocument | None = None
     cover_letter_document: ApplicationDocument | None = None
@@ -265,6 +266,7 @@ class ApplicationCreate(_Camel):
     method: str = ""
     posting: str = ""
     application_date: str = ""
+    status: str = ""
     notes: str = ""
 
 
@@ -282,6 +284,7 @@ class ApplicationUpdate(_Camel):
     method: str | None = None
     posting: str | None = None
     application_date: str | None = None
+    status: str | None = None
     notes: str | None = None
 
 

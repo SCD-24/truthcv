@@ -5,6 +5,7 @@ import Typography from "@mui/material/Typography";
 import type { StepProps } from "../wizard/steps";
 import { useWizard } from "../wizard/store";
 import { confirmInferences } from "../api/client";
+import { ButtonSpinner } from "../components/ButtonSpinner";
 import "../styles/step.css";
 
 export function ConfirmStep({ onAdvance, onBack }: StepProps) {
@@ -116,6 +117,7 @@ export function ConfirmStep({ onAdvance, onBack }: StepProps) {
           Back
         </Button>
         <Button variant="contained" disabled={loading} onClick={submit}>
+          {loading && <ButtonSpinner />}
           {loading ? "Saving…" : "Confirm & continue"}
         </Button>
       </Box>
