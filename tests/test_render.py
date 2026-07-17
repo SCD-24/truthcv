@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from render.html import render_html
+from render.cover_letter import render_letter_html
 from render.ats import lint
 from render import pdf as pdf_mod
 from render import docx as docx_mod
@@ -57,6 +58,18 @@ def test_render_html_structured_profile_header():
     assert "https://li/jane" in html
     assert "Backend engineer who ships" in html
     assert "<table" not in html.lower()  # still ATS-safe
+
+
+def test_cover_letter_header_shows_name_once():
+    """The candidate's name renders once in the letterhead. The body carries no
+    name (the prompt forbids it), so the name must not appear a second time."""
+    body = "Dear Hiring Manager,\n\nI build payments systems in Python.\n\nBest,"
+    html = render_letter_html(body, name="Ada Lovelace", contact="ada@example.com")
+    visible = html.split("<body>", 1)[1]
+    # Name appears exactly once in the rendered document body: the letterhead.
+    assert visible.count("Ada Lovelace") == 1
+    assert "ada@example.com" in visible
+    assert "<h1>Ada Lovelace</h1>" in html
 
 
 def test_ats_passes_good_html():
