@@ -1,0 +1,123 @@
+/* Analytics — reading the outbound ledger back as insight.
+ *
+ * Same provenance-ledger language as the rest of TruthCV: mono "record voice"
+ * for eyebrows, ids and figures; token spacing and radii; the accent carries
+ * meaning (seal-green for responded/positive, oxblood for stale/gap) and never
+ * decorates. This file only holds the grid and bar-chart layout MUI's theme
+ * can't express — everything else stays MUI + theme.
+ */
+
+.analytics-page {
+  width: 100%;
+}
+
+.analytics-page__head {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: var(--space-4);
+}
+
+.analytics-page__title {
+  font-family: var(--font-display);
+  font-size: var(--step-2);
+  font-weight: var(--w-bold);
+  color: var(--ink);
+  margin: 0;
+}
+
+.analytics__eyebrow {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin-bottom: var(--space-1);
+}
+
+/* Headline stat cards — a responsive grid of record figures. */
+.analytics__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-4);
+}
+
+.analytics__stat-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.analytics__stat-value {
+  font-family: var(--font-display);
+  font-size: var(--step-3);
+  font-weight: var(--w-bold);
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.analytics__stat-sub {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+
+/* Per-month bar chart — a simple flexed row of columns the theme can't do. */
+.analytics__chart {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  min-height: 160px;
+  padding-top: var(--space-4);
+}
+
+.analytics__bar-col {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 24px;
+}
+
+.analytics__bar-stack {
+  width: 100%;
+  max-width: 48px;
+  height: 130px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+/* The applied column; the responded portion is stamped seal-green over it. */
+.analytics__bar {
+  width: 100%;
+  background: var(--line);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 2px;
+}
+
+.analytics__bar-responded {
+  width: 100%;
+  background: var(--attest);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.analytics__bar-label {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.analytics__bar-count {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: var(--w-medium);
+  color: var(--ink);
+}

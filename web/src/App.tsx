@@ -14,9 +14,10 @@ import { ConfirmStep } from "./steps/ConfirmStep";
 import { DownloadStep } from "./steps/DownloadStep";
 import { SettingsModal } from "./settings/SettingsModal";
 import { ApplicationsPage } from "./applications/ApplicationsPage";
+import { AnalyticsPage } from "./analytics/AnalyticsPage";
 
-/** Top-level view: the wizard, or the full-page applications ledger. */
-type View = "wizard" | "applications";
+/** Top-level view: the wizard, the applications ledger, or its analytics. */
+type View = "wizard" | "applications" | "analytics";
 
 /**
  * A request to open the Download step (step 5) with an already-saved document
@@ -106,12 +107,14 @@ export function App() {
         }}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenApplications={() => setView("applications")}
+        onOpenAnalytics={() => setView("analytics")}
         applicationsActive={view === "applications"}
+        analyticsActive={view === "analytics"}
       />
       <main className="stage">
         <div
           className={
-            view === "applications"
+            view !== "wizard"
               ? "stage__inner stage__inner--wide"
               : "stage__inner"
           }
@@ -121,6 +124,8 @@ export function App() {
               onBack={() => setView("wizard")}
               onEditDocument={openDocumentEditor}
             />
+          ) : view === "analytics" ? (
+            <AnalyticsPage onBack={() => setView("wizard")} />
           ) : (
             <div className="stage__step" key={current}>
               {current === "upload" && <UploadStep {...stepProps} />}
