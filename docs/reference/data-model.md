@@ -50,6 +50,5 @@ Projected from `schema` widgets on the architecture canvas.
 | `posting` | string | - | Optional linked job posting text (absent for General submissions). |
 | `created_at / updated_at` | string | - | ISO timestamps. |
 | `application_date` | string | - | User-set date the application was submitted (ISO yyyy-mm-dd); distinct from the auto created_at/updated_at timestamps. |
-| `status` | string | optional | One of: Draft \| Applied \| Waiting \| Interviewing \| Offer \| Rejected; blank when unset. |
 | `notes` | string | - | Free-text notes the user attaches to the application record. |
 <!-- generated:end comp:application-tracker -->

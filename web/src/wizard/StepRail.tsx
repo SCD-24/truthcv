@@ -2,6 +2,7 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Typography from "@mui/material/Typography";
 import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
+import InsightsOutlinedIcon from "@mui/icons-material/InsightsOutlined";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import { STEPS, stepIndex, type StepId } from "./steps";
 
@@ -11,8 +12,11 @@ interface Props {
   onNavigate: (to: StepId) => void;
   onOpenSettings: () => void;
   onOpenApplications: () => void;
+  onOpenAnalytics: () => void;
   /** True when the applications page (not the wizard) is the active view. */
   applicationsActive?: boolean;
+  /** True when the analytics page (not the wizard) is the active view. */
+  analyticsActive?: boolean;
 }
 
 /**
@@ -26,7 +30,9 @@ export function StepRail({
   onNavigate,
   onOpenSettings,
   onOpenApplications,
+  onOpenAnalytics,
   applicationsActive = false,
+  analyticsActive = false,
 }: Props) {
   const reachedIdx = stepIndex(reached);
   const currentIdx = stepIndex(current);
@@ -76,6 +82,16 @@ export function StepRail({
           sx={{ justifyContent: "flex-start" }}
         >
           Applications
+        </Button>
+        <Button
+          fullWidth
+          variant={analyticsActive ? "contained" : "outlined"}
+          startIcon={<InsightsOutlinedIcon fontSize="small" />}
+          onClick={onOpenAnalytics}
+          aria-current={analyticsActive ? "page" : undefined}
+          sx={{ justifyContent: "flex-start" }}
+        >
+          Analytics
         </Button>
         <Button
           fullWidth
