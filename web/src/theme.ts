@@ -104,7 +104,19 @@ export const theme = createTheme({
         },
       },
     },
-    MuiPaper: { styleOverrides: { root: { backgroundImage: 'none' } } },
+    MuiPaper: {
+      styleOverrides: { root: { backgroundImage: 'none' } },
+      // The palette above is light-mode-only (see the note there), so an
+      // outlined Paper keeps light-mode surface/text/border and can't be read
+      // on the dark ground. Restate the surfaces as tokens so background, text,
+      // and border all flip together with prefers-color-scheme.
+      variants: [
+        {
+          props: { variant: 'outlined' },
+          style: { backgroundColor: 'var(--surface)', color: 'var(--ink)', borderColor: 'var(--line)' },
+        },
+      ],
+    },
     MuiCheckbox: { styleOverrides: { root: { color: 'var(--ink-soft)', '&.Mui-checked': { color: 'var(--attest)' } } } },
     MuiRadio: { styleOverrides: { root: { color: 'var(--ink-soft)', '&.Mui-checked': { color: 'var(--attest)' } } } },
     MuiAlert: {
