@@ -1,4 +1,54 @@
 {
   "version": 1,
-  "components": {}
+  "components": {
+    "web-ui": {
+      "plans": [
+        {
+          "planId": "p-5883bee4",
+          "name": "fix-paper-outlined-dark-mode",
+          "feature": null,
+          "tasks": [
+            {
+              "id": "t-1",
+              "title": "Add MuiPaper outlined variant with token colours",
+              "description": "In web/src/theme.ts, extend the existing MuiPaper component config (currently only styleOverrides.root = { backgroundImage: 'none' }) with a `variants` array containing one entry: props { variant: 'outlined' }, style { backgroundColor: 'var(--surface)', color: 'var(--ink)', borderColor: 'var(--line)' }. This mirrors the existing MuiChip/MuiButton token-restatement pattern so background, text, and border all flip together under prefers-color-scheme:dark and match the ledger surfaces. Add a short comment explaining why (same rationale as the MuiChip variants note: palette is light-mode-only so tokens must be restated to flip). Keep the existing root backgroundImage override intact.",
+              "complexity": "low",
+              "status": "done"
+            },
+            {
+              "id": "t-2",
+              "title": "Verify types and build",
+              "description": "Run `cd web && npx tsc --noEmit` to confirm the variants entry type-checks against MUI's PaperProps, then `cd web && npm run build` to confirm the production bundle builds cleanly. Fix any type errors (e.g. ensure the variants prop shape matches what MUI expects for MuiPaper).",
+              "complexity": "low",
+              "status": "done"
+            }
+          ],
+          "status": "building",
+          "attention": null,
+          "forestId": "16c533f7-1575-4e64-b3a8-14d5b5e2e5a2",
+          "createdAt": "2026-07-19T20:26:36.458Z"
+        }
+      ],
+      "status": "building",
+      "tasks": [
+        {
+          "id": "t-1",
+          "title": "Add MuiPaper outlined variant with token colours",
+          "description": "In web/src/theme.ts, extend the existing MuiPaper component config (currently only styleOverrides.root = { backgroundImage: 'none' }) with a `variants` array containing one entry: props { variant: 'outlined' }, style { backgroundColor: 'var(--surface)', color: 'var(--ink)', borderColor: 'var(--line)' }. This mirrors the existing MuiChip/MuiButton token-restatement pattern so background, text, and border all flip together under prefers-color-scheme:dark and match the ledger surfaces. Add a short comment explaining why (same rationale as the MuiChip variants note: palette is light-mode-only so tokens must be restated to flip). Keep the existing root backgroundImage override intact.",
+          "complexity": "low",
+          "status": "done"
+        },
+        {
+          "id": "t-2",
+          "title": "Verify types and build",
+          "description": "Run `cd web && npx tsc --noEmit` to confirm the variants entry type-checks against MUI's PaperProps, then `cd web && npm run build` to confirm the production bundle builds cleanly. Fix any type errors (e.g. ensure the variants prop shape matches what MUI expects for MuiPaper).",
+          "complexity": "low",
+          "status": "done"
+        }
+      ],
+      "forestId": "16c533f7-1575-4e64-b3a8-14d5b5e2e5a2",
+      "attention": null,
+      "updatedAt": "2026-07-19T20:26:36.458Z"
+    }
+  }
 }
