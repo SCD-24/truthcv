@@ -561,7 +561,12 @@ def save_application_cover_letter(
 
     from render.cover_letter import render_letter_html
 
-    html = render_letter_html(body.text)
+    _profile = load().profile
+    html = render_letter_html(
+        body.text,
+        name=_profile.name or "Your Name",
+        contact=_contact_line(_profile),
+    )
     # Record the document FIRST so the link always persists, then render
     # best-effort — a missing backend must never lose the saved cover letter.
     app = app_store.save_cover_letter_document(app_id, body.text)
@@ -675,7 +680,12 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
             blocked_claims=blocked_claims,
         )
 
-    html = render_letter_html(letter["text"])
+    _profile = load().profile
+    html = render_letter_html(
+        letter["text"],
+        name=_profile.name or "Your Name",
+        contact=_contact_line(_profile),
+    )
 
     # Attach to an application when asked (per-application files + persisted
     # document); otherwise render to the shared scratch filenames.
