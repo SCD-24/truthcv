@@ -73,6 +73,22 @@ const EMPTY: ApplicationCreate = {
   posting: "",
 };
 
+// Order applications by status; lower index sorts first. Unlisted/unset
+// statuses (e.g. "") fall to the bottom.
+const STATUS_ORDER = [
+  "Offer",
+  "Interviewing",
+  "Waiting",
+  "Applied",
+  "Draft",
+  "Rejected",
+] as const;
+
+const statusRank = (status: string): number => {
+  const i = STATUS_ORDER.indexOf(status as (typeof STATUS_ORDER)[number]);
+  return i === -1 ? STATUS_ORDER.length : i;
+};
+
 /**
  * The applications ledger — an outbound record of every job the user is
  * pursuing and which CV/cover letter went out with it. Full CRUD against the
@@ -265,7 +281,9 @@ export function ApplicationsPage({
               </TableRow>
             </TableHead>
             <TableBody>
-              {apps.map((app) =>
+              {[...apps]
+                .sort((a, b) => statusRank(a.status) - statusRank(b.status))
+                .map((app) =>
                 editing === app.id ? (
                   <TableRow key={app.id}>
                     <TableCell colSpan={COLUMNS.length}>
