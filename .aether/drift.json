@@ -1,9 +1,159 @@
 {
   "version": 1,
-  "findings": [],
-  "suppressions": [],
+  "findings": [
+    {
+      "kind": "undeclared-connection",
+      "severity": "high",
+      "title": "Agent container calls the API's MCP tool surface over HTTP",
+      "detail": "agent/mcp.json points the `truthcv` MCP server at ${TRUTHCV_MCP_URL:-http://app:8080/mcp} and agent/daily-apply.sh allow-lists mcp__truthcv__* tools, a real HTTP path from the agent to the API that the topology does not declare.",
+      "verifiedReason": "",
+      "architecture": "No agent→api edge",
+      "sourceState": "HTTP to http://app:8080/mcp (agent/mcp.json)",
+      "source": "auto",
+      "agent": "",
+      "target": {
+        "type": "connection",
+        "from": "agent",
+        "to": "api"
+      },
+      "suggestion": {
+        "action": "set_connection",
+        "args": {
+          "from": "agent",
+          "to": "api",
+          "protocol": "HTTP/MCP"
+        }
+      },
+      "destructive": false,
+      "status": "proposed",
+      "firstSeen": 1786800598804,
+      "lastSeen": 1786909689738,
+      "id": "93105448"
+    },
+    {
+      "kind": "undeclared-endpoint",
+      "severity": "low",
+      "title": "Undeclared /api/profile/answers routes",
+      "detail": "api/routes.py adds GET and PUT /api/profile/answers backed by truth.answers; the declared API only lists GET /api/profile.",
+      "verifiedReason": "",
+      "architecture": "Only GET /api/profile declared",
+      "sourceState": "GET/PUT /api/profile/answers",
+      "source": "auto",
+      "agent": "",
+      "target": {
+        "type": "component",
+        "id": "api"
+      },
+      "suggestion": {
+        "action": "add_endpoint",
+        "args": {
+          "componentId": "api",
+          "method": "PUT",
+          "path": "/api/profile/answers"
+        }
+      },
+      "destructive": false,
+      "status": "proposed",
+      "firstSeen": 1786909689738,
+      "lastSeen": 1786914192390,
+      "id": "a75d7433"
+    },
+    {
+      "kind": "undeclared-component",
+      "severity": "high",
+      "title": "New unattended agent container is not a declared component",
+      "detail": "agent/Dockerfile, agent/entrypoint.sh and agent/daily-apply.sh add a second container that runs the headless `claude` CLI on a schedule to apply to jobs; no such component exists in the declared topology.",
+      "verifiedReason": "",
+      "architecture": "Only web-ui + FastAPI app containers",
+      "sourceState": "Separate agent container running claude CLI",
+      "source": "auto",
+      "agent": "",
+      "target": {
+        "type": "component",
+        "id": "api"
+      },
+      "suggestion": {
+        "action": "create_component",
+        "args": {
+          "id": "application-agent",
+          "name": "Application Agent",
+          "type": "backend"
+        }
+      },
+      "destructive": false,
+      "status": "proposed",
+      "firstSeen": 1786914192390,
+      "lastSeen": 1786914192390,
+      "id": "323040b8"
+    },
+    {
+      "kind": "undeclared-connection",
+      "severity": "high",
+      "title": "Agent container calls the API over HTTP/MCP",
+      "detail": "agent/mcp.json configures an http MCP server at ${TRUTHCV_MCP_URL:-http://app:8080/mcp}, so the agent container talks to the API's /mcp router over HTTP — a communication path absent from the declared connection map.",
+      "verifiedReason": "",
+      "architecture": "No agent→API edge declared",
+      "sourceState": "HTTP MCP call to http://app:8080/mcp",
+      "source": "auto",
+      "agent": "",
+      "target": {
+        "type": "connection",
+        "from": "application-agent",
+        "to": "api"
+      },
+      "suggestion": {
+        "action": "set_connection",
+        "args": {
+          "from": "application-agent",
+          "to": "api",
+          "protocol": "HTTP/MCP"
+        }
+      },
+      "destructive": false,
+      "status": "proposed",
+      "firstSeen": 1786914192390,
+      "lastSeen": 1786914192390,
+      "id": "822edf8a"
+    },
+    {
+      "kind": "undeclared-endpoint",
+      "severity": "medium",
+      "title": "Undeclared screening/cooldown REST routes on the API",
+      "detail": "api/routes.py adds GET/POST /api/screenings, DELETE /api/screenings/{id} and GET /api/cooldown, none of which appear in the API's declared Wizard/Application/Settings endpoint tables.",
+      "verifiedReason": "",
+      "architecture": "No screening or cooldown routes declared",
+      "sourceState": "GET/POST /api/screenings, GET /api/cooldown",
+      "source": "auto",
+      "agent": "",
+      "target": {
+        "type": "component",
+        "id": "api"
+      },
+      "suggestion": {
+        "action": "add_endpoint",
+        "args": {
+          "componentId": "api",
+          "method": "POST",
+          "path": "/api/screenings"
+        }
+      },
+      "destructive": false,
+      "status": "proposed",
+      "firstSeen": 1786914192390,
+      "lastSeen": 1786914192390,
+      "id": "01c4ebae"
+    }
+  ],
+  "suppressions": [
+    "6275e257",
+    "ddce5a3a",
+    "24c15578",
+    "efdbe5a8",
+    "61fca9e0",
+    "25decc3c"
+  ],
   "dismissals": [],
-  "lastRun": 1784492879467,
+  "lastRun": 1786914339801,
   "lastMode": "scoped",
-  "analyzedHead": "8661345bfab799a4ba0d92c8f070914cb584c262"
+  "analyzedHead": "dbacd10accd459c8cd4084c15c1b06820b95251f"
 }
