@@ -27,5 +27,61 @@ services:
     volumes:
       - ollama:/root/.ollama
 
+  # Unattended job-application agent — its own container, deliberately
+  # separate from `app`, so a browser crash can never take the wizard down.
+  # Runs headless Claude Code on a schedule against agent/RUNBOOK.md and
+  # agent/prompt.md, reaching its tools per agent/mcp.json. Not started by a
+  # bare `docker compose up` — start it explicitly with:
+  #   docker compose --profile agent up -d agent
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    depends_on: [app]
+    profiles: ["agent"]
+    # Scheduled long-running loop (the run loop itself is task t-4's
+    # entrypoint), same as `app` — it should come back after a host reboot or
+    # a crash rather than stay down silently.
+    restart: unless-stopped
+    environment:
+      # HH:MM,HH:MM (24h, container TZ) — the agent's daily run times. This
+      # default is mirrored by AGENT_RUN_TIMES in
+      # web/src/settings/SettingsModal.tsx, which the Settings UI displays as
+      # the schedule. The two MUST be changed together.
+      - RUN_AT=${RUN_AT:-09:00,15:00}
+      # In-network address of the `app` service's MCP tool surface
+      # (mcp/server.py, mounted at /mcp) — only reachable inside the compose
+      # network, not from the host.
+      - TRUTHCV_MCP_URL=${TRUTHCV_MCP_URL:-http://app:8080/mcp}
+      # In-container path of the bind-mounted unix socket the agent uses to
+      # drive the operator's real HOST Chrome — see the volumes: entry below and
+      # agent/mcp.json. Must match the host-side path the interceptor daemon
+      # actually listens on.
+      - INTERCEPTOR_SOCKET=${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}
+      # No default: the architecture has no daily quota (agent/RUNBOOK.md
+      # §1, "There is no daily quota"). Empty/unset must be treated by the
+      # run loop (task t-4) as "no cap", not as zero.
+      - MAX_APPLICATIONS_PER_RUN=${MAX_APPLICATIONS_PER_RUN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      # The host Chrome interceptor's unix socket, bind-mounted in so the
+      # agent drives a real, already-logged-in browser on the host instead of
+      # a fresh one inside the container (see agent/Dockerfile). Both sides
+      # use the same env var so the mount always matches agent/mcp.json.
+      - ${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}:${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}
+      # Per-run logs written by agent/daily-apply.sh (RUN_LOG_DIR, default
+      # /app/runs). Its own named volume, NOT the app's data volume: these are
+      # operator diagnostics for unattended runs, and without a volume they
+      # vanish on every container restart, which is exactly when they are
+      # wanted. Nothing else in the system reads them.
+      - agent-runs:/app/runs
+      # Deliberately NOT mounting the app's data volume here: every
+      # capability the agent has goes through the TruthCV MCP tool surface
+      # (mcp/server.py), not the filesystem — agent/RUNBOOK.md says outright
+      # "There is no file on disk to read any of this from — call the tool."
+      # Keep this surface small; do not add ${DATA_DIR:-./data}:/app/data
+      # without a concrete, checked need.
+
 volumes:
   ollama:
+  agent-runs:

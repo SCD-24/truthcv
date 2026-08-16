@@ -183,6 +183,74 @@ class ProfileStatus(_Camel):
     has_profile: bool
 
 
+class AnswersModel(_Camel):
+    """Canonical ATS screening answers — GET/PUT /api/profile/answers wire shape.
+
+    Mirrors every field of truth.answers.Answers (the runbook-transcribed
+    canonical answers plus canonical_cv_asset_id) so GET/PUT round-trips the
+    full record instead of silently dropping fields pydantic doesn't know
+    about.
+    """
+
+    phone: str = ""
+    work_authorisation: str = ""
+    salary_expectation: str = ""
+    notice_period: str = ""
+    location_preference: str = ""
+    canonical_cv_asset_id: str | None = None
+    name: str = ""
+    email: str = ""
+    linkedin: str = ""
+    github: str = ""
+    website: str = ""
+    requires_sponsorship: str = ""
+    authorized_non_german_country: str = ""
+    languages: str = ""
+    highest_relevant_degree: str = ""
+    other_degree: str = ""
+    cs_degree: str = ""
+    gpa: str = ""
+    gender: str = ""
+    years_of_experience: str = ""
+    current_role: str = ""
+    how_did_you_hear: str = ""
+
+
+class AnswersUpdate(_Camel):
+    """Partial PUT /api/profile/answers body — every field optional.
+
+    Mirrors AnswersModel field-for-field, but all fields default to None so
+    the route can tell "the client didn't send this field" (stays None, and
+    is excluded via `model_dump(exclude_unset=True)`) apart from "the client
+    sent it" — including an explicit empty string, which IS applied. This is
+    what lets PUT merge only the supplied fields onto the existing stored
+    answers instead of clobbering everything else back to blank/default.
+    """
+
+    phone: str | None = None
+    work_authorisation: str | None = None
+    salary_expectation: str | None = None
+    notice_period: str | None = None
+    location_preference: str | None = None
+    canonical_cv_asset_id: str | None = None
+    name: str | None = None
+    email: str | None = None
+    linkedin: str | None = None
+    github: str | None = None
+    website: str | None = None
+    requires_sponsorship: str | None = None
+    authorized_non_german_country: str | None = None
+    languages: str | None = None
+    highest_relevant_degree: str | None = None
+    other_degree: str | None = None
+    cs_degree: str | None = None
+    gpa: str | None = None
+    gender: str | None = None
+    years_of_experience: str | None = None
+    current_role: str | None = None
+    how_did_you_hear: str | None = None
+
+
 class CoverLetterApprovals(_Camel):
     """Generation-scoped decisions on blocked cover-letter claims. Approved
     claims are allowed for that one generation only; never persisted to
@@ -311,3 +379,41 @@ class SaveDocumentResult(_Camel):
     # backend (WeasyPrint/pandoc) produced neither a PDF nor a DOCX — so the
     # document is attached but its download links are null. NOT a save failure.
     render_unavailable: bool = False
+
+
+class ScreeningModel(_Camel):
+    """A tracked job-screening record: the wire shape for GET/POST /screenings."""
+
+    id: str = ""
+    company: str = ""
+    role: str = ""
+    url: str = ""
+    screened_date: str = ""
+    verdict: str = ""
+    failing_criterion: str = ""
+    reason: str = ""
+    cooldown_expires: str = ""
+    source: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class ScreeningCreate(_Camel):
+    """Client-supplied fields for a new screening record."""
+
+    company: str = ""
+    role: str = ""
+    url: str = ""
+    screened_date: str = ""
+    verdict: str = ""
+    failing_criterion: str = ""
+    reason: str = ""
+    cooldown_expires: str = ""
+    source: str = ""
+
+
+class CooldownResult(_Camel):
+    """Whether a company (optionally role) is currently in cooldown."""
+
+    in_cooldown: bool
+    expires: str | None = None

@@ -1,5 +1,4 @@
 <!-- generated:start edge:llm-provider-layer→secret-store -->
-> **Not verified at the current commit** — source has changed since the last full sweep, or none has run. Treat this section as a snapshot and verify against source before relying on it.
 # Interaction: LLM Provider Layer → Secret Store
 
 - **Participants:** `llm-provider-layer` → `secret-store`

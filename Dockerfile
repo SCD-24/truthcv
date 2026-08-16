@@ -3,7 +3,12 @@ FROM node:20-slim AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json* ./
 RUN npm install
-COPY web/ ./
+# Copy only the build inputs. Copying the whole web/ directory would drag in
+# node_modules — which in a git worktree is a symlink to another checkout — on
+# top of the real node_modules npm just installed, and BuildKit refuses to
+# replace a directory with a file.
+COPY web/index.html web/tsconfig.json web/vite.config.ts ./
+COPY web/src/ ./src/
 # Vite builds to ../api/static per web/vite.config.ts; build in place then copy.
 RUN npm run build
 
@@ -30,6 +35,8 @@ COPY guardrail/ ./guardrail/
 COPY render/ ./render/
 COPY coverletter/ ./coverletter/
 COPY applications/ ./applications/
+COPY screening/ ./screening/
+COPY mcp/ ./mcp/
 COPY api/ ./api/
 
 # Built frontend bundle from stage 1.

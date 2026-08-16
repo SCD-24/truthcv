@@ -1,5 +1,4 @@
 <!-- generated:start edge:api→cover-letter-engine -->
-> **Not verified at the current commit** — source has changed since the last full sweep, or none has run. Treat this section as a snapshot and verify against source before relying on it.
 # Interaction: API → Cover Letter Engine
 
 - **Participants:** `api` → `cover-letter-engine`

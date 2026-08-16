@@ -1,0 +1,33 @@
+# Docker build context exclusions.
+#
+# node_modules is the load-bearing one: in a forest worktree web/node_modules is
+# a SYMLINK to an absolute path in the main checkout, so `COPY web/ ./` either
+# fails or lands a dangling link on top of the real modules `npm install` just
+# created one step earlier. The image installs its own dependencies from
+# package.json/package-lock.json, so the host tree's copy is never wanted.
+node_modules
+web/node_modules
+**/node_modules
+
+# Stale incremental-build state from the host would make `tsc -b` skip work it
+# should redo inside the image.
+**/tsconfig.tsbuildinfo
+
+# Python bytecode compiled against the host interpreter.
+**/__pycache__
+**/*.pyc
+**/*.pyo
+
+# Never ship the live data volume into a build layer: it holds the application
+# ledger, the canonical CV and the pre-deletion Jobs archive — personal data
+# that has no business in an image. The volume is mounted at runtime instead.
+data/
+
+# Repository and tooling state the image has no use for.
+.git
+.gitignore
+.aether/
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/

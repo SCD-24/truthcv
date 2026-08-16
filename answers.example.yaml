@@ -1,0 +1,60 @@
+# Template for the canonical ATS screening answers.
+#
+# These are the recurring questions an application screener asks — the ones a
+# human would otherwise retype into every form. They are NOT guardrail-validated
+# CV facts; those live in truth.yaml and are governed by the Truth Store.
+#
+# Nothing here ships with a value. TruthCV deliberately has no built-in
+# identity: every field below defaults to an empty string, so a fresh install
+# answers with blanks until you fill them in. Copy this file to
+# `answers.local.yaml` (gitignored), put your own details in it, then seed the
+# shared data volume:
+#
+#     cp answers.example.yaml answers.local.yaml
+#     $EDITOR answers.local.yaml
+#     python -m truth.answers --answers answers.local.yaml
+#
+# Seeding merges these keys over the stored answers.yaml: a key you leave
+# out keeps whatever value is already stored, and so does a key you leave
+# blank (empty or whitespace-only) — a blank value means "leave the stored
+# value alone", not "clear it". That also means it is safe to copy this file
+# wholesale and seed it filled in only partially: the fields you didn't touch
+# are left as they were, not wiped. canonical_cv_asset_id is set separately,
+# by `python -m truth.answers <cv.pdf>`, and is not listed here.
+#
+# To actually clear a field (set it back to blank), seeding cannot do it —
+# use the web UI under Settings instead, which writes through
+# PUT /api/profile/answers.
+
+# Contact details.
+phone: ""
+name: ""
+email: ""
+linkedin: ""
+github: ""
+website: ""
+
+# Right to work. Be precise here — a screener treats these as binding, and the
+# agent will type them verbatim.
+work_authorisation: ""
+requires_sponsorship: ""
+authorized_non_german_country: ""
+
+# Terms and availability.
+salary_expectation: ""
+notice_period: ""
+location_preference: ""
+
+# Background.
+languages: ""
+highest_relevant_degree: ""
+other_degree: ""
+cs_degree: ""
+gpa: ""
+gender: ""
+years_of_experience: ""
+current_role: ""
+
+# How you found the role. Answer honestly; "referral" is a claim about a person
+# who would have to vouch for you.
+how_did_you_hear: ""

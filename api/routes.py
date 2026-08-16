@@ -16,6 +16,9 @@ from providers import ProviderError, get_provider
 from render import lint, render_docx, render_html, render_pdf
 from render.pdf import RenderUnavailable
 from truth import load, persist_source_hash, save
+from truth.answers import Answers
+from truth.answers import load as load_answers
+from truth.answers import save as save_answers
 from truth.extract import build_truth_from_text, write_confirmed
 from truth.model import Truth
 from truth.pdf import (
@@ -29,8 +32,13 @@ from truth.pdf import (
 
 import applications as app_store
 from api import secrets as secrets_store
+from screening import store as screening_store
+from screening.cooldown import cooldown as check_cooldown
+from screening.model import Screening
 
 from .schemas import (
+    AnswersModel,
+    AnswersUpdate,
     ApplicationCreate,
     ApplicationDocument,
     ApplicationModel,
@@ -39,6 +47,7 @@ from .schemas import (
     ConfirmInferencesRequest,
     CoverLetterApprovals,
     CoverLetterRequest,
+    CooldownResult,
     CoverLetterResult,
     ModelInfo,
     ModelList,
@@ -49,6 +58,8 @@ from .schemas import (
     SaveCoverLetterRequest,
     SaveCvRequest,
     SaveDocumentResult,
+    ScreeningCreate,
+    ScreeningModel,
     SettingsStatus,
     SettingsUpdate,
     TailorRequest,
@@ -58,6 +69,50 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/api")
+
+
+def _screening_model(screening: Screening) -> ScreeningModel:
+    """Map a stored Screening to its wire model."""
+    data = {f: getattr(screening, f) for f in Screening.EDITABLE}
+    return ScreeningModel(
+        id=screening.id,
+        created_at=screening.created_at,
+        updated_at=screening.updated_at,
+        **data,
+    )
+
+
+@router.get("/screenings", response_model=list[ScreeningModel])
+def list_screenings() -> list[ScreeningModel]:
+    """Every screening record, most recent first."""
+    screenings = sorted(
+        screening_store.load_all(), key=lambda s: s.created_at, reverse=True
+    )
+    return [_screening_model(s) for s in screenings]
+
+
+@router.post("/screenings", response_model=ScreeningModel, status_code=201)
+def create_screening(body: ScreeningCreate) -> ScreeningModel:
+    """Create a new screening record from client-supplied fields."""
+    screening = screening_store.create(body.model_dump(by_alias=False))
+    return _screening_model(screening)
+
+
+@router.delete("/screenings/{screening_id}", status_code=204)
+def delete_screening(screening_id: str) -> None:
+    """Delete a screening record."""
+    if not screening_store.delete(screening_id):
+        raise HTTPException(status_code=404, detail="Screening not found.")
+
+
+@router.get("/cooldown", response_model=CooldownResult)
+def get_cooldown(company: str, role: str | None = None) -> CooldownResult:
+    """Whether `company` (optionally narrowed by `role`) is currently in cooldown.
+
+    Delegates entirely to screening.cooldown.cooldown; no arithmetic here.
+    """
+    status = check_cooldown(company, role)
+    return CooldownResult(in_cooldown=status.in_cooldown, expires=status.expires)
 
 
 def _truth_doc(truth: Truth) -> TruthDoc:
@@ -594,6 +649,25 @@ def _settings_status() -> SettingsStatus:
 @router.get("/profile", response_model=ProfileStatus)
 def profile() -> ProfileStatus:
     return ProfileStatus(has_profile=has_profile())
+
+
+@router.get("/profile/answers", response_model=AnswersModel)
+def get_profile_answers() -> AnswersModel:
+    return AnswersModel.model_validate(load_answers().to_dict())
+
+
+@router.put("/profile/answers", response_model=AnswersModel)
+def put_profile_answers(body: AnswersUpdate) -> AnswersModel:
+    """Merge only the fields the client actually sent onto the stored answers.
+
+    Omitted fields must survive untouched — the wizard's field-by-field save
+    flow means most PUTs carry a strict subset of the 22 fields, and treating
+    absence the same as "clear this" would silently blank the rest.
+    """
+    merged = load_answers().to_dict()
+    merged.update(body.model_dump(exclude_unset=True, by_alias=False))
+    answers = Answers.from_dict(merged)
+    return AnswersModel.model_validate(save_answers(answers).to_dict())
 
 
 def _letter_approvals(

@@ -1,6 +1,21 @@
 data/
 __pycache__/
-node_modules/
+# No trailing slash: in a forest worktree `web/node_modules` is a SYMLINK to the
+# main checkout, and a `node_modules/` pattern matches directories only, so git
+# would otherwise offer to commit an absolute-path symlink.
+node_modules
 *.pyc
 .env
 .aether/debug/runs/*
+# The canonical CV is personal data. It lives on the shared data volume
+# (data/canonical_cv.pdf, registered via `python -m truth.answers <path>`),
+# never in git history. Anchored with a leading slash: an unanchored
+# `assets/` would match at any depth and swallow the built frontend bundle
+# in api/static/assets/.
+/assets/
+# The operator's own screening answers and job-search queue. Both are personal
+# data (phone, address, salary band, target companies) and both have a tracked
+# `.example` counterpart that documents the shape without carrying anyone's
+# details. Anchored so they only ever match at the repo root.
+/answers.local.yaml
+/agent/targets.md

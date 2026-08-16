@@ -98,7 +98,10 @@ def build_letter(
     blocked. ``approved_texts`` are claim strings the user has approved for THIS
     generation only — they are added to the guardrail's allowed set (never
     written to truth), mirroring the CV render approval flow. ``denied_texts``
-    are dropped from the letter entirely so they can't ship.
+    are dropped from the letter entirely so they can't ship: their paragraphs
+    are excised BEFORE validation, so the guardrail only ever checks claims
+    from paragraphs that will actually be emitted, and any resulting
+    ``blocked_claims`` name only claims still present in the letter.
 
     ``paragraphs`` short-circuits the LLM: pass the cached paragraphs from a
     prior attempt (see load_letter_draft) so an approve/decline round-trip
@@ -109,7 +112,8 @@ def build_letter(
         paragraphs = _generate_paragraphs(posting, tone, length, truth, provider)
         save_letter_draft(paragraphs)
 
-    scope = _letter_scope(paragraphs, truth, approved_texts or set(), denied_texts or set())
+    shown = _excise_denied(paragraphs, denied_texts or set())
+    scope = _letter_scope(shown, truth, approved_texts or set(), denied_texts or set())
     check = validate([scope])
     if not check.ok:
         return {
@@ -119,7 +123,7 @@ def build_letter(
             "text": "",
         }
 
-    text = "\n\n".join(p.get("text", "").strip() for p in paragraphs if p.get("text", "").strip())
+    text = "\n\n".join(p["text"] for p in shown)
     return {"blocked": False, "unverifiable": [], "blocked_claims": [], "text": text}
 
 
@@ -136,6 +140,22 @@ def _generate_paragraphs(
     return result.get("paragraphs", []) if isinstance(result, dict) else []
 
 
+def _excise_denied(paragraphs: list[dict], denied_texts: set[str]) -> list[dict]:
+    """Drop any paragraph carrying a denied claim entirely, rather than trying
+    to mutate its prose text. Matching denied claims against a paragraph's own
+    `claims` list (not its free-form text) sidesteps casing/punctuation drift
+    between the claim string and the prose, and dropping the whole paragraph
+    avoids order-dependent overlapping-removal bugs. The originals (passed to
+    save_letter_draft) are untouched so a later round-trip still sees them."""
+    shown = []
+    for p in paragraphs:
+        claims = p.get("claims", [])
+        if any(c in denied_texts for c in claims):
+            continue
+        shown.append(p)
+    return shown
+
+
 def _letter_scope(
     paragraphs: list[dict],
     truth: Truth,
@@ -144,8 +164,13 @@ def _letter_scope(
 ) -> Scope:
     """The single validation scope for the letter's factual claims.
 
-    Approved claim texts are appended to `allowed` (traceable for THIS
-    generation only, no truth write); denied claims are excluded from `texts`.
+    ``paragraphs`` is expected to already be the surviving set (post
+    ``_excise_denied``), so validation only ever runs over — and any
+    resulting ``blocked_claims`` only ever name — claims that will actually
+    be emitted. Approved claim texts are appended to `allowed` (traceable for
+    THIS generation only, no truth write); the ``denied_texts`` filter here is
+    a defensive no-op given already-excised input, kept in case this is ever
+    called with un-excised paragraphs.
     """
     claims = [
         c
