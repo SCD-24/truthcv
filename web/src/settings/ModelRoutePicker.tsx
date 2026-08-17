@@ -37,6 +37,7 @@ export function ModelRoutePicker({
   title,
   description,
   saveLabel = "Save",
+  savedLabel = "Saved.",
   filterCards,
   allowClear = false,
   showTest = false,
@@ -47,6 +48,7 @@ export function ModelRoutePicker({
   title: string;
   description?: string;
   saveLabel?: string;
+  savedLabel?: string;
   filterCards?: string[];
   allowClear?: boolean;
   showTest?: boolean;
@@ -264,7 +266,7 @@ export function ModelRoutePicker({
       {test.kind === "ok" && <Alert severity="success">{test.detail}</Alert>}
       {test.kind === "fail" && <Alert severity="error">{test.detail}</Alert>}
       {error && <Alert severity="error">{error}</Alert>}
-      {saved && !error && <Alert severity="success">Saved.</Alert>}
+      {saved && !error && <Alert severity="success">{savedLabel}</Alert>}
 
       <Stack direction="row" spacing={2}>
         {showTest && (

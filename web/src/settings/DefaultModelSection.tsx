@@ -23,6 +23,7 @@ export function DefaultModelSection({
       }}
       title="Default model"
       description="The model used when a task has no more specific routing."
+      savedLabel="Default model saved."
       showTest
     />
   );
