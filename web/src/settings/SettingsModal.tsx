@@ -26,8 +26,9 @@ import "../styles/settings.css";
 
 /** A titled group of settings fields, separated from its siblings by a
  * Divider in the caller. Establishes the one section pattern the modal's
- * panels share. */
-function SettingsSection({
+ * panels share. Exported so other settings panels (e.g. AccountsSection)
+ * reuse the same wrapper instead of duplicating it. */
+export function SettingsSection({
   title,
   description,
   children,
