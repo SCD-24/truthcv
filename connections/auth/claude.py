@@ -18,12 +18,15 @@ from urllib.parse import urlencode
 
 import httpx
 
-# Verify every constant against aether server/auth/claude.js when porting.
+# Constants mirror the current Claude Code CLI's manual (paste-code) flow —
+# verified against `claude setup-token` output. The endpoints aether used
+# (claude.ai/console.anthropic.com, org:create_api_key scope) are rejected
+# with "Invalid request format" since the claude.com migration.
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-AUTHORIZE_URL = "https://claude.ai/oauth/authorize"
-TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
-REDIRECT_URI = "https://console.anthropic.com/oauth/code/callback"
-SCOPES = "org:create_api_key user:profile user:inference"
+AUTHORIZE_URL = "https://claude.com/cai/oauth/authorize"
+TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
+REDIRECT_URI = "https://platform.claude.com/oauth/code/callback"
+SCOPES = "user:inference"
 CLAUDE_CODE_PREAMBLE = "You are Claude Code, Anthropic's official CLI for Claude."
 
 _EXPIRY_SKEW_S = 300
@@ -114,6 +117,7 @@ def get_valid_access_token() -> str:
                 "grant_type": "refresh_token",
                 "refresh_token": record.get("refreshToken", ""),
                 "client_id": CLIENT_ID,
+                "scope": SCOPES,
             }, timeout=30)
         except httpx.HTTPError as exc:
             raise AuthError("Claude token refresh failed — reconnect the subscription in Settings.") from exc

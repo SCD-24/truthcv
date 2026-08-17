@@ -16,6 +16,20 @@ def enc(data_dir, monkeypatch):
     return data_dir
 
 
+def test_constants_match_current_claude_code_flow():
+    """Pin the OAuth constants to the flow the current Claude Code CLI uses.
+
+    Verified 2026-08-17 against `claude setup-token` (CLI 2.1.233): the old
+    claude.ai/console.anthropic.com endpoints reject logins with
+    "Invalid request format"; org:create_api_key is no longer granted.
+    """
+    assert claude.AUTHORIZE_URL == "https://claude.com/cai/oauth/authorize"
+    assert claude.TOKEN_URL == "https://platform.claude.com/v1/oauth/token"
+    assert claude.REDIRECT_URI == "https://platform.claude.com/oauth/code/callback"
+    assert claude.SCOPES == "user:inference"
+    assert claude.CLIENT_ID == "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+
+
 def test_start_login_builds_pkce_url(enc):
     out = claude.start_login()
     assert out["flow"] == "paste-code"
