@@ -724,7 +724,8 @@ def get_agent_llm_credentials(x_agent_token: str = Header(default="")) -> AgentL
     itself information this guard is meant to withhold.
     """
     secret = os.environ.get("AGENT_API_TOKEN", "").strip()
-    if not secret or not hmac.compare_digest(x_agent_token, secret):
+    given = x_agent_token.encode("utf-8", "surrogateescape")
+    if not secret or not hmac.compare_digest(given, secret.encode("utf-8")):
         raise HTTPException(status_code=404)
 
     route = modelrouting.load().agent

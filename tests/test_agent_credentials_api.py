@@ -66,6 +66,16 @@ def test_oauth_refresh_fails_503(client, monkeypatch):
     assert "boom" not in resp.text
 
 
+def test_non_ascii_header_404(client):
+    # Raw non-ASCII bytes on the wire (as an ISO-8859-1/UTF-8 client might send)
+    # must not crash hmac.compare_digest into a distinguishable 500 — every
+    # mismatch, ASCII or not, is a plain 404.
+    resp = client.get(
+        "/api/agent/llm-credentials", headers=[(b"X-Agent-Token", b"n\xc3\xb6pe")]
+    )
+    assert resp.status_code == 404
+
+
 def test_non_claude_agent_route_409(client):
     secretstore.set_connection("ollama", {"baseUrl": "http://x:11434"})
     modelrouting.save(Routing(agent=Route("ollama", "llama3.1")))
