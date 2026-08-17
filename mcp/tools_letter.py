@@ -16,6 +16,7 @@ from dataclasses import asdict
 # which writes the single global data_dir()/"cover_letter_draft.json". Passing
 # paragraphs= unconditionally below is what keeps build_letter from writing that
 # shared file, so each application's draft lives only in this call's return value.
+from agentconfig.store import is_blocked, load as load_agent_config
 from coverletter.generate import _generate_paragraphs, build_letter
 from providers import get_provider
 from truth.store import load as load_truth
@@ -28,6 +29,7 @@ def generate_cover_letter(
     denied_texts: list[str] | None = None,
     paragraphs: list[dict] | None = None,
     provider=None,
+    company: str | None = None,
 ) -> dict:
     """Generate (or re-validate) a guardrailed cover letter for one application.
 
@@ -37,7 +39,19 @@ def generate_cover_letter(
     approval parameter: this tool cannot be used to self-approve an inference,
     only to generate a fresh letter or retry excising denied claims from an
     already-generated one (via ``paragraphs``, avoiding a second LLM call).
+
+    ``company``, when given, is refused outright if blocklisted in the agent
+    config.
     """
+    if company is not None and is_blocked(load_agent_config(), company):
+        return {
+            "text": "",
+            "blocked": True,
+            "blocked_claims": [],
+            "unverifiable": [],
+            "paragraphs": [],
+            "blocked_reason": "company_blocked",
+        }
     if provider is None:
         provider = get_provider()
     truth = load_truth()

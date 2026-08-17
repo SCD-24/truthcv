@@ -297,3 +297,28 @@ def test_check_cooldown_agrees_with_the_http_route(data_dir):
     assert tool_result_none["in_cooldown"] is False
     assert tool_result_none["in_cooldown"] == http_result_none["inCooldown"]
     assert tool_result_none["expires"] == http_result_none["expires"] is None
+
+
+def test_generate_cover_letter_refuses_blocked_company(data_dir):
+    """When `company` is given and blocklisted, generate_cover_letter must
+    refuse before any provider is resolved — no LLM cost for a refused
+    letter. Passing no provider= would normally trigger get_provider(); if
+    the guard is placed after that call, this test errors trying to build a
+    real provider instead of returning the refusal cleanly."""
+    from agentconfig import store as agent_config_store
+
+    cfg = agent_config_store.load()
+    cfg.blocked_companies = ["Acme GmbH"]
+    agent_config_store.save(cfg)
+
+    result = tools_letter.generate_cover_letter(
+        "posting text", "neutral", "short", company="acme gmbh"
+    )
+    assert result == {
+        "text": "",
+        "blocked": True,
+        "blocked_claims": [],
+        "unverifiable": [],
+        "paragraphs": [],
+        "blocked_reason": "company_blocked",
+    }
