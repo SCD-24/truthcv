@@ -31,12 +31,15 @@ from truth.pdf import (
 )
 
 import applications as app_store
+from agentconfig import store as agent_config_store
 from api import secrets as secrets_store
 from screening import store as screening_store
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
 
 from .schemas import (
+    AgentConfigModel,
+    AgentConfigUpdate,
     AnswersModel,
     AnswersUpdate,
     ApplicationCreate,
@@ -668,6 +671,20 @@ def put_profile_answers(body: AnswersUpdate) -> AnswersModel:
     merged.update(body.model_dump(exclude_unset=True, by_alias=False))
     answers = Answers.from_dict(merged)
     return AnswersModel.model_validate(save_answers(answers).to_dict())
+
+
+@router.get("/agent/config", response_model=AgentConfigModel)
+def get_agent_config() -> AgentConfigModel:
+    return AgentConfigModel.model_validate(agent_config_store.load().to_dict())
+
+
+@router.put("/agent/config", response_model=AgentConfigModel)
+def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:
+    """Merge only the fields the client sent onto the stored config."""
+    merged = agent_config_store.load().to_dict()
+    merged.update(body.model_dump(exclude_unset=True, by_alias=False))
+    cfg = agent_config_store.AgentConfig.from_dict(merged)
+    return AgentConfigModel.model_validate(agent_config_store.save(cfg).to_dict())
 
 
 def _letter_approvals(

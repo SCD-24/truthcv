@@ -6,8 +6,13 @@ frontend client (web/src/api/types.ts) expects.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+import re
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
+
+_RUN_AT_RE = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+_RUN_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 
 
 class _Camel(BaseModel):
@@ -249,6 +254,65 @@ class AnswersUpdate(_Camel):
     years_of_experience: str | None = None
     current_role: str | None = None
     how_did_you_hear: str | None = None
+
+
+class AgentConfigModel(_Camel):
+    """GET /api/agent/config response: enabled flag, blocklist, and schedule."""
+
+    enabled: bool = True
+    blocked_companies: list[str] = Field(default_factory=list)
+    run_at: list[str] = Field(default_factory=lambda: ["09:00", "15:00"])
+    run_days: list[str] = Field(
+        default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"]
+    )
+
+
+class AgentConfigUpdate(_Camel):
+    """Partial PUT /api/agent/config body — every field optional.
+
+    Mirrors AnswersUpdate's merge semantics: omitted fields stay None and are
+    excluded via `model_dump(exclude_unset=True)`, so the route only applies
+    the fields the client actually sent.
+    """
+
+    enabled: bool | None = None
+    blocked_companies: list[str] | None = None
+    run_at: list[str] | None = None
+    run_days: list[str] | None = None
+
+    @field_validator("blocked_companies")
+    @classmethod
+    def _strip_and_drop_empties(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        return [s.strip() for s in v if s.strip()]
+
+    @field_validator("run_at")
+    @classmethod
+    def _validate_run_at(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        if not v:
+            raise ValueError("runAt must not be empty")
+        for t in v:
+            if not _RUN_AT_RE.match(t):
+                raise ValueError(f"invalid time {t!r}, expected HH:MM")
+        return v
+
+    @field_validator("run_days")
+    @classmethod
+    def _validate_run_days(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        if not v:
+            raise ValueError("runDays must not be empty")
+        deduped: list[str] = []
+        for d in v:
+            if d not in _RUN_DAYS:
+                raise ValueError(f"invalid day {d!r}, expected one of {sorted(_RUN_DAYS)}")
+            if d not in deduped:
+                deduped.append(d)
+        return deduped
 
 
 class CoverLetterApprovals(_Camel):
