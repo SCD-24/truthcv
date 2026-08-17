@@ -7,7 +7,10 @@ the unverifiable tokens.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+import hmac
+import os
+
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 import tailor as tailor_engine
@@ -35,7 +38,7 @@ import modelrouting
 import secretstore
 from agentconfig import store as agent_config_store
 from connections import catalog
-from connections.auth.claude import AuthError
+from connections.auth.claude import AuthError, get_valid_access_token
 from connections.auth import claude as claude_auth
 from providers import OPENROUTER_BASE_URL, build_connection_provider, reset_provider
 from screening import store as screening_store
@@ -45,6 +48,7 @@ from screening.model import Screening
 from .schemas import (
     AgentConfigModel,
     AgentConfigUpdate,
+    AgentLlmCredentials,
     AnswersModel,
     AnswersUpdate,
     ApiKeyRequest,
@@ -709,6 +713,42 @@ def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:
     merged.update(body.model_dump(exclude_unset=True, exclude_none=True, by_alias=False))
     cfg = agent_config_store.AgentConfig.from_dict(merged)
     return AgentConfigModel.model_validate(agent_config_store.save(cfg).to_dict())
+
+
+@router.get("/agent/llm-credentials", response_model=AgentLlmCredentials)
+def get_agent_llm_credentials(x_agent_token: str = Header(default="")) -> AgentLlmCredentials:
+    """Guarded: only the unattended agent (holding AGENT_API_TOKEN) may call this.
+
+    Unset env secret or a mismatched/missing header both 404 — a 401/403 would
+    reveal to a prober that the endpoint exists but requires auth, which is
+    itself information this guard is meant to withhold.
+    """
+    secret = os.environ.get("AGENT_API_TOKEN", "").strip()
+    if not secret or not hmac.compare_digest(x_agent_token, secret):
+        raise HTTPException(status_code=404)
+
+    route = modelrouting.load().agent
+    card = route.connection if route else "claude"
+    if card != "claude":
+        raise HTTPException(status_code=409, detail="Agent supports only the Claude connection.")
+    model = route.model if route else ""
+
+    conn = secretstore.get_connection("claude")
+    oauth = conn.get("oauth") or {}
+    if oauth.get("accessToken") and conn.get("authMode") != "apikey":
+        try:
+            token = get_valid_access_token()
+        except AuthError:
+            raise HTTPException(
+                status_code=503, detail="Claude subscription needs reconnecting."
+            ) from None
+        return AgentLlmCredentials(auth_type="oauth", token=token, model=model)
+
+    api_key = conn.get("apiKey")
+    if api_key:
+        return AgentLlmCredentials(auth_type="api_key", token=api_key, model=model)
+
+    raise HTTPException(status_code=404)
 
 
 def _letter_approvals(

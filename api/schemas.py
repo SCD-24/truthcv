@@ -540,6 +540,14 @@ class RoutingModel(_Camel):
     default: RouteModel | None = None
 
 
+class AgentLlmCredentials(_Camel):
+    """GET /api/agent/llm-credentials response: never logged, response-only egress."""
+
+    auth_type: str
+    token: str
+    model: str = ""
+
+
 class RoutingUpdate(_Camel):
     """Partial PUT /api/routing body — every field optional.
 
