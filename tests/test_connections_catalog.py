@@ -18,3 +18,14 @@ def test_unknown_card_raises():
     import pytest
     with pytest.raises(KeyError):
         card("copilot")
+
+
+def test_modes_are_the_seam_the_frontend_derives_from():
+    """Pins the catalog's mode strings to the seam the frontend's
+    CONNECTION_MODES constant (web/src/api/types.ts) is derived from. A mode
+    string here that isn't one of these three silently breaks the UI's
+    mode-gated rendering (AccountsSection.tsx) without either side's tests
+    failing on their own."""
+    known = {"subscription", "apikey", "url"}
+    for c in CARDS.values():
+        assert set(c["modes"]) <= known

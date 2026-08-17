@@ -7,6 +7,7 @@ import {
   saveConnectionKey,
   startLogin,
 } from "../api/client";
+import { CONNECTION_MODES } from "../api/types";
 import type { ConnectionList, ConnectionStatus } from "../api/types";
 import { AccountsSection } from "./AccountsSection";
 
@@ -31,10 +32,10 @@ function makeStatus(overrides: Partial<ConnectionStatus> = {}): ConnectionStatus
   return {
     provider: "codex",
     label: "Codex",
-    modes: ["apiKey"],
+    modes: ["apikey"],
     subscriptionConnected: false,
     apiKeyConnected: false,
-    authMode: "apiKey",
+    authMode: "apikey",
     expiresAt: null,
     connectedAt: null,
     ...overrides,
@@ -55,7 +56,7 @@ describe("AccountsSection", () => {
     const list = makeList([
       makeStatus({ provider: "claude", label: "Claude" }),
       makeStatus({ provider: "codex", label: "Codex" }),
-      makeStatus({ provider: "ollama", label: "Ollama" }),
+      makeStatus({ provider: "ollama", label: "Ollama", modes: ["url"] }),
     ]);
     render(<AccountsSection list={list} onChanged={vi.fn()} />);
 
@@ -122,7 +123,7 @@ describe("AccountsSection", () => {
     vi.mocked(saveConnectionKey).mockResolvedValueOnce([]);
     const onChanged = vi.fn();
     const list = makeList([
-      makeStatus({ provider: "codex", label: "Codex", modes: ["apiKey"], authMode: "apiKey" }),
+      makeStatus({ provider: "codex", label: "Codex", modes: ["apikey"], authMode: "apikey" }),
     ]);
     render(<AccountsSection list={list} onChanged={onChanged} />);
 
@@ -138,7 +139,7 @@ describe("AccountsSection", () => {
   it("a rejected saveConnectionKey renders its message in an Alert", async () => {
     vi.mocked(saveConnectionKey).mockRejectedValueOnce(new Error("Bad key format."));
     const list = makeList([
-      makeStatus({ provider: "codex", label: "Codex", modes: ["apiKey"], authMode: "apiKey" }),
+      makeStatus({ provider: "codex", label: "Codex", modes: ["apikey"], authMode: "apikey" }),
     ]);
     render(<AccountsSection list={list} onChanged={vi.fn()} />);
 
@@ -155,8 +156,8 @@ describe("AccountsSection", () => {
       makeStatus({
         provider: "codex",
         label: "Codex",
-        modes: ["apiKey"],
-        authMode: "apiKey",
+        modes: ["apikey"],
+        authMode: "apikey",
         apiKeyConnected: true,
       }),
     ]);
@@ -165,8 +166,33 @@ describe("AccountsSection", () => {
     fireEvent.click(screen.getByRole("button", { name: /disconnect/i }));
 
     await vi.waitFor(() => {
-      expect(logoutConnection).toHaveBeenCalledWith("codex", "apiKey");
+      expect(logoutConnection).toHaveBeenCalledWith("codex", "apikey");
     });
     expect(onChanged).toHaveBeenCalled();
+  });
+
+  it("ollama card: its pane gates on the url mode, not apikey", async () => {
+    vi.mocked(saveConnectionKey).mockResolvedValueOnce([]);
+    const onChanged = vi.fn();
+    const list = makeList([
+      makeStatus({ provider: "ollama", label: "Ollama", modes: ["url"], authMode: "url" }),
+    ]);
+    render(<AccountsSection list={list} onChanged={onChanged} />);
+
+    fireEvent.change(screen.getByLabelText(/base url/i), {
+      target: { value: "http://localhost:11434" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await vi.waitFor(() => {
+      expect(saveConnectionKey).toHaveBeenCalledWith("ollama", {
+        baseUrl: "http://localhost:11434",
+      });
+    });
+    expect(onChanged).toHaveBeenCalled();
+  });
+
+  it("CONNECTION_MODES pins the three backend mode literals fixtures derive from", () => {
+    expect(CONNECTION_MODES).toEqual(["subscription", "apikey", "url"]);
   });
 });

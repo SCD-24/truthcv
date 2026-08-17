@@ -18,7 +18,7 @@ import {
 } from "../api/client";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { SettingsSection } from "./SettingsModal";
-import type { ConnectionList, ConnectionStatus, StartLoginResult } from "../api/types";
+import type { ConnectionList, ConnectionMode, ConnectionStatus, StartLoginResult } from "../api/types";
 
 function statusLine(status: ConnectionStatus): string {
   const parts: string[] = [];
@@ -62,9 +62,9 @@ function ConnectionCard({
   status: ConnectionStatus;
   onChanged: () => void;
 }) {
-  const dualMode = status.modes.includes("subscription") && status.modes.includes("apiKey");
-  const [mode, setMode] = useState<string>(
-    status.modes.includes("subscription") ? "subscription" : "apiKey",
+  const dualMode = status.modes.includes("subscription") && status.modes.includes("apikey");
+  const [mode, setMode] = useState<ConnectionMode>(
+    status.modes.includes("subscription") ? "subscription" : status.modes[0],
   );
   const [error, setError] = useState<string | null>(null);
 
@@ -147,7 +147,9 @@ function ConnectionCard({
   }
 
   const showSubscription = mode === "subscription" && status.modes.includes("subscription");
-  const showApiKey = mode === "apiKey" && status.modes.includes("apiKey");
+  const showApiKey =
+    (mode === "apikey" && status.modes.includes("apikey")) ||
+    (mode === "url" && status.modes.includes("url"));
 
   return (
     <Card variant="outlined">
@@ -173,7 +175,7 @@ function ConnectionCard({
               }}
             >
               <ToggleButton value="subscription">Subscription</ToggleButton>
-              <ToggleButton value="apiKey">API key</ToggleButton>
+              <ToggleButton value="apikey">API key</ToggleButton>
             </ToggleButtonGroup>
           )}
 
@@ -237,9 +239,7 @@ function ConnectionCard({
                     autoComplete="off"
                     value={bearer}
                     onChange={(e) => setBearer(e.target.value)}
-                    placeholder={
-                      status.apiKeyConnected ? "•••••  key saved" : "Optional"
-                    }
+                    placeholder="Optional"
                   />
                 </>
               ) : (
@@ -269,7 +269,7 @@ function ConnectionCard({
                     busy={disconnecting}
                     busyLabel="Disconnecting…"
                     label="Disconnect"
-                    onClick={() => handleDisconnect("apiKey")}
+                    onClick={() => handleDisconnect("apikey")}
                   />
                 </Box>
               )}
@@ -298,13 +298,6 @@ export function AccountsSection({
       title="Accounts"
       description="Connect the providers TruthCV and the application agent use."
     >
-      {!list.encryptionAvailable && (
-        <Alert severity="warning">
-          Set <code>ENCRYPTION_KEY</code> in your <code>.env</code> to save
-          keys securely. Until then TruthCV falls back to keys in the
-          environment.
-        </Alert>
-      )}
       <Stack spacing={2}>
         {list.connections.map((status) => (
           <ConnectionCard key={status.provider} status={status} onChanged={onChanged} />

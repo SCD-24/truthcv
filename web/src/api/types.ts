@@ -317,11 +317,17 @@ export type AgentConfigUpdate = Partial<AgentConfig>;
 /** Provider identifier for connection status and routing. */
 export type CardKey = "claude" | "codex" | "openrouter" | "ollama";
 
+/** The mode literals the backend catalog emits (connections/catalog.py CARDS).
+ * The single source of truth for what a mode string can be — fixtures and
+ * checks derive from this rather than hand-typing "apikey"/"url" elsewhere. */
+export const CONNECTION_MODES = ["subscription", "apikey", "url"] as const;
+export type ConnectionMode = (typeof CONNECTION_MODES)[number];
+
 /** Status of a single provider connection. */
 export interface ConnectionStatus {
   provider: CardKey | string;
   label: string;
-  modes: string[];
+  modes: ConnectionMode[];
   subscriptionConnected: boolean;
   apiKeyConnected: boolean;
   authMode: string;
