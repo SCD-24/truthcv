@@ -39,6 +39,7 @@ export function DefaultModelSection({
   onSaved: (r: Routing) => void;
 }) {
   const connectedConnections = connections.filter(isConnected);
+  const connectedKey = connectedConnections.map((c) => c.provider).join(" ");
 
   const [connection, setConnection] = useState(
     routing.default?.connection ?? connectedConnections[0]?.provider ?? "",
@@ -75,10 +76,38 @@ export function DefaultModelSection({
     }
   }
 
-  // Load the initial connection's models once on mount, and mark the current
-  // model as custom if it isn't in the live list (so it survives even if the
-  // list can't be fetched).
+  // Reconcile the selected connection against the live connected set: a
+  // saved default may point at a card that was disconnected before this
+  // panel was ever opened, or a card connected when it opened may be
+  // disconnected live via AccountsSection while it's still showing. Either
+  // way a selection that isn't in the connected set is stale — fall back to
+  // the first still-connected card, or none, and drop its stale model choice
+  // so Save can't re-persist an invalid default.
   useEffect(() => {
+    const stillValid = connectedConnections.some((c) => c.provider === connection);
+    if (stillValid) return;
+    const next = connectedConnections[0]?.provider ?? "";
+    if (next === connection) return;
+    setConnection(next);
+    setModel("");
+    setCustomModel(false);
+    setModels([]);
+    setTest({ kind: "idle" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectedKey]);
+
+  // Load the selected connection's models whenever it changes — including on
+  // mount, after a manual connection pick, and after the reconciliation
+  // effect above corrects a stale selection — and mark the current model as
+  // custom if it isn't in the live list (so it survives even if the list
+  // can't be fetched). Skipped for a connection not currently in the
+  // connected set: the reconciliation effect is about to replace it, and
+  // fetching models for a disconnected card would be wasted (or fail).
+  useEffect(() => {
+    if (!connection || !connectedConnections.some((c) => c.provider === connection)) {
+      setModels([]);
+      return;
+    }
     let alive = true;
     loadModels(connection).then((list) => {
       if (!alive) return;
@@ -88,7 +117,7 @@ export function DefaultModelSection({
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [connection, connectedKey]);
 
   async function handleSave() {
     setSaving(true);
@@ -137,7 +166,6 @@ export function DefaultModelSection({
           setModel("");
           setCustomModel(false);
           setTest({ kind: "idle" });
-          loadModels(next);
         }}
       >
         {connectedConnections.map((c) => (

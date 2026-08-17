@@ -140,4 +140,57 @@ describe("DefaultModelSection", () => {
     expect(await screen.findByText("Connected fine.")).toBeTruthy();
     expect(testConnectionProvider).toHaveBeenCalledWith("claude", "");
   });
+
+  it("a saved default naming a disconnected card resets to a valid selection (or empty) and disables Save", () => {
+    // Neither connection is connected, so a saved default naming "claude"
+    // is stale — the section must not leave it selected (Save would then
+    // re-persist an invalid default).
+    const connections = [
+      makeStatus({ provider: "claude", label: "Claude" }),
+      makeStatus({ provider: "codex", label: "Codex" }),
+    ];
+    render(
+      <DefaultModelSection
+        connections={connections}
+        routing={makeRouting({ default: { connection: "claude", model: "claude-opus-5" } })}
+        onSaved={vi.fn()}
+      />,
+    );
+
+    // No connected cards to fall back to, so the selection resets to empty
+    // and the stale "claude" pick is dropped — Save must not be able to
+    // re-persist it, and no model fetch is made for a disconnected card.
+    expect((screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(listConnectionModels).not.toHaveBeenCalled();
+  });
+
+  it("resets the selection when the selected card is disconnected live (e.g. via AccountsSection)", async () => {
+    vi.mocked(listConnectionModels).mockResolvedValue([]);
+    const connections = [
+      makeStatus({ provider: "claude", label: "Claude", subscriptionConnected: true }),
+    ];
+    const { rerender } = render(
+      <DefaultModelSection connections={connections} routing={makeRouting()} onSaved={vi.fn()} />,
+    );
+
+    await vi.waitFor(() => {
+      expect(listConnectionModels).toHaveBeenCalledWith("claude");
+    });
+    expect(
+      (screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+
+    const disconnected = [
+      makeStatus({ provider: "claude", label: "Claude", subscriptionConnected: false }),
+    ];
+    rerender(
+      <DefaultModelSection connections={disconnected} routing={makeRouting()} onSaved={vi.fn()} />,
+    );
+
+    expect(
+      (screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
 });
