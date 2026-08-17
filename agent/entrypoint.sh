@@ -86,7 +86,7 @@ seconds_until_next_slot() {
   IFS=',' read -ra slots <<< "$RUN_AT"
   for offset in $(seq 0 8); do
     for t in "${slots[@]}"; do
-      target=$(date -d "today +${offset} days ${t}" +%s 2>/dev/null) || return 1
+      target=$(date -d "$(date -d "@$now" +%F) +${offset} days ${t}" +%s 2>/dev/null) || return 1
       dow=$(date -d "@$target" +%u)
       if [[ ",$RUN_DAYS," == *",$dow,"* ]] && (( target > now )); then
         if (( best == -1 )) || (( target - now < best )); then
