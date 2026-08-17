@@ -482,3 +482,44 @@ class CooldownResult(_Camel):
     in_cooldown: bool
     expires: str | None = None
     blocked: bool = False
+
+
+class ConnectionStatus(_Camel):
+    """One catalog card's connection state — never carries token material."""
+
+    provider: str
+    label: str
+    modes: list[str]
+    subscription_connected: bool = False
+    api_key_connected: bool = False
+    auth_mode: str = ""
+    expires_at: float | None = None
+    connected_at: float | None = None
+
+
+class ConnectionList(_Camel):
+    """GET /api/auth/status response: one ConnectionStatus per catalog card."""
+
+    encryption_available: bool
+    connections: list[ConnectionStatus] = []
+
+
+class StartLoginResult(_Camel):
+    flow: str
+    auth_url: str | None = None
+    user_code: str | None = None
+    verification_uri: str | None = None
+
+
+class CompleteLoginRequest(_Camel):
+    code: str
+
+
+class ApiKeyRequest(_Camel):
+    api_key: str | None = None
+    base_url: str | None = None
+    bearer: str | None = None
+
+
+class ConnectionTestRequest(_Camel):
+    model: str | None = None

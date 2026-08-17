@@ -31,8 +31,13 @@ from truth.pdf import (
 )
 
 import applications as app_store
+import secretstore
 from agentconfig import store as agent_config_store
 from api import secrets as secrets_store
+from connections import catalog
+from connections.auth.claude import AuthError
+from connections.auth import claude as claude_auth
+from providers import OPENROUTER_BASE_URL, build_connection_provider, reset_provider
 from screening import store as screening_store
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
@@ -42,12 +47,17 @@ from .schemas import (
     AgentConfigUpdate,
     AnswersModel,
     AnswersUpdate,
+    ApiKeyRequest,
     ApplicationCreate,
     ApplicationDocument,
     ApplicationModel,
     ApplicationUpdate,
     AtsWarning,
+    CompleteLoginRequest,
     ConfirmInferencesRequest,
+    ConnectionList,
+    ConnectionStatus,
+    ConnectionTestRequest,
     CoverLetterApprovals,
     CoverLetterRequest,
     CooldownResult,
@@ -65,6 +75,7 @@ from .schemas import (
     ScreeningModel,
     SettingsStatus,
     SettingsUpdate,
+    StartLoginResult,
     TailorRequest,
     TailorResult,
     TestResult,
@@ -897,3 +908,143 @@ def list_models(body: SettingsUpdate) -> ModelList:
     return ModelList(
         models=[ModelInfo(id=m["id"], label=m.get("label") or m["id"]) for m in models]
     )
+
+
+def _require_card(provider: str) -> dict:
+    try:
+        return catalog.card(provider)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown connection '{provider}'.") from None
+
+
+def _connection_status(card_key: str) -> ConnectionStatus:
+    meta = catalog.card(card_key)
+    conn = secretstore.get_connection(card_key)
+    oauth = conn.get("oauth") or {}
+    has_key = bool(conn.get("apiKey")) or (card_key == "ollama" and bool(conn.get("baseUrl")))
+    return ConnectionStatus(
+        provider=card_key,
+        label=meta["label"],
+        modes=list(meta["modes"]),
+        subscription_connected=bool(oauth.get("accessToken")),
+        api_key_connected=has_key,
+        auth_mode=conn.get("authMode", ""),
+        expires_at=oauth.get("expiresAt"),
+        connected_at=oauth.get("connectedAt"),
+    )
+
+
+def _models_result(models: list[dict]) -> ModelList:
+    return ModelList(
+        models=[ModelInfo(id=m["id"], label=m.get("label") or m["id"]) for m in models]
+    )
+
+
+@router.get("/auth/status", response_model=ConnectionList)
+def get_connection_status() -> ConnectionList:
+    return ConnectionList(
+        encryption_available=secretstore.encryption_available(),
+        connections=[_connection_status(key) for key in catalog.card_keys()],
+    )
+
+
+@router.post("/auth/{provider}/start", response_model=StartLoginResult)
+def start_connection_login(provider: str) -> StartLoginResult:
+    _require_card(provider)
+    if provider != "claude":
+        raise HTTPException(
+            status_code=400,
+            detail="Subscription sign-in is not available for this provider yet.",
+        )
+    return StartLoginResult.model_validate(claude_auth.start_login())
+
+
+@router.post("/auth/claude/complete", response_model=ConnectionStatus)
+def complete_connection_login(body: CompleteLoginRequest) -> ConnectionStatus:
+    try:
+        claude_auth.complete_login(body.code)
+    except AuthError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _connection_status("claude")
+
+
+def _probe_key(card: str, body: ApiKeyRequest) -> list[dict]:
+    """Construct a provider directly from the submitted credential (never via
+    the stored oauth path) and list its models. An empty submitted value falls
+    back to the currently stored credential, so a bare re-validate still works."""
+    conn = secretstore.get_connection(card)
+    if card == "claude":
+        from providers.anthropic_provider import AnthropicProvider
+
+        provider = AnthropicProvider(api_key=body.api_key or conn.get("apiKey") or None)
+    elif card in ("codex", "openrouter"):
+        from providers.openai_provider import OpenAIProvider
+
+        base_url = OPENROUTER_BASE_URL if card == "openrouter" else None
+        provider = OpenAIProvider(
+            api_key=body.api_key or conn.get("apiKey") or None, base_url=base_url
+        )
+    elif card == "ollama":
+        from providers.ollama_provider import OllamaProvider
+
+        provider = OllamaProvider(host=body.base_url or conn.get("baseUrl") or None)
+    else:
+        raise ProviderError(f"Unknown connection '{card}'.")
+    return provider.list_models()
+
+
+@router.post("/auth/{provider}/key", response_model=ModelList)
+def post_connection_key(provider: str, body: ApiKeyRequest) -> ModelList:
+    _require_card(provider)
+    if not secretstore.encryption_available():
+        raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
+    try:
+        models = _probe_key(provider, body)
+    except ProviderError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    updates: dict = {}
+    if body.api_key:
+        updates["apiKey"] = body.api_key
+    if body.base_url:
+        updates["baseUrl"] = body.base_url
+    if body.bearer:
+        updates["bearer"] = body.bearer
+    if "subscription" in catalog.card(provider)["modes"]:
+        updates["authMode"] = "apikey"
+    if updates:
+        secretstore.set_connection(provider, updates)
+    reset_provider()
+    return _models_result(models)
+
+
+@router.get("/auth/{provider}/models", response_model=ModelList)
+def get_connection_models(provider: str) -> ModelList:
+    _require_card(provider)
+    try:
+        models = build_connection_provider(provider, None).list_models()
+    except ProviderError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001 — surface upstream LLM/SDK errors cleanly
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}") from e
+    return _models_result(models)
+
+
+@router.post("/auth/{provider}/test", response_model=TestResult)
+def test_connection(provider: str, body: ConnectionTestRequest) -> TestResult:
+    _require_card(provider)
+    try:
+        provider_obj = build_connection_provider(provider, body.model)
+        provider_obj.complete("ping", [{"role": "user", "content": "ping"}])
+        return TestResult(ok=True, detail="Connection succeeded.")
+    except HTTPException as e:
+        return TestResult(ok=False, detail=str(e.detail))
+    except Exception as e:  # noqa: BLE001
+        return TestResult(ok=False, detail=f"{type(e).__name__}: {e}")
+
+
+@router.post("/auth/{provider}/logout", response_model=ConnectionStatus)
+def logout_connection(provider: str, mode: str | None = None) -> ConnectionStatus:
+    _require_card(provider)
+    secretstore.clear_mode(provider, mode or "apikey")
+    reset_provider()
+    return _connection_status(provider)
