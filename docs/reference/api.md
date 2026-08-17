@@ -42,7 +42,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **GET** | `/api/auth/{provider}/models` | List available models for an authenticated provider connection (live model-list lookup). |
 | **POST** | `/api/auth/{provider}/test` | Test connection to an authenticated provider (small live call). Returns {ok, detail}. |
 | **POST** | `/api/auth/{provider}/logout` | Revoke provider connection (`mode=subscription` clears OAuth; default `mode=apikey` clears key material). |
-| **GET** | `/api/agent/llm-credentials` | Fetch LLM credentials and model for the unattended agent. **Internal, X-Agent-Token guarded.** Returns `{token, model}` or 404 if token is absent or invalid. |
+| **GET** | `/api/agent/llm-credentials` | Fetch LLM credentials and model for the unattended agent. **Internal, X-Agent-Token guarded.** Returns `{authType, token, model}` or 404 if token is absent or invalid. |
 
 ## Model routing API
 

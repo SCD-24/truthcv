@@ -719,9 +719,7 @@ def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:
 def get_agent_llm_credentials(x_agent_token: str = Header(default="")) -> AgentLlmCredentials:
     """Guarded: only the unattended agent (holding AGENT_API_TOKEN) may call this.
 
-    Unset env secret or a mismatched/missing header both 404 — a 401/403 would
-    reveal to a prober that the endpoint exists but requires auth, which is
-    itself information this guard is meant to withhold.
+    Returns 404 rather than 401/403 so the response carries no authentication hint.
     """
     secret = os.environ.get("AGENT_API_TOKEN", "").strip()
     given = x_agent_token.encode("utf-8", "surrogateescape")

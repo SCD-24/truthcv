@@ -104,6 +104,8 @@ if [[ -n "${AGENT_API_TOKEN:-}" ]]; then
     elif [[ "$AUTH_TYPE" == "api_key" ]]; then
       export ANTHROPIC_API_KEY="$AUTH_TOKEN"
       log "using API key credentials from app"
+    else
+      log "unrecognized auth type from app; using container ANTHROPIC_API_KEY"
     fi
     unset CREDS AUTH_TOKEN
   else
