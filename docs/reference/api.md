@@ -35,10 +35,10 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 
 | Method | Path | Description |
 |---|---|---|
-| **GET** | `/api/auth/status` | Check OAuth flow status for all providers; returns {provider, status, error?, expiresAt?}. |
-| **POST** | `/api/auth/{provider}/start` | Start OAuth flow for a provider; returns {authUrl} (browser redirects to it). |
-| **POST** | `/api/auth/claude/complete` | Complete Claude OAuth flow (authorization code → token); stores encrypted via ENCRYPTION_KEY. |
-| **POST** | `/api/auth/{provider}/key` | Save provider API key directly (Claude subscription OAuth paste-code, OpenAI/OpenRouter keys). |
+| **GET** | `/api/auth/status` | Status of every catalog connection card. Returns `{encryptionAvailable, connections:[{provider,label,modes,subscriptionConnected,apiKeyConnected,authMode,expiresAt,connectedAt}]}`. |
+| **POST** | `/api/auth/{provider}/start` | Start the paste-code OAuth flow for a provider — Stage 1 supports this for `claude` only (400 for any other provider). Returns `{flow:"paste-code", authUrl}`. |
+| **POST** | `/api/auth/claude/complete` | Complete the Claude paste-code OAuth flow (authorization code → token); stores encrypted via ENCRYPTION_KEY. |
+| **POST** | `/api/auth/{provider}/key` | Save an API key (or, for `ollama`, a base URL/bearer token) for a provider connection — probes it live before persisting. Distinct from the paste-code OAuth flow above: this is key/URL storage, not subscription sign-in. An empty body re-validates the currently stored credential without changing it. |
 | **GET** | `/api/auth/{provider}/models` | List available models for an authenticated provider connection (live model-list lookup). |
 | **POST** | `/api/auth/{provider}/test` | Test connection to an authenticated provider (small live call). Returns {ok, detail}. |
 | **POST** | `/api/auth/{provider}/logout` | Revoke provider connection (`mode=subscription` clears OAuth; default `mode=apikey` clears key material). |
