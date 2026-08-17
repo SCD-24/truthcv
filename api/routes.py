@@ -34,7 +34,6 @@ import applications as app_store
 import modelrouting
 import secretstore
 from agentconfig import store as agent_config_store
-from api import secrets as secrets_store
 from connections import catalog
 from connections.auth.claude import AuthError
 from connections.auth import claude as claude_auth
@@ -652,15 +651,25 @@ def save_application_cover_letter(
     )
 
 
+_V1_PROVIDER_TO_CARD = {"anthropic": "claude", "openai": "codex", "ollama": "ollama"}
+_CARD_TO_V1_PROVIDER = {v: k for k, v in _V1_PROVIDER_TO_CARD.items()}
+
+
 def _settings_status() -> SettingsStatus:
-    creds = secrets_store.resolve_credentials()
+    routing = modelrouting.load()
+    if routing.default is not None:
+        active_provider = _CARD_TO_V1_PROVIDER.get(routing.default.connection, routing.default.connection)
+        model = routing.default.model
+    else:
+        card, model = secretstore.legacy_default()
+        active_provider = _CARD_TO_V1_PROVIDER.get(card, card or "")
     return SettingsStatus(
-        encryption_available=secrets_store.encryption_available(),
-        active_provider=creds["activeProvider"],
-        model=creds["model"],
-        anthropic_key_set=bool(creds["anthropicApiKey"]),
-        openai_key_set=bool(creds["openaiApiKey"]),
-        ollama_host=creds["ollamaHost"],
+        encryption_available=secretstore.encryption_available(),
+        active_provider=active_provider,
+        model=model,
+        anthropic_key_set=bool(secretstore.get_connection("claude").get("apiKey")),
+        openai_key_set=bool(secretstore.get_connection("codex").get("apiKey")),
+        ollama_host=secretstore.get_connection("ollama").get("baseUrl", ""),
     )
 
 
@@ -839,22 +848,28 @@ def get_settings() -> SettingsStatus:
 
 @router.post("/settings", response_model=SettingsStatus)
 def post_settings(body: SettingsUpdate) -> SettingsStatus:
-    if not secrets_store.encryption_available():
+    """Old single-provider POST shape, shimmed onto the v2 store: the key/host
+    lands in that provider's connection, and {connection, model} becomes the
+    routing default."""
+    if not secretstore.encryption_available():
         raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
-    current = secrets_store.read_secrets()
-    current["activeProvider"] = body.active_provider
-    if body.model is not None:
-        current["model"] = body.model
-    if body.ollama_host:
-        current["ollamaHost"] = body.ollama_host
+    card = _V1_PROVIDER_TO_CARD.get(body.active_provider, body.active_provider)
+
+    updates: dict = {}
     if body.api_key:  # empty/None leaves the stored key unchanged
-        field = {"anthropic": "anthropicApiKey", "openai": "openaiApiKey"}.get(
-            body.active_provider
-        )
-        if field:
-            current[field] = body.api_key
-    secrets_store.write_secrets(current)
-    from providers import reset_provider
+        updates["apiKey"] = body.api_key
+    if body.ollama_host:
+        updates["baseUrl"] = body.ollama_host
+    if updates:
+        secretstore.set_connection(card, updates)
+
+    routing = modelrouting.load()
+    if body.model is not None:
+        model = body.model
+    else:
+        model = routing.default.model if routing.default else ""
+    routing.default = modelrouting.Route(card, model)
+    modelrouting.save(routing)
 
     reset_provider()
     return _settings_status()
@@ -876,24 +891,27 @@ def test_settings(body: SettingsUpdate) -> TestResult:
 def _provider_from_update(body: SettingsUpdate):
     """Build a provider from the submitted settings WITHOUT persisting anything.
 
-    Uses a key/host typed in the form if present, otherwise the saved credential
+    Uses a key/host typed in the form if present, otherwise the saved connection
     — so the model list can load with an unsaved key (like Test connection) and
     without writing secrets just to populate a dropdown.
     """
     name = (body.active_provider or "").strip().lower()
-    creds = secrets_store.resolve_credentials()
-    if name == "anthropic":
+    card = _V1_PROVIDER_TO_CARD.get(name)
+    if card is None:
+        raise HTTPException(status_code=400, detail=f"Unknown provider '{name}'.")
+    conn = secretstore.get_connection(card)
+    if card == "claude":
         from providers.anthropic_provider import AnthropicProvider
 
-        return AnthropicProvider(api_key=body.api_key or creds["anthropicApiKey"] or None)
-    if name == "openai":
+        return AnthropicProvider(api_key=body.api_key or conn.get("apiKey") or None)
+    if card == "codex":
         from providers.openai_provider import OpenAIProvider
 
-        return OpenAIProvider(api_key=body.api_key or creds["openaiApiKey"] or None)
-    if name == "ollama":
+        return OpenAIProvider(api_key=body.api_key or conn.get("apiKey") or None)
+    if card == "ollama":
         from providers.ollama_provider import OllamaProvider
 
-        return OllamaProvider(host=body.ollama_host or creds["ollamaHost"] or None)
+        return OllamaProvider(host=body.ollama_host or conn.get("baseUrl") or None)
     raise HTTPException(status_code=400, detail=f"Unknown provider '{name}'.")
 
 

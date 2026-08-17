@@ -17,8 +17,6 @@ import json
 import os
 from pathlib import Path
 
-_FIELDS = ("activeProvider", "anthropicApiKey", "openaiApiKey", "ollamaHost", "model")
-
 
 class SecretsUnavailable(RuntimeError):
     """Raised when a write is attempted without a valid ENCRYPTION_KEY."""
@@ -76,27 +74,6 @@ def write_secrets(data: dict) -> None:
     tmp = p.with_suffix(".enc.tmp")
     tmp.write_bytes(token)
     tmp.replace(p)
-
-
-def resolve_credentials() -> dict:
-    """Merge stored secrets over environment defaults.
-
-    Returns every field in _FIELDS; secrets.enc values win where present,
-    otherwise the environment variable, otherwise a sensible default.
-    """
-    s = read_secrets()
-    out = {
-        "activeProvider": os.environ.get("LLM_PROVIDER", "anthropic"),
-        "anthropicApiKey": os.environ.get("ANTHROPIC_API_KEY", ""),
-        "openaiApiKey": os.environ.get("OPENAI_API_KEY", ""),
-        "ollamaHost": os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
-        "model": os.environ.get("LLM_MODEL", ""),
-    }
-    for k in _FIELDS:
-        v = s.get(k)
-        if v:
-            out[k] = v
-    return out
 
 
 SCHEMA_VERSION = 2

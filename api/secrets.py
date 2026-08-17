@@ -12,7 +12,6 @@ from secretstore import (
     SecretsUnavailable,
     encryption_available,
     read_secrets,
-    resolve_credentials,
     write_secrets,
 )
 
@@ -20,6 +19,5 @@ __all__ = [
     "SecretsUnavailable",
     "encryption_available",
     "read_secrets",
-    "resolve_credentials",
     "write_secrets",
 ]
