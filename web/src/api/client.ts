@@ -22,6 +22,10 @@ import type {
   CooldownStatus,
   AgentConfig,
   AgentConfigUpdate,
+  ConnectionStatus,
+  ConnectionList,
+  StartLoginResult,
+  Routing,
 } from "./types";
 
 /**
@@ -291,6 +295,72 @@ export function getAgentConfig(): Promise<AgentConfig> {
 /** Patch the agent configuration (only the keys you pass change). Returns fresh values. */
 export function updateAgentConfig(body: AgentConfigUpdate): Promise<AgentConfig> {
   return request("/api/agent/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** List all provider connections and their status. */
+export function listConnections(): Promise<ConnectionList> {
+  return request("/api/auth/status");
+}
+
+/** Start a login flow for a provider. */
+export function startLogin(provider: string): Promise<StartLoginResult> {
+  return request(`/api/auth/${provider}/start`, { method: "POST" });
+}
+
+/** Complete a Claude login flow with an authorization code. */
+export function completeClaudeLogin(code: string): Promise<ConnectionStatus> {
+  return request("/api/auth/claude/complete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+}
+
+/** Save an API key or base URL for a provider and fetch available models. */
+export function saveConnectionKey(
+  provider: string,
+  body: { apiKey?: string; baseUrl?: string; bearer?: string },
+): Promise<ModelInfo[]> {
+  return request<ModelList>(`/api/auth/${provider}/key`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then((r) => r.models);
+}
+
+/** Fetch available models for a provider connection. */
+export function listConnectionModels(provider: string): Promise<ModelInfo[]> {
+  return request<ModelList>(`/api/auth/${provider}/models`).then((r) => r.models);
+}
+
+/** Test the connection to a provider with an optional model. */
+export function testConnectionProvider(provider: string, model?: string): Promise<TestResult> {
+  return request(`/api/auth/${provider}/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: model || undefined }),
+  });
+}
+
+/** Logout from a provider connection mode. */
+export function logoutConnection(provider: string, mode: string): Promise<ConnectionStatus> {
+  return request(`/api/auth/${provider}/logout?mode=${encodeURIComponent(mode)}`, {
+    method: "POST",
+  });
+}
+
+/** Fetch the current routing configuration. */
+export function getRouting(): Promise<Routing> {
+  return request("/api/routing");
+}
+
+/** Update the routing configuration (only the keys you pass change). */
+export function updateRouting(body: Partial<Routing>): Promise<Routing> {
+  return request("/api/routing", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

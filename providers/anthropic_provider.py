@@ -11,7 +11,9 @@ from ._json import parse_json_object
 
 
 class AnthropicProvider(LLMProvider):
-    def __init__(self, model: str | None = None, api_key: str | None = None) -> None:
+    def __init__(
+        self, model: str | None = None, api_key: str | None = None, oauth: bool = False
+    ) -> None:
         try:
             import anthropic  # noqa: F401
         except ImportError as exc:  # pragma: no cover - import guard
@@ -19,27 +21,53 @@ class AnthropicProvider(LLMProvider):
                 "The 'anthropic' package is required for LLM_PROVIDER=anthropic."
             ) from exc
         self._anthropic = anthropic
-        key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not key:
-            raise ProviderError("ANTHROPIC_API_KEY is not set.")
-        self._client = anthropic.Anthropic(api_key=key)
+        self._oauth = oauth
+        if not oauth:
+            key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+            if not key:
+                raise ProviderError("ANTHROPIC_API_KEY is not set.")
+            self._client = anthropic.Anthropic(api_key=key)
         self._model = env_model("claude-opus-4-8", model)
+
+    def _get_client(self):
+        """Key mode: the cached client. OAuth mode: per-call client with a
+        fresh subscription token (lazy refresh lives in the auth module)."""
+        if not self._oauth:
+            return self._client
+        from connections.auth.claude import get_valid_access_token
+
+        return self._anthropic.Anthropic(
+            auth_token=get_valid_access_token(),
+            default_headers={"anthropic-beta": "oauth-2025-04-20"},
+        )
+
+    def _system_param(self, system: str):
+        if not self._oauth:
+            return system
+        from connections.auth.claude import CLAUDE_CODE_PREAMBLE
+
+        # Subscription tokens are rejected unless this exact preamble is the
+        # first system block.
+        return [
+            {"type": "text", "text": CLAUDE_CODE_PREAMBLE},
+            {"type": "text", "text": system},
+        ]
 
     def list_models(self) -> list[dict[str, str]]:
         """Live model list from the Anthropic Models API (auto-paginates)."""
         out: list[dict[str, str]] = []
-        for m in self._client.models.list():
+        for m in self._get_client().models.list():
             out.append({"id": m.id, "label": getattr(m, "display_name", "") or m.id})
         return out
 
     def complete(self, system: str, messages: list[dict[str, str]]) -> str:
-        resp = self._client.messages.create(
+        resp = self._get_client().messages.create(
             model=self._model,
             # Generous ceiling so a long extraction isn't truncated mid-JSON;
             # stays under the SDK's non-streaming timeout guard. See base.py.
             max_tokens=MAX_OUTPUT_TOKENS,
             thinking={"type": "disabled"},
-            system=system,
+            system=self._system_param(system),
             messages=messages,
         )
         return "".join(block.text for block in resp.content if block.type == "text")

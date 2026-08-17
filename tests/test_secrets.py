@@ -31,13 +31,16 @@ def test_round_trip_encrypted(data_dir, monkeypatch):
 
 
 def test_resolve_prefers_secrets_then_env(data_dir, monkeypatch):
+    """Same behavior the old resolve_credentials() covered, via the v2
+    accessors it was replaced by: get_connection merges stored-over-env."""
+    from secretstore import get_connection
+
     monkeypatch.setenv("ENCRYPTION_KEY", FERNET_KEY)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     sec.write_secrets({"activeProvider": "anthropic", "anthropicApiKey": "enc-key"})
-    creds = sec.resolve_credentials()
-    assert creds["anthropicApiKey"] == "enc-key"  # secrets wins
-    assert creds["openaiApiKey"] == ""  # absent everywhere
+    assert get_connection("claude")["apiKey"] == "enc-key"  # secrets wins over env
+    assert get_connection("codex").get("apiKey", "") == ""  # absent everywhere
 
 
 def test_invalid_key_disables(data_dir, monkeypatch):

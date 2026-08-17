@@ -17,8 +17,6 @@ import json
 import os
 from pathlib import Path
 
-_FIELDS = ("activeProvider", "anthropicApiKey", "openaiApiKey", "ollamaHost", "model")
-
 
 class SecretsUnavailable(RuntimeError):
     """Raised when a write is attempted without a valid ENCRYPTION_KEY."""
@@ -69,7 +67,7 @@ def write_secrets(data: dict) -> None:
     f = _fernet()
     if f is None:
         raise SecretsUnavailable("ENCRYPTION_KEY is missing or invalid.")
-    clean = {k: v for k, v in data.items() if k in _FIELDS and v is not None}
+    clean = {k: v for k, v in data.items() if v is not None}
     p = secrets_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     token = f.encrypt(json.dumps(clean).encode("utf-8"))
@@ -78,22 +76,96 @@ def write_secrets(data: dict) -> None:
     tmp.replace(p)
 
 
-def resolve_credentials() -> dict:
-    """Merge stored secrets over environment defaults.
+SCHEMA_VERSION = 2
 
-    Returns every field in _FIELDS; secrets.enc values win where present,
-    otherwise the environment variable, otherwise a sensible default.
-    """
-    s = read_secrets()
-    out = {
-        "activeProvider": os.environ.get("LLM_PROVIDER", "anthropic"),
-        "anthropicApiKey": os.environ.get("ANTHROPIC_API_KEY", ""),
-        "openaiApiKey": os.environ.get("OPENAI_API_KEY", ""),
-        "ollamaHost": os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
-        "model": os.environ.get("LLM_MODEL", ""),
+_V1_KEY_MAP = (
+    ("anthropicApiKey", "claude", "apiKey"),
+    ("openaiApiKey", "codex", "apiKey"),
+    ("ollamaHost", "ollama", "baseUrl"),
+)
+
+
+def migrate_v1(raw: dict) -> dict:
+    """Lift a flat v1 secrets dict into the v2 connections shape. Pure."""
+    if raw.get("version") == SCHEMA_VERSION:
+        return raw
+    connections: dict = {}
+    for v1_key, card, field in _V1_KEY_MAP:
+        if raw.get(v1_key):
+            connections.setdefault(card, {})[field] = raw[v1_key]
+    for card in ("claude", "codex"):
+        if card in connections:
+            connections[card]["authMode"] = "apikey"
+    return {
+        "version": SCHEMA_VERSION,
+        "connections": connections,
+        "legacyDefault": {
+            "provider": raw.get("activeProvider", ""),
+            "model": raw.get("model", ""),
+        },
     }
-    for k in _FIELDS:
-        v = s.get(k)
+
+
+def load_store() -> dict:
+    """Return the v2 store, migrating a v1 file in place (with a .bak) once."""
+    raw = read_secrets()
+    if raw.get("version") == SCHEMA_VERSION:
+        return raw
+    store = migrate_v1(raw)
+    if raw and encryption_available():
+        p = secrets_path()
+        if p.exists():
+            bak = p.with_name("secrets.enc.v1.bak")
+            if not bak.exists():
+                bak.write_bytes(p.read_bytes())
+        write_secrets(store)
+    return store
+
+
+def save_store(store: dict) -> None:
+    write_secrets(store)
+
+
+_ENV_KEY_FALLBACK = {"claude": "ANTHROPIC_API_KEY", "codex": "OPENAI_API_KEY"}
+_V1_PROVIDER_TO_CARD = {"anthropic": "claude", "openai": "codex", "ollama": "ollama"}
+
+
+def get_connection(card: str) -> dict:
+    """Stored connection for a card, with env vars filling absent fields."""
+    conn = dict(load_store().get("connections", {}).get(card, {}))
+    env_var = _ENV_KEY_FALLBACK.get(card)
+    if env_var and not conn.get("apiKey"):
+        v = os.environ.get(env_var, "").strip()
         if v:
-            out[k] = v
-    return out
+            conn["apiKey"] = v
+    if card == "ollama" and not conn.get("baseUrl"):
+        v = os.environ.get("OLLAMA_HOST", "").strip()
+        conn["baseUrl"] = v if v else "http://localhost:11434"
+    return conn
+
+
+def set_connection(card: str, updates: dict) -> None:
+    """Merge updates into a card's stored connection. None deletes a field."""
+    store = load_store()
+    conn = store.setdefault("connections", {}).setdefault(card, {})
+    for k, v in updates.items():
+        if v is None:
+            conn.pop(k, None)
+        else:
+            conn[k] = v
+    save_store(store)
+
+
+def clear_mode(card: str, mode: str) -> None:
+    if mode == "subscription":
+        set_connection(card, {"oauth": None})
+    else:
+        set_connection(card, {"apiKey": None, "baseUrl": None, "bearer": None, "authMode": None})
+
+
+def legacy_default() -> tuple[str | None, str]:
+    """(card, model) equivalent of the v1 activeProvider/model behavior."""
+    leg = load_store().get("legacyDefault", {})
+    provider = (leg.get("provider") or os.environ.get("LLM_PROVIDER", "anthropic")).strip().lower()
+    model = (leg.get("model") or os.environ.get("LLM_MODEL", "")).strip()
+    return _V1_PROVIDER_TO_CARD.get(provider), model

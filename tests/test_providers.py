@@ -27,7 +27,12 @@ def test_get_provider_defaults_and_selects(data_dir, monkeypatch):
     assert isinstance(get_provider(), FakeProvider)
 
 
-def test_get_provider_unknown_raises(monkeypatch):
+def test_get_provider_unknown_raises(data_dir, monkeypatch):
+    # data_dir isolates the data volume, and ENCRYPTION_KEY must be cleared too:
+    # earlier tests in a full-suite run import api.main, which loads the real
+    # .env into os.environ, so without this the legacy-secrets path in
+    # load_store() reads/writes the real data/secrets.enc instead of a fake one.
+    monkeypatch.delenv("ENCRYPTION_KEY", raising=False)
     monkeypatch.setenv("LLM_PROVIDER", "nope")
     from providers import reset_provider
 
@@ -37,16 +42,19 @@ def test_get_provider_unknown_raises(monkeypatch):
 
 
 def test_get_provider_uses_secrets_credentials(data_dir, monkeypatch):
+    # LLM_PROVIDER=fake is now an env-only test bypass (providers/__init__.py's
+    # resolution ladder), not a value the legacy secrets path maps to a card —
+    # so this exercises the legacy-secrets fallback with a real provider name
+    # instead, which is what "uses secrets credentials" is actually testing.
     from providers import get_provider, reset_provider
 
     monkeypatch.setenv("ENCRYPTION_KEY", "h2oN5GQVeWVhciVjWNImtAmWFyPGlrWvDCq8vXuqfmo=")
     from api import secrets as sec
 
-    sec.write_secrets({"activeProvider": "fake"})  # active provider from secrets
+    sec.write_secrets({"activeProvider": "anthropic", "anthropicApiKey": "sk-ant-1"})
     reset_provider()
-    from providers.fake import FakeProvider
 
-    assert isinstance(get_provider(refresh=True), FakeProvider)
+    assert type(get_provider(refresh=True)).__name__ == "AnthropicProvider"
 
 
 def test_env_model_treats_empty_as_default(monkeypatch):

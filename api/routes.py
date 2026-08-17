@@ -31,8 +31,13 @@ from truth.pdf import (
 )
 
 import applications as app_store
+import modelrouting
+import secretstore
 from agentconfig import store as agent_config_store
-from api import secrets as secrets_store
+from connections import catalog
+from connections.auth.claude import AuthError
+from connections.auth import claude as claude_auth
+from providers import OPENROUTER_BASE_URL, build_connection_provider, reset_provider
 from screening import store as screening_store
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
@@ -42,12 +47,17 @@ from .schemas import (
     AgentConfigUpdate,
     AnswersModel,
     AnswersUpdate,
+    ApiKeyRequest,
     ApplicationCreate,
     ApplicationDocument,
     ApplicationModel,
     ApplicationUpdate,
     AtsWarning,
+    CompleteLoginRequest,
     ConfirmInferencesRequest,
+    ConnectionList,
+    ConnectionStatus,
+    ConnectionTestRequest,
     CoverLetterApprovals,
     CoverLetterRequest,
     CooldownResult,
@@ -58,6 +68,9 @@ from .schemas import (
     ProfileStatus,
     RenderRequest,
     RenderResult,
+    RouteModel,
+    RoutingModel,
+    RoutingUpdate,
     SaveCoverLetterRequest,
     SaveCvRequest,
     SaveDocumentResult,
@@ -65,6 +78,7 @@ from .schemas import (
     ScreeningModel,
     SettingsStatus,
     SettingsUpdate,
+    StartLoginResult,
     TailorRequest,
     TailorResult,
     TestResult,
@@ -637,15 +651,25 @@ def save_application_cover_letter(
     )
 
 
+_V1_PROVIDER_TO_CARD = {"anthropic": "claude", "openai": "codex", "ollama": "ollama"}
+_CARD_TO_V1_PROVIDER = {v: k for k, v in _V1_PROVIDER_TO_CARD.items()}
+
+
 def _settings_status() -> SettingsStatus:
-    creds = secrets_store.resolve_credentials()
+    routing = modelrouting.load()
+    if routing.default is not None:
+        active_provider = _CARD_TO_V1_PROVIDER.get(routing.default.connection, routing.default.connection)
+        model = routing.default.model
+    else:
+        card, model = secretstore.legacy_default()
+        active_provider = _CARD_TO_V1_PROVIDER.get(card, card or "")
     return SettingsStatus(
-        encryption_available=secrets_store.encryption_available(),
-        active_provider=creds["activeProvider"],
-        model=creds["model"],
-        anthropic_key_set=bool(creds["anthropicApiKey"]),
-        openai_key_set=bool(creds["openaiApiKey"]),
-        ollama_host=creds["ollamaHost"],
+        encryption_available=secretstore.encryption_available(),
+        active_provider=active_provider,
+        model=model,
+        anthropic_key_set=bool(secretstore.get_connection("claude").get("apiKey")),
+        openai_key_set=bool(secretstore.get_connection("codex").get("apiKey")),
+        ollama_host=secretstore.get_connection("ollama").get("baseUrl", ""),
     )
 
 
@@ -824,22 +848,32 @@ def get_settings() -> SettingsStatus:
 
 @router.post("/settings", response_model=SettingsStatus)
 def post_settings(body: SettingsUpdate) -> SettingsStatus:
-    if not secrets_store.encryption_available():
+    """Old single-provider POST shape, shimmed onto the v2 store: the key/host
+    lands in that provider's connection, and {connection, model} becomes the
+    routing default."""
+    if not secretstore.encryption_available():
         raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
-    current = secrets_store.read_secrets()
-    current["activeProvider"] = body.active_provider
-    if body.model is not None:
-        current["model"] = body.model
-    if body.ollama_host:
-        current["ollamaHost"] = body.ollama_host
-    if body.api_key:  # empty/None leaves the stored key unchanged
-        field = {"anthropic": "anthropicApiKey", "openai": "openaiApiKey"}.get(
-            body.active_provider
+    card = _V1_PROVIDER_TO_CARD.get(body.active_provider, body.active_provider)
+    if card not in catalog.CARDS:
+        raise HTTPException(
+            status_code=400, detail=f"Unknown provider '{body.active_provider}'."
         )
-        if field:
-            current[field] = body.api_key
-    secrets_store.write_secrets(current)
-    from providers import reset_provider
+
+    updates: dict = {}
+    if body.api_key:  # empty/None leaves the stored key unchanged
+        updates["apiKey"] = body.api_key
+    if body.ollama_host:
+        updates["baseUrl"] = body.ollama_host
+    if updates:
+        secretstore.set_connection(card, updates)
+
+    routing = modelrouting.load()
+    if body.model is not None:
+        model = body.model
+    else:
+        model = routing.default.model if routing.default else ""
+    routing.default = modelrouting.Route(card, model)
+    modelrouting.save(routing)
 
     reset_provider()
     return _settings_status()
@@ -861,24 +895,27 @@ def test_settings(body: SettingsUpdate) -> TestResult:
 def _provider_from_update(body: SettingsUpdate):
     """Build a provider from the submitted settings WITHOUT persisting anything.
 
-    Uses a key/host typed in the form if present, otherwise the saved credential
+    Uses a key/host typed in the form if present, otherwise the saved connection
     — so the model list can load with an unsaved key (like Test connection) and
     without writing secrets just to populate a dropdown.
     """
     name = (body.active_provider or "").strip().lower()
-    creds = secrets_store.resolve_credentials()
-    if name == "anthropic":
+    card = _V1_PROVIDER_TO_CARD.get(name)
+    if card is None:
+        raise HTTPException(status_code=400, detail=f"Unknown provider '{name}'.")
+    conn = secretstore.get_connection(card)
+    if card == "claude":
         from providers.anthropic_provider import AnthropicProvider
 
-        return AnthropicProvider(api_key=body.api_key or creds["anthropicApiKey"] or None)
-    if name == "openai":
+        return AnthropicProvider(api_key=body.api_key or conn.get("apiKey") or None)
+    if card == "codex":
         from providers.openai_provider import OpenAIProvider
 
-        return OpenAIProvider(api_key=body.api_key or creds["openaiApiKey"] or None)
-    if name == "ollama":
+        return OpenAIProvider(api_key=body.api_key or conn.get("apiKey") or None)
+    if card == "ollama":
         from providers.ollama_provider import OllamaProvider
 
-        return OllamaProvider(host=body.ollama_host or creds["ollamaHost"] or None)
+        return OllamaProvider(host=body.ollama_host or conn.get("baseUrl") or None)
     raise HTTPException(status_code=400, detail=f"Unknown provider '{name}'.")
 
 
@@ -897,3 +934,222 @@ def list_models(body: SettingsUpdate) -> ModelList:
     return ModelList(
         models=[ModelInfo(id=m["id"], label=m.get("label") or m["id"]) for m in models]
     )
+
+
+def _require_card(provider: str) -> dict:
+    try:
+        return catalog.card(provider)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown connection '{provider}'.") from None
+
+
+def _connection_status(card_key: str) -> ConnectionStatus:
+    meta = catalog.card(card_key)
+    conn = secretstore.get_connection(card_key)
+    oauth = conn.get("oauth") or {}
+    has_key = bool(conn.get("apiKey")) or (card_key == "ollama" and bool(conn.get("baseUrl")))
+    return ConnectionStatus(
+        provider=card_key,
+        label=meta["label"],
+        modes=list(meta["modes"]),
+        subscription_connected=bool(oauth.get("accessToken")),
+        api_key_connected=has_key,
+        auth_mode=conn.get("authMode", ""),
+        expires_at=oauth.get("expiresAt"),
+        connected_at=oauth.get("connectedAt"),
+    )
+
+
+def _models_result(models: list[dict]) -> ModelList:
+    return ModelList(
+        models=[ModelInfo(id=m["id"], label=m.get("label") or m["id"]) for m in models]
+    )
+
+
+@router.get("/auth/status", response_model=ConnectionList)
+def get_connection_status() -> ConnectionList:
+    return ConnectionList(
+        encryption_available=secretstore.encryption_available(),
+        connections=[_connection_status(key) for key in catalog.card_keys()],
+    )
+
+
+@router.post("/auth/{provider}/start", response_model=StartLoginResult)
+def start_connection_login(provider: str) -> StartLoginResult:
+    _require_card(provider)
+    if provider != "claude":
+        raise HTTPException(
+            status_code=400,
+            detail="Subscription sign-in is not available for this provider yet.",
+        )
+    return StartLoginResult.model_validate(claude_auth.start_login())
+
+
+@router.post("/auth/claude/complete", response_model=ConnectionStatus)
+def complete_connection_login(body: CompleteLoginRequest) -> ConnectionStatus:
+    try:
+        claude_auth.complete_login(body.code)
+    except AuthError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    reset_provider()
+    return _connection_status("claude")
+
+
+def _probe_key(card: str, body: ApiKeyRequest) -> list[dict]:
+    """Construct a provider directly from the submitted credential (never via
+    the stored oauth path) and list its models. An empty submitted value falls
+    back to the currently stored credential, so a bare re-validate still works."""
+    conn = secretstore.get_connection(card)
+    if card == "claude":
+        from providers.anthropic_provider import AnthropicProvider
+
+        provider = AnthropicProvider(api_key=body.api_key or conn.get("apiKey") or None)
+    elif card in ("codex", "openrouter"):
+        from providers.openai_provider import OpenAIProvider
+
+        base_url = OPENROUTER_BASE_URL if card == "openrouter" else None
+        provider = OpenAIProvider(
+            api_key=body.api_key or conn.get("apiKey") or None, base_url=base_url
+        )
+    elif card == "ollama":
+        from providers.ollama_provider import OllamaProvider
+
+        provider = OllamaProvider(
+            host=body.base_url or conn.get("baseUrl") or None,
+            bearer=body.bearer or conn.get("bearer") or None,
+        )
+    else:
+        raise ProviderError(f"Unknown connection '{card}'.")
+    return provider.list_models()
+
+
+@router.post("/auth/{provider}/key", response_model=ModelList)
+def post_connection_key(provider: str, body: ApiKeyRequest) -> ModelList:
+    _require_card(provider)
+    if not secretstore.encryption_available():
+        raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
+    try:
+        models = _probe_key(provider, body)
+    except ProviderError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001 — surface upstream SDK auth errors as 400s
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}") from e
+    updates: dict = {}
+    if body.api_key:
+        updates["apiKey"] = body.api_key
+    if body.base_url:
+        updates["baseUrl"] = body.base_url
+    if body.bearer:
+        updates["bearer"] = body.bearer
+    if body.api_key and "subscription" in catalog.card(provider)["modes"]:
+        updates["authMode"] = "apikey"
+    if updates:
+        secretstore.set_connection(provider, updates)
+    reset_provider()
+    return _models_result(models)
+
+
+@router.get("/auth/{provider}/models", response_model=ModelList)
+def get_connection_models(provider: str) -> ModelList:
+    _require_card(provider)
+    try:
+        models = build_connection_provider(provider, None).list_models()
+    except ProviderError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001 — surface upstream LLM/SDK errors cleanly
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}") from e
+    return _models_result(models)
+
+
+@router.post("/auth/{provider}/test", response_model=TestResult)
+def test_connection(provider: str, body: ConnectionTestRequest) -> TestResult:
+    _require_card(provider)
+    try:
+        provider_obj = build_connection_provider(provider, body.model)
+        provider_obj.complete("ping", [{"role": "user", "content": "ping"}])
+        return TestResult(ok=True, detail="Connection succeeded.")
+    except HTTPException as e:
+        return TestResult(ok=False, detail=str(e.detail))
+    except Exception as e:  # noqa: BLE001
+        return TestResult(ok=False, detail=f"{type(e).__name__}: {e}")
+
+
+@router.post("/auth/{provider}/logout", response_model=ConnectionStatus)
+def logout_connection(provider: str, mode: str | None = None) -> ConnectionStatus:
+    _require_card(provider)
+    secretstore.clear_mode(provider, mode or "apikey")
+    reset_provider()
+    return _connection_status(provider)
+
+
+@router.get("/routing", response_model=RoutingModel)
+def get_routing() -> RoutingModel:
+    """Get the current model routing configuration."""
+    routing = modelrouting.load()
+    return RoutingModel(
+        tasks={k: RouteModel(connection=v.connection, model=v.model) for k, v in routing.tasks.items()},
+        agent=RouteModel(connection=routing.agent.connection, model=routing.agent.model) if routing.agent else None,
+        default=RouteModel(connection=routing.default.connection, model=routing.default.model) if routing.default else None,
+    )
+
+
+@router.put("/routing", response_model=RoutingModel)
+def put_routing(body: RoutingUpdate) -> RoutingModel:
+    """Merge only the fields the client sent onto the stored routing.
+
+    A field explicitly sent as null is not the same as an absent field: it
+    clears that route (`default`/`agent` sent as null, or a `tasks` entry
+    sent as null, removes it) instead of leaving the stored value untouched.
+    """
+    # Load current routing
+    stored = modelrouting.load()
+    stored_dict = stored.to_dict()
+
+    # Prepare update from body — exclude_unset only, so an explicit null
+    # survives into update_dict and is distinguishable from an absent field.
+    update_dict = body.model_dump(exclude_unset=True, by_alias=False)
+
+    # Validate all connections in the update before applying
+    for route_dict in _all_routes_in_dict(update_dict):
+        connection = route_dict.get("connection")
+        if connection not in catalog.CARDS:
+            raise HTTPException(status_code=400, detail=f"unknown connection: {connection}")
+
+    # Merge: update the stored dict with only the fields that were sent.
+    # A None value clears the corresponding route rather than being ignored.
+    if "tasks" in update_dict:
+        for name, route in (update_dict["tasks"] or {}).items():
+            if route is None:
+                stored_dict["tasks"].pop(name, None)
+            else:
+                stored_dict["tasks"][name] = route
+    if "agent" in update_dict:
+        stored_dict["agent"] = update_dict["agent"]
+    if "default" in update_dict:
+        stored_dict["default"] = update_dict["default"]
+
+    # Parse back to Routing and save
+    routing = modelrouting.Routing.from_dict(stored_dict)
+    modelrouting.save(routing)
+    reset_provider()
+
+    # Return fresh routing
+    return RoutingModel(
+        tasks={k: RouteModel(connection=v.connection, model=v.model) for k, v in routing.tasks.items()},
+        agent=RouteModel(connection=routing.agent.connection, model=routing.agent.model) if routing.agent else None,
+        default=RouteModel(connection=routing.default.connection, model=routing.default.model) if routing.default else None,
+    )
+
+
+def _all_routes_in_dict(d: dict) -> list[dict]:
+    """Collect all route dicts from a routing update dict."""
+    routes = []
+    if "agent" in d and isinstance(d["agent"], dict):
+        routes.append(d["agent"])
+    if "default" in d and isinstance(d["default"], dict):
+        routes.append(d["default"])
+    if "tasks" in d and isinstance(d["tasks"], dict):
+        for route in d["tasks"].values():
+            if isinstance(route, dict):
+                routes.append(route)
+    return routes

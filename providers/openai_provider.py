@@ -12,7 +12,9 @@ from ._json import parse_json_object
 
 
 class OpenAIProvider(LLMProvider):
-    def __init__(self, model: str | None = None, api_key: str | None = None) -> None:
+    def __init__(
+        self, model: str | None = None, api_key: str | None = None, base_url: str | None = None
+    ) -> None:
         try:
             import openai  # noqa: F401
         except ImportError as exc:  # pragma: no cover - import guard
@@ -22,7 +24,10 @@ class OpenAIProvider(LLMProvider):
         key = api_key or os.environ.get("OPENAI_API_KEY")
         if not key:
             raise ProviderError("OPENAI_API_KEY is not set.")
-        self._client = openai.OpenAI(api_key=key)
+        kwargs: dict[str, Any] = {"api_key": key}
+        if base_url is not None:
+            kwargs["base_url"] = base_url
+        self._client = openai.OpenAI(**kwargs)
         self._model = env_model("gpt-4o", model)
 
     def _chat(self, system: str, messages: list[dict[str, str]], json_mode: bool) -> str:

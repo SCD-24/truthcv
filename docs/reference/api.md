@@ -30,3 +30,22 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **POST** | `/api/settings/test` | Test connection: a tiny live provider call with saved/submitted credentials. Returns {ok, detail}. |
 | **POST** | `/api/models` | List available models for a provider (live model-list lookup). |
 <!-- generated:end comp:api -->
+
+## Provider connections API
+
+| Method | Path | Description |
+|---|---|---|
+| **GET** | `/api/auth/status` | Status of every catalog connection card. Returns `{encryptionAvailable, connections:[{provider,label,modes,subscriptionConnected,apiKeyConnected,authMode,expiresAt,connectedAt}]}`. |
+| **POST** | `/api/auth/{provider}/start` | Start the paste-code OAuth flow for a provider — Stage 1 supports this for `claude` only (400 for any other provider). Returns `{flow:"paste-code", authUrl}`. |
+| **POST** | `/api/auth/claude/complete` | Complete the Claude paste-code OAuth flow (authorization code → token); stores encrypted via ENCRYPTION_KEY. |
+| **POST** | `/api/auth/{provider}/key` | Save an API key (or, for `ollama`, a base URL/bearer token) for a provider connection — probes it live before persisting. Distinct from the paste-code OAuth flow above: this is key/URL storage, not subscription sign-in. An empty body re-validates the currently stored credential without changing it. |
+| **GET** | `/api/auth/{provider}/models` | List available models for an authenticated provider connection (live model-list lookup). |
+| **POST** | `/api/auth/{provider}/test` | Test connection to an authenticated provider (small live call). Returns {ok, detail}. |
+| **POST** | `/api/auth/{provider}/logout` | Revoke provider connection (`mode=subscription` clears OAuth; default `mode=apikey` clears key material). |
+
+## Model routing API
+
+| Method | Path | Description |
+|---|---|---|
+| **GET** | `/api/routing` | Get current model routing (tasks, agent, default); each has {connection, model}. |
+| **PUT** | `/api/routing` | Update routing (merge only sent fields onto stored state); all connections must exist. A field explicitly sent as `null` clears it — `default`/`agent` sent as null removes that route, and a `tasks` entry sent as null removes that task's route. An absent field is left untouched. |

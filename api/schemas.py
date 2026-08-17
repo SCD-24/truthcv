@@ -482,3 +482,75 @@ class CooldownResult(_Camel):
     in_cooldown: bool
     expires: str | None = None
     blocked: bool = False
+
+
+class ConnectionStatus(_Camel):
+    """One catalog card's connection state — never carries token material."""
+
+    provider: str
+    label: str
+    modes: list[str]
+    subscription_connected: bool = False
+    api_key_connected: bool = False
+    auth_mode: str = ""
+    expires_at: float | None = None
+    connected_at: float | None = None
+
+
+class ConnectionList(_Camel):
+    """GET /api/auth/status response: one ConnectionStatus per catalog card."""
+
+    encryption_available: bool
+    connections: list[ConnectionStatus] = []
+
+
+class StartLoginResult(_Camel):
+    flow: str
+    auth_url: str | None = None
+    user_code: str | None = None
+    verification_uri: str | None = None
+
+
+class CompleteLoginRequest(_Camel):
+    code: str
+
+
+class ApiKeyRequest(_Camel):
+    api_key: str | None = None
+    base_url: str | None = None
+    bearer: str | None = None
+
+
+class ConnectionTestRequest(_Camel):
+    model: str | None = None
+
+
+class RouteModel(_Camel):
+    """A single connection + model pair."""
+
+    connection: str
+    model: str = ""
+
+
+class RoutingModel(_Camel):
+    """GET /api/routing response: all routing assignments."""
+
+    tasks: dict[str, RouteModel] = Field(default_factory=dict)
+    agent: RouteModel | None = None
+    default: RouteModel | None = None
+
+
+class RoutingUpdate(_Camel):
+    """Partial PUT /api/routing body — every field optional.
+
+    Mirrors the merge semantics: omitted fields stay None and are excluded
+    via `model_dump(exclude_unset=True)`, so the route only applies the
+    fields the client actually sent. Unlike other merge-PUT bodies in this
+    file, a field sent explicitly as `null` is NOT the same as omitting it:
+    `default`/`agent` sent as null clears that route, and a task entry sent
+    as null removes that task's route — see put_routing in routes.py.
+    """
+
+    tasks: dict[str, RouteModel | None] | None = None
+    agent: RouteModel | None = None
+    default: RouteModel | None = None
