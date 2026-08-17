@@ -87,6 +87,47 @@ def test_complete_login_resets_cached_provider(client, monkeypatch):
     assert calls == [True]
 
 
+def test_key_probe_error_does_not_leak_submitted_key(client, monkeypatch):
+    """The 400 detail is exception-derived; pin that a submitted secret never
+    ends up embedded in it (the exception message here deliberately doesn't
+    reference it, and this test would fail if a future change made it do so)."""
+
+    def boom(card, body):
+        raise RuntimeError("invalid x-api-key")
+
+    monkeypatch.setattr("api.routes._probe_key", boom)
+    resp = client.post("/api/auth/codex/key", json={"apiKey": "sk-super-secret-value"})
+    assert resp.status_code == 400
+    assert "sk-super-secret-value" not in resp.json()["detail"]
+
+
+def test_key_revalidate_empty_body_keeps_subscription_auth_mode(client, monkeypatch):
+    """A bare re-validate (empty body) on a subscription-connected claude
+    connection must not flip authMode to "apikey" — that only happens when a
+    new key was actually submitted."""
+    monkeypatch.setattr("api.routes._probe_key", lambda card, body: [])
+    secretstore.set_connection("claude", {
+        "oauth": {"accessToken": "t", "expiresAt": time.time() + 100},
+        "authMode": "subscription",
+    })
+    resp = client.post("/api/auth/claude/key", json={})
+    assert resp.status_code == 200
+    assert secretstore.get_connection("claude")["authMode"] == "subscription"
+
+
+def test_key_submitted_flips_auth_mode_to_apikey(client, monkeypatch):
+    """Submitting an actual key still flips authMode, unlike the bare
+    re-validate case above."""
+    monkeypatch.setattr("api.routes._probe_key", lambda card, body: [])
+    secretstore.set_connection("claude", {
+        "oauth": {"accessToken": "t", "expiresAt": time.time() + 100},
+        "authMode": "subscription",
+    })
+    resp = client.post("/api/auth/claude/key", json={"apiKey": "sk-new"})
+    assert resp.status_code == 200
+    assert secretstore.get_connection("claude")["authMode"] == "apikey"
+
+
 def test_logout_subscription_clears_oauth_only(client):
     secretstore.set_connection("claude", {
         "oauth": {"accessToken": "t", "expiresAt": time.time() + 100},

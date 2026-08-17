@@ -1037,7 +1037,7 @@ def post_connection_key(provider: str, body: ApiKeyRequest) -> ModelList:
         updates["baseUrl"] = body.base_url
     if body.bearer:
         updates["bearer"] = body.bearer
-    if "subscription" in catalog.card(provider)["modes"]:
+    if body.api_key and "subscription" in catalog.card(provider)["modes"]:
         updates["authMode"] = "apikey"
     if updates:
         secretstore.set_connection(provider, updates)
