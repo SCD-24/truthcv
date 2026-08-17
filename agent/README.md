@@ -97,8 +97,8 @@ under the operator's name. Watch it.
 | Env var | Default | Meaning |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | **Required.** Injected at runtime, never baked into the image. Checked at container start. |
-| `RUN_AT` | `09:00,15:00` | Comma-separated `HH:MM` (24h, container TZ). A **list** — the agent runs at every slot in it, twice a day by default. |
-| `RUN_DAYS` | `1,2,3,4,5` | Days to run, `1`=Mon … `7`=Sun. |
+| `RUN_AT` | `09:00,15:00` | Comma-separated `HH:MM` (24h, container TZ). Fallback only — used when the agent config API is unreachable; see below. |
+| `RUN_DAYS` | `1,2,3,4,5` | Days to run, `1`=Mon … `7`=Sun. Fallback only — used when the agent config API is unreachable; see below. |
 | `RUN_ONCE` | unset | `1` = run immediately and exit. |
 | `TZ` | container default | Timezone the schedule is expressed in. |
 | `TRUTHCV_MCP_URL` | `http://app:8080/mcp` | The `app` service's MCP tool surface. In-network only — not reachable from the host or the internet. |
@@ -106,10 +106,28 @@ under the operator's name. Watch it.
 | `INTERCEPTOR_MCP_COMMAND` | `interceptor-mcp` | **Placeholder.** The command that serves that socket — see the gap noted above. |
 | `MAX_APPLICATIONS_PER_RUN` | empty | Empty means **no cap**, matching RUNBOOK §1 ("there is no daily quota"). Not zero. |
 
-`RUN_AT`'s default is mirrored by `AGENT_RUN_TIMES` in
-`web/src/settings/SettingsModal.tsx`, which is what the Settings UI shows as the
-schedule. **Change the two together** or the UI will describe a schedule the
-agent is not keeping.
+## Agents page: the schedule and enable switch
+
+The **Agents page** is the source of truth for whether the agent runs and
+when. It reads and writes the app service's agent config
+(`GET`/`PUT /api/agent/config`, camelCase `enabled`/`blockedCompanies`/
+`runAt`/`runDays`), which `agent/entrypoint.sh` and `agent/daily-apply.sh`
+poll through the small node helper `agent/agent-config.js` — the agent image
+has no `curl`, so `node` is the only HTTP client available to it.
+
+- **Schedule** — `entrypoint.sh`'s `refresh_schedule()` re-fetches `runAt`/
+  `runDays` from the config API on every pass through the run loop (at least
+  every 5 minutes, so a change made on the Agents page is picked up without
+  restarting the container). If the config API is unreachable or returns a
+  malformed schedule, it falls back to the `RUN_AT`/`RUN_DAYS` env values
+  above. `--check-schedule`'s output line reports which source it used
+  (`source=config` or `source=env`).
+- **Enabled flag** — `daily-apply.sh` checks `enabled` at the start of every
+  run, after its other preconditions pass. `false` skips the run cleanly
+  (exit 0, logged, not an error). An **unreachable** config API is not treated
+  as "enabled": the run **aborts** (fails closed) rather than applying with a
+  possibly-stale flag — if the app is down, the MCP tools the run depends on
+  are down too, so "did not run" is the safe failure.
 
 The operator's identity isn't configured through an env var, so it has no row
 above — it's seeded straight into the data volume; see [The agent has no

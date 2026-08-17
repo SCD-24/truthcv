@@ -62,6 +62,19 @@ CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude)}"
 
 log "preconditions OK"
 
+# --- Agent enable gate --------------------------------------------------------
+# The Agents page can switch the agent off; the flag lives in the app service's
+# agent config (GET /api/agent/config). Unreachable config fails CLOSED: if the
+# app is down, the MCP tools this run depends on are down too, and "did not
+# run" is the safe failure for an unattended submitter.
+ENABLED="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" enabled)" || ENABLED=""
+if [[ "$ENABLED" == "false" ]]; then
+  log "agent disabled in config - skipping run"
+  exit 0
+elif [[ "$ENABLED" != "true" ]]; then
+  abort "agent config unreachable - skipping run (fail closed)"
+fi
+
 # --- Run ---------------------------------------------------------------------
 
 # agent/prompt.md carries the operating instructions (it references

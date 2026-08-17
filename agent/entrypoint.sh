@@ -8,17 +8,23 @@
 #   default      loop: sleep until the next scheduled slot, run, repeat
 #
 # Schedule is controlled by RUN_AT (comma-separated HH:MM, 24h, container TZ)
-# and RUN_DAYS (comma-separated 1=Mon .. 7=Sun). docker-compose.yml defaults
-# RUN_AT to "09:00,15:00" - two runs a day is the configured cadence, and
-# that default is mirrored by AGENT_RUN_TIMES in
-# web/src/settings/SettingsModal.tsx, which the Settings UI displays as the
-# schedule. If you change one, change the other.
+# and RUN_DAYS (comma-separated 1=Mon .. 7=Sun). The schedule's source of
+# truth is the app's agent config (Agents page); env is the fallback used only
+# when that config API is unreachable.
 
 set -uo pipefail
 
-RUN_AT="${RUN_AT:-09:00,15:00}"
-RUN_DAYS="${RUN_DAYS:-1,2,3,4,5}"
+RUN_AT_DEFAULT="${RUN_AT:-09:00,15:00}"
+RUN_DAYS_DEFAULT="${RUN_DAYS:-1,2,3,4,5}"
 DAILY_APPLY="${DAILY_APPLY:-/app/agent/daily-apply.sh}"
+AGENT_CONFIG_JS="${AGENT_CONFIG_JS:-/app/agent/agent-config.js}"
+
+# RUN_AT/RUN_DAYS hold the active schedule; refresh_schedule() (below) sets
+# them from the config API, falling back to the *_DEFAULT values above when
+# that API is unreachable. Seed them with the defaults so the pre-refresh
+# preflight and startup log line have sane values.
+RUN_AT="$RUN_AT_DEFAULT"
+RUN_DAYS="$RUN_DAYS_DEFAULT"
 
 log() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 
@@ -94,14 +100,28 @@ seconds_until_next_slot() {
   return 0
 }
 
+# Schedule source of truth is the app's agent config (Agents page); the RUN_AT/
+# RUN_DAYS env values are only the fallback when the config API is unreachable.
+refresh_schedule() {
+  local at days
+  at="$(node "$AGENT_CONFIG_JS" run_at 2>/dev/null)" || at=""
+  days="$(node "$AGENT_CONFIG_JS" run_days 2>/dev/null)" || days=""
+  RUN_AT="${at:-$RUN_AT_DEFAULT}"
+  RUN_DAYS="${days:-$RUN_DAYS_DEFAULT}"
+  SCHEDULE_SOURCE=config
+  [[ -n "$at" ]] || SCHEDULE_SOURCE=env
+  validate_run_at || { RUN_AT="$RUN_AT_DEFAULT"; RUN_DAYS="$RUN_DAYS_DEFAULT"; SCHEDULE_SOURCE=env; }
+}
+
 # Print the next few slots and exit, so the schedule can be checked without
 # waiting a day for it. Deliberately runs BEFORE preflight: it submits
 # nothing and talks to nothing, so it must not require ANTHROPIC_API_KEY.
 check_schedule() {
   local cursor secs i
   cursor=$(date +%s)
+  refresh_schedule
   validate_run_at || return 1
-  echo "RUN_AT=$RUN_AT RUN_DAYS=$RUN_DAYS TZ=${TZ:-unset} - next ${CHECK_SLOTS:-6} slots:"
+  echo "RUN_AT=$RUN_AT RUN_DAYS=$RUN_DAYS TZ=${TZ:-unset} source=$SCHEDULE_SOURCE - next ${CHECK_SLOTS:-6} slots:"
   for (( i = 0; i < ${CHECK_SLOTS:-6}; i++ )); do
     secs=$(seconds_until_next_slot "$cursor") || return 1
     cursor=$(( cursor + secs ))
@@ -127,9 +147,14 @@ if [[ "${RUN_ONCE:-0}" == "1" ]]; then
 fi
 
 while true; do
+  refresh_schedule
   if ! secs=$(seconds_until_next_slot); then
     log "ERROR: could not compute next slot from RUN_AT=$RUN_AT RUN_DAYS=$RUN_DAYS"
     exit 1
+  fi
+  if (( secs > 300 )); then
+    sleep 300
+    continue          # re-fetch and recompute; the slot may have moved
   fi
   log "next run in ${secs}s ($(date -d "@$(( $(date +%s) + secs ))" '+%a %Y-%m-%d %H:%M %Z'))"
   sleep "$secs"

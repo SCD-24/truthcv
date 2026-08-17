@@ -44,10 +44,10 @@ services:
     # a crash rather than stay down silently.
     restart: unless-stopped
     environment:
-      # HH:MM,HH:MM (24h, container TZ) — the agent's daily run times. This
-      # default is mirrored by AGENT_RUN_TIMES in
-      # web/src/settings/SettingsModal.tsx, which the Settings UI displays as
-      # the schedule. The two MUST be changed together.
+      # HH:MM,HH:MM (24h, container TZ) — fallback run times, used only when
+      # the app's agent config API (Agents page) is unreachable. The Agents
+      # page is the schedule's source of truth; see agent/entrypoint.sh's
+      # refresh_schedule().
       - RUN_AT=${RUN_AT:-09:00,15:00}
       # In-network address of the `app` service's MCP tool surface
       # (mcp/server.py, mounted at /mcp) — only reachable inside the compose

@@ -52,6 +52,10 @@ COPY --chown=node:node agent/prompt.md       /app/agent/prompt.md
 COPY --chown=node:node agent/mcp.json        /app/agent/mcp.json
 COPY --chown=node:node agent/daily-apply.sh  /app/agent/daily-apply.sh
 COPY --chown=node:node agent/entrypoint.sh   /app/agent/entrypoint.sh
+# Fetches enabled/runAt/runDays from the app's agent config API (Agents
+# page) — see entrypoint.sh's refresh_schedule() and daily-apply.sh's enable
+# gate, both of which invoke this via `node`.
+COPY --chown=node:node agent/agent-config.js /app/agent/agent-config.js
 # The smoke test is shipped IN the image, not just kept in the repo: it is run
 # via `--entrypoint /app/agent/smoke-test.sh` against the built container, and
 # its whole point is to test the image as shipped (agent/README.md).
