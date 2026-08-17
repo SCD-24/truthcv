@@ -27,7 +27,12 @@ def test_get_provider_defaults_and_selects(data_dir, monkeypatch):
     assert isinstance(get_provider(), FakeProvider)
 
 
-def test_get_provider_unknown_raises(monkeypatch):
+def test_get_provider_unknown_raises(data_dir, monkeypatch):
+    # data_dir isolates the data volume, and ENCRYPTION_KEY must be cleared too:
+    # earlier tests in a full-suite run import api.main, which loads the real
+    # .env into os.environ, so without this the legacy-secrets path in
+    # load_store() reads/writes the real data/secrets.enc instead of a fake one.
+    monkeypatch.delenv("ENCRYPTION_KEY", raising=False)
     monkeypatch.setenv("LLM_PROVIDER", "nope")
     from providers import reset_provider
 
