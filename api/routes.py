@@ -31,6 +31,7 @@ from truth.pdf import (
 )
 
 import applications as app_store
+import modelrouting
 import secretstore
 from agentconfig import store as agent_config_store
 from api import secrets as secrets_store
@@ -68,6 +69,9 @@ from .schemas import (
     ProfileStatus,
     RenderRequest,
     RenderResult,
+    RouteModel,
+    RoutingModel,
+    RoutingUpdate,
     SaveCoverLetterRequest,
     SaveCvRequest,
     SaveDocumentResult,
@@ -1051,3 +1055,65 @@ def logout_connection(provider: str, mode: str | None = None) -> ConnectionStatu
     secretstore.clear_mode(provider, mode or "apikey")
     reset_provider()
     return _connection_status(provider)
+
+
+@router.get("/routing", response_model=RoutingModel)
+def get_routing() -> RoutingModel:
+    """Get the current model routing configuration."""
+    routing = modelrouting.load()
+    return RoutingModel(
+        tasks={k: RouteModel(connection=v.connection, model=v.model) for k, v in routing.tasks.items()},
+        agent=RouteModel(connection=routing.agent.connection, model=routing.agent.model) if routing.agent else None,
+        default=RouteModel(connection=routing.default.connection, model=routing.default.model) if routing.default else None,
+    )
+
+
+@router.put("/routing", response_model=RoutingModel)
+def put_routing(body: RoutingUpdate) -> RoutingModel:
+    """Merge only the fields the client sent onto the stored routing."""
+    # Load current routing
+    stored = modelrouting.load()
+    stored_dict = stored.to_dict()
+
+    # Prepare update from body
+    update_dict = body.model_dump(exclude_unset=True, exclude_none=True, by_alias=False)
+
+    # Validate all connections in the update before applying
+    for route_dict in _all_routes_in_dict(update_dict):
+        connection = route_dict.get("connection")
+        if connection and connection not in catalog.CARDS:
+            raise HTTPException(status_code=400, detail=f"unknown connection: {connection}")
+
+    # Merge: update the stored dict with only the fields that were sent
+    if "tasks" in update_dict:
+        stored_dict["tasks"].update(update_dict["tasks"])
+    if "agent" in update_dict:
+        stored_dict["agent"] = update_dict["agent"]
+    if "default" in update_dict:
+        stored_dict["default"] = update_dict["default"]
+
+    # Parse back to Routing and save
+    routing = modelrouting.Routing.from_dict(stored_dict)
+    modelrouting.save(routing)
+    reset_provider()
+
+    # Return fresh routing
+    return RoutingModel(
+        tasks={k: RouteModel(connection=v.connection, model=v.model) for k, v in routing.tasks.items()},
+        agent=RouteModel(connection=routing.agent.connection, model=routing.agent.model) if routing.agent else None,
+        default=RouteModel(connection=routing.default.connection, model=routing.default.model) if routing.default else None,
+    )
+
+
+def _all_routes_in_dict(d: dict) -> list[dict]:
+    """Collect all route dicts from a routing update dict."""
+    routes = []
+    if "agent" in d and isinstance(d["agent"], dict):
+        routes.append(d["agent"])
+    if "default" in d and isinstance(d["default"], dict):
+        routes.append(d["default"])
+    if "tasks" in d and isinstance(d["tasks"], dict):
+        for route in d["tasks"].values():
+            if isinstance(route, dict):
+                routes.append(route)
+    return routes

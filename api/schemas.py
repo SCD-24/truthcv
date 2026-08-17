@@ -523,3 +523,31 @@ class ApiKeyRequest(_Camel):
 
 class ConnectionTestRequest(_Camel):
     model: str | None = None
+
+
+class RouteModel(_Camel):
+    """A single connection + model pair."""
+
+    connection: str
+    model: str = ""
+
+
+class RoutingModel(_Camel):
+    """GET /api/routing response: all routing assignments."""
+
+    tasks: dict[str, RouteModel] = Field(default_factory=dict)
+    agent: RouteModel | None = None
+    default: RouteModel | None = None
+
+
+class RoutingUpdate(_Camel):
+    """Partial PUT /api/routing body — every field optional.
+
+    Mirrors the merge semantics: omitted fields stay None and are excluded
+    via `model_dump(exclude_unset=True)`, so the route only applies the
+    fields the client actually sent.
+    """
+
+    tasks: dict[str, RouteModel] | None = None
+    agent: RouteModel | None = None
+    default: RouteModel | None = None
