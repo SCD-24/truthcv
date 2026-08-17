@@ -69,7 +69,7 @@ def write_secrets(data: dict) -> None:
     f = _fernet()
     if f is None:
         raise SecretsUnavailable("ENCRYPTION_KEY is missing or invalid.")
-    clean = {k: v for k, v in data.items() if k in _FIELDS and v is not None}
+    clean = {k: v for k, v in data.items() if v is not None}
     p = secrets_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     token = f.encrypt(json.dumps(clean).encode("utf-8"))
@@ -97,3 +97,53 @@ def resolve_credentials() -> dict:
         if v:
             out[k] = v
     return out
+
+
+SCHEMA_VERSION = 2
+
+_V1_KEY_MAP = (
+    ("anthropicApiKey", "claude", "apiKey"),
+    ("openaiApiKey", "codex", "apiKey"),
+    ("ollamaHost", "ollama", "baseUrl"),
+)
+
+
+def migrate_v1(raw: dict) -> dict:
+    """Lift a flat v1 secrets dict into the v2 connections shape. Pure."""
+    if raw.get("version") == SCHEMA_VERSION:
+        return raw
+    connections: dict = {}
+    for v1_key, card, field in _V1_KEY_MAP:
+        if raw.get(v1_key):
+            connections.setdefault(card, {})[field] = raw[v1_key]
+    for card in ("claude", "codex"):
+        if card in connections:
+            connections[card]["authMode"] = "apikey"
+    return {
+        "version": SCHEMA_VERSION,
+        "connections": connections,
+        "legacyDefault": {
+            "provider": raw.get("activeProvider", ""),
+            "model": raw.get("model", ""),
+        },
+    }
+
+
+def load_store() -> dict:
+    """Return the v2 store, migrating a v1 file in place (with a .bak) once."""
+    raw = read_secrets()
+    if raw.get("version") == SCHEMA_VERSION:
+        return raw
+    store = migrate_v1(raw)
+    if raw and encryption_available():
+        p = secrets_path()
+        if p.exists():
+            bak = p.with_name("secrets.enc.v1.bak")
+            if not bak.exists():
+                bak.write_bytes(p.read_bytes())
+        write_secrets(store)
+    return store
+
+
+def save_store(store: dict) -> None:
+    write_secrets(store)
