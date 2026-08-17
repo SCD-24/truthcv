@@ -426,7 +426,7 @@ function BlocklistSection({
           value={newCompany}
           onChange={(e) => setNewCompany(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") handleAdd();
+            if (e.key === "Enter" && !saving) handleAdd();
           }}
         />
         <Button variant="outlined" onClick={handleAdd} disabled={saving || !newCompany.trim()}>
