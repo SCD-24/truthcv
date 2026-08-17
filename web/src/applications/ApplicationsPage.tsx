@@ -387,17 +387,18 @@ function ApplicationRow({
         <Stamp on={app.responseReceived} yes="Replied" no="Waiting" />
       </TableCell>
       <TableCell>{app.method || "—"}</TableCell>
-      <TableCell
-        sx={{
-          maxWidth: 220,
-          whiteSpace: "normal",
-          display: "-webkit-box",
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: "vertical",
-          overflow: "hidden",
-        }}
-      >
-        {app.notes || "—"}
+      <TableCell sx={{ maxWidth: 220 }}>
+        <Box
+          sx={{
+            whiteSpace: "normal",
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+          }}
+        >
+          {app.notes || "—"}
+        </Box>
       </TableCell>
       <TableCell>
         <PostingCell app={app} onOpen={onOpenPosting} />
