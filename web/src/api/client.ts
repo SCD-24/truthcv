@@ -26,6 +26,7 @@ import type {
   ConnectionList,
   StartLoginResult,
   Routing,
+  RoutingUpdate,
 } from "./types";
 
 /**
@@ -359,7 +360,7 @@ export function getRouting(): Promise<Routing> {
 }
 
 /** Update the routing configuration (only the keys you pass change). */
-export function updateRouting(body: Partial<Routing>): Promise<Routing> {
+export function updateRouting(body: RoutingUpdate): Promise<Routing> {
   return request("/api/routing", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
