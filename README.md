@@ -151,6 +151,8 @@ All settings live in `.env` (copied from [`.env.example`](.env.example)):
 
 Provider accounts can be configured in the in-app **Settings → Accounts** modal (if `ENCRYPTION_KEY` is set), and env-var credentials remain as fallback. You can leave API keys blank in `.env` and set them from the app instead — the app encrypts them into `./data/secrets.enc`.
 
+Per-task model routing is available in **Settings → Task models**, where you can override the default provider and model for specific operations: truth extraction, keywords, tailoring, inference, and cover letter generation. Cleared tasks use the default model.
+
 Generate a key with either of the following and copy the printed value into
 `ENCRYPTION_KEY`:
 
