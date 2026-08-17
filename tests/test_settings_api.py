@@ -126,6 +126,19 @@ def test_get_settings_falls_back_to_legacy_default_without_routing(client):
     assert b["openaiKeySet"] is True
 
 
+def test_post_settings_unknown_provider_400_writes_nothing(client):
+    """An active_provider that maps to no known card must 400, not silently
+    create a connection or a dangling routing default for a card that isn't
+    in the catalog."""
+    r = client.post(
+        "/api/settings",
+        json={"activeProvider": "copilot", "apiKey": "sk-x"},
+    )
+    assert r.status_code == 400
+    assert "copilot" not in secretstore.load_store().get("connections", {})
+    assert modelrouting.load().default is None
+
+
 def test_models_uses_typed_unsaved_key(client, monkeypatch):
     """/api/models constructs a provider directly from a submitted-but-unsaved
     key, per _provider_from_update, without persisting it."""

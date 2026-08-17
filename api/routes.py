@@ -854,6 +854,10 @@ def post_settings(body: SettingsUpdate) -> SettingsStatus:
     if not secretstore.encryption_available():
         raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
     card = _V1_PROVIDER_TO_CARD.get(body.active_provider, body.active_provider)
+    if card not in catalog.CARDS:
+        raise HTTPException(
+            status_code=400, detail=f"Unknown provider '{body.active_provider}'."
+        )
 
     updates: dict = {}
     if body.api_key:  # empty/None leaves the stored key unchanged
