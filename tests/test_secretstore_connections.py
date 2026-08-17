@@ -29,6 +29,11 @@ def test_ollama_baseurl_default(enc):
     assert secretstore.get_connection("ollama")["baseUrl"] == "http://localhost:11434"
 
 
+def test_ollama_baseurl_empty_env_uses_default(enc, monkeypatch):
+    monkeypatch.setenv("OLLAMA_HOST", "")
+    assert secretstore.get_connection("ollama")["baseUrl"] == "http://localhost:11434"
+
+
 def test_clear_mode(enc):
     secretstore.set_connection("claude", {"oauth": {"accessToken": "t"}, "apiKey": "k"})
     secretstore.clear_mode("claude", "subscription")

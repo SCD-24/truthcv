@@ -162,7 +162,8 @@ def get_connection(card: str) -> dict:
         if v:
             conn["apiKey"] = v
     if card == "ollama" and not conn.get("baseUrl"):
-        conn["baseUrl"] = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+        v = os.environ.get("OLLAMA_HOST", "").strip()
+        conn["baseUrl"] = v if v else "http://localhost:11434"
     return conn
 
 
