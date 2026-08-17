@@ -1010,7 +1010,10 @@ def _probe_key(card: str, body: ApiKeyRequest) -> list[dict]:
     elif card == "ollama":
         from providers.ollama_provider import OllamaProvider
 
-        provider = OllamaProvider(host=body.base_url or conn.get("baseUrl") or None)
+        provider = OllamaProvider(
+            host=body.base_url or conn.get("baseUrl") or None,
+            bearer=body.bearer or conn.get("bearer") or None,
+        )
     else:
         raise ProviderError(f"Unknown connection '{card}'.")
     return provider.list_models()

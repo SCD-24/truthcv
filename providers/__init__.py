@@ -46,7 +46,9 @@ def build_connection_provider(card: str, model: str | None) -> LLMProvider:
     if card == "ollama":
         from .ollama_provider import OllamaProvider
 
-        return OllamaProvider(model=model, host=conn.get("baseUrl") or None)
+        return OllamaProvider(
+            model=model, host=conn.get("baseUrl") or None, bearer=conn.get("bearer") or None
+        )
     raise ProviderError(f"Unknown connection '{card}'.")
 
 

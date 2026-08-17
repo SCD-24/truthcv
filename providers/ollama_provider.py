@@ -13,11 +13,17 @@ from ._json import parse_json_object
 
 
 class OllamaProvider(LLMProvider):
-    def __init__(self, model: str | None = None, host: str | None = None) -> None:
+    def __init__(
+        self, model: str | None = None, host: str | None = None, bearer: str | None = None
+    ) -> None:
         self._host = (host or os.environ.get("OLLAMA_HOST", "http://localhost:11434")).rstrip(
             "/"
         )
         self._model = env_model("llama3.1", model)
+        self._bearer = bearer or None
+
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._bearer}"} if self._bearer else {}
 
     def _chat(self, system: str, messages: list[dict[str, str]], fmt_json: bool) -> str:
         payload: dict[str, Any] = {
@@ -31,7 +37,9 @@ class OllamaProvider(LLMProvider):
         if fmt_json:
             payload["format"] = "json"
         try:
-            resp = httpx.post(f"{self._host}/api/chat", json=payload, timeout=120)
+            resp = httpx.post(
+                f"{self._host}/api/chat", json=payload, headers=self._headers(), timeout=120
+            )
             resp.raise_for_status()
         except httpx.HTTPError as exc:
             raise ProviderError(f"Ollama request failed: {exc}") from exc
@@ -40,7 +48,7 @@ class OllamaProvider(LLMProvider):
     def list_models(self) -> list[dict[str, str]]:
         """Models currently pulled on the local Ollama host (GET /api/tags)."""
         try:
-            resp = httpx.get(f"{self._host}/api/tags", timeout=10)
+            resp = httpx.get(f"{self._host}/api/tags", headers=self._headers(), timeout=10)
             resp.raise_for_status()
         except httpx.HTTPError as exc:
             raise ProviderError(f"Ollama request failed: {exc}") from exc
