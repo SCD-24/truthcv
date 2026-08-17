@@ -1,25 +1,44 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import {
   deleteScreening,
   getCooldown,
   getProfileAnswers,
+  getRouting,
+  listConnections,
   listScreenings,
   saveProfileAnswers,
 } from "../api/client";
-import type { CooldownStatus, ProfileAnswers, ScreeningRecord } from "../api/types";
+import type {
+  ConnectionList,
+  CooldownStatus,
+  ProfileAnswers,
+  Routing,
+  ScreeningRecord,
+} from "../api/types";
 import { isCooldownActive } from "./cooldown";
 import { lastAgentActivity } from "./agentActivity";
+import { SettingsModal } from "./SettingsModal";
 
 /**
- * NOTE ON APPROACH: web/ has no @testing-library/react, jest-dom, or
- * jsdom/happy-dom, and no vitest DOM environment is configured. Adding any
- * of those is out of scope for this task, so SettingsModal itself is not
- * rendered here. Instead this file tests the pure logic it depends on
- * (isCooldownActive, lastAgentActivity) and the API client functions its
- * panels call, by stubbing globalThis.fetch — the same boundary the real
- * component talks to.
+ * This file mixes two boundary choices: most tests exercise pure logic
+ * (isCooldownActive, lastAgentActivity) and API client functions by stubbing
+ * globalThis.fetch, unrelated to SettingsModal's own rendering. The
+ * SettingsModal render tests below mock the API client module directly
+ * (mirroring AccountsSection.test.tsx), keeping the rest of the client's
+ * exports as their real fetch-backed implementations via importOriginal so
+ * the fetch-stub tests keep working unmodified.
  */
+vi.mock("../api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/client")>();
+  return {
+    ...actual,
+    listConnections: vi.fn(),
+    getRouting: vi.fn(),
+  };
+});
 
 /** Build a fetch Response stub with only the members request<T>() reads
  * (ok, status, json()) — enough to drive the client without a real DOM/Fetch
@@ -231,5 +250,42 @@ describe("screening list", () => {
 
     const [path] = fetchMock.mock.calls[0];
     expect(path).toBe("/api/cooldown?company=Acme");
+  });
+});
+
+/** Pins the rewired modal's own contract: it loads connections + routing on
+ * open and renders both the Accounts and Default model sections from them,
+ * rather than the old single Provider panel. */
+describe("SettingsModal", () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("loads connections + routing on open and renders both sections", async () => {
+    const list: ConnectionList = {
+      encryptionAvailable: true,
+      connections: [
+        {
+          provider: "claude",
+          label: "Claude",
+          modes: ["subscription"],
+          subscriptionConnected: true,
+          apiKeyConnected: false,
+          authMode: "subscription",
+          expiresAt: null,
+          connectedAt: null,
+        },
+      ],
+    };
+    const routing: Routing = { tasks: {}, agent: null, default: null };
+    vi.mocked(listConnections).mockResolvedValueOnce(list);
+    vi.mocked(getRouting).mockResolvedValueOnce(routing);
+
+    render(<SettingsModal onClose={vi.fn()} />);
+
+    expect(await screen.findByText("Accounts")).toBeTruthy();
+    expect(screen.getByText("Default model")).toBeTruthy();
+    expect(screen.getAllByText("Claude").length).toBeGreaterThan(0);
   });
 });
