@@ -108,7 +108,9 @@ native English as C1 — across 77 applications.
 3. Call `generate_cover_letter` with the posting text, a tone, and a length to
    get a per-role letter grounded in the operator's actual work. See §6 for
    what to do when it comes back blocked. Never write a cover letter free-hand outside
-   this tool — a hand-written letter has no guardrail behind it at all.
+   this tool — a hand-written letter has no guardrail behind it at all. Always
+   pass `company` (the name as posted) to `generate_cover_letter` so the
+   blocklist can refuse before any text is generated.
 
 **Browser tooling is whatever this environment provides; nothing in this
 runbook depends on which one.** Every rule here applies identically regardless
@@ -276,6 +278,15 @@ before every application, never infer a cooldown from memory of an earlier run.
 - Never use One-Click / bulk apply on any platform.
 - Never re-enable any auto-fill browser extension — it is deliberately off.
 - Never put the operator's data into a third-party form that isn't the employer's ATS.
+
+### Blocked companies
+
+The operator can blocklist companies on the Agents page. A blocklisted
+company reports `in_cooldown: true` with `blocked: true` and no expiry from
+`check_cooldown` — treat it exactly like a cooldown that never expires:
+do not apply, do not retry later, do not attempt to work around it.
+`generate_cover_letter` will also refuse (`blocked_reason:
+"company_blocked"`) when you pass the company name.
 
 **Open issue:** `check_cooldown`'s derived (non-screening) cooldown window is a
 single server-configured duration applied identically whether you call it with
