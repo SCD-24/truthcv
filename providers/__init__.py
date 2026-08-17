@@ -1,9 +1,9 @@
 """Provider layer: select an LLMProvider from the resolved credentials.
 
-The active provider and its credentials come from
-secretstore.resolve_credentials (encrypted secrets.enc, falling back to
-environment variables). Resolving credentials through the neutral secretstore
-package — rather than api — keeps this layer a leaf that depends only downward.
+The active provider and its credentials come from modelrouting (task -> connection
++ model) and secretstore (connection -> credentials, with a legacy env/secrets
+fallback for installs with no routing configured). Resolving through these neutral
+packages — rather than api — keeps this layer a leaf that depends only downward.
 Adding a new provider later is one new file + one branch here. Nothing in the
 truthfulness path depends on which provider is returned.
 """
@@ -12,50 +12,77 @@ from __future__ import annotations
 
 from .base import LLMProvider, Message, ProviderError
 
-__all__ = ["LLMProvider", "Message", "ProviderError", "get_provider"]
+__all__ = [
+    "LLMProvider", "Message", "ProviderError",
+    "build_connection_provider", "get_provider", "reset_provider",
+]
 
-_cached: LLMProvider | None = None
+_cache: dict[tuple[str, str | None], LLMProvider] = {}
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
-def get_provider(refresh: bool = False) -> LLMProvider:
-    """Return the configured provider, selected by LLM_PROVIDER.
+def build_connection_provider(card: str, model: str | None) -> LLMProvider:
+    """Build (uncached) a provider for a connection card. Raises ProviderError."""
+    from secretstore import get_connection
 
-    LLM_PROVIDER=anthropic|openai|ollama (default: anthropic). Reads the matching
-    credential env var. Raises ProviderError on misconfiguration.
-    """
-    global _cached
-    if _cached is not None and not refresh:
-        return _cached
-
-    from secretstore import resolve_credentials
-
-    creds = resolve_credentials()
-    name = creds["activeProvider"].strip().lower()
-    model = creds["model"] or None
-    if name == "anthropic":
+    conn = get_connection(card)
+    if card == "claude":
         from .anthropic_provider import AnthropicProvider
 
-        _cached = AnthropicProvider(model=model, api_key=creds["anthropicApiKey"] or None)
-    elif name == "openai":
+        if conn.get("oauth") and conn.get("authMode") != "apikey":
+            return AnthropicProvider(model=model, oauth=True)
+        return AnthropicProvider(model=model, api_key=conn.get("apiKey") or None)
+    if card == "codex":
         from .openai_provider import OpenAIProvider
 
-        _cached = OpenAIProvider(model=model, api_key=creds["openaiApiKey"] or None)
-    elif name == "ollama":
+        return OpenAIProvider(model=model, api_key=conn.get("apiKey") or None)
+    if card == "openrouter":
+        from .openai_provider import OpenAIProvider
+
+        return OpenAIProvider(
+            model=model, api_key=conn.get("apiKey") or None, base_url=OPENROUTER_BASE_URL
+        )
+    if card == "ollama":
         from .ollama_provider import OllamaProvider
 
-        _cached = OllamaProvider(model=model, host=creds["ollamaHost"] or None)
-    elif name == "fake":
+        return OllamaProvider(model=model, host=conn.get("baseUrl") or None)
+    raise ProviderError(f"Unknown connection '{card}'.")
+
+
+def get_provider(task: str | None = None, refresh: bool = False) -> LLMProvider:
+    """Provider for a task via the routing ladder: task route -> default ->
+    legacy env behavior. LLM_PROVIDER=fake short-circuits (tests)."""
+    import os
+
+    if os.environ.get("LLM_PROVIDER", "").strip().lower() == "fake":
         from .fake import FakeProvider
 
-        _cached = FakeProvider()
+        return FakeProvider()
+
+    import modelrouting
+
+    route = modelrouting.resolve(modelrouting.load(), task)
+    if route is not None:
+        card, model = route.connection, (route.model or None)
     else:
-        raise ProviderError(
-            f"Unknown LLM_PROVIDER '{name}'. Use anthropic, openai, or ollama."
-        )
-    return _cached
+        from secretstore import legacy_default
+
+        card, model_str = legacy_default()
+        model = model_str or None
+        if card is None:
+            raise ProviderError(
+                "No model routing configured and LLM_PROVIDER is not one of "
+                "anthropic, openai, ollama."
+            )
+    key = (card, model)
+    if refresh:
+        _cache.pop(key, None)
+    if key not in _cache:
+        _cache[key] = build_connection_provider(card, model)
+    return _cache[key]
 
 
 def reset_provider() -> None:
-    """Clear the cached provider (used by tests)."""
-    global _cached
-    _cached = None
+    """Clear all cached providers (called after settings writes and by tests)."""
+    _cache.clear()
