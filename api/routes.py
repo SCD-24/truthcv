@@ -682,7 +682,7 @@ def get_agent_config() -> AgentConfigModel:
 def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:
     """Merge only the fields the client sent onto the stored config."""
     merged = agent_config_store.load().to_dict()
-    merged.update(body.model_dump(exclude_unset=True, by_alias=False))
+    merged.update(body.model_dump(exclude_unset=True, exclude_none=True, by_alias=False))
     cfg = agent_config_store.AgentConfig.from_dict(merged)
     return AgentConfigModel.model_validate(agent_config_store.save(cfg).to_dict())
 

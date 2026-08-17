@@ -45,3 +45,27 @@ def test_put_rejects_bad_time(client, data_dir):
 def test_put_rejects_bad_day(client, data_dir):
     assert client.put("/api/agent/config", json={"runDays": ["monday"]}).status_code == 422
     assert client.put("/api/agent/config", json={"runDays": []}).status_code == 422
+
+
+def test_put_dedups_run_days_preserving_order(client, data_dir):
+    r = client.put("/api/agent/config", json={"runDays": ["mon", "mon", "tue"]})
+    assert r.status_code == 200
+    assert r.json()["runDays"] == ["mon", "tue"]
+
+
+def test_put_explicit_nulls_do_not_reset_fields(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={"enabled": False, "blockedCompanies": ["Acme"]},
+    )
+    assert r.status_code == 200
+    assert r.json()["enabled"] is False
+    assert r.json()["blockedCompanies"] == ["Acme"]
+
+    r = client.put(
+        "/api/agent/config",
+        json={"enabled": None, "blockedCompanies": None},
+    )
+    assert r.status_code == 200
+    assert r.json()["enabled"] is False
+    assert r.json()["blockedCompanies"] == ["Acme"]
