@@ -70,7 +70,9 @@ def _router(system, messages, schema):
 def test_draft_references_only_truth_ids_and_flags_inference(data_dir):
     provider = FakeProvider(router=_router)
     truth = _truth()
-    result = tailor("A backend role using Python and Kubernetes.", truth, provider)
+    result = tailor(
+        "A backend role using Python and Kubernetes.", truth, lambda task=None: provider
+    )
 
     valid_ids = truth.all_ids()
     draft = result["draft"]
@@ -91,7 +93,7 @@ def test_draft_references_only_truth_ids_and_flags_inference(data_dir):
 
 def test_claims_for_ids_maps_approved_inferences(data_dir):
     provider = FakeProvider(router=_router)
-    tailor("posting", _truth(), provider)
+    tailor("posting", _truth(), lambda task=None: provider)
     # persisted draft's inference id is inf-1; maps to (experience_id, claim)
     assert claims_for_ids(["inf-1"]) == [("exp-acme-1", "Experience with Kubernetes")]
     assert claims_for_ids(["nope"]) == []
@@ -137,7 +139,7 @@ def test_infer_message_lists_keywords_and_falls_back_when_empty():
 def test_empty_provider_falls_back_to_verbatim_truth(data_dir):
     provider = FakeProvider()  # returns schema-empty
     truth = _truth()
-    result = tailor("posting", truth, provider)
+    result = tailor("posting", truth, lambda task=None: provider)
     # fallback carries truth experiences verbatim, still only real ids
     assert {e.source_id for e in result["draft"].experiences} == {
         e.id for e in truth.experiences

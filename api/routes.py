@@ -154,7 +154,7 @@ def extract() -> TruthDoc:
     if not text.strip():
         raise HTTPException(status_code=400, detail="Upload a PDF before extracting.")
     try:
-        truth = build_truth_from_text(text, get_provider())
+        truth = build_truth_from_text(text, get_provider("truth_extract"))
     except ProviderError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001 — surface upstream LLM/SDK errors cleanly
@@ -182,7 +182,7 @@ def put_truth(body: TruthDoc) -> None:
 @router.post("/tailor", response_model=TailorResult)
 def tailor_route(body: TailorRequest) -> TailorResult:
     try:
-        result = tailor_engine.tailor(body.posting, load(), get_provider())
+        result = tailor_engine.tailor(body.posting, load(), get_provider)
     except ProviderError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001 — surface upstream LLM/SDK errors cleanly
@@ -766,7 +766,7 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
             body.tone,
             body.length,
             load(),
-            get_provider(),
+            get_provider("cover_letter"),
             approved_texts=approved_texts,
             denied_texts=denied_texts,
             paragraphs=paragraphs,
