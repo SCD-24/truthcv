@@ -171,6 +171,21 @@ export interface ProfileStatus {
   hasProfile: boolean;
 }
 
+/** The canonical ATS form answers the unattended application agent types into
+ * job application forms on the user's behalf. */
+export interface ProfileAnswers {
+  phone: string;
+  workAuthorisation: string;
+  salaryExpectation: string;
+  noticePeriod: string;
+  locationPreference: string;
+  canonicalCvAssetId: string | null;
+}
+
+/** A partial patch of the canonical answers; the PUT route merges only the
+ * keys you send. */
+export type ProfileAnswersUpdate = Partial<ProfileAnswers>;
+
 /** Generation-scoped decisions on blocked cover-letter claims. Approved claims
  * are allowed for that one generation only; never persisted to the truth file. */
 export interface CoverLetterApprovals {
@@ -261,3 +276,40 @@ export interface SaveDocumentResult {
    * the document is attached; only its download links are missing. */
   renderUnavailable?: boolean;
 }
+
+/** Whether a company (optionally narrowed by role) is currently in cooldown. */
+export interface CooldownStatus {
+  inCooldown: boolean;
+  expires: string | null;
+}
+
+/** A job the unattended application agent screened and rejected (or otherwise
+ * decided on), recording why and — for a rejection — how long the company
+ * stays in cooldown before the agent will reconsider it. */
+export interface ScreeningRecord {
+  id: string;
+  company: string;
+  role: string;
+  url: string;
+  screenedDate: string;
+  verdict: string;
+  failingCriterion: string;
+  reason: string;
+  /** ISO timestamp the cooldown lapses; empty when there is no cooldown. */
+  cooldownExpires: string;
+  source: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Configuration for the unattended job application agent. */
+export interface AgentConfig {
+  enabled: boolean;
+  blockedCompanies: string[];
+  runAt: string[];
+  runDays: string[];
+}
+
+/** A partial patch of agent configuration; the PUT route merges only the
+ * keys you send. */
+export type AgentConfigUpdate = Partial<AgentConfig>;

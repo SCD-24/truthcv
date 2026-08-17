@@ -1,0 +1,20 @@
+{
+  "_comment": "MCP server config loaded by the `claude` CLI in agent/Dockerfile's image (see docker-compose.yml `agent` service, --mcp-config). Plain JSON has no comment syntax, so notes live in these _comment keys instead — the `claude` CLI ignores unknown keys, and the sibling Jobs project's docker/mcp.json (heavily-commented everywhere else) is itself comment-free, evidence the same convention already held there. ${VAR:-default} below is Claude Code's documented env-var expansion for .mcp.json; it reads this container's actual environment (docker-compose.yml `agent` service), so it stays correct if either default ever changes there.",
+
+  "mcpServers": {
+    "truthcv": {
+      "type": "http",
+      "url": "${TRUTHCV_MCP_URL:-http://app:8080/mcp}",
+      "_comment": "TruthCV's own tool surface: generate_cover_letter, record_application, record_screening, check_cooldown, get_canonical_cv, get_profile_answers (mcp/server.py, APIRouter(prefix='/mcp')). The default is the in-network address of the `app` compose service — reachable only from inside the compose network, not from the host or the open internet."
+    },
+
+    "interceptor": {
+      "command": "${INTERCEPTOR_MCP_COMMAND:-interceptor-mcp}",
+      "args": ["--socket", "${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}"],
+      "_unresolved": "The retiring Jobs repo does NOT contain an interceptor MCP server binary or its launch command — it allow-listed mcp__interceptor__interceptor_{browser,read,local} and relied on a server declared in the operator's personal Claude config, plus a Chrome extension that its own docs record as NOT INSTALLED as of 2026-08-12. So `interceptor-mcp` here is a PLACEHOLDER default, not a verified command: the operator must set INTERCEPTOR_MCP_COMMAND to whatever actually serves the socket on their host. Until then the agent has no working browser driver and its first run will fail at browser attach, which agent/entrypoint.sh's preflight should catch rather than letting a run start blind.",
+      "_comment": "PRIMARY browser driver. Reaches the operator's real, already-logged-in HOST Chrome via the Interceptor daemon, over the unix socket bind-mounted into this container at INTERCEPTOR_SOCKET's path (docker-compose.yml `agent` service). This is the whole reason the agent runs in its own container instead of reusing a containerised browser: see agent/Dockerfile's BROWSER STRATEGY comment — this image installs no browser of its own, on purpose."
+    }
+  },
+
+  "_fallbackComment": "Playwright (an in-container browser, as the retired Jobs project's docker/mcp.json used) remains the documented FALLBACK per architecture, not configured as a live server above: agent/Dockerfile deliberately installs no browser at all, so a `playwright` entry here could not actually launch anything. Host Chrome via `interceptor` is the primary and intended path because it alone preserves the operator's logged-in ATS/SSO sessions, which a fresh containerised browser cannot reproduce. Re-adding `playwright` here would require re-adding a browser to agent/Dockerfile, undoing that decision — see agent/RUNBOOK.md's note that browser tooling is whatever the environment provides."
+}

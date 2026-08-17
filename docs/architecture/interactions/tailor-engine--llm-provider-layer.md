@@ -1,5 +1,4 @@
 <!-- generated:start edge:tailor-engine→llm-provider-layer -->
-> **Not verified at the current commit** — source has changed since the last full sweep, or none has run. Treat this section as a snapshot and verify against source before relying on it.
 # Interaction: Tailor Engine → LLM Provider Layer
 
 - **Participants:** `tailor-engine` → `llm-provider-layer`

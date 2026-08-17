@@ -21,6 +21,7 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogActions from "@mui/material/DialogActions";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Checkbox from "@mui/material/Checkbox";
+import TableSortLabel from "@mui/material/TableSortLabel";
 import {
   APPLICATIONS_EXPORT_URL,
   createApplication,
@@ -34,28 +35,11 @@ import type {
   ApplicationDocument,
 } from "../api/types";
 import { DocumentAttachModal } from "./DocumentAttachModal";
+import { COLUMN_DEFS, compareApplications } from "./sorting";
+import type { ColumnDef, SortDirection } from "./sorting";
 import "../styles/applications.css";
 
 type PreviewKind = "cv" | "cover-letter";
-
-/** The columns the user asked to track, in order. */
-const COLUMNS = [
-  "Company",
-  "Date",
-  "Website",
-  "Application URL",
-  "Submitted",
-  "Submission Type",
-  "Status",
-  "Reached Out",
-  "To Who",
-  "Response Received",
-  "Method",
-  "Notes",
-  "Posting",
-  "Documents",
-  "",
-] as const;
 
 const EMPTY: ApplicationCreate = {
   company: "",
@@ -71,22 +55,6 @@ const EMPTY: ApplicationCreate = {
   applicationDate: "",
   notes: "",
   posting: "",
-};
-
-// Order applications by status; lower index sorts first. Unlisted/unset
-// statuses (e.g. "") fall to the bottom.
-const STATUS_ORDER = [
-  "Offer",
-  "Interviewing",
-  "Waiting",
-  "Applied",
-  "Draft",
-  "Rejected",
-] as const;
-
-const statusRank = (status: string): number => {
-  const i = STATUS_ORDER.indexOf(status as (typeof STATUS_ORDER)[number]);
-  return i === -1 ? STATUS_ORDER.length : i;
 };
 
 /**
@@ -124,6 +92,8 @@ export function ApplicationsPage({
   );
   // The application whose job posting is open in the view/edit modal.
   const [posting, setPosting] = useState<Application | null>(null);
+  const [sortCol, setSortCol] = useState<ColumnDef | null>(null);
+  const [sortDir, setSortDir] = useState<SortDirection>("asc");
 
   /** Replace an application in the list after a document is attached/edited. */
   function applyAttached(updated: Application) {
@@ -275,18 +245,36 @@ export function ApplicationsPage({
           <Table size="small" className="apps__table" sx={{ width: "100%" }}>
             <TableHead>
               <TableRow>
-                {COLUMNS.map((c) => (
-                  <TableCell key={c || "actions"}>{c}</TableCell>
+                {COLUMN_DEFS.map((c) => (
+                  <TableCell key={c.label || "actions"}>
+                    {c.sortable ? (
+                      <TableSortLabel
+                        active={sortCol?.label === c.label}
+                        direction={sortCol?.label === c.label ? sortDir : "asc"}
+                        onClick={() => {
+                          if (sortCol?.label === c.label) setSortDir(sortDir === "asc" ? "desc" : "asc");
+                          else {
+                            setSortCol(c);
+                            setSortDir("asc");
+                          }
+                        }}
+                      >
+                        {c.label}
+                      </TableSortLabel>
+                    ) : (
+                      c.label
+                    )}
+                  </TableCell>
                 ))}
               </TableRow>
             </TableHead>
             <TableBody>
               {[...apps]
-                .sort((a, b) => statusRank(a.status) - statusRank(b.status))
+                .sort((a, b) => compareApplications(a, b, sortCol, sortDir))
                 .map((app) =>
                 editing === app.id ? (
                   <TableRow key={app.id}>
-                    <TableCell colSpan={COLUMNS.length}>
+                    <TableCell colSpan={COLUMN_DEFS.length}>
                       <ApplicationForm
                         draft={draft}
                         setDraft={setDraft}
@@ -399,8 +387,18 @@ function ApplicationRow({
         <Stamp on={app.responseReceived} yes="Replied" no="Waiting" />
       </TableCell>
       <TableCell>{app.method || "—"}</TableCell>
-      <TableCell sx={{ maxWidth: 220, whiteSpace: "normal" }}>
-        {app.notes || "—"}
+      <TableCell sx={{ maxWidth: 220 }}>
+        <Box
+          sx={{
+            whiteSpace: "normal",
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+          }}
+        >
+          {app.notes || "—"}
+        </Box>
       </TableCell>
       <TableCell>
         <PostingCell app={app} onOpen={onOpenPosting} />

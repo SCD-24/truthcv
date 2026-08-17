@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -13,12 +14,7 @@ import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import InputAdornment from "@mui/material/InputAdornment";
 import Typography from "@mui/material/Typography";
-import {
-  getSettings,
-  listModels,
-  saveSettings,
-  testConnection,
-} from "../api/client";
+import { getSettings, listModels, saveSettings, testConnection } from "../api/client";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import type {
   ModelInfo,
@@ -27,6 +23,33 @@ import type {
   SettingsUpdate,
 } from "../api/types";
 import "../styles/settings.css";
+
+/** A titled group of settings fields, separated from its siblings by a
+ * Divider in the caller. Establishes the one section pattern the modal's
+ * panels share. */
+function SettingsSection({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Stack spacing={2}>
+      <Stack spacing={0.5}>
+        <Typography variant="h6">{title}</Typography>
+        {description && (
+          <Typography variant="body2" color="text.secondary">
+            {description}
+          </Typography>
+        )}
+      </Stack>
+      <Stack spacing={2}>{children}</Stack>
+    </Stack>
+  );
+}
 
 const PROVIDERS: { id: ProviderName; label: string }[] = [
   { id: "anthropic", label: "Anthropic" },
@@ -181,12 +204,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const keySet = keyIsSet(status, provider);
 
   return (
-    <Dialog open onClose={onClose} maxWidth="sm" fullWidth aria-labelledby="settings-title">
+    <Dialog open onClose={onClose} maxWidth="md" fullWidth aria-labelledby="settings-title">
       <DialogTitle
         id="settings-title"
         sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}
       >
-        Provider settings
+        Settings
         <IconButton onClick={onClose} aria-label="Close settings" edge="end">
           <CloseIcon />
         </IconButton>
@@ -198,7 +221,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             Loading settings…
           </Typography>
         ) : (
-          <Stack spacing={2}>
+          <Stack spacing={3}>
+            <SettingsSection title="Provider">
             {encryptionOff && (
               <Alert severity="warning">
                 Set <code>ENCRYPTION_KEY</code> in your <code>.env</code> to save
@@ -320,6 +344,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 />
               )}
             </Box>
+            </SettingsSection>
 
             {test.kind === "ok" && <Alert severity="success">{test.detail}</Alert>}
             {test.kind === "fail" && <Alert severity="error">{test.detail}</Alert>}

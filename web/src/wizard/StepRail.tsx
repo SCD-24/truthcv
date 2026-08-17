@@ -3,6 +3,7 @@ import Button from "@mui/material/Button";
 import Typography from "@mui/material/Typography";
 import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import InsightsOutlinedIcon from "@mui/icons-material/InsightsOutlined";
+import SmartToyOutlinedIcon from "@mui/icons-material/SmartToyOutlined";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import { STEPS, stepIndex, type StepId } from "./steps";
 
@@ -13,10 +14,13 @@ interface Props {
   onOpenSettings: () => void;
   onOpenApplications: () => void;
   onOpenAnalytics: () => void;
+  onOpenAgents: () => void;
   /** True when the applications page (not the wizard) is the active view. */
   applicationsActive?: boolean;
   /** True when the analytics page (not the wizard) is the active view. */
   analyticsActive?: boolean;
+  /** True when the agents page (not the wizard) is the active view. */
+  agentsActive?: boolean;
 }
 
 /**
@@ -31,8 +35,10 @@ export function StepRail({
   onOpenSettings,
   onOpenApplications,
   onOpenAnalytics,
+  onOpenAgents,
   applicationsActive = false,
   analyticsActive = false,
+  agentsActive = false,
 }: Props) {
   const reachedIdx = stepIndex(reached);
   const currentIdx = stepIndex(current);
@@ -92,6 +98,16 @@ export function StepRail({
           sx={{ justifyContent: "flex-start" }}
         >
           Analytics
+        </Button>
+        <Button
+          fullWidth
+          variant={agentsActive ? "contained" : "outlined"}
+          startIcon={<SmartToyOutlinedIcon fontSize="small" />}
+          onClick={onOpenAgents}
+          aria-current={agentsActive ? "page" : undefined}
+          sx={{ justifyContent: "flex-start" }}
+        >
+          Agents
         </Button>
         <Button
           fullWidth

@@ -30,6 +30,55 @@ out with it.
 
 The button is on the Applications page; the browser downloads the zip directly.
 
+## Unattended application agent
+
+TruthCV also runs the applications, not just the paperwork. The agent
+(`agent/`) is a headless Claude Code process that works through a target list,
+screens each posting against your filters, generates the CV and cover letter
+through the same guardrailed engine the wizard uses, submits the form, and
+writes the result back into the ledger.
+
+It is a **separate container on its own compose profile**, so it is never
+started by a bare `docker compose up` and a browser crash can never take the
+wizard down:
+
+```bash
+docker compose --profile agent up -d agent
+```
+
+By default it runs at **09:00 and 15:00** (container time, `RUN_AT`). Every
+capability it has goes through TruthCV's MCP tool surface — it deliberately
+does not mount the data volume.
+
+> **It drives your real, logged-in Chrome on the host**, over a bind-mounted
+> interceptor socket, so applications are submitted from your actual browser
+> sessions. There is no in-container browser and no headless fallback: that was
+> a deliberate choice, because a fresh browser would be logged out of every ATS
+> and would apply as nobody. If the interceptor daemon is not listening, the
+> agent aborts the run rather than proceeding blind.
+
+Configuration, the schedule, the interceptor precondition and the smoke test are
+documented in [`agent/README.md`](agent/README.md). The target list it works
+from is [`agent/targets.md`](agent/targets.md); what has actually been applied
+to, screened out or put in cooldown lives in the ledger and screening store on
+the data volume, not in that file.
+
+### The plain-text application log
+
+The ledger is the system of record, but a readable account is kept outside the
+application as well, at `data/log/APPLICATION_LOG.md`:
+
+```bash
+python scripts/render_application_log.py
+```
+
+It renders every application in the ledger and **refuses to write at all** if
+the rendered text does not account for each one exactly once — a log that
+silently omits an application is worse than no log, because it reads as
+complete. It is written one directory below the data volume root on purpose:
+`GET /api/download/{name}` serves that root by bare filename without
+authentication, and the log carries the same personal data the records do.
+
 ## Requirements
 
 - [Docker](https://docs.docker.com/get-docker/) and Docker Compose (recommended), **or** Python 3.11+ and Node 20+ for local dev.
@@ -54,6 +103,26 @@ Then open **http://localhost:8080**.
 
 Generated CVs and your truth file are persisted in `./data` (mounted into the
 container), so they survive restarts.
+
+**Before the agent applies to anything, seed your identity.** TruthCV ships
+with no built-in identity — every ATS screening answer (name, email, phone,
+work authorisation, salary expectation, ...) defaults to an empty string, and
+the [unattended application agent](#unattended-application-agent) refuses to
+submit while those fields are blank (`agent/RUNBOOK.md` §5). Copy the tracked
+template, fill in your own details, then write them into the data volume from
+inside a container — the volume is root-owned, so running this directly on
+the host fails with a `PermissionError`:
+
+```bash
+cp answers.example.yaml answers.local.yaml
+$EDITOR answers.local.yaml
+docker compose run --rm -v "$(pwd)/answers.local.yaml:/app/answers.local.yaml" app \
+  python -m truth.answers --answers /app/answers.local.yaml
+```
+
+You can also fill these in later from the web UI's **Settings** modal (same
+file, via `PUT /api/profile/answers`) — but until one route or the other has
+run, the agent has no identity to submit with.
 
 ### Run fully offline with Ollama
 

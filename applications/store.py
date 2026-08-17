@@ -14,7 +14,15 @@ from pathlib import Path
 
 from truth.store import data_dir
 
-from .model import Application, Document, new_id
+from .model import (
+    Application,
+    Attachment,
+    Confirmation,
+    Document,
+    FieldSubmitted,
+    Screening,
+    new_id,
+)
 
 
 def applications_path() -> Path:
@@ -137,6 +145,54 @@ def save_cover_letter_document(app_id: str, source: str) -> Application | None:
     return _persist_document(
         app_id, "cover_letter_document", Document(source, pdf, docx)
     )
+
+
+# --- Structured evidence fields ------------------------------------------------
+
+def _persist_field(app_id: str, attr: str, value) -> Application | None:
+    """Load, set one structured field, stamp updated_at, and atomically persist."""
+    apps = load_all()
+    app = next((a for a in apps if a.id == app_id), None)
+    if app is None:
+        return None
+    setattr(app, attr, value)
+    app.updated_at = _now()
+    _write_all(apps)
+    return app
+
+
+def save_fields_submitted(app_id: str, fields_submitted) -> Application | None:
+    """Replace the as-submitted form-field evidence for an application."""
+    values = [
+        f if isinstance(f, FieldSubmitted) else FieldSubmitted.from_dict(f)
+        for f in fields_submitted or []
+    ]
+    return _persist_field(app_id, "fields_submitted", values)
+
+
+def save_confirmation(app_id: str, confirmation) -> Application | None:
+    """Replace the submission-confirmation evidence for an application."""
+    value = (
+        confirmation
+        if isinstance(confirmation, Confirmation)
+        else Confirmation.from_dict(confirmation)
+    )
+    return _persist_field(app_id, "confirmation", value)
+
+
+def save_screening(app_id: str, screening) -> Application | None:
+    """Replace the pre-application screening verdicts for an application."""
+    value = screening if isinstance(screening, Screening) else Screening.from_dict(screening)
+    return _persist_field(app_id, "screening", value)
+
+
+def save_attachments(app_id: str, attachments) -> Application | None:
+    """Replace the actually-uploaded attachment evidence for an application."""
+    values = [
+        a if isinstance(a, Attachment) else Attachment.from_dict(a)
+        for a in attachments or []
+    ]
+    return _persist_field(app_id, "attachments", values)
 
 
 def delete_documents(app: Application) -> None:

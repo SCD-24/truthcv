@@ -1,5 +1,4 @@
 <!-- generated:start edge:application-tracker→renderer -->
-> **Not verified at the current commit** — source has changed since the last full sweep, or none has run. Treat this section as a snapshot and verify against source before relying on it.
 # Interaction: Application Tracker → Renderer
 
 - **Participants:** `application-tracker` → `renderer`

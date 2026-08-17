@@ -1,5 +1,4 @@
 <!-- generated:start edge:cover-letter-engine→llm-provider-layer -->
-> **Not verified at the current commit** — source has changed since the last full sweep, or none has run. Treat this section as a snapshot and verify against source before relying on it.
 # Interaction: Cover Letter Engine → LLM Provider Layer
 
 - **Participants:** `cover-letter-engine` → `llm-provider-layer`

@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from mcp.server import router as mcp_router
 from truth.store import data_dir
 
 from .config import cors_origins, port, static_dir
@@ -25,6 +26,7 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(mcp_router)
 
 
 @app.get("/api/download/{name}")

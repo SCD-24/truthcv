@@ -1,5 +1,15 @@
 import { createTheme } from "@mui/material/styles";
 
+// MUI's CSS-vars-aware theme members (`theme.colorSchemes`, etc.) are typed
+// only when this augmentation opts in — otherwise `Theme` is the plain,
+// vars-less shape and `colorSchemes` doesn't type-check even though it's
+// present at runtime.
+declare module "@mui/material/styles" {
+  interface CssThemeVariables {
+    enabled: true;
+  }
+}
+
 /**
  * MUI theme for TruthCV — the "provenance ledger" design language expressed as
  * an MUI theme rather than stock Material Design.
@@ -20,23 +30,48 @@ const body = 'var(--font-body)';
 const display = 'var(--font-display)';
 
 export const theme = createTheme({
-  cssVariables: false,
-  palette: {
-    // createTheme augments each colour at module-eval time (computing
-    // light/dark/contrastText), which requires a PARSEABLE colour — a raw
-    // `var(--x)` string throws and blanks the whole app. So the palette carries
-    // concrete light-mode hexes from tokens.css here; dark-mode flipping is
-    // handled where it visibly matters by the `var(--x)` references in the
-    // component styleOverrides/variants below (those are applied as CSS at
-    // paint time, so they follow prefers-color-scheme for free).
-    background: { default: '#ecede6', paper: '#f6f7f2' },
-    text: { primary: '#1a211c', secondary: '#59615a' },
-    primary: { main: '#2f5d3e', contrastText: '#f6f7f2' },
-    success: { main: '#2f5d3e', contrastText: '#f6f7f2' },
-    error: { main: '#9c3b2c', contrastText: '#f6f7f2' },
-    warning: { main: '#a35b12', contrastText: '#f6f7f2' },
-    info: { main: '#356fa6', contrastText: '#f6f7f2' },
-    divider: '#d2d5cc',
+  // MUI's `createTheme` augments every palette colour at module-eval time
+  // (computing light/dark/contrastText via `alpha()`), which requires a
+  // PARSEABLE colour — a raw `var(--x)` string throws MUI error #9 and blanks
+  // the whole app (confirmed live: six `Object.alpha` throws at startup with
+  // `var(--ink)` in the palette). So the palette can never carry CSS vars.
+  //
+  // Instead we give MUI two full colour schemes, each with concrete hexes
+  // mirroring tokens.css: `colorSchemes.light` copies the `:root` block,
+  // `colorSchemes.dark` copies the `prefers-color-scheme: dark` override.
+  // `cssVariables: { colorSchemeSelector: 'media' }` makes MUI switch between
+  // them itself, following `prefers-color-scheme` the same way tokens.css
+  // does. tokens.css stays the source of truth for CSS-level styling (the
+  // `var(--x)` references in the component styleOverrides/variants below are
+  // applied as CSS at paint time and follow prefers-color-scheme for free);
+  // the palette hexes here exist only because MUI's runtime colour math
+  // (`alpha()`, tonal calculations) needs something it can parse.
+  cssVariables: { colorSchemeSelector: 'media' },
+  colorSchemes: {
+    light: {
+      palette: {
+        background: { default: '#ecede6', paper: '#f6f7f2' },
+        text: { primary: '#1a211c', secondary: '#59615a' },
+        primary: { main: '#2f5d3e', contrastText: '#f6f7f2' },
+        success: { main: '#2f5d3e', contrastText: '#f6f7f2' },
+        error: { main: '#9c3b2c', contrastText: '#f6f7f2' },
+        warning: { main: '#a35b12', contrastText: '#f6f7f2' },
+        info: { main: '#356fa6', contrastText: '#f6f7f2' },
+        divider: '#d2d5cc',
+      },
+    },
+    dark: {
+      palette: {
+        background: { default: '#151814', paper: '#1e221c' },
+        text: { primary: '#e8eae2', secondary: '#9aa197' },
+        primary: { main: '#8fc39c', contrastText: '#1e221c' },
+        success: { main: '#8fc39c', contrastText: '#1e221c' },
+        error: { main: '#d98a76', contrastText: '#1e221c' },
+        warning: { main: '#e0a561', contrastText: '#1e221c' },
+        info: { main: '#6aa8e6', contrastText: '#1e221c' },
+        divider: '#313629',
+      },
+    },
   },
   shape: { borderRadius: 8 },
   typography: {

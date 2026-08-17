@@ -92,10 +92,26 @@ def test_approving_blocked_claim_unblocks_without_truth_write(data_dir):
 
 
 def test_denied_claim_is_dropped_from_letter(data_dir):
-    """A denied claim is excluded from the validated texts, so a letter whose
-    only factual claim is denied has nothing left to trip the guardrail."""
+    """A denied claim's whole paragraph is excised before validation, so a
+    letter whose only factual claim is denied has nothing left to trip the
+    guardrail, and the denied claim's text is entirely absent from the
+    rendered letter."""
     out = build_letter(
         "A role", "Professional", "Short", _truth(), FakeProvider(router=_router_lie),
         denied_texts={"Led a team of 200 at Globex"},
     )
     assert out["blocked"] is False
+    assert "Led a team of 200 at Globex" not in out["text"]
+    assert "Globex" not in out["text"]
+
+
+def test_denied_claim_empties_letter_when_it_is_the_only_paragraph(data_dir):
+    """When the letter consists of a single paragraph and its only claim is
+    denied, excising that paragraph leaves nothing behind: the letter text is
+    empty even though the guardrail itself did not block."""
+    out = build_letter(
+        "A role", "Professional", "Short", _truth(), FakeProvider(router=_router_lie),
+        denied_texts={"Led a team of 200 at Globex"},
+    )
+    assert out["blocked"] is False
+    assert out["text"] == ""

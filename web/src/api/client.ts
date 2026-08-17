@@ -10,12 +10,18 @@ import type {
   SettingsUpdate,
   TestResult,
   ProfileStatus,
+  ProfileAnswers,
+  ProfileAnswersUpdate,
   CoverLetterResult,
   CoverLetterApprovals,
   Application,
   ApplicationCreate,
   ApplicationUpdate,
   SaveDocumentResult,
+  ScreeningRecord,
+  CooldownStatus,
+  AgentConfig,
+  AgentConfigUpdate,
 } from "./types";
 
 /**
@@ -130,6 +136,20 @@ export function getProfile(): Promise<ProfileStatus> {
   return request("/api/profile");
 }
 
+/** Read the canonical ATS form answers the application agent submits. */
+export function getProfileAnswers(): Promise<ProfileAnswers> {
+  return request("/api/profile/answers");
+}
+
+/** Patch the canonical answers (only the keys you pass change). Returns fresh values. */
+export function saveProfileAnswers(body: ProfileAnswersUpdate): Promise<ProfileAnswers> {
+  return request("/api/profile/answers", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 /** Read non-secret provider settings status. */
 export function getSettings(): Promise<SettingsStatus> {
   return request("/api/settings");
@@ -240,5 +260,39 @@ export function saveApplicationCoverLetter(
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
+  });
+}
+
+/** Every job the application agent has screened, most recent first — the
+ * record of what it rejected (and why) and what stays in cooldown. */
+export function listScreenings(): Promise<ScreeningRecord[]> {
+  return request("/api/screenings");
+}
+
+/** Delete a screening record, ending its cooldown and un-blocking the target. */
+export function deleteScreening(id: string): Promise<void> {
+  return request<void>("/api/screenings/" + encodeURIComponent(id), {
+    method: "DELETE",
+  });
+}
+
+/** Whether `company` (optionally narrowed by `role`) is currently in cooldown. */
+export function getCooldown(company: string, role?: string): Promise<CooldownStatus> {
+  const params = new URLSearchParams({ company });
+  if (role) params.set("role", role);
+  return request(`/api/cooldown?${params.toString()}`);
+}
+
+/** Read the agent configuration. */
+export function getAgentConfig(): Promise<AgentConfig> {
+  return request("/api/agent/config");
+}
+
+/** Patch the agent configuration (only the keys you pass change). Returns fresh values. */
+export function updateAgentConfig(body: AgentConfigUpdate): Promise<AgentConfig> {
+  return request("/api/agent/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
 }

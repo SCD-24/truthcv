@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# Daily job-application run for TruthCV's unattended agent (agent/Dockerfile,
+# docker-compose.yml `agent` service, plan agent-container-and-schedule task
+# t-2). Ported from the retiring Jobs project's bin/daily-apply.sh, moved off
+# that project's filesystem and onto TruthCV's MCP tool surface.
+#
+# Preconditions are checked first and the run aborts loudly rather than
+# half-working: applying to jobs with a broken browser session is worse than
+# not running at all.
+
+set -uo pipefail
+
+RUN_LOG_DIR="${RUN_LOG_DIR:-/app/runs}"
+RUNBOOK="${RUNBOOK:-/app/agent/RUNBOOK.md}"
+PROMPT_FILE="${PROMPT_FILE:-/app/agent/prompt.md}"
+MCP_CONFIG="${MCP_CONFIG:-/app/agent/mcp.json}"
+INTERCEPTOR_SOCKET="${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}"
+STAMP="$(date +%Y-%m-%d_%H%M)"
+
+mkdir -p "$RUN_LOG_DIR"
+RUN_LOG="$RUN_LOG_DIR/run_$STAMP.log"
+
+log() { printf '%s  %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$RUN_LOG"; }
+
+abort() { log "ABORT: $*"; exit 1; }
+
+log "=== daily-apply run $STAMP ==="
+
+# --- Preconditions -----------------------------------------------------------
+
+CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude)}"
+[[ -n "$CLAUDE_BIN" && -x "$CLAUDE_BIN" ]] || abort "claude CLI not found (set CLAUDE_BIN, or put claude on PATH)"
+
+[[ -r "$RUNBOOK" ]] || abort "runbook missing: $RUNBOOK"
+
+# Interceptor drives the operator's real, already-logged-in browser on the HOST over
+# a unix socket bind-mounted into this container (docker-compose.yml,
+# agent/mcp.json). Without it there is no way to apply, and no point
+# searching.
+[[ -S "$INTERCEPTOR_SOCKET" ]] || abort "interceptor socket absent: $INTERCEPTOR_SOCKET - is the interceptor daemon running on the host?"
+
+# The Jobs original also required a live Chrome process (`pgrep -x chrome` /
+# `pgrep -f google-chrome`) so interceptor had a browser on the same machine
+# to attach to. That check cannot survive containerisation: this agent now
+# runs in its own container while Chrome runs on the HOST, so the container's
+# process table will never show it - kept unchanged it would abort every
+# single run, unconditionally, which is as useless as deleting it outright.
+# The honest replacement is to check that the socket is actually live
+# (accepting connections), not merely a stale file left behind by an
+# interceptor process that has since died. This image has no tool that can
+# dial a unix socket to test that - agent/Dockerfile installs only
+# ca-certificates, tzdata and the claude CLI, no nc/socat/curl - so that
+# connectability probe cannot be done with those. The base image does ship
+# node, which CAN dial a unix socket - agent/smoke-test.sh uses it for exactly
+# this - but a probe here would open and drop a connection on the operator's
+# live browser daemon before every run, so it is kept in the smoke test where
+# it is run deliberately. The -S check above is therefore the only guard on the
+# run path; a present-but-dead socket surfaces when the interceptor MCP server
+# fails to respond mid-run.
+
+[[ -n "${TRUTHCV_MCP_URL:-}" ]] || abort "TRUTHCV_MCP_URL is not set - it is the agent's only route to the TruthCV tools"
+
+log "preconditions OK"
+
+# --- Agent enable gate --------------------------------------------------------
+# The Agents page can switch the agent off; the flag lives in the app service's
+# agent config (GET /api/agent/config). Unreachable config fails CLOSED: if the
+# app is down, the MCP tools this run depends on are down too, and "did not
+# run" is the safe failure for an unattended submitter.
+ENABLED="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" enabled)" || ENABLED=""
+if [[ "$ENABLED" == "false" ]]; then
+  log "agent disabled in config - skipping run"
+  exit 0
+elif [[ "$ENABLED" != "true" ]]; then
+  abort "agent config unreachable - skipping run (fail closed)"
+fi
+
+# --- Run ---------------------------------------------------------------------
+
+# agent/prompt.md carries the operating instructions (it references
+# agent/RUNBOOK.md and names the six tools); this script only adds the date.
+PROMPT="$(cat "$PROMPT_FILE")"$'\n\n'"Today is $(date +%Y-%m-%d)."
+
+# MAX_APPLICATIONS_PER_RUN empty/unset means no cap (agent/RUNBOOK.md §1,
+# "there is no daily quota"; docker-compose.yml defaults it to empty for that
+# reason). Only append a limit line when it is actually a positive integer,
+# so the common empty case adds nothing to the prompt.
+if [[ "${MAX_APPLICATIONS_PER_RUN:-}" =~ ^[1-9][0-9]*$ ]]; then
+  PROMPT="$PROMPT"$'\n\n'"Apply to at most $MAX_APPLICATIONS_PER_RUN role(s) this run."
+fi
+
+log "invoking claude..."
+
+# Playwright's mcp__plugin_playwright_playwright__* tools from the Jobs
+# original are dropped: agent/mcp.json documents Playwright as a fallback
+# only and does not configure it as a live server, because agent/Dockerfile
+# deliberately installs no browser (see its BROWSER STRATEGY comment) - a
+# Playwright entry here could not launch anything.
+"$CLAUDE_BIN" -p "$PROMPT" \
+  --mcp-config "$MCP_CONFIG" \
+  --allowedTools \
+    "Read" "Write" "WebSearch" "WebFetch" \
+    "mcp__truthcv__generate_cover_letter" \
+    "mcp__truthcv__record_application" \
+    "mcp__truthcv__record_screening" \
+    "mcp__truthcv__check_cooldown" \
+    "mcp__truthcv__get_canonical_cv" \
+    "mcp__truthcv__get_profile_answers" \
+    "mcp__interceptor__interceptor_browser" \
+    "mcp__interceptor__interceptor_read" \
+    "mcp__interceptor__interceptor_local" \
+  </dev/null >>"$RUN_LOG" 2>&1
+
+RC=$?
+log "claude exited rc=$RC"
+
+log "=== run complete: $RUN_LOG ==="
+exit $RC

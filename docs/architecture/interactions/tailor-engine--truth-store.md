@@ -1,5 +1,4 @@
 <!-- generated:start edge:tailor-engine→truth-store -->
-> **Not verified at the current commit** — source has changed since the last full sweep, or none has run. Treat this section as a snapshot and verify against source before relying on it.
 # Interaction: Tailor Engine → Truth Store
 
 - **Participants:** `tailor-engine` → `truth-store`

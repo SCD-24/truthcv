@@ -1,5 +1,4 @@
 <!-- generated:start edge:secret-store→truth-data-volume -->
-> **Not verified at the current commit** — source has changed since the last full sweep, or none has run. Treat this section as a snapshot and verify against source before relying on it.
 # Interaction: Secret Store → Truth Data Volume
 
 - **Participants:** `secret-store` → `truth-data-volume`
