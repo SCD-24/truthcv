@@ -89,6 +89,30 @@ if [[ "${MAX_APPLICATIONS_PER_RUN:-}" =~ ^[1-9][0-9]*$ ]]; then
   PROMPT="$PROMPT"$'\n\n'"Apply to at most $MAX_APPLICATIONS_PER_RUN role(s) this run."
 fi
 
+# Fetch routed LLM credentials from the app (Stage 2). Fallback: the
+# container's ANTHROPIC_API_KEY env, exactly the pre-Stage-2 behavior.
+AGENT_MODEL=""
+if [[ -n "${AGENT_API_TOKEN:-}" ]]; then
+  if CREDS="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" llm_credentials 2>/dev/null)"; then
+    AUTH_TYPE="$(sed -n 1p <<<"$CREDS")"
+    AUTH_TOKEN="$(sed -n 2p <<<"$CREDS")"
+    AGENT_MODEL="$(sed -n 3p <<<"$CREDS")"
+    if [[ "$AUTH_TYPE" == "oauth" ]]; then
+      export CLAUDE_CODE_OAUTH_TOKEN="$AUTH_TOKEN"
+      unset ANTHROPIC_API_KEY
+      log "using Claude subscription credentials from app"
+    elif [[ "$AUTH_TYPE" == "api_key" ]]; then
+      export ANTHROPIC_API_KEY="$AUTH_TOKEN"
+      log "using API key credentials from app"
+    fi
+    unset CREDS AUTH_TOKEN
+  else
+    log "credential fetch failed; falling back to container ANTHROPIC_API_KEY"
+  fi
+fi
+MODEL_ARGS=()
+[[ -n "$AGENT_MODEL" ]] && MODEL_ARGS=(--model "$AGENT_MODEL")
+
 log "invoking claude..."
 
 # Playwright's mcp__plugin_playwright_playwright__* tools from the Jobs
@@ -96,7 +120,7 @@ log "invoking claude..."
 # only and does not configure it as a live server, because agent/Dockerfile
 # deliberately installs no browser (see its BROWSER STRATEGY comment) - a
 # Playwright entry here could not launch anything.
-"$CLAUDE_BIN" -p "$PROMPT" \
+"$CLAUDE_BIN" -p "$PROMPT" "${MODEL_ARGS[@]}" \
   --mcp-config "$MCP_CONFIG" \
   --allowedTools \
     "Read" "Write" "WebSearch" "WebFetch" \

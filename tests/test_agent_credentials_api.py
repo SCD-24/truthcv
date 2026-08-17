@@ -84,3 +84,14 @@ def test_non_claude_agent_route_409(client):
 
 def test_nothing_configured_404(client):
     assert client.get("/api/agent/llm-credentials", headers=_hdr()).status_code == 404
+
+
+def test_response_shape_matches_agent_parser(client):
+    # agent/agent-config.js's llm_credentials verb parses the 200 body by
+    # reading exactly these three keys, in this shape — a field renamed or
+    # dropped here breaks the agent's parser silently. This test is the seam
+    # guard between the two.
+    secretstore.set_connection("claude", {"apiKey": "sk-ant-agent", "authMode": "apikey"})
+    modelrouting.save(Routing(agent=Route("claude", "claude-opus-4-8")))
+    body = client.get("/api/agent/llm-credentials", headers=_hdr()).json()
+    assert set(body.keys()) == {"authType", "token", "model"}
