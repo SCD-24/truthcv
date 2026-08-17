@@ -29,13 +29,23 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **POST** | `/api/settings` | Save provider selection + API key/model/host; encrypts to ./data/secrets.enc via ENCRYPTION_KEY. Empty apiKey leaves the stored key unchanged. |
 | **POST** | `/api/settings/test` | Test connection: a tiny live provider call with saved/submitted credentials. Returns {ok, detail}. |
 | **POST** | `/api/models` | List available models for a provider (live model-list lookup). |
+<!-- generated:end comp:api -->
+
+## Provider connections API
+
+| Method | Path | Description |
+|---|---|---|
 | **GET** | `/api/auth/status` | Check OAuth flow status for all providers; returns {provider, status, error?, expiresAt?}. |
 | **POST** | `/api/auth/{provider}/start` | Start OAuth flow for a provider; returns {authUrl} (browser redirects to it). |
 | **POST** | `/api/auth/claude/complete` | Complete Claude OAuth flow (authorization code → token); stores encrypted via ENCRYPTION_KEY. |
 | **POST** | `/api/auth/{provider}/key` | Save provider API key directly (Claude subscription OAuth paste-code, OpenAI/OpenRouter keys). |
 | **GET** | `/api/auth/{provider}/models` | List available models for an authenticated provider connection (live model-list lookup). |
 | **POST** | `/api/auth/{provider}/test` | Test connection to an authenticated provider (small live call). Returns {ok, detail}. |
-| **POST** | `/api/auth/{provider}/logout` | Revoke provider connection (`mode=all` revokes all, `mode=provider` revokes one provider). |
-| **GET** | `/api/routing` | Get current model routing (connection, model) for the default setting. |
-| **PUT** | `/api/routing` | Update default model routing; sets {connection, model} pair. |
-<!-- generated:end comp:api -->
+| **POST** | `/api/auth/{provider}/logout` | Revoke provider connection (`mode=subscription` clears OAuth; default `mode=apikey` clears key material). |
+
+## Model routing API
+
+| Method | Path | Description |
+|---|---|---|
+| **GET** | `/api/routing` | Get current model routing (tasks, agent, default); each has {connection, model}. |
+| **PUT** | `/api/routing` | Update routing (merge only sent fields onto stored state); all connections must exist. |
