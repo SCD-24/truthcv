@@ -20,6 +20,8 @@ import type {
   SaveDocumentResult,
   ScreeningRecord,
   CooldownStatus,
+  AgentConfig,
+  AgentConfigUpdate,
 } from "./types";
 
 /**
@@ -279,4 +281,18 @@ export function getCooldown(company: string, role?: string): Promise<CooldownSta
   const params = new URLSearchParams({ company });
   if (role) params.set("role", role);
   return request(`/api/cooldown?${params.toString()}`);
+}
+
+/** Read the agent configuration. */
+export function getAgentConfig(): Promise<AgentConfig> {
+  return request("/api/agent/config");
+}
+
+/** Patch the agent configuration (only the keys you pass change). Returns fresh values. */
+export function updateAgentConfig(body: AgentConfigUpdate): Promise<AgentConfig> {
+  return request("/api/agent/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }

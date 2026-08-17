@@ -301,3 +301,15 @@ export interface ScreeningRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+/** Configuration for the unattended job application agent. */
+export interface AgentConfig {
+  enabled: boolean;
+  blockedCompanies: string[];
+  runAt: string[];
+  runDays: string[];
+}
+
+/** A partial patch of agent configuration; the PUT route merges only the
+ * keys you send. */
+export type AgentConfigUpdate = Partial<AgentConfig>;
