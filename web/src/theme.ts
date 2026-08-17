@@ -28,9 +28,10 @@ export const theme = createTheme({
     // concrete light-mode hexes from tokens.css here; dark-mode flipping is
     // handled where it visibly matters by the `var(--x)` references in the
     // component styleOverrides/variants below (those are applied as CSS at
-    // paint time, so they follow prefers-color-scheme for free).
+    // paint time, so they follow prefers-color-scheme for free). text colours
+    // are not augmented, so they can and do use vars.
     background: { default: '#ecede6', paper: '#f6f7f2' },
-    text: { primary: '#1a211c', secondary: '#59615a' },
+    text: { primary: 'var(--ink)', secondary: 'var(--ink-soft)' },
     primary: { main: '#2f5d3e', contrastText: '#f6f7f2' },
     success: { main: '#2f5d3e', contrastText: '#f6f7f2' },
     error: { main: '#9c3b2c', contrastText: '#f6f7f2' },
