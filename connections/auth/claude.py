@@ -81,14 +81,18 @@ def complete_login(code_state: str) -> dict:
     code, _, state = code_state.strip().partition("#")
     if not code or state != _pending["state"]:
         raise AuthError("Pasted code doesn't match this login attempt. Start again.")
-    resp = httpx.post(TOKEN_URL, json={
-        "grant_type": "authorization_code",
-        "code": code,
-        "state": state,
-        "client_id": CLIENT_ID,
-        "redirect_uri": REDIRECT_URI,
-        "code_verifier": _pending["verifier"],
-    }, timeout=30)
+    try:
+        resp = httpx.post(TOKEN_URL, json={
+            "grant_type": "authorization_code",
+            "code": code,
+            "state": state,
+            "client_id": CLIENT_ID,
+            "redirect_uri": REDIRECT_URI,
+            "code_verifier": _pending["verifier"],
+        }, timeout=30)
+    except httpx.HTTPError as exc:
+        _pending = None
+        raise AuthError("Token exchange failed — could not reach the Claude OAuth server.") from exc
     _pending = None
     if resp.status_code != 200:
         raise AuthError(f"Token exchange failed ({resp.status_code}).")
@@ -105,11 +109,14 @@ def get_valid_access_token() -> str:
             raise AuthError("Claude subscription is not connected.")
         if record.get("expiresAt", 0) - time.time() > _EXPIRY_SKEW_S:
             return record["accessToken"]
-        resp = httpx.post(TOKEN_URL, json={
-            "grant_type": "refresh_token",
-            "refresh_token": record.get("refreshToken", ""),
-            "client_id": CLIENT_ID,
-        }, timeout=30)
+        try:
+            resp = httpx.post(TOKEN_URL, json={
+                "grant_type": "refresh_token",
+                "refresh_token": record.get("refreshToken", ""),
+                "client_id": CLIENT_ID,
+            }, timeout=30)
+        except httpx.HTTPError as exc:
+            raise AuthError("Claude token refresh failed — reconnect the subscription in Settings.") from exc
         if resp.status_code != 200:
             raise AuthError("Claude token refresh failed — reconnect the subscription in Settings.")
         return _store_record(resp.json(), old_refresh=record.get("refreshToken"))["accessToken"]

@@ -1,5 +1,6 @@
 import time
 
+import httpx
 import pytest
 import respx
 from httpx import Response
@@ -69,3 +70,23 @@ def test_get_valid_token_fresh_skips_refresh(enc):
 def test_get_valid_token_disconnected_raises(enc):
     with pytest.raises(claude.AuthError):
         claude.get_valid_access_token()
+
+
+@respx.mock
+def test_get_valid_token_wraps_network_error_on_refresh(enc):
+    secretstore.set_connection("claude", {"oauth": {
+        "accessToken": "old", "refreshToken": "rt-keep",
+        "expiresAt": time.time() + 10, "scope": "", "connectedAt": 0,
+    }})
+    respx.post(claude.TOKEN_URL).mock(side_effect=httpx.ConnectError("connection refused"))
+    with pytest.raises(claude.AuthError):
+        claude.get_valid_access_token()
+
+
+@respx.mock
+def test_complete_login_wraps_network_error_on_exchange(enc):
+    start = claude.start_login()
+    state = start["authUrl"].split("state=")[1].split("&")[0]
+    respx.post(claude.TOKEN_URL).mock(side_effect=httpx.ConnectError("connection refused"))
+    with pytest.raises(claude.AuthError):
+        claude.complete_login(f"authcode#{state}")
