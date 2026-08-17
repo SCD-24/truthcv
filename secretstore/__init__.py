@@ -147,3 +147,47 @@ def load_store() -> dict:
 
 def save_store(store: dict) -> None:
     write_secrets(store)
+
+
+_ENV_KEY_FALLBACK = {"claude": "ANTHROPIC_API_KEY", "codex": "OPENAI_API_KEY"}
+_V1_PROVIDER_TO_CARD = {"anthropic": "claude", "openai": "codex", "ollama": "ollama"}
+
+
+def get_connection(card: str) -> dict:
+    """Stored connection for a card, with env vars filling absent fields."""
+    conn = dict(load_store().get("connections", {}).get(card, {}))
+    env_var = _ENV_KEY_FALLBACK.get(card)
+    if env_var and not conn.get("apiKey"):
+        v = os.environ.get(env_var, "").strip()
+        if v:
+            conn["apiKey"] = v
+    if card == "ollama" and not conn.get("baseUrl"):
+        conn["baseUrl"] = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+    return conn
+
+
+def set_connection(card: str, updates: dict) -> None:
+    """Merge updates into a card's stored connection. None deletes a field."""
+    store = load_store()
+    conn = store.setdefault("connections", {}).setdefault(card, {})
+    for k, v in updates.items():
+        if v is None:
+            conn.pop(k, None)
+        else:
+            conn[k] = v
+    save_store(store)
+
+
+def clear_mode(card: str, mode: str) -> None:
+    if mode == "subscription":
+        set_connection(card, {"oauth": None})
+    else:
+        set_connection(card, {"apiKey": None, "baseUrl": None, "bearer": None, "authMode": None})
+
+
+def legacy_default() -> tuple[str | None, str]:
+    """(card, model) equivalent of the v1 activeProvider/model behavior."""
+    leg = load_store().get("legacyDefault", {})
+    provider = (leg.get("provider") or os.environ.get("LLM_PROVIDER", "anthropic")).strip().lower()
+    model = (leg.get("model") or os.environ.get("LLM_MODEL", "")).strip()
+    return _V1_PROVIDER_TO_CARD.get(provider), model
