@@ -10,6 +10,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
       # In-container path the app writes to — must equal the volume mount target
       # below. Do NOT derive this from the host's .env DATA_DIR (that's a host path).
       - DATA_DIR=/app/data
@@ -63,6 +64,7 @@ services:
       # run loop (task t-4) as "no cap", not as zero.
       - MAX_APPLICATIONS_PER_RUN=${MAX_APPLICATIONS_PER_RUN:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
     volumes:
       # The host Chrome interceptor's unix socket, bind-mounted in so the
       # agent drives a real, already-logged-in browser on the host instead of

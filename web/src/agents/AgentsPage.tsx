@@ -24,15 +24,25 @@ import {
   deleteScreening,
   getAgentConfig,
   getProfileAnswers,
+  getRouting,
+  listConnections,
   listScreenings,
   saveProfileAnswers,
   updateAgentConfig,
+  updateRouting,
 } from "../api/client";
 import { ButtonSpinner } from "../components/ButtonSpinner";
+import { ModelRoutePicker } from "../settings/ModelRoutePicker";
 import { isCooldownActive } from "../settings/cooldown";
 import { lastAgentActivity } from "../settings/agentActivity";
 import { isValidRunTime, WEEKDAYS } from "./schedule";
-import type { AgentConfig, ProfileAnswers, ScreeningRecord } from "../api/types";
+import type {
+  AgentConfig,
+  ConnectionStatus,
+  ProfileAnswers,
+  Routing,
+  ScreeningRecord,
+} from "../api/types";
 
 /** The five canonical ATS answers before they're loaded from the server. */
 const EMPTY_ANSWERS: ProfileAnswers = {
@@ -138,6 +148,10 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  const [connections, setConnections] = useState<ConnectionStatus[]>([]);
+  const [routing, setRouting] = useState<Routing | null>(null);
+  const [modelLoadError, setModelLoadError] = useState<string | null>(null);
+
   useEffect(() => {
     let alive = true;
     Promise.all([getAgentConfig(), getProfileAnswers(), listScreenings()])
@@ -151,6 +165,26 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
         setLoadError(e instanceof Error ? e.message : "Couldn't load the agent's configuration."),
       )
       .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Loaded on its own chain, separate from the three loads above: a routing
+  // or connections failure must only take out the Model section, per this
+  // file's own per-section failure-isolation contract — not the whole page.
+  useEffect(() => {
+    let alive = true;
+    Promise.all([getRouting(), listConnections()])
+      .then(([r, conns]) => {
+        if (!alive) return;
+        setRouting(r);
+        setConnections(conns.connections);
+      })
+      .catch((e: unknown) => {
+        if (!alive) return;
+        setModelLoadError(e instanceof Error ? e.message : "Couldn't load the model section.");
+      });
     return () => {
       alive = false;
     };
@@ -187,6 +221,15 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
             config={config}
             onChange={(updater) => setConfig((cur) => (cur ? updater(cur) : cur))}
           />
+          {routing ? (
+            <ModelSection connections={connections} routing={routing} onSaved={setRouting} />
+          ) : (
+            modelLoadError && (
+              <Section title="Model">
+                <Alert severity="error">{modelLoadError}</Alert>
+              </Section>
+            )
+          )}
           <ScheduleSection config={config} onChange={setConfig} />
           <BlocklistSection config={config} onChange={setConfig} />
           <ProfileAnswersSection answers={answers} onChange={setAnswers} />
@@ -240,6 +283,36 @@ function EnabledSection({
       </Typography>
       {error && <Alert severity="error">{error}</Alert>}
     </Section>
+  );
+}
+
+/** The model the unattended agent runs on — a claude-only ModelRoutePicker
+ * (the agent drives the operator's own Chrome via the interceptor, which
+ * only supports Claude) saving/clearing the `agent` route. Cleared falls
+ * back to the container's ANTHROPIC_API_KEY. */
+function ModelSection({
+  connections,
+  routing,
+  onSaved,
+}: {
+  connections: ConnectionStatus[];
+  routing: Routing;
+  onSaved: (r: Routing) => void;
+}) {
+  return (
+    <ModelRoutePicker
+      connections={connections}
+      route={routing.agent}
+      onSave={async (route) => {
+        const fresh = await updateRouting({ agent: route });
+        onSaved(fresh);
+      }}
+      title="Model"
+      description="Model and account the unattended agent runs on. Cleared = the container's ANTHROPIC_API_KEY."
+      filterCards={["claude"]}
+      allowClear
+      showTest={false}
+    />
   );
 }
 

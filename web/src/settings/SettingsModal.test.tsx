@@ -286,6 +286,7 @@ describe("SettingsModal", () => {
 
     expect(await screen.findByText("Accounts")).toBeTruthy();
     expect(screen.getByText("Default model")).toBeTruthy();
+    expect(screen.getByText("Task models")).toBeTruthy();
     expect(screen.getAllByText("Claude").length).toBeGreaterThan(0);
   });
 });

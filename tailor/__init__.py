@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from providers.base import LLMProvider
 from truth.model import Truth
@@ -77,15 +77,24 @@ def claims_for_ids(approved_ids: list[str]) -> list[tuple[str, str]]:
     ]
 
 
-def tailor(posting: str, truth: Truth, provider: LLMProvider) -> dict[str, Any]:
+def tailor(
+    posting: str,
+    truth: Truth,
+    provider_for: Callable[[str | None], LLMProvider],
+) -> dict[str, Any]:
     """Produce keywords, inferences, and a truth-only structured draft; persist it.
+
+    ``provider_for`` resolves a task name to the provider configured for that
+    task (see ``providers.get_provider``); each sub-call asks for its own.
 
     Returns a dict matching the frontend's TailorResult ({keywords, inferences}),
     plus the draft for internal render use.
     """
-    keywords = extract_keywords(posting, provider)
-    experiences, education, skills = select_and_rephrase(posting, keywords, truth, provider)
-    inferences = detect_inferences(keywords, truth, provider)
+    keywords = extract_keywords(posting, provider_for("keywords"))
+    experiences, education, skills = select_and_rephrase(
+        posting, keywords, truth, provider_for("tailor")
+    )
+    inferences = detect_inferences(keywords, truth, provider_for("infer"))
 
     draft = Draft(
         experiences=experiences,

@@ -7,7 +7,10 @@ the unverifiable tokens.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+import hmac
+import os
+
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 import tailor as tailor_engine
@@ -35,7 +38,7 @@ import modelrouting
 import secretstore
 from agentconfig import store as agent_config_store
 from connections import catalog
-from connections.auth.claude import AuthError
+from connections.auth.claude import AuthError, get_valid_access_token
 from connections.auth import claude as claude_auth
 from providers import OPENROUTER_BASE_URL, build_connection_provider, reset_provider
 from screening import store as screening_store
@@ -45,6 +48,7 @@ from screening.model import Screening
 from .schemas import (
     AgentConfigModel,
     AgentConfigUpdate,
+    AgentLlmCredentials,
     AnswersModel,
     AnswersUpdate,
     ApiKeyRequest,
@@ -154,7 +158,7 @@ def extract() -> TruthDoc:
     if not text.strip():
         raise HTTPException(status_code=400, detail="Upload a PDF before extracting.")
     try:
-        truth = build_truth_from_text(text, get_provider())
+        truth = build_truth_from_text(text, get_provider("truth_extract"))
     except ProviderError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001 — surface upstream LLM/SDK errors cleanly
@@ -182,7 +186,7 @@ def put_truth(body: TruthDoc) -> None:
 @router.post("/tailor", response_model=TailorResult)
 def tailor_route(body: TailorRequest) -> TailorResult:
     try:
-        result = tailor_engine.tailor(body.posting, load(), get_provider())
+        result = tailor_engine.tailor(body.posting, load(), get_provider)
     except ProviderError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001 — surface upstream LLM/SDK errors cleanly
@@ -711,6 +715,41 @@ def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:
     return AgentConfigModel.model_validate(agent_config_store.save(cfg).to_dict())
 
 
+@router.get("/agent/llm-credentials", response_model=AgentLlmCredentials)
+def get_agent_llm_credentials(x_agent_token: str = Header(default="")) -> AgentLlmCredentials:
+    """Guarded: only the unattended agent (holding AGENT_API_TOKEN) may call this.
+
+    Returns 404 rather than 401/403 so the response carries no authentication hint.
+    """
+    secret = os.environ.get("AGENT_API_TOKEN", "").strip()
+    given = x_agent_token.encode("utf-8", "surrogateescape")
+    if not secret or not hmac.compare_digest(given, secret.encode("utf-8")):
+        raise HTTPException(status_code=404)
+
+    route = modelrouting.load().agent
+    card = route.connection if route else "claude"
+    if card != "claude":
+        raise HTTPException(status_code=409, detail="Agent supports only the Claude connection.")
+    model = route.model if route else ""
+
+    conn = secretstore.get_connection("claude")
+    oauth = conn.get("oauth") or {}
+    if oauth.get("accessToken") and conn.get("authMode") != "apikey":
+        try:
+            token = get_valid_access_token()
+        except AuthError:
+            raise HTTPException(
+                status_code=503, detail="Claude subscription needs reconnecting."
+            ) from None
+        return AgentLlmCredentials(auth_type="oauth", token=token, model=model)
+
+    api_key = conn.get("apiKey")
+    if api_key:
+        return AgentLlmCredentials(auth_type="api_key", token=api_key, model=model)
+
+    raise HTTPException(status_code=404)
+
+
 def _letter_approvals(
     approvals: CoverLetterApprovals | None,
 ) -> tuple[set[str], set[str], list[dict] | None]:
@@ -766,7 +805,7 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
             body.tone,
             body.length,
             load(),
-            get_provider(),
+            get_provider("cover_letter"),
             approved_texts=approved_texts,
             denied_texts=denied_texts,
             paragraphs=paragraphs,

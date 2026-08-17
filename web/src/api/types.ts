@@ -361,3 +361,13 @@ export interface Routing {
   agent: RouteChoice | null;
   default: RouteChoice | null;
 }
+
+/** Partial PUT /api/routing body. A task entry (or `agent`/`default`) sent
+ * explicitly as `null` clears that route rather than leaving it unchanged —
+ * mirrors RoutingUpdate in api/schemas.py, which is why this isn't just
+ * `Partial<Routing>`: `Routing.tasks` values are never null. */
+export interface RoutingUpdate {
+  tasks?: Record<string, RouteChoice | null>;
+  agent?: RouteChoice | null;
+  default?: RouteChoice | null;
+}

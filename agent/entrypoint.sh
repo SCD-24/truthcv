@@ -52,7 +52,12 @@ validate_run_at() {
 
 preflight() {
   local ok=0
-  [[ -n "${ANTHROPIC_API_KEY:-}" ]] || { log "ABORT: ANTHROPIC_API_KEY is not set"; ok=1; }
+  if [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${AGENT_API_TOKEN:-}" ]]; then
+    log "ABORT: neither ANTHROPIC_API_KEY nor AGENT_API_TOKEN is set"
+    ok=1
+  elif [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    log "credentials will be fetched from app at run time"
+  fi
   [[ -x "$DAILY_APPLY" ]] || { log "ABORT: $DAILY_APPLY missing or not executable"; ok=1; }
   validate_run_at || ok=1
   return $ok

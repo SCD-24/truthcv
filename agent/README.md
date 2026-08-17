@@ -96,7 +96,8 @@ under the operator's name. Watch it.
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | **Required.** Injected at runtime, never baked into the image. Checked at container start. |
+| `ANTHROPIC_API_KEY` | — | Injected at runtime, never baked into the image. Checked at container start. **Fallback only** when `AGENT_API_TOKEN` is unset; when it is set, credentials are fetched from `GET /api/agent/llm-credentials` at run start. |
+| `AGENT_API_TOKEN` | unset | Shared secret (generate with `openssl rand -hex 32`). When set, the agent fetches LLM credentials from the app at run start via a guarded endpoint; when unset, it uses `ANTHROPIC_API_KEY` directly (original behavior). |
 | `RUN_AT` | `09:00,15:00` | Comma-separated `HH:MM` (24h, container TZ). Fallback only — used when the agent config API is unreachable; see below. |
 | `RUN_DAYS` | `1,2,3,4,5` | Days to run, `1`=Mon … `7`=Sun. Fallback only — used when the agent config API is unreachable; see below. |
 | `RUN_ONCE` | unset | `1` = run immediately and exit. |
@@ -105,6 +106,8 @@ under the operator's name. Watch it.
 | `INTERCEPTOR_SOCKET` | `/tmp/interceptor.sock` | Host socket for the browser, bind-mounted at the same path inside. |
 | `INTERCEPTOR_MCP_COMMAND` | `interceptor-mcp` | **Placeholder.** The command that serves that socket — see the gap noted above. |
 | `MAX_APPLICATIONS_PER_RUN` | empty | Empty means **no cap**, matching RUNBOOK §1 ("there is no daily quota"). Not zero. |
+
+The agent runs the Claude Code CLI, so the **Model** setting on the Agents page accepts only the Claude connection — other providers are filtered out by design.
 
 ## Agents page: the schedule and enable switch
 

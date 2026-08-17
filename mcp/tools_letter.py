@@ -53,7 +53,7 @@ def generate_cover_letter(
             "blocked_reason": "company_blocked",
         }
     if provider is None:
-        provider = get_provider()
+        provider = get_provider("cover_letter")
     truth = load_truth()
     paras = (
         paragraphs

@@ -13,6 +13,7 @@ import Typography from "@mui/material/Typography";
 import { getRouting, listConnections } from "../api/client";
 import { AccountsSection } from "./AccountsSection";
 import { DefaultModelSection } from "./DefaultModelSection";
+import { TaskModelsSection } from "./TaskModelsSection";
 import type { ConnectionList, Routing } from "../api/types";
 import "../styles/settings.css";
 
@@ -118,6 +119,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
             {connections && routing && (
               <DefaultModelSection
+                connections={connections.connections}
+                routing={routing}
+                onSaved={setRouting}
+              />
+            )}
+
+            {connections && routing && (
+              <TaskModelsSection
                 connections={connections.connections}
                 routing={routing}
                 onSaved={setRouting}
