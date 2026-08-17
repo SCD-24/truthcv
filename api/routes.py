@@ -1081,7 +1081,7 @@ def put_routing(body: RoutingUpdate) -> RoutingModel:
     # Validate all connections in the update before applying
     for route_dict in _all_routes_in_dict(update_dict):
         connection = route_dict.get("connection")
-        if connection and connection not in catalog.CARDS:
+        if connection not in catalog.CARDS:
             raise HTTPException(status_code=400, detail=f"unknown connection: {connection}")
 
     # Merge: update the stored dict with only the fields that were sent

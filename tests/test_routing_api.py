@@ -30,3 +30,10 @@ def test_put_unknown_connection_400(client):
 def test_put_unknown_task_ignored(client):
     client.put("/api/routing", json={"tasks": {"nonsense": {"connection": "claude"}}})
     assert client.get("/api/routing").json()["tasks"] == {}
+
+
+def test_put_empty_connection_400(client):
+    resp = client.put("/api/routing", json={"default": {"connection": ""}})
+    assert resp.status_code == 400
+    # Verify nothing was saved
+    assert client.get("/api/routing").json()["default"] is None
