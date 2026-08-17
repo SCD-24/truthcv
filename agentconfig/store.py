@@ -13,6 +13,11 @@ def config_path() -> Path:
     return data_dir() / "agent_config.json"
 
 
+def _is_string_list(value: object) -> bool:
+    """Check if value is a list containing only strings."""
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
 @dataclass
 class AgentConfig:
     """Agent configuration: enabled flag, blocklist, and schedule."""
@@ -33,17 +38,17 @@ class AgentConfig:
 
         # blocked_companies: list[str]
         if "blocked_companies" in raw:
-            if isinstance(raw["blocked_companies"], list):
+            if _is_string_list(raw["blocked_companies"]):
                 kwargs["blocked_companies"] = raw["blocked_companies"]
 
         # run_at: list[str]
         if "run_at" in raw:
-            if isinstance(raw["run_at"], list):
+            if _is_string_list(raw["run_at"]):
                 kwargs["run_at"] = raw["run_at"]
 
         # run_days: list[str]
         if "run_days" in raw:
-            if isinstance(raw["run_days"], list):
+            if _is_string_list(raw["run_days"]):
                 kwargs["run_days"] = raw["run_days"]
 
         return cls(**kwargs)
