@@ -142,16 +142,14 @@ All settings live in `.env` (copied from [`.env.example`](.env.example)):
 
 | Variable | What it does |
 |---|---|
-| `LLM_PROVIDER` | `anthropic` \| `openai` \| `ollama` |
-| `LLM_MODEL` | Optional model id override; blank uses each provider's default |
-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Credential for the selected provider |
+| `LLM_PROVIDER` | `anthropic` \| `openai` \| `ollama` — can also be set in Settings → Default model |
+| `LLM_MODEL` | Optional model id override; blank uses each provider's default — can also be set in Settings → Default model |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Credential for the selected provider; env vars remain as fallback |
 | `OLLAMA_HOST` | Ollama endpoint (compose sets this automatically) |
-| `ENCRYPTION_KEY` | Optional — unlocks the in-app Settings modal (keys saved encrypted at rest) |
+| `ENCRYPTION_KEY` | Optional — unlocks the in-app Settings → Accounts modal (provider credentials saved encrypted at rest) |
 | `DATA_DIR` | Host path for persisted data (default `./data`) |
 
-You can leave the API key blank in `.env` and instead enter/save it from the
-in-app **Settings** modal — but that feature only turns on if `ENCRYPTION_KEY`
-is set.
+Provider accounts can be configured in the in-app **Settings → Accounts** modal (if `ENCRYPTION_KEY` is set), and env-var credentials remain as fallback. You can leave API keys blank in `.env` and set them from the app instead — the app encrypts them into `./data/secrets.enc`.
 
 Generate a key with either of the following and copy the printed value into
 `ENCRYPTION_KEY`:
