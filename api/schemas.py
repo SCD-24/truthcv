@@ -545,9 +545,12 @@ class RoutingUpdate(_Camel):
 
     Mirrors the merge semantics: omitted fields stay None and are excluded
     via `model_dump(exclude_unset=True)`, so the route only applies the
-    fields the client actually sent.
+    fields the client actually sent. Unlike other merge-PUT bodies in this
+    file, a field sent explicitly as `null` is NOT the same as omitting it:
+    `default`/`agent` sent as null clears that route, and a task entry sent
+    as null removes that task's route — see put_routing in routes.py.
     """
 
-    tasks: dict[str, RouteModel] | None = None
+    tasks: dict[str, RouteModel | None] | None = None
     agent: RouteModel | None = None
     default: RouteModel | None = None

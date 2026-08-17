@@ -48,4 +48,4 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | Method | Path | Description |
 |---|---|---|
 | **GET** | `/api/routing` | Get current model routing (tasks, agent, default); each has {connection, model}. |
-| **PUT** | `/api/routing` | Update routing (merge only sent fields onto stored state); all connections must exist. |
+| **PUT** | `/api/routing` | Update routing (merge only sent fields onto stored state); all connections must exist. A field explicitly sent as `null` clears it — `default`/`agent` sent as null removes that route, and a `tasks` entry sent as null removes that task's route. An absent field is left untouched. |

@@ -1091,13 +1091,19 @@ def get_routing() -> RoutingModel:
 
 @router.put("/routing", response_model=RoutingModel)
 def put_routing(body: RoutingUpdate) -> RoutingModel:
-    """Merge only the fields the client sent onto the stored routing."""
+    """Merge only the fields the client sent onto the stored routing.
+
+    A field explicitly sent as null is not the same as an absent field: it
+    clears that route (`default`/`agent` sent as null, or a `tasks` entry
+    sent as null, removes it) instead of leaving the stored value untouched.
+    """
     # Load current routing
     stored = modelrouting.load()
     stored_dict = stored.to_dict()
 
-    # Prepare update from body
-    update_dict = body.model_dump(exclude_unset=True, exclude_none=True, by_alias=False)
+    # Prepare update from body — exclude_unset only, so an explicit null
+    # survives into update_dict and is distinguishable from an absent field.
+    update_dict = body.model_dump(exclude_unset=True, by_alias=False)
 
     # Validate all connections in the update before applying
     for route_dict in _all_routes_in_dict(update_dict):
@@ -1105,9 +1111,14 @@ def put_routing(body: RoutingUpdate) -> RoutingModel:
         if connection not in catalog.CARDS:
             raise HTTPException(status_code=400, detail=f"unknown connection: {connection}")
 
-    # Merge: update the stored dict with only the fields that were sent
+    # Merge: update the stored dict with only the fields that were sent.
+    # A None value clears the corresponding route rather than being ignored.
     if "tasks" in update_dict:
-        stored_dict["tasks"].update(update_dict["tasks"])
+        for name, route in (update_dict["tasks"] or {}).items():
+            if route is None:
+                stored_dict["tasks"].pop(name, None)
+            else:
+                stored_dict["tasks"][name] = route
     if "agent" in update_dict:
         stored_dict["agent"] = update_dict["agent"]
     if "default" in update_dict:
