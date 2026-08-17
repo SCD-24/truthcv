@@ -13,6 +13,8 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from agentconfig.store import is_blocked as agent_config_is_blocked
+from agentconfig.store import load as agent_config_load
 from applications.store import load_all as load_applications
 
 from .store import load_all as load_screenings
@@ -35,6 +37,7 @@ class CooldownStatus:
 
     in_cooldown: bool
     expires: str | None = None
+    blocked: bool = False
 
 
 def _matches(company: str, role: str | None, rec_company: str, rec_role: str) -> bool:
@@ -96,9 +99,14 @@ def cooldown(company: str, role: str | None = None) -> CooldownStatus:
 
     A blank/whitespace (or non-string) ``company`` never matches anything and
     always reports no cooldown.
+
+    A blocklisted company is permanently in cooldown (blocked=True, no expiry).
     """
     if not isinstance(company, str) or not company.strip():
         return CooldownStatus(in_cooldown=False, expires=None)
+    cfg = agent_config_load()
+    if agent_config_is_blocked(cfg, company):
+        return CooldownStatus(in_cooldown=True, expires=None, blocked=True)
     expiries = _screening_expiries(company, role) + _application_expiries(company, role)
     if not expiries:
         return CooldownStatus(in_cooldown=False)

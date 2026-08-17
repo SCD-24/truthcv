@@ -115,7 +115,7 @@ def get_cooldown(company: str, role: str | None = None) -> CooldownResult:
     Delegates entirely to screening.cooldown.cooldown; no arithmetic here.
     """
     status = check_cooldown(company, role)
-    return CooldownResult(in_cooldown=status.in_cooldown, expires=status.expires)
+    return CooldownResult(in_cooldown=status.in_cooldown, expires=status.expires, blocked=status.blocked)
 
 
 def _truth_doc(truth: Truth) -> TruthDoc:

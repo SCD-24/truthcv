@@ -72,7 +72,7 @@ def check_cooldown(company: str, role: str | None = None) -> dict:
     ``GET /api/cooldown``, so the two surfaces can never disagree.
     """
     status = _cooldown(company, role)
-    return {"in_cooldown": status.in_cooldown, "expires": status.expires}
+    return {"in_cooldown": status.in_cooldown, "expires": status.expires, "blocked": status.blocked}
 
 
 def get_canonical_cv() -> dict:

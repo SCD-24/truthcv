@@ -481,3 +481,4 @@ class CooldownResult(_Camel):
 
     in_cooldown: bool
     expires: str | None = None
+    blocked: bool = False
