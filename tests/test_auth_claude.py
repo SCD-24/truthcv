@@ -35,6 +35,11 @@ def test_start_login_builds_pkce_url(enc):
     assert out["flow"] == "paste-code"
     assert out["authUrl"].startswith(claude.AUTHORIZE_URL)
     assert "code_challenge=" in out["authUrl"] and "state=" in out["authUrl"]
+    # The claude.com authorize endpoint rejects short state values with
+    # "Invalid request format" — 32 random bytes (43 b64url chars) like the
+    # Claude Code CLI, verified 2026-08-17.
+    state = out["authUrl"].split("state=")[1].split("&")[0]
+    assert len(state) == 43
 
 
 @respx.mock

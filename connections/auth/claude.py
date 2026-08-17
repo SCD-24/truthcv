@@ -48,7 +48,9 @@ def start_login() -> dict:
     global _pending
     verifier = _b64url(os.urandom(32))
     challenge = _b64url(hashlib.sha256(verifier.encode("ascii")).digest())
-    state = _b64url(os.urandom(16))
+    # 32 bytes, like the Claude Code CLI — the claude.com authorize endpoint
+    # rejects shorter state values with "Invalid request format".
+    state = _b64url(os.urandom(32))
     _pending = {"verifier": verifier, "state": state}
     query = urlencode({
         "code": "true",
