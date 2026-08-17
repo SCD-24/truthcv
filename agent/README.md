@@ -107,6 +107,8 @@ under the operator's name. Watch it.
 | `INTERCEPTOR_MCP_COMMAND` | `interceptor-mcp` | **Placeholder.** The command that serves that socket — see the gap noted above. |
 | `MAX_APPLICATIONS_PER_RUN` | empty | Empty means **no cap**, matching RUNBOOK §1 ("there is no daily quota"). Not zero. |
 
+The agent runs the Claude Code CLI, so the **Model** setting on the Agents page accepts only the Claude connection — other providers are filtered out by design.
+
 ## Agents page: the schedule and enable switch
 
 The **Agents page** is the source of truth for whether the agent runs and
