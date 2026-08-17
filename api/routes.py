@@ -965,6 +965,7 @@ def complete_connection_login(body: CompleteLoginRequest) -> ConnectionStatus:
         claude_auth.complete_login(body.code)
     except AuthError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    reset_provider()
     return _connection_status("claude")
 
 
@@ -1002,6 +1003,8 @@ def post_connection_key(provider: str, body: ApiKeyRequest) -> ModelList:
         models = _probe_key(provider, body)
     except ProviderError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001 — surface upstream SDK auth errors as 400s
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}") from e
     updates: dict = {}
     if body.api_key:
         updates["apiKey"] = body.api_key
