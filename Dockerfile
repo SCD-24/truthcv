@@ -36,6 +36,7 @@ COPY render/ ./render/
 COPY coverletter/ ./coverletter/
 COPY applications/ ./applications/
 COPY screening/ ./screening/
+COPY agentconfig/ ./agentconfig/
 COPY mcp/ ./mcp/
 COPY api/ ./api/
 
