@@ -183,7 +183,10 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
         </Stack>
       ) : config ? (
         <Stack spacing={3}>
-          <EnabledSection config={config} onChange={setConfig} />
+          <EnabledSection
+            config={config}
+            onChange={(updater) => setConfig((cur) => (cur ? updater(cur) : cur))}
+          />
           <ScheduleSection config={config} onChange={setConfig} />
           <BlocklistSection config={config} onChange={setConfig} />
           <ProfileAnswersSection answers={answers} onChange={setAnswers} />
@@ -195,25 +198,30 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
 }
 
 /** Agent enabled/disabled toggle. Optimistic — flips immediately, reverts and
- * surfaces an error if the PUT fails. */
+ * surfaces an error if the PUT fails.
+ *
+ * `onChange` takes an updater over the *current* config rather than a
+ * snapshot, so the optimistic set and its revert only ever touch the
+ * `enabled` field against whatever the latest state is — a save from
+ * another section (e.g. Schedule) that lands while this PUT is in flight
+ * is never clobbered by a stale full-config revert. */
 function EnabledSection({
   config,
   onChange,
 }: {
   config: AgentConfig;
-  onChange: (c: AgentConfig) => void;
+  onChange: (updater: (prev: AgentConfig) => AgentConfig) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
 
   async function handleToggle(enabled: boolean) {
-    const previous = config;
     setError(null);
-    onChange({ ...config, enabled });
+    onChange((prev) => ({ ...prev, enabled }));
     try {
       const fresh = await updateAgentConfig({ enabled });
-      onChange(fresh);
+      onChange((prev) => ({ ...prev, enabled: fresh.enabled }));
     } catch (e) {
-      onChange(previous);
+      onChange((prev) => ({ ...prev, enabled: !enabled }));
       setError(e instanceof Error ? e.message : "Couldn't update the agent.");
     }
   }
