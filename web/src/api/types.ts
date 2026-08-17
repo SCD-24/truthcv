@@ -313,3 +313,45 @@ export interface AgentConfig {
 /** A partial patch of agent configuration; the PUT route merges only the
  * keys you send. */
 export type AgentConfigUpdate = Partial<AgentConfig>;
+
+/** Provider identifier for connection status and routing. */
+export type CardKey = "claude" | "codex" | "openrouter" | "ollama";
+
+/** Status of a single provider connection. */
+export interface ConnectionStatus {
+  provider: CardKey | string;
+  label: string;
+  modes: string[];
+  subscriptionConnected: boolean;
+  apiKeyConnected: boolean;
+  authMode: string;
+  expiresAt: number | null;
+  connectedAt: number | null;
+}
+
+/** Response from GET /api/auth/status. */
+export interface ConnectionList {
+  encryptionAvailable: boolean;
+  connections: ConnectionStatus[];
+}
+
+/** Result of starting a login flow for a provider. */
+export interface StartLoginResult {
+  flow: "paste-code" | "browser" | "device-code" | string;
+  authUrl?: string | null;
+  userCode?: string | null;
+  verificationUri?: string | null;
+}
+
+/** A routing choice for a task or agent — which model via which provider. */
+export interface RouteChoice {
+  connection: string;
+  model: string;
+}
+
+/** Routing configuration for tasks and defaults. */
+export interface Routing {
+  tasks: Record<string, RouteChoice>;
+  agent: RouteChoice | null;
+  default: RouteChoice | null;
+}
