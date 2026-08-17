@@ -3,10 +3,9 @@ import { ModelRoutePicker } from "./ModelRoutePicker";
 import { SettingsSection } from "./SettingsModal";
 import type { ConnectionStatus, Routing } from "../api/types";
 
-/** The task keys the backend routes independently (providers/__init__.py's
- * get_provider(task) callers), paired with the label each row shows. Mirrors
- * the backend's task-name strings — same drift-protection pattern as
- * CONNECTION_MODES for the mode literals. */
+/** The task keys the backend routes independently, paired with the label each
+ * row shows. Mirrors `modelrouting.TASK_NAMES` (modelrouting/store.py) — same
+ * drift-protection pattern as CONNECTION_MODES for the mode literals. */
 export const TASKS = [
   { key: "truth_extract", label: "Truth extraction" },
   { key: "keywords", label: "Keyword extraction" },

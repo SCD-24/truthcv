@@ -140,4 +140,19 @@ describe("AgentsPage model section", () => {
       expect(updateRouting).toHaveBeenCalledWith({ agent: null });
     });
   });
+
+  it("a getRouting failure only takes out the Model section — the rest of the page still renders", async () => {
+    vi.mocked(getAgentConfig).mockResolvedValue(makeConfig());
+    vi.mocked(getProfileAnswers).mockResolvedValue(makeAnswers());
+    vi.mocked(listScreenings).mockResolvedValue([]);
+    vi.mocked(getRouting).mockRejectedValue(new Error("routing unavailable"));
+    vi.mocked(listConnections).mockResolvedValue({ encryptionAvailable: true, connections: [] });
+
+    render(<AgentsPage onBack={vi.fn()} />);
+
+    expect(await screen.findByLabelText("Agent enabled")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Schedule" })).toBeTruthy();
+    expect(await screen.findByText("routing unavailable")).toBeTruthy();
+    expect(screen.queryByLabelText(/connection/i)).toBeNull();
+  });
 });
