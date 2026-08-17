@@ -42,6 +42,9 @@ your only options are:
    `paragraphs`, per `agent/RUNBOOK.md` §6) — no other retry path exists.
 2. Skip the application and call `record_screening` to say why.
 
+If `blocked_reason` is `"company_blocked"`, there is no retry path — abandon
+the application and call `record_screening` instead.
+
 Never assert a fact the guardrail could not ground. Never work around a
 block by rewording a claim, typing it directly into a form field, or any
 other route that bypasses `generate_cover_letter`'s validation. Never wait

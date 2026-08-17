@@ -199,7 +199,9 @@ two moves from here are:
    `paragraphs` set to the `paragraphs` you were given. This re-runs
    validation over the letter with those claims excised — it does **not**
    make a second model call — and returns a new `blocked`/`blocked_claims`
-   result. Repeat until `blocked` is `false`.
+   result. Repeat until `blocked` is `false`. This retry path does not apply
+   when `blocked_reason` is `"company_blocked"` (see §8) — there is nothing
+   to drop, so abandon the application instead.
 2. **Abandon the application.** If dropping the blocked claim(s) would leave
    the letter making no honest case for the role, or the posting cannot be
    answered without the blocked claim, stop. Do not apply. Call
