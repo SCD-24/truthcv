@@ -16,7 +16,10 @@ const req = http.get(u, { timeout: 5000 }, (res) => {
   res.on("end", () => {
     try {
       const cfg = JSON.parse(body);
-      if (field === "enabled") process.stdout.write(String(cfg.enabled === true));
+      if (field === "enabled") {
+        if (typeof cfg.enabled !== "boolean") { process.exit(1); return; }
+        process.stdout.write(String(cfg.enabled));
+      }
       else if (field === "run_at") process.stdout.write(cfg.runAt.join(","));
       else process.stdout.write(cfg.runDays.map((d) => DAY_NUM[d]).filter(Boolean).join(","));
       process.exit(0);

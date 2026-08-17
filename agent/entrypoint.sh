@@ -115,7 +115,8 @@ refresh_schedule() {
 
 # Print the next few slots and exit, so the schedule can be checked without
 # waiting a day for it. Deliberately runs BEFORE preflight: it submits
-# nothing and talks to nothing, so it must not require ANTHROPIC_API_KEY.
+# nothing (it only reads the schedule via refresh_schedule), so it must not
+# require ANTHROPIC_API_KEY.
 check_schedule() {
   local cursor secs i
   cursor=$(date +%s)
