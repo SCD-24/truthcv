@@ -23,6 +23,7 @@ from mcp.tools_ledger import (
     record_application,
     record_screening,
 )
+from mcp.tools_boards import record_company_board
 
 TOOLS: dict[str, Callable[..., dict]] = {}
 
@@ -43,6 +44,7 @@ register("record_screening", record_screening)
 register("check_cooldown", check_cooldown)
 register("get_canonical_cv", get_canonical_cv)
 register("get_profile_answers", get_profile_answers)
+register("record_company_board", record_company_board)
 
 router = APIRouter(prefix="/mcp")
 

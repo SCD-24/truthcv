@@ -34,6 +34,11 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     blockedCompanies: [],
     runAt: ["09:00"],
     runDays: ["mon"],
+    profiles: [],
+    targetCompanies: [],
+    cooldownDays: null,
+    maxApplicationsPerRun: null,
+    companyBoards: [],
     ...overrides,
   };
 }

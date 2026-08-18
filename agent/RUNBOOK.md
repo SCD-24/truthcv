@@ -26,7 +26,12 @@ Always report what you rejected and on which criterion.
 
 ---
 
-## 2. Hard filters — all six must pass
+## 2. Hard filters — all six must pass (defaults when no job profiles configured)
+
+These six filters apply only when no job profiles are configured via `/api/agent/config`.
+When profiles ARE configured, a rendered profile-specific requirements block in the
+run prompt supersedes these defaults. Each profile may waive any criterion (e.g.,
+salary, entity verification) independently.
 
 1. **Fully remote.** Not hybrid, not "remote-first with N days in office."
    If the posting's own fields contradict each other, see §7.

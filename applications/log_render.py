@@ -172,6 +172,8 @@ def _section(number: int, app: Application) -> list[str]:
     ]
     if app.ats:
         parts.append(f"- **ATS:** {_cell(app.ats)}")
+    if app.profile:
+        parts.append(f"- **Profile:** {_cell(app.profile)}")
     parts += _provenance_lines(app)
     parts += _screening_lines(app)
     if app.attachments:

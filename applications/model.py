@@ -197,6 +197,7 @@ class Application:
     cover_letter_document: Document | None = None
     created_at: str = ""
     updated_at: str = ""
+    profile: str = ""
 
     # Fields a client may set directly on create/update (documents are managed
     # by the save-and-render routes, not by generic writes).
@@ -218,6 +219,7 @@ class Application:
         "ats",
         "capture_method",
         "gaps_disclosed",
+        "profile",
     )
 
     # Fields with dedicated (de)serialization below, excluded from the

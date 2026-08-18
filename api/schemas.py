@@ -256,8 +256,70 @@ class AnswersUpdate(_Camel):
     how_did_you_hear: str | None = None
 
 
+class JobProfileModel(_Camel):
+    """Job search profile with search criteria and requirements."""
+
+    name: str = ""
+    enabled: bool = True
+    keywords: list[str] = Field(default_factory=list)
+    locations: list[str] = Field(default_factory=list)
+    preferred_sources: list[str] = Field(default_factory=list)
+    remote_model: str | None = None
+    employment_country: str | None = None
+    eor_allowed: bool | None = None
+    require_entity_verification: bool = True
+    salary_floor: int | None = None
+    salary_ask_min: int | None = None
+    salary_ask_max: int | None = None
+    working_language: str | None = None
+    glassdoor_min: float | None = None
+    glassdoor_min_reviews: int | None = None
+    accepted_role_types: list[str] = Field(default_factory=list)
+    rejected_role_types: list[str] = Field(default_factory=list)
+
+    @field_validator("salary_floor", "salary_ask_min", "salary_ask_max")
+    @classmethod
+    def _validate_salary_values(cls, v: int | None) -> int | None:
+        if v is not None and v <= 0:
+            raise ValueError("salary values must be > 0")
+        return v
+
+    @field_validator("glassdoor_min")
+    @classmethod
+    def _validate_glassdoor_min(cls, v: float | None) -> float | None:
+        if v is not None and (v < 0 or v > 5):
+            raise ValueError("glassdoor_min must be between 0 and 5")
+        return v
+
+    @field_validator("glassdoor_min_reviews")
+    @classmethod
+    def _validate_glassdoor_min_reviews(cls, v: int | None) -> int | None:
+        if v is not None and v < 0:
+            raise ValueError("glassdoor_min_reviews must be >= 0")
+        return v
+
+    @field_validator("keywords", "locations", "preferred_sources", "accepted_role_types", "rejected_role_types", mode="before")
+    @classmethod
+    def _split_comma_delimited_lists(cls, v):
+        if isinstance(v, str):
+            return [s.strip() for s in v.split(",") if s.strip()]
+        if isinstance(v, list):
+            return [s.strip() for s in v if isinstance(s, str) and s.strip()]
+        return v
+
+
+class CompanyBoardModel(_Camel):
+    """Resolved company board entry (response-only)."""
+
+    company: str
+    careers_url: str
+    ats: str = ""
+    status: str = "ok"
+    resolved_at: str = ""
+
+
 class AgentConfigModel(_Camel):
-    """GET /api/agent/config response: enabled flag, blocklist, and schedule."""
+    """GET /api/agent/config response: enabled flag, blocklist, schedule, job profiles, and resolved boards."""
 
     enabled: bool = True
     blocked_companies: list[str] = Field(default_factory=list)
@@ -265,6 +327,11 @@ class AgentConfigModel(_Camel):
     run_days: list[str] = Field(
         default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"]
     )
+    profiles: list[JobProfileModel] = Field(default_factory=list)
+    target_companies: list[str] = Field(default_factory=list)
+    cooldown_days: int | None = None
+    max_applications_per_run: int | None = None
+    company_boards: list[CompanyBoardModel] = Field(default_factory=list)
 
 
 class AgentConfigUpdate(_Camel):
@@ -279,6 +346,10 @@ class AgentConfigUpdate(_Camel):
     blocked_companies: list[str] | None = None
     run_at: list[str] | None = None
     run_days: list[str] | None = None
+    profiles: list[JobProfileModel] | None = None
+    target_companies: list[str] | None = None
+    cooldown_days: int | None = None
+    max_applications_per_run: int | None = None
 
     @field_validator("blocked_companies")
     @classmethod
@@ -313,6 +384,58 @@ class AgentConfigUpdate(_Camel):
             if d not in deduped:
                 deduped.append(d)
         return deduped
+
+    @field_validator("target_companies", mode="before")
+    @classmethod
+    def _validate_target_companies(cls, v: list[str] | str | None) -> list[str] | None:
+        if v is None:
+            return v
+        if isinstance(v, str):
+            return [s.strip() for s in v.split(",") if s.strip()]
+        if isinstance(v, list):
+            return [s.strip() for s in v if isinstance(s, str) and s.strip()]
+        return v
+
+    @field_validator("cooldown_days")
+    @classmethod
+    def _validate_cooldown_days(cls, v: int | None) -> int | None:
+        if v is None:
+            return v
+        if v < 0:
+            raise ValueError("cooldownDays must be >= 0")
+        return v
+
+    @field_validator("max_applications_per_run")
+    @classmethod
+    def _validate_max_applications_per_run(cls, v: int | None) -> int | None:
+        if v is None:
+            return v
+        if v < 1:
+            raise ValueError("maxApplicationsPerRun must be >= 1")
+        return v
+
+    @field_validator("profiles")
+    @classmethod
+    def _validate_profiles(cls, v: list[JobProfileModel] | None) -> list[JobProfileModel] | None:
+        if v is None:
+            return v
+        # Check for non-empty unique names and salary ordering
+        names_seen = set()
+        for profile in v:
+            name = profile.name.strip()
+            if not name:
+                raise ValueError("profile name must not be empty")
+            if name in names_seen:
+                raise ValueError(f"duplicate profile name: {name!r}")
+            names_seen.add(name)
+            # Check salary ordering: floor <= ask_min <= ask_max
+            if profile.salary_floor is not None and profile.salary_ask_min is not None:
+                if profile.salary_floor > profile.salary_ask_min:
+                    raise ValueError("salary_floor must be <= salary_ask_min")
+            if profile.salary_ask_min is not None and profile.salary_ask_max is not None:
+                if profile.salary_ask_min > profile.salary_ask_max:
+                    raise ValueError("salary_ask_min must be <= salary_ask_max")
+        return v
 
 
 class CoverLetterApprovals(_Camel):

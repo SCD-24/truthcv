@@ -329,3 +329,19 @@ def test_notes_survive_every_other_shape_unchanged():
     assert Application.from_dict({"notes": None}).notes == ""
     assert Application.from_dict({}).notes == ""
     assert Application.from_dict({"notes": ["", "  ", "kept"]}).notes == "kept"
+
+
+def test_profile_round_trip():
+    app = Application(id="test-id", company="Test Co", profile="Senior Python")
+    serialized = app.to_dict()
+    assert serialized["profile"] == "Senior Python"
+    deserialized = Application.from_dict(serialized)
+    assert deserialized.profile == "Senior Python"
+    assert deserialized.to_dict() == serialized
+
+
+def test_legacy_record_without_profile_loads_default():
+    raw = {"id": "test-id", "company": "Test Co", "submitted": True}
+    app = Application.from_dict(raw)
+    assert app.profile == ""
+    assert app.company == "Test Co"
