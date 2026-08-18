@@ -1,7 +1,9 @@
 """Persistence for canonical ATS screening answers against the ./data volume.
 
 Separate from truth.yaml: these are candidate-editable answers to recurring
-application-screener questions (phone, work authorisation, salary band, ...)
+application-screener questions (phone, work authorisation, notice period, ...)
+— but never salary, which the agent derives from the matched job profile's
+clamped ask band (agentconfig/salary.py) rather than from a free-text answer —
 rather than guardrail-validated CV facts, so they get their own file on the
 same data volume and never touch the Truth Store's content or validation.
 """
@@ -29,7 +31,6 @@ class Answers:
 
     phone: str = ""
     work_authorisation: str = ""
-    salary_expectation: str = ""
     notice_period: str = ""
     location_preference: str = ""
     canonical_cv_asset_id: str | None = None
@@ -64,7 +65,6 @@ class Answers:
         return cls(
             phone=text("phone", defaults.phone),
             work_authorisation=text("work_authorisation", defaults.work_authorisation),
-            salary_expectation=text("salary_expectation", defaults.salary_expectation),
             notice_period=text("notice_period", defaults.notice_period),
             location_preference=text("location_preference", defaults.location_preference),
             canonical_cv_asset_id=str(asset_id) if asset_id is not None else None,

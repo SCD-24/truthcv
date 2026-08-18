@@ -176,7 +176,6 @@ export interface ProfileStatus {
 export interface ProfileAnswers {
   phone: string;
   workAuthorisation: string;
-  salaryExpectation: string;
   noticePeriod: string;
   locationPreference: string;
   canonicalCvAssetId: string | null;
@@ -316,6 +315,9 @@ export interface JobProfile {
   salaryFloor: number | null;
   salaryAskMin: number | null;
   salaryAskMax: number | null;
+  /** Currency the salary band is expressed in. Not editable in the UI yet, but
+   * round-tripped through save so a hand-set value is never silently reset. */
+  currency: string;
   workingLanguage: string | null;
   glassdoorMin: number | null;
   glassdoorMinReviews: number | null;

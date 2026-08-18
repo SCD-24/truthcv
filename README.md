@@ -106,7 +106,7 @@ container), so they survive restarts.
 
 **Before the agent applies to anything, seed your identity.** TruthCV ships
 with no built-in identity — every ATS screening answer (name, email, phone,
-work authorisation, salary expectation, ...) defaults to an empty string, and
+work authorisation, ...) defaults to an empty string, and
 the [unattended application agent](#unattended-application-agent) refuses to
 submit while those fields are blank (`agent/RUNBOOK.md` §5). Copy the tracked
 template, fill in your own details, then write them into the data volume from

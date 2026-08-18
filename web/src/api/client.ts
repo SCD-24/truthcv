@@ -28,6 +28,7 @@ import type {
   Routing,
   RoutingUpdate,
 } from "./types";
+import { errorDetailToMessage } from "./errorDetail";
 
 /**
  * Typed wrappers over the wizard's REST routes. Served same-origin by the API
@@ -63,7 +64,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const detail = await res
       .json()
-      .then((b) => (b && typeof b.detail === "string" ? b.detail : ""))
+      .then((b) => errorDetailToMessage(b))
       .catch(() => "");
     throw new Error(detail || `That didn't work (error ${res.status}). Try again.`);
   }

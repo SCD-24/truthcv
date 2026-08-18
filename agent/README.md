@@ -36,9 +36,9 @@ ran its own Chrome under Xvfb. That trade was reconsidered and reversed.
 ## The agent has no identity until you seed one
 
 `get_profile_answers` returns every field — name, email, phone, work
-authorisation, salary expectation, and the rest — as `""` on a fresh install.
-`truth/answers.py` ships with no personal defaults on purpose. Seed your own
-before the first run:
+authorisation, and the rest — as `""` on a fresh install. `truth/answers.py`
+ships with no personal defaults on purpose. Seed your own before the first
+run:
 
 ```bash
 cp answers.example.yaml answers.local.yaml

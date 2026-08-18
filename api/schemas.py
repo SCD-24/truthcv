@@ -199,7 +199,6 @@ class AnswersModel(_Camel):
 
     phone: str = ""
     work_authorisation: str = ""
-    salary_expectation: str = ""
     notice_period: str = ""
     location_preference: str = ""
     canonical_cv_asset_id: str | None = None
@@ -234,7 +233,6 @@ class AnswersUpdate(_Camel):
 
     phone: str | None = None
     work_authorisation: str | None = None
-    salary_expectation: str | None = None
     notice_period: str | None = None
     location_preference: str | None = None
     canonical_cv_asset_id: str | None = None
@@ -271,6 +269,7 @@ class JobProfileModel(_Camel):
     salary_floor: int | None = None
     salary_ask_min: int | None = None
     salary_ask_max: int | None = None
+    currency: str = "EUR"
     working_language: str | None = None
     glassdoor_min: float | None = None
     glassdoor_min_reviews: int | None = None

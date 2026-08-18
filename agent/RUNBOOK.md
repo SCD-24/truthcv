@@ -8,8 +8,8 @@ volume in every case.
 Your only route to the operator's facts, their CV, their letter-writing, and
 their application history is the TruthCV tool surface: `generate_cover_letter`,
 `record_application`, `record_screening`, `check_cooldown`, `get_canonical_cv`,
-`get_profile_answers`. There is no file on disk to read any of this from —
-call the tool.
+`get_profile_answers`, `get_job_profiles`, `recommend_salary`. There is no
+file on disk to read any of this from — call the tool.
 
 ---
 
@@ -42,7 +42,10 @@ salary, entity verification) independently.
    not an EOR placement. Watch for the tell: "you'll be hired via Remote.com / Deel /
    Velocity Global / our global employer partner." That killed Camunda.
 3. **≥ €85,000** gross. If the posted band tops out at or below 85k, reject.
-   If no band is posted, it passes this filter (ask for 95–110k on the form).
+   If no band is posted, it passes this filter — see §3 for how to answer a
+   salary-expectation field when the posting states none. The figure to ask
+   for always comes from the matched profile's own band, never a fixed number
+   written here.
 4. **English as the working language.** "German required" or "fluent German" in
    requirements = reject. "German is a plus" = fine.
 5. **Glassdoor ≥ 3.5**, OR waived if the company has fewer than 20 reviews.
@@ -63,11 +66,11 @@ Do not guess, remember, or reuse a value from a previous run. At the start of
 every application, call the `get_profile_answers` tool and use the values it
 returns **verbatim** — it returns (among other fields) name, email, phone,
 location preference, LinkedIn, GitHub, website, work authorisation, sponsorship
-requirement, notice period, salary expectation, languages, degrees, years of
-experience, current role, and how the operator heard about the role. These
-are the operator's canonical, maintained answers; the file you are reading
-now does not duplicate them, because a copy here would drift from the source
-of truth.
+requirement, notice period, languages, degrees, years of experience, current
+role, and how the operator heard about the role. These are the operator's
+canonical, maintained answers; the file you are reading now does not
+duplicate them, because a copy here would drift from the source of truth.
+Salary expectation is deliberately **not** among them — see below.
 
 Two rules travel with this table regardless of what it currently contains:
 
@@ -76,6 +79,26 @@ Two rules travel with this table regardless of what it currently contains:
   whatever the tool returns for other fields.
 - **"How did you hear about us" is never "referral."** Use the tool's answer
   (careers page / job board) as given.
+
+### Salary expectation — call `recommend_salary`, never compute one yourself
+
+When an ATS field asks for a salary expectation, figure, or range:
+
+1. Identify which configured profile (§2) this posting matched — the same
+   profile you are recording against for the run's screening report.
+2. Call `recommend_salary` with that profile's name and your derived figure
+   (the posted band's midpoint, or your best justified number if none is
+   posted). The tool clamps it into the profile's own configured band; it,
+   not this runbook, is the source of the number.
+3. **Type the string `recommend_salary` returns into the form, verbatim.**
+   Never invent, round, or otherwise compute a salary figure yourself, and
+   never fall back to a number written in this file or a previous run.
+4. **If the tool declines** — no matching profile, or the profile has no
+   configured salary band — leave the field blank, do not guess, and raise
+   the posting as an open issue in the §9 report for the operator to review.
+5. **Record the matched profile's name on the screening** for every posting
+   you screen, whether it is applied to, rejected, or skipped — see §5.6's
+   `screening` block.
 
 ---
 
@@ -147,12 +170,14 @@ ATS bot detection.
      intended to type — this record is evidence, and §4 applies to it exactly
      as it applies to the form.
    - `screening`: the §2 filter verdicts — `entity` (the German-entity / EOR
-     finding), `remote`, `salary` (how the band was handled — the number
-     offered, or "not stated; asked for 95–110k" when the posting had none),
-     `language`, `role_type`, and `glassdoor` as
+     finding), `remote`, `salary` (how the band was handled — the posted
+     number, or the exact string `recommend_salary` returned when the posting
+     had none, per §3), `language`, `role_type`, and `glassdoor` as
      `{rating, reviews, waiver_applied}`, where `waiver_applied` is `true`
      only when you invoked the under-20-reviews waiver in §2.5 and `false`
      otherwise.
+   - `profile`: the name of the matched profile that drove this application
+     (§3, §2), recorded on every screening.
    - `gaps_disclosed`: every gap you disclosed in the cover letter, one entry
      per gap, in full — not a summary of it.
    - `attachments`: one entry per file actually uploaded, as `{kind, path}`.

@@ -9,6 +9,9 @@ so the agent and the wizard can never disagree about what happened.
 
 from __future__ import annotations
 
+import agentconfig.store as _agentconfig_store
+from agentconfig.salary import clamp_ask as _clamp_ask
+from agentconfig.salary import format_ask as _format_ask
 from applications.model import Attachment, Confirmation, FieldSubmitted
 from applications.store import create as create_application
 from applications.store import save_attachments as _save_attachments
@@ -86,3 +89,36 @@ def get_canonical_cv() -> dict:
 def get_profile_answers() -> dict:
     """The canonical ATS screening answers (runbook §3), as a plain dict."""
     return _load_answers().to_dict()
+
+
+def get_job_profiles() -> list[dict]:
+    """The configured job search profiles from agent_config.json, as plain dicts."""
+    cfg = _agentconfig_store.load()
+    return [profile.to_dict() for profile in cfg.profiles]
+
+
+def recommend_salary(profile_name: str, proposed: int | None = None) -> dict:
+    """Recommend a salary ask for a named profile, clamped to its configured band.
+
+    Looks up ``profile_name`` in the configured job profiles and clamps
+    ``proposed`` (or the band minimum, if omitted) into
+    ``[salary_ask_min, salary_ask_max]`` via ``agentconfig.salary.clamp_ask``.
+    Returns a refusal dict if the profile is unknown or has no salary band.
+    """
+    cfg = _agentconfig_store.load()
+    profile = next((p for p in cfg.profiles if p.name == profile_name), None)
+    if profile is None:
+        return {"refused": f"Profile not found: {profile_name}"}
+
+    clamped = _clamp_ask(profile, proposed)
+    if clamped is None:
+        return {"refused": "Profile has no salary band configured"}
+
+    return {
+        "amount": clamped,
+        "formatted": _format_ask(profile, clamped),
+        "band": {"min": profile.salary_ask_min, "max": profile.salary_ask_max},
+        # Only a figure the caller actually proposed can be "clamped"; with
+        # proposed=None the band minimum is supplied, not adjusted.
+        "clamped": proposed is not None and proposed != clamped,
+    }

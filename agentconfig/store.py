@@ -36,6 +36,7 @@ class JobProfile:
     salary_floor: int | None = None
     salary_ask_min: int | None = None
     salary_ask_max: int | None = None
+    currency: str = "EUR"
     working_language: str | None = None
     glassdoor_min: float | None = None
     glassdoor_min_reviews: int | None = None
@@ -83,6 +84,10 @@ class JobProfile:
         if "glassdoor_min" in raw and isinstance(raw["glassdoor_min"], (int, float)):
             kwargs["glassdoor_min"] = float(raw["glassdoor_min"])
 
+        # currency: str
+        if "currency" in raw and isinstance(raw["currency"], str):
+            kwargs["currency"] = raw["currency"]
+
         # accepted_role_types, rejected_role_types: list[str]
         for field_name in ("accepted_role_types", "rejected_role_types"):
             if field_name in raw:
@@ -106,6 +111,7 @@ class JobProfile:
             "salary_floor": self.salary_floor,
             "salary_ask_min": self.salary_ask_min,
             "salary_ask_max": self.salary_ask_max,
+            "currency": self.currency,
             "working_language": self.working_language,
             "glassdoor_min": self.glassdoor_min,
             "glassdoor_min_reviews": self.glassdoor_min_reviews,

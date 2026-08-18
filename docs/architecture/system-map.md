@@ -4,6 +4,7 @@
 ```mermaid
 graph TD
     api["API <br/> <small>(BACKEND)</small>"]
+    application-agent["Application Agent <br/> <small>(BACKEND)</small>"]
     application-tracker["Application Tracker <br/> <small>(BACKEND)</small>"]
     cover-letter-engine["Cover Letter Engine <br/> <small>(BACKEND)</small>"]
     guardrail-validator["Guardrail Validator <br/> <small>(BACKEND)</small>"]
@@ -23,6 +24,9 @@ graph TD
     api -->|in-process| secret-store
     api -->|in-process| tailor-engine
     api -->|in-process| truth-store
+    application-agent -->|HTTPS| api
+    application-agent -->|in-process| application-tracker
+    application-agent -->|in-process| truth-store
     application-tracker -->|in-process| renderer
     application-tracker -->|file I/O| truth-data-volume
     cover-letter-engine -->|in-process| guardrail-validator
@@ -47,6 +51,7 @@ graph TD
 ## Components
 
 - [API](overview.md) (`api`, backend)
+- [Application Agent](overview.md) (`application-agent`, backend)
 - [Application Tracker](overview.md) (`application-tracker`, backend)
 - [Cover Letter Engine](overview.md) (`cover-letter-engine`, backend)
 - [Guardrail Validator](overview.md) (`guardrail-validator`, backend)
@@ -69,6 +74,9 @@ graph TD
 - [api → secret-store](interactions/api--secret-store.md) via `in-process`
 - [api → tailor-engine](interactions/api--tailor-engine.md) via `in-process`
 - [api → truth-store](interactions/api--truth-store.md) via `in-process`
+- [application-agent → api](interactions/application-agent--api.md) via `HTTPS`
+- [application-agent → application-tracker](interactions/application-agent--application-tracker.md) via `in-process`
+- [application-agent → truth-store](interactions/application-agent--truth-store.md) via `in-process`
 - [application-tracker → renderer](interactions/application-tracker--renderer.md) via `in-process`
 - [application-tracker → truth-data-volume](interactions/application-tracker--truth-data-volume.md) via `file I/O`
 - [cover-letter-engine → guardrail-validator](interactions/cover-letter-engine--guardrail-validator.md) via `in-process`

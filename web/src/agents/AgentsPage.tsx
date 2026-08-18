@@ -5,38 +5,27 @@ import Paper from "@mui/material/Paper";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Button from "@mui/material/Button";
-import IconButton from "@mui/material/IconButton";
-import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import Alert from "@mui/material/Alert";
 import Switch from "@mui/material/Switch";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Checkbox from "@mui/material/Checkbox";
 import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
 import Typography from "@mui/material/Typography";
 import CircularProgress from "@mui/material/CircularProgress";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
 import Chip from "@mui/material/Chip";
-import Tooltip from "@mui/material/Tooltip";
 import {
-  deleteScreening,
   getAgentConfig,
   getProfileAnswers,
   getRouting,
   listConnections,
-  listScreenings,
   saveProfileAnswers,
   updateAgentConfig,
   updateRouting,
 } from "../api/client";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { ModelRoutePicker } from "../settings/ModelRoutePicker";
-import { isCooldownActive } from "../settings/cooldown";
-import { lastAgentActivity } from "../settings/agentActivity";
 import { isValidRunTime, WEEKDAYS } from "./schedule";
 import type {
   AgentConfig,
@@ -44,14 +33,14 @@ import type {
   JobProfile,
   ProfileAnswers,
   Routing,
-  ScreeningRecord,
 } from "../api/types";
 
-/** The five canonical ATS answers before they're loaded from the server. */
+/** The four canonical ATS answers before they're loaded from the server.
+ * Salary is deliberately absent: it now comes from the matched job profile's
+ * band via recommend_salary, not from a free-text answer. */
 const EMPTY_ANSWERS: ProfileAnswers = {
   phone: "",
   workAuthorisation: "",
-  salaryExpectation: "",
   noticePeriod: "",
   locationPreference: "",
   canonicalCvAssetId: null,
@@ -84,62 +73,11 @@ function Section({
   );
 }
 
-/** How a cooldown reads in the table: the active/expired/none label the chip
- * carries, kept separate from the pure isCooldownActive predicate. */
-function cooldownLabel(record: ScreeningRecord, active: boolean): string {
-  if (active) return `Until ${record.cooldownExpires}`;
-  return record.cooldownExpires ? "Expired" : "No cooldown";
-}
-
-/** One rejected-target row: company/reason, role, verdict, why it failed, its
- * cooldown state, and a delete control to un-block it. */
-function ScreeningRow({
-  record,
-  deleting,
-  onDelete,
-}: {
-  record: ScreeningRecord;
-  deleting: boolean;
-  onDelete: (id: string) => void;
-}) {
-  const active = isCooldownActive(record.cooldownExpires);
-  return (
-    <TableRow>
-      <TableCell>
-        <Tooltip title={record.reason || "No reason recorded."}>
-          <Typography variant="body2">{record.company || "—"}</Typography>
-        </Tooltip>
-      </TableCell>
-      <TableCell>{record.role || "—"}</TableCell>
-      <TableCell>{record.verdict || "—"}</TableCell>
-      <TableCell>{record.failingCriterion || "—"}</TableCell>
-      <TableCell>
-        <Chip
-          size="small"
-          variant="outlined"
-          color={active ? "warning" : "default"}
-          label={cooldownLabel(record, active)}
-        />
-      </TableCell>
-      <TableCell align="right">
-        <IconButton
-          aria-label={`Delete screening record for ${record.company || "this target"}`}
-          onClick={() => onDelete(record.id)}
-          disabled={deleting}
-          size="small"
-        >
-          <DeleteOutlineIcon fontSize="small" />
-        </IconButton>
-      </TableCell>
-    </TableRow>
-  );
-}
-
 /**
  * The Agents page — enable/disable the unattended application agent, edit its
- * run schedule and blocklist, edit the ATS profile answers it submits, and
- * review/clear the screening & cooldown ledger. Reached from the rail
- * (wired in a later task); `onBack` returns to the wizard step left behind.
+ * run schedule and blocklist, and edit the ATS profile answers it submits.
+ * Reached from the rail (wired in a later task); `onBack` returns to the
+ * wizard step left behind.
  *
  * Each section owns its own error/success state and saves independently, so a
  * failure in one (e.g. a bad schedule save) never blocks or clobbers another.
@@ -147,7 +85,6 @@ function ScreeningRow({
 export function AgentsPage({ onBack }: { onBack: () => void }) {
   const [config, setConfig] = useState<AgentConfig | null>(null);
   const [answers, setAnswers] = useState<ProfileAnswers>(EMPTY_ANSWERS);
-  const [screenings, setScreenings] = useState<ScreeningRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -157,12 +94,11 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     let alive = true;
-    Promise.all([getAgentConfig(), getProfileAnswers(), listScreenings()])
-      .then(([c, a, sc]) => {
+    Promise.all([getAgentConfig(), getProfileAnswers()])
+      .then(([c, a]) => {
         if (!alive) return;
         setConfig(c);
         setAnswers(a);
-        setScreenings(sc);
       })
       .catch((e: unknown) =>
         setLoadError(e instanceof Error ? e.message : "Couldn't load the agent's configuration."),
@@ -237,7 +173,6 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
           <ProfilesSection config={config} onChange={setConfig} />
           <BlocklistSection config={config} onChange={setConfig} />
           <ProfileAnswersSection answers={answers} onChange={setAnswers} />
-          <ScreeningsSection screenings={screenings} onChange={setScreenings} />
         </Stack>
       ) : null}
     </Box>
@@ -453,6 +388,8 @@ interface ProfileDraft {
   salaryFloor: string;
   salaryAskMin: string;
   salaryAskMax: string;
+  /** Carried through unedited so saving a profile cannot reset a hand-set currency. */
+  currency: string;
   workingLanguage: string;
   glassdoorMin: string;
   glassdoorMinReviews: string;
@@ -503,6 +440,7 @@ function profileToDraft(p: JobProfile): ProfileDraft {
     salaryFloor: numberToText(p.salaryFloor),
     salaryAskMin: numberToText(p.salaryAskMin),
     salaryAskMax: numberToText(p.salaryAskMax),
+    currency: p.currency || "EUR",
     workingLanguage: p.workingLanguage ?? "",
     glassdoorMin: numberToText(p.glassdoorMin),
     glassdoorMinReviews: numberToText(p.glassdoorMinReviews),
@@ -513,23 +451,24 @@ function profileToDraft(p: JobProfile): ProfileDraft {
 
 function emptyDraft(): ProfileDraft {
   return {
-    name: "",
+    name: "New profile",
     enabled: true,
     keywordsText: "",
     locationsText: "",
     preferredSourcesText: "",
-    remoteModel: "",
-    employmentCountry: "",
-    eorAllowed: "",
+    remoteModel: "remote",
+    employmentCountry: "Germany",
+    eorAllowed: "false",
     requireEntityVerification: true,
-    salaryFloor: "",
-    salaryAskMin: "",
-    salaryAskMax: "",
-    workingLanguage: "",
-    glassdoorMin: "",
-    glassdoorMinReviews: "",
-    acceptedRoleTypesText: "",
-    rejectedRoleTypesText: "",
+    salaryFloor: "85000",
+    salaryAskMin: "95000",
+    salaryAskMax: "110000",
+    currency: "EUR",
+    workingLanguage: "English",
+    glassdoorMin: "3.5",
+    glassdoorMinReviews: "20",
+    acceptedRoleTypesText: "agentic / AI engineering, data engineering",
+    rejectedRoleTypesText: "generic full-stack, frontend, SRE, Java-heavy backend",
   };
 }
 
@@ -547,12 +486,58 @@ function draftToProfile(d: ProfileDraft): JobProfile {
     salaryFloor: textToIntOrNull(d.salaryFloor),
     salaryAskMin: textToIntOrNull(d.salaryAskMin),
     salaryAskMax: textToIntOrNull(d.salaryAskMax),
+    currency: d.currency.trim() || "EUR",
     workingLanguage: d.workingLanguage.trim() || null,
     glassdoorMin: textToFloatOrNull(d.glassdoorMin),
     glassdoorMinReviews: textToIntOrNull(d.glassdoorMinReviews),
     acceptedRoleTypes: textToList(d.acceptedRoleTypesText),
     rejectedRoleTypes: textToList(d.rejectedRoleTypesText),
   };
+}
+
+/** Checks a salary-like field's text is either blank or a positive integer.
+ * Returns an error message naming `label`, or null if the field is fine. */
+function validateSalaryField(text: string, label: string): string | null {
+  const n = textToIntOrNull(text);
+  if (n !== null && n <= 0) return `${label} must be > 0`;
+  return null;
+}
+
+/** Validates a set of profile drafts before they're sent to the API.
+ * Returns a short message naming the first rule violated, or null if every
+ * draft is well-formed. Checked in order: non-empty/unique names, positive
+ * salary fields, salary ordering (floor <= ask min <= ask max), and a
+ * glassdoor rating within [0, 5]. */
+function validateDrafts(drafts: ProfileDraft[]): string | null {
+  const seenNames = new Set<string>();
+  for (const draft of drafts) {
+    const name = draft.name.trim();
+    if (!name) return "Profile name is required";
+    if (seenNames.has(name)) return `Duplicate profile name: ${name}`;
+    seenNames.add(name);
+
+    const salaryError =
+      validateSalaryField(draft.salaryFloor, "Salary floor") ||
+      validateSalaryField(draft.salaryAskMin, "Salary ask minimum") ||
+      validateSalaryField(draft.salaryAskMax, "Salary ask maximum");
+    if (salaryError) return salaryError;
+
+    const floor = textToIntOrNull(draft.salaryFloor);
+    const askMin = textToIntOrNull(draft.salaryAskMin);
+    const askMax = textToIntOrNull(draft.salaryAskMax);
+    if (floor !== null && askMin !== null && floor > askMin) {
+      return "Salary floor must be <= ask minimum";
+    }
+    if (askMin !== null && askMax !== null && askMin > askMax) {
+      return "Salary ask minimum must be <= ask maximum";
+    }
+
+    const glassdoorMin = textToFloatOrNull(draft.glassdoorMin);
+    if (glassdoorMin !== null && (glassdoorMin < 0 || glassdoorMin > 5)) {
+      return "Glassdoor min rating must be 0-5";
+    }
+  }
+  return null;
 }
 
 /** Job search profiles: each is a card of search criteria the agent matches
@@ -591,6 +576,12 @@ function ProfilesSection({
   }
 
   async function handleSave() {
+    const validationError = validateDrafts(drafts);
+    if (validationError) {
+      setError(validationError);
+      setSaved(false);
+      return;
+    }
     setSaving(true);
     setError(null);
     setSaved(false);
@@ -713,9 +704,9 @@ function ProfilesSection({
                     }
                     sx={{ minWidth: 140 }}
                   >
-                    <option value="">Not set</option>
-                    <option value="true">Allowed</option>
-                    <option value="false">Not allowed</option>
+                    <MenuItem value="">Not set</MenuItem>
+                    <MenuItem value="true">Allowed</MenuItem>
+                    <MenuItem value="false">Not allowed</MenuItem>
                   </TextField>
                 </Stack>
                 <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
@@ -878,8 +869,9 @@ function BlocklistSection({
   );
 }
 
-/** The five ATS answers, moved verbatim from SettingsModal with their own
- * Save that PUTs only these five keys (a partial body). */
+/** The four ATS answers, with their own Save that PUTs only these four keys
+ * (a partial body). Salary expectation is not among them — the agent derives
+ * its figure from the matched job profile's band instead. */
 function ProfileAnswersSection({
   answers,
   onChange,
@@ -899,7 +891,6 @@ function ProfileAnswersSection({
       const fresh = await saveProfileAnswers({
         phone: answers.phone,
         workAuthorisation: answers.workAuthorisation,
-        salaryExpectation: answers.salaryExpectation,
         noticePeriod: answers.noticePeriod,
         locationPreference: answers.locationPreference,
       });
@@ -915,7 +906,7 @@ function ProfileAnswersSection({
   return (
     <Section
       title="Profile answers"
-      description="The canonical answers the unattended application agent types into ATS forms when it submits on your behalf. Keep them accurate — they go out with every application."
+      description="The canonical answers the unattended application agent types into ATS forms when it submits on your behalf. Keep them accurate — they go out with every application. Salary is not one of them: the agent derives its figure from the matched job profile's ask band below."
     >
       <TextField
         fullWidth
@@ -930,13 +921,6 @@ function ProfileAnswersSection({
         value={answers.workAuthorisation}
         onChange={(e) => onChange({ ...answers, workAuthorisation: e.target.value })}
         helperText='What the agent types into ATS work-authorisation questions — e.g. "Authorised to work in the UK, no sponsorship required."'
-      />
-      <TextField
-        fullWidth
-        label="Salary expectation"
-        value={answers.salaryExpectation}
-        onChange={(e) => onChange({ ...answers, salaryExpectation: e.target.value })}
-        helperText="What the agent types into ATS salary-expectation fields."
       />
       <TextField
         fullWidth
@@ -964,76 +948,4 @@ function ProfileAnswersSection({
   );
 }
 
-/** The screening/cooldown ledger, moved verbatim from SettingsModal. */
-function ScreeningsSection({
-  screenings,
-  onChange,
-}: {
-  screenings: ScreeningRecord[];
-  onChange: (s: ScreeningRecord[]) => void;
-}) {
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const last = lastAgentActivity(screenings);
-  const lastLabel = last ? new Date(last).toLocaleDateString() : null;
 
-  async function handleDelete(id: string) {
-    setDeletingId(id);
-    setError(null);
-    try {
-      await deleteScreening(id);
-      onChange(screenings.filter((r) => r.id !== id));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't delete the screening record.");
-    } finally {
-      setDeletingId(null);
-    }
-  }
-
-  return (
-    <Section
-      title="Screening & cooldowns"
-      description="Targets the unattended application agent rejected, why, and how long each stays in cooldown before it's reconsidered. Delete a record to un-block a target immediately."
-    >
-      {lastLabel ? (
-        <Typography variant="body2" color="text.secondary">
-          Last recorded activity: {lastLabel} — the date of its most recent
-          screening record, the closest thing to a run log TruthCV has.
-        </Typography>
-      ) : (
-        <Typography variant="body2" color="text.secondary">
-          The agent hasn't recorded any activity yet.
-        </Typography>
-      )}
-      {screenings.length === 0 ? (
-        <Typography variant="body2" color="text.secondary">
-          The agent hasn't rejected any targets yet.
-        </Typography>
-      ) : (
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Company</TableCell>
-              <TableCell>Role</TableCell>
-              <TableCell>Verdict</TableCell>
-              <TableCell>Failing criterion</TableCell>
-              <TableCell>Cooldown</TableCell>
-              <TableCell align="right">Delete</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {screenings.map((record) => (
-              <ScreeningRow
-                key={record.id}
-                record={record}
-                deleting={deletingId === record.id}
-                onDelete={handleDelete}
-              />
-            ))}
-          </TableBody>
-        </Table>
-      )}
-      {error && <Alert severity="error">{error}</Alert>}
-    </Section>
-  );
-}

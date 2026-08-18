@@ -16,9 +16,13 @@ import { SettingsModal } from "./settings/SettingsModal";
 import { ApplicationsPage } from "./applications/ApplicationsPage";
 import { AnalyticsPage } from "./analytics/AnalyticsPage";
 import { AgentsPage } from "./agents/AgentsPage";
+import { ScreeningsPage } from "./screenings/ScreeningsPage";
 
-/** Top-level view: the wizard, the applications ledger, its analytics, or the agents page. */
-type View = "wizard" | "applications" | "analytics" | "agents";
+/**
+ * Top-level view: the wizard, the applications ledger, its analytics, the
+ * agents page, or the screenings page.
+ */
+type View = "wizard" | "applications" | "analytics" | "agents" | "screenings";
 
 /**
  * A request to open the Download step (step 5) with an already-saved document
@@ -110,9 +114,11 @@ export function App() {
         onOpenApplications={() => setView("applications")}
         onOpenAnalytics={() => setView("analytics")}
         onOpenAgents={() => setView("agents")}
+        onOpenScreenings={() => setView("screenings")}
         applicationsActive={view === "applications"}
         analyticsActive={view === "analytics"}
         agentsActive={view === "agents"}
+        screeningsActive={view === "screenings"}
       />
       <main className="stage">
         <div
@@ -131,6 +137,8 @@ export function App() {
             <AnalyticsPage onBack={() => setView("wizard")} />
           ) : view === "agents" ? (
             <AgentsPage onBack={() => setView("wizard")} />
+          ) : view === "screenings" ? (
+            <ScreeningsPage onBack={() => setView("wizard")} />
           ) : (
             <div className="stage__step" key={current}>
               {current === "upload" && <UploadStep {...stepProps} />}

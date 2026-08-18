@@ -19,9 +19,11 @@ from mcp.tools_letter import generate_cover_letter
 from mcp.tools_ledger import (
     check_cooldown,
     get_canonical_cv,
+    get_job_profiles,
     get_profile_answers,
     record_application,
     record_screening,
+    recommend_salary,
 )
 from mcp.tools_boards import record_company_board
 
@@ -45,6 +47,8 @@ register("check_cooldown", check_cooldown)
 register("get_canonical_cv", get_canonical_cv)
 register("get_profile_answers", get_profile_answers)
 register("record_company_board", record_company_board)
+register("get_job_profiles", get_job_profiles)
+register("recommend_salary", recommend_salary)
 
 router = APIRouter(prefix="/mcp")
 

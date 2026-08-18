@@ -7,7 +7,6 @@ import {
   getRouting,
   listConnectionModels,
   listConnections,
-  listScreenings,
   updateRouting,
 } from "../api/client";
 import type { AgentConfig, ConnectionList, ConnectionStatus, ProfileAnswers, Routing } from "../api/types";
@@ -18,13 +17,11 @@ import { AgentsPage } from "./AgentsPage";
 vi.mock("../api/client", () => ({
   getAgentConfig: vi.fn(),
   getProfileAnswers: vi.fn(),
-  listScreenings: vi.fn(),
   getRouting: vi.fn(),
   listConnections: vi.fn(),
   listConnectionModels: vi.fn(),
   updateAgentConfig: vi.fn(),
   saveProfileAnswers: vi.fn(),
-  deleteScreening: vi.fn(),
   updateRouting: vi.fn(),
 }));
 
@@ -47,7 +44,6 @@ function makeAnswers(): ProfileAnswers {
   return {
     phone: "",
     workAuthorisation: "",
-    salaryExpectation: "",
     noticePeriod: "",
     locationPreference: "",
     canonicalCvAssetId: null,
@@ -80,7 +76,6 @@ function makeRouting(overrides: Partial<Routing> = {}): Routing {
 async function renderLoaded(connections: ConnectionList, routing: Routing) {
   vi.mocked(getAgentConfig).mockResolvedValue(makeConfig());
   vi.mocked(getProfileAnswers).mockResolvedValue(makeAnswers());
-  vi.mocked(listScreenings).mockResolvedValue([]);
   vi.mocked(getRouting).mockResolvedValue(routing);
   vi.mocked(listConnections).mockResolvedValue(connections);
   vi.mocked(listConnectionModels).mockResolvedValue([]);
@@ -149,7 +144,6 @@ describe("AgentsPage model section", () => {
   it("a getRouting failure only takes out the Model section — the rest of the page still renders", async () => {
     vi.mocked(getAgentConfig).mockResolvedValue(makeConfig());
     vi.mocked(getProfileAnswers).mockResolvedValue(makeAnswers());
-    vi.mocked(listScreenings).mockResolvedValue([]);
     vi.mocked(getRouting).mockRejectedValue(new Error("routing unavailable"));
     vi.mocked(listConnections).mockResolvedValue({ encryptionAvailable: true, connections: [] });
 
