@@ -206,6 +206,25 @@ def test_put_accepts_valid_salary_range(client, data_dir):
     assert profile["salaryAskMax"] == 130000
 
 
+def test_currency_survives_the_wire_and_defaults_to_eur(client, data_dir):
+    """A profile's currency must round-trip through PUT and GET.
+
+    recommend_salary formats its figure with the profile's currency, so a save
+    that silently reset it to EUR would make the agent quote the wrong unit.
+    """
+    r = client.put(
+        "/api/agent/config",
+        json={"profiles": [{"name": "UK", "currency": "GBP", "salaryAskMin": 80000}]},
+    )
+    assert r.status_code == 200
+    assert r.json()["profiles"][0]["currency"] == "GBP"
+
+    assert client.get("/api/agent/config").json()["profiles"][0]["currency"] == "GBP"
+
+    r = client.put("/api/agent/config", json={"profiles": [{"name": "Default"}]})
+    assert r.json()["profiles"][0]["currency"] == "EUR"
+
+
 def test_put_rejects_glassdoor_min_out_of_range(client, data_dir):
     r = client.put(
         "/api/agent/config",

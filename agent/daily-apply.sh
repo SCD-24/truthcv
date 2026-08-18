@@ -89,6 +89,35 @@ if [[ "${MAX_APPLICATIONS_PER_RUN:-}" =~ ^[1-9][0-9]*$ ]]; then
   PROMPT="$PROMPT"$'\n\n'"Apply to at most $MAX_APPLICATIONS_PER_RUN role(s) this run."
 fi
 
+# jq program rendering one criteria block per configured profile: name,
+# employment country, remote model, salary band (in the profile's own
+# currency), Glassdoor minimum, EOR/entity-verification flags, working
+# language, and accepted/rejected role types. Missing fields render as
+# "not configured" rather than being silently dropped, so the agent never
+# mistakes an unset criterion for a waived one.
+# Field names are camelCase to match the wire format api/schemas.py's
+# AgentConfigModel/JobProfileModel produce (same convention as the
+# targetCompanies/companyBoards/cooldownDays fields already used above).
+# currency is exposed on the wire (api/schemas.py JobProfileModel) and
+# defaults to "EUR"; the jq fallback repeats that default so an older
+# config payload without the field still renders a band.
+PROFILE_CRITERIA_JQ='
+def fmt_bool: if . == null then "not configured" elif . then "true" else "false" end;
+def fmt_list: if (. // []) | length > 0 then (. // [] | join(", ")) else "not configured" end;
+def fmt_band(min_v; max_v; cur): if (min_v != null and max_v != null) then "\(min_v) - \(max_v) \(cur // "EUR")" else "not configured" end;
+.profiles[] |
+"### Profile: \(.name)\n" +
+"  - Employment country: \(.employmentCountry // "not configured")\n" +
+"  - Remote model: \(.remoteModel // "not configured")\n" +
+"  - Salary band: \(fmt_band(.salaryAskMin; .salaryAskMax; .currency))\n" +
+"  - Glassdoor min rating: \(.glassdoorMin // "not configured")\n" +
+"  - EOR allowed: \(.eorAllowed | fmt_bool)\n" +
+"  - Entity verification required: \(.requireEntityVerification | fmt_bool)\n" +
+"  - Working language: \(.workingLanguage // "not configured")\n" +
+"  - Accepted role types: \(.acceptedRoleTypes | fmt_list)\n" +
+"  - Rejected role types: \(.rejectedRoleTypes | fmt_list)\n"
+'
+
 # Job profiles: when configured, append search strategies and requirements.
 # Fetch from the agent config endpoint (profiles, target_companies, cooldown_days,
 # maxApplicationsPerRun, companyBoards). If fetch fails or profiles are absent,
@@ -109,7 +138,18 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
       PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$BOARDS"$'\n'
     fi
     PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Cooldown days (stale company filter): $(jq -r '.cooldownDays // "not configured"' <<<"$JOB_CONFIG" 2>/dev/null)"$'\n'
-    
+
+    # Render each profile's full criteria: name, employment country, remote
+    # model, salary band, Glassdoor minimum, EOR/entity-verification rules,
+    # working language, and accepted/rejected role types. The agent matches
+    # each posting against these instead of the RUNBOOK.md §2 defaults, and
+    # must quote the matched profile's name back with get_job_profiles /
+    # recommend_salary.
+    PROFILE_CRITERIA="$(jq -r "$PROFILE_CRITERIA_JQ" <<<"$JOB_CONFIG" 2>/dev/null)"
+    if [[ -n "$PROFILE_CRITERIA" ]]; then
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Profile criteria (call get_job_profiles to re-fetch verbatim; call"$'\n'"recommend_salary with the matched profile's name for any salary-expectation field):"$'\n\n'"$PROFILE_CRITERIA"$'\n'
+    fi
+
     PROMPT="$PROMPT"$'\n\n'"$PROFILE_BLOCK"
   fi
 fi
@@ -158,6 +198,8 @@ log "invoking claude..."
     "mcp__truthcv__get_canonical_cv" \
     "mcp__truthcv__get_profile_answers" \
     "mcp__truthcv__record_company_board" \
+    "mcp__truthcv__get_job_profiles" \
+    "mcp__truthcv__recommend_salary" \
     "mcp__interceptor__interceptor_browser" \
     "mcp__interceptor__interceptor_read" \
     "mcp__interceptor__interceptor_local" \

@@ -692,7 +692,7 @@ def put_profile_answers(body: AnswersUpdate) -> AnswersModel:
     """Merge only the fields the client actually sent onto the stored answers.
 
     Omitted fields must survive untouched — the wizard's field-by-field save
-    flow means most PUTs carry a strict subset of the 22 fields, and treating
+    flow means most PUTs carry a strict subset of the 21 fields, and treating
     absence the same as "clear this" would silently blank the rest.
     """
     merged = load_answers().to_dict()

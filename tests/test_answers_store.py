@@ -131,7 +131,6 @@ def test_partial_data_only_overrides_given_fields(data_dir):
     assert answers.years_of_experience == "3"
     # everything else still falls back to the blank defaults
     assert answers.name == defaults.name
-    assert answers.salary_expectation == defaults.salary_expectation
     assert answers.canonical_cv_asset_id is None
 
 
@@ -253,3 +252,26 @@ def test_seed_answers_missing_file_raises(data_dir, tmp_path_factory):
 
     with pytest.raises(FileNotFoundError):
         seed_answers(missing)
+
+
+def test_answers_legacy_yaml_with_salary_expectation_key_loads_and_key_is_ignored():
+    """A legacy YAML mapping carrying the removed salary_expectation key still loads.
+
+    Older answers.yaml files (or seed templates) may still contain the now
+    -removed salary_expectation key. from_dict must not raise on it, and the
+    resulting Answers object must not carry any salary_expectation value,
+    since the field no longer exists on the dataclass.
+    """
+    legacy_raw = {
+        "name": "Test",
+        "phone": "+1 555 0100",
+        "salary_expectation": "100-120k",
+    }
+
+    answers = Answers.from_dict(legacy_raw)
+
+    assert answers.name == "Test"
+    assert answers.phone == "+1 555 0100"
+    assert not hasattr(answers, "salary_expectation")
+    field_names = {field.name for field in dataclasses.fields(Answers)}
+    assert "salary_expectation" not in field_names

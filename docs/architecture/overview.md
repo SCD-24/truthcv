@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-13 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+14 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -120,3 +120,7 @@ Owns the user's job-application records (applications/) persisted as application
 
 **Tech:** Python, PyYAML/JSON
 <!-- generated:end comp:application-tracker -->
+
+<!-- generated:start comp:application-agent -->
+## Application Agent (`application-agent`, BACKEND)
+<!-- generated:end comp:application-agent -->

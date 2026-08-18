@@ -57,6 +57,8 @@ def test_no_registered_tool_accepts_an_approval_parameter():
         "get_canonical_cv",
         "get_profile_answers",
         "record_company_board",
+        "get_job_profiles",
+        "recommend_salary",
     }
     offenses = []
     for name, fn in mcp_server.TOOLS.items():

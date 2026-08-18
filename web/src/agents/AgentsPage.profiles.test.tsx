@@ -7,7 +7,7 @@ import {
   getRouting,
   listConnectionModels,
   listConnections,
-  listScreenings,
+  saveProfileAnswers,
   updateAgentConfig,
 } from "../api/client";
 import type { AgentConfig, ConnectionList, JobProfile, ProfileAnswers, Routing } from "../api/types";
@@ -18,13 +18,11 @@ import { AgentsPage } from "./AgentsPage";
 vi.mock("../api/client", () => ({
   getAgentConfig: vi.fn(),
   getProfileAnswers: vi.fn(),
-  listScreenings: vi.fn(),
   getRouting: vi.fn(),
   listConnections: vi.fn(),
   listConnectionModels: vi.fn(),
   updateAgentConfig: vi.fn(),
   saveProfileAnswers: vi.fn(),
-  deleteScreening: vi.fn(),
   updateRouting: vi.fn(),
 }));
 
@@ -57,6 +55,7 @@ function makeProfile(overrides: Partial<JobProfile> = {}): JobProfile {
     salaryFloor: null,
     salaryAskMin: null,
     salaryAskMax: null,
+    currency: "EUR",
     workingLanguage: null,
     glassdoorMin: null,
     glassdoorMinReviews: null,
@@ -70,7 +69,6 @@ function makeAnswers(): ProfileAnswers {
   return {
     phone: "",
     workAuthorisation: "",
-    salaryExpectation: "",
     noticePeriod: "",
     locationPreference: "",
     canonicalCvAssetId: null,
@@ -90,7 +88,6 @@ async function renderLoaded(config: AgentConfig) {
   const connections: ConnectionList = { encryptionAvailable: true, connections: [] };
   vi.mocked(getAgentConfig).mockResolvedValue(config);
   vi.mocked(getProfileAnswers).mockResolvedValue(makeAnswers());
-  vi.mocked(listScreenings).mockResolvedValue([]);
   vi.mocked(getRouting).mockResolvedValue(makeRouting());
   vi.mocked(listConnections).mockResolvedValue(connections);
   vi.mocked(listConnectionModels).mockResolvedValue([]);
@@ -125,7 +122,9 @@ describe("AgentsPage profiles section", () => {
     await renderLoaded(makeConfig());
 
     fireEvent.click(screen.getByRole("button", { name: "Add profile" }));
-    // Keywords and Salary floor are left blank.
+    // Clear Keywords and Salary floor which are pre-filled; they should round-trip as [] and null.
+    fireEvent.change(screen.getByLabelText("Keywords"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Salary floor"), { target: { value: "" } });
     vi.mocked(updateAgentConfig).mockResolvedValueOnce(
       makeConfig({ profiles: [makeProfile()] }),
     );
@@ -155,5 +154,131 @@ describe("AgentsPage profiles section", () => {
     // The other sections are still on the page, untouched by the profiles save.
     expect(screen.getByRole("heading", { name: "Schedule" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Blocked companies" })).toBeTruthy();
+  });
+
+  it("EOR allowed renders MUI MenuItem options (not raw <option>s); picking one updates the field and closes the menu", async () => {
+    await renderLoaded(makeConfig({ profiles: [makeProfile({ name: "P1" })] }));
+
+    fireEvent.mouseDown(screen.getByLabelText("EOR allowed"));
+    const notSet = screen.getByRole("option", { name: "Not set" });
+    const allowed = screen.getByRole("option", { name: "Allowed" });
+    const notAllowed = screen.getByRole("option", { name: "Not allowed" });
+    // Real <option> elements would fail this — MUI menus render <li role="option">.
+    expect(notSet.tagName).toBe("LI");
+    expect(allowed.tagName).toBe("LI");
+    expect(notAllowed.tagName).toBe("LI");
+
+    fireEvent.click(allowed);
+
+    // The menu closes on selection.
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("option", { name: "Allowed" })).toBeNull();
+    });
+
+    vi.mocked(updateAgentConfig).mockResolvedValueOnce(
+      makeConfig({ profiles: [makeProfile({ name: "P1", eorAllowed: true })] }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save profiles" }));
+
+    await vi.waitFor(() => expect(updateAgentConfig).toHaveBeenCalled());
+    const body = vi.mocked(updateAgentConfig).mock.calls[0][0];
+    expect(body.profiles?.[0]?.eorAllowed).toBe(true);
+  });
+
+  it("adding a profile and saving without editing it persists the prefilled defaults", async () => {
+    await renderLoaded(makeConfig());
+
+    fireEvent.click(screen.getByRole("button", { name: "Add profile" }));
+
+    vi.mocked(updateAgentConfig).mockResolvedValueOnce(
+      makeConfig({ profiles: [makeProfile({ name: "New profile" })] }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save profiles" }));
+
+    await vi.waitFor(() => expect(updateAgentConfig).toHaveBeenCalled());
+    const body = vi.mocked(updateAgentConfig).mock.calls[0][0];
+    expect(body.profiles).toEqual([
+      {
+        name: "New profile",
+        enabled: true,
+        keywords: [],
+        locations: [],
+        preferredSources: [],
+        remoteModel: "remote",
+        employmentCountry: "Germany",
+        eorAllowed: false,
+        requireEntityVerification: true,
+        salaryFloor: 85000,
+        salaryAskMin: 95000,
+        salaryAskMax: 110000,
+        currency: "EUR",
+        workingLanguage: "English",
+        glassdoorMin: 3.5,
+        glassdoorMinReviews: 20,
+        acceptedRoleTypes: ["agentic / AI engineering", "data engineering"],
+        rejectedRoleTypes: ["generic full-stack", "frontend", "SRE", "Java-heavy backend"],
+      },
+    ]);
+  });
+
+  it("a profile's currency survives an edit and save unchanged", async () => {
+    // The UI has no currency control, and PUT replaces profiles wholesale, so
+    // dropping the field here would silently reset a hand-set currency to EUR
+    // and make recommend_salary quote the wrong unit.
+    await renderLoaded(makeConfig({ profiles: [makeProfile({ name: "UK", currency: "GBP" })] }));
+
+    fireEvent.change(screen.getByLabelText("Salary ask min"), { target: { value: "80000" } });
+    vi.mocked(updateAgentConfig).mockResolvedValueOnce(
+      makeConfig({ profiles: [makeProfile({ name: "UK", currency: "GBP" })] }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save profiles" }));
+
+    await vi.waitFor(() => expect(updateAgentConfig).toHaveBeenCalled());
+    const body = vi.mocked(updateAgentConfig).mock.calls[0][0];
+    expect(body.profiles?.[0].currency).toBe("GBP");
+  });
+
+  it("clearing a profile's name to blank and saving shows an inline error and makes no API call", async () => {
+    await renderLoaded(makeConfig());
+
+    fireEvent.click(screen.getByRole("button", { name: "Add profile" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save profiles" }));
+
+    expect(await screen.findByText("Profile name is required")).toBeTruthy();
+    expect(updateAgentConfig).not.toHaveBeenCalled();
+  });
+
+  it("the profile answers section neither renders nor saves a salary expectation", async () => {
+    // Salary now comes from the matched job profile's clamped ask band. If a
+    // free-text salary answer survived here it would race that band and the
+    // agent could type a figure the guardrail never approved.
+    await renderLoaded(makeConfig());
+
+    expect(screen.queryByLabelText("Salary expectation")).toBeNull();
+
+    vi.mocked(saveProfileAnswers).mockResolvedValueOnce(makeAnswers());
+    fireEvent.change(screen.getByLabelText("Phone"), { target: { value: "555-0100" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save answers" }));
+
+    await vi.waitFor(() => expect(saveProfileAnswers).toHaveBeenCalled());
+    expect(Object.keys(vi.mocked(saveProfileAnswers).mock.calls[0][0]).sort()).toEqual([
+      "locationPreference",
+      "noticePeriod",
+      "phone",
+      "workAuthorisation",
+    ]);
+  });
+
+  it("a salary floor above the ask minimum shows an inline error and makes no API call", async () => {
+    await renderLoaded(makeConfig());
+
+    fireEvent.click(screen.getByRole("button", { name: "Add profile" }));
+    fireEvent.change(screen.getByLabelText("Salary floor"), { target: { value: "100000" } });
+    fireEvent.change(screen.getByLabelText("Salary ask min"), { target: { value: "90000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save profiles" }));
+
+    expect(await screen.findByText("Salary floor must be <= ask minimum")).toBeTruthy();
+    expect(updateAgentConfig).not.toHaveBeenCalled();
   });
 });
