@@ -89,6 +89,31 @@ if [[ "${MAX_APPLICATIONS_PER_RUN:-}" =~ ^[1-9][0-9]*$ ]]; then
   PROMPT="$PROMPT"$'\n\n'"Apply to at most $MAX_APPLICATIONS_PER_RUN role(s) this run."
 fi
 
+# Job profiles: when configured, append search strategies and requirements.
+# Fetch from the agent config endpoint (profiles, target_companies, cooldown_days,
+# maxApplicationsPerRun, companyBoards). If fetch fails or profiles are absent,
+# prompt stays unchanged (§5.1 default: the six RUNBOOK.md filters apply).
+if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_config 2>/dev/null)"; then
+  PROFILES="$(jq -r '.profiles // [] | length' <<<"$JOB_CONFIG" 2>/dev/null || echo 0)"
+  if [[ "$PROFILES" -gt 0 ]]; then
+    # Append a block for each enabled profile
+    PROFILE_BLOCK="## Job profiles configured:"$'\n'
+    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Any profile passing all its criteria drives an application (single-profile-passes rule)."$'\n'
+    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Record which profile drove each application in the screening report."$'\n'
+    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Target companies (watchlist): $(jq -r '.targetCompanies | join(", ")' <<<"$JOB_CONFIG" 2>/dev/null)"$'\n'
+    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Resolved company boards and apply-channel URLs:"$'\n'
+    
+    # Add company boards (resolved)
+    BOARDS="$(jq -r '.companyBoards[]? | "\(.company): \(.careersUrl)"' <<<"$JOB_CONFIG" 2>/dev/null | sed 's/^/  - /')"
+    if [[ -n "$BOARDS" ]]; then
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$BOARDS"$'\n'
+    fi
+    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Cooldown days (stale company filter): $(jq -r '.cooldownDays // "not configured"' <<<"$JOB_CONFIG" 2>/dev/null)"$'\n'
+    
+    PROMPT="$PROMPT"$'\n\n'"$PROFILE_BLOCK"
+  fi
+fi
+
 # Fetch routed LLM credentials from the app (Stage 2). Fallback: the
 # container's ANTHROPIC_API_KEY env, exactly the pre-Stage-2 behavior.
 AGENT_MODEL=""
@@ -132,6 +157,7 @@ log "invoking claude..."
     "mcp__truthcv__check_cooldown" \
     "mcp__truthcv__get_canonical_cv" \
     "mcp__truthcv__get_profile_answers" \
+    "mcp__truthcv__record_company_board" \
     "mcp__interceptor__interceptor_browser" \
     "mcp__interceptor__interceptor_read" \
     "mcp__interceptor__interceptor_local" \

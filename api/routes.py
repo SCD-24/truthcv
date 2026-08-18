@@ -703,12 +703,37 @@ def put_profile_answers(body: AnswersUpdate) -> AnswersModel:
 
 @router.get("/agent/config", response_model=AgentConfigModel)
 def get_agent_config() -> AgentConfigModel:
-    return AgentConfigModel.model_validate(agent_config_store.load().to_dict())
+    """Fetch agent config with resolved company boards.
+    
+    Prunes board entries for companies no longer on the target watchlist.
+    """
+    from companyboards import store as board_store
+    
+    cfg = agent_config_store.load()
+    data = cfg.to_dict()
+    
+    # Load company boards and prune to target watchlist
+    boards = board_store.load()
+    board_store.prune(cfg.target_companies)
+    
+    # Populate company_boards in response
+    data["company_boards"] = [
+        {"company": board.company, "careers_url": board.careers_url, "ats": board.ats, "status": board.status, "resolved_at": board.resolved_at}
+        for board in boards.values()
+        if board.company.strip().casefold() in {name.strip().casefold() for name in cfg.target_companies}
+    ]
+    
+    return AgentConfigModel.model_validate(data)
 
 
 @router.put("/agent/config", response_model=AgentConfigModel)
 def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:
-    """Merge only the fields the client sent onto the stored config."""
+    """Merge only the fields the client sent onto the stored config.
+    
+    Profiles are WHOLESALE-REPLACED (not merged) because exclude_none=True
+    means an omitted or null profiles field never reaches the merge dict.
+    Other sibling fields (enabled, blocklist, schedule, globals) merge partially.
+    """
     merged = agent_config_store.load().to_dict()
     merged.update(body.model_dump(exclude_unset=True, exclude_none=True, by_alias=False))
     cfg = agent_config_store.AgentConfig.from_dict(merged)

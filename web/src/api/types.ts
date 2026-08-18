@@ -302,12 +302,47 @@ export interface ScreeningRecord {
   updatedAt: string;
 }
 
+/** Job search profile with search criteria and requirements. */
+export interface JobProfile {
+  name: string;
+  enabled: boolean;
+  keywords: string[];
+  locations: string[];
+  preferredSources: string[];
+  remoteModel: string | null;
+  employmentCountry: string | null;
+  eorAllowed: boolean | null;
+  requireEntityVerification: boolean;
+  salaryFloor: number | null;
+  salaryAskMin: number | null;
+  salaryAskMax: number | null;
+  workingLanguage: string | null;
+  glassdoorMin: number | null;
+  glassdoorMinReviews: number | null;
+  acceptedRoleTypes: string[];
+  rejectedRoleTypes: string[];
+}
+
+/** Resolved company board entry. */
+export interface CompanyBoard {
+  company: string;
+  careersUrl: string;
+  ats: string;
+  status: string;
+  resolvedAt: string;
+}
+
 /** Configuration for the unattended job application agent. */
 export interface AgentConfig {
   enabled: boolean;
   blockedCompanies: string[];
   runAt: string[];
   runDays: string[];
+  profiles: JobProfile[];
+  targetCompanies: string[];
+  cooldownDays: number | null;
+  maxApplicationsPerRun: number | null;
+  readonly companyBoards: CompanyBoard[];
 }
 
 /** A partial patch of agent configuration; the PUT route merges only the

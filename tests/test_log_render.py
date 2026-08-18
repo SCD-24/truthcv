@@ -150,3 +150,23 @@ def test_records_without_a_date_or_role_still_render():
     assert "<!-- record: 000eee000eee -->" in text
     assert "role not recorded" in text
     assert "- **Date:** not recorded" in text
+
+
+def test_profile_name_appears_when_set():
+    """Profile field is rendered when present."""
+    app = _app("111fff111fff", profile="Senior Python")
+    text = render_log([app])
+    assert "- **Profile:** Senior Python" in text
+
+
+def test_profile_omitted_when_blank():
+    """Blank profile renders identically to pre-profile records."""
+    app_with_blank = _app("222ggg222ggg", profile="")
+    app_without = _app("333hhh333hhh")
+    
+    text_blank = render_log([app_with_blank])
+    text_without = render_log([app_without])
+    
+    # Both should omit the profile line
+    assert "- **Profile:**" not in text_blank
+    assert "- **Profile:**" not in text_without

@@ -5,7 +5,7 @@
 const field = process.argv[2];
 const DAY_NUM = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
 const base = process.env.TRUTHCV_MCP_URL;
-if (!base || !["enabled", "run_at", "run_days", "llm_credentials"].includes(field)) process.exit(1);
+if (!base || !["enabled", "run_at", "run_days", "llm_credentials", "job_config"].includes(field)) process.exit(1);
 
 if (field === "llm_credentials") {
   // Distinct exit code (2) when the shared secret itself is missing, so
@@ -48,7 +48,17 @@ const req = http.get(u, { timeout: 5000 }, (res) => {
         process.stdout.write(String(cfg.enabled));
       }
       else if (field === "run_at") process.stdout.write(cfg.runAt.join(","));
-      else process.stdout.write(cfg.runDays.map((d) => DAY_NUM[d]).filter(Boolean).join(","));
+      else if (field === "run_days") process.stdout.write(cfg.runDays.map((d) => DAY_NUM[d]).filter(Boolean).join(","));
+      else if (field === "job_config") {
+        const payload = {
+          profiles: cfg.profiles || [],
+          targetCompanies: cfg.targetCompanies || [],
+          cooldownDays: cfg.cooldownDays,
+          maxApplicationsPerRun: cfg.maxApplicationsPerRun,
+          companyBoards: cfg.companyBoards || [],
+        };
+        process.stdout.write(JSON.stringify(payload));
+      }
       process.exit(0);
     } catch { process.exit(1); }
   });

@@ -37,6 +37,7 @@ COPY coverletter/ ./coverletter/
 COPY applications/ ./applications/
 COPY screening/ ./screening/
 COPY agentconfig/ ./agentconfig/
+COPY companyboards/ ./companyboards/
 COPY connections/ ./connections/
 COPY modelrouting/ ./modelrouting/
 COPY mcp/ ./mcp/

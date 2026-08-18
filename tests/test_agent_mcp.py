@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 from api.main import app
 from applications.store import load_all as load_applications
 from mcp import server as mcp_server
-from mcp import tools_ledger, tools_letter
+from mcp import tools_ledger, tools_letter, tools_boards
 from providers.fake import FakeProvider
 from truth.model import Bullet, Experience, Skill, Truth
 from truth.store import save as save_truth
@@ -56,6 +56,7 @@ def test_no_registered_tool_accepts_an_approval_parameter():
         "check_cooldown",
         "get_canonical_cv",
         "get_profile_answers",
+        "record_company_board",
     }
     offenses = []
     for name, fn in mcp_server.TOOLS.items():
@@ -86,7 +87,11 @@ def test_no_tool_module_reaches_the_guardrail_allow_list():
     module list is discovered from the registered tools' `__module__`, so a
     tool added in a new module is covered automatically."""
     module_names = {fn.__module__ for fn in mcp_server.TOOLS.values()}
-    modules = {tools_letter.__name__: tools_letter, tools_ledger.__name__: tools_ledger}
+    modules = {
+        tools_letter.__name__: tools_letter,
+        tools_ledger.__name__: tools_ledger,
+        tools_boards.__name__: tools_boards,
+    }
     assert module_names <= modules.keys(), (
         f"unknown tool module(s), extend this test's module map: {module_names - modules.keys()}"
     )
@@ -322,3 +327,19 @@ def test_generate_cover_letter_refuses_blocked_company(data_dir):
         "paragraphs": [],
         "blocked_reason": "company_blocked",
     }
+
+
+def test_record_company_board_persists_and_can_be_retrieved(data_dir):
+    """record_company_board round-trips through the store."""
+    result = tools_boards.record_company_board(
+        "Google", "https://careers.google.com", "Lever", "ok"
+    )
+    assert result["company"] == "Google"
+    assert result["careers_url"] == "https://careers.google.com"
+    assert result["ats"] == "Lever"
+
+    # Verify it was actually stored
+    from companyboards import store
+    boards = store.load()
+    assert "google" in boards
+    assert boards["google"].careers_url == "https://careers.google.com"

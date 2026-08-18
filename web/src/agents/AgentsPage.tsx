@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Paper from "@mui/material/Paper";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
 import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
@@ -39,6 +41,7 @@ import { isValidRunTime, WEEKDAYS } from "./schedule";
 import type {
   AgentConfig,
   ConnectionStatus,
+  JobProfile,
   ProfileAnswers,
   Routing,
   ScreeningRecord,
@@ -231,6 +234,7 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
             )
           )}
           <ScheduleSection config={config} onChange={setConfig} />
+          <ProfilesSection config={config} onChange={setConfig} />
           <BlocklistSection config={config} onChange={setConfig} />
           <ProfileAnswersSection answers={answers} onChange={setAnswers} />
           <ScreeningsSection screenings={screenings} onChange={setScreenings} />
@@ -428,6 +432,369 @@ function ScheduleSection({
       </Box>
       {error && <Alert severity="error">{error}</Alert>}
       {saved && !error && <Alert severity="success">Schedule saved.</Alert>}
+    </Section>
+  );
+}
+
+/** Editable text-shaped mirror of a JobProfile: multi-item fields are held as
+ * raw comma-separated text while being edited, and nullable numeric/string
+ * fields are held as text too (blank means "unset" — the criterion is off).
+ * Converted to/from JobProfile only at the section's load/save boundary. */
+interface ProfileDraft {
+  name: string;
+  enabled: boolean;
+  keywordsText: string;
+  locationsText: string;
+  preferredSourcesText: string;
+  remoteModel: string;
+  employmentCountry: string;
+  eorAllowed: "" | "true" | "false";
+  requireEntityVerification: boolean;
+  salaryFloor: string;
+  salaryAskMin: string;
+  salaryAskMax: string;
+  workingLanguage: string;
+  glassdoorMin: string;
+  glassdoorMinReviews: string;
+  acceptedRoleTypesText: string;
+  rejectedRoleTypesText: string;
+}
+
+function listToText(values: string[]): string {
+  return values.join(", ");
+}
+
+function textToList(text: string): string[] {
+  return text
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function numberToText(n: number | null): string {
+  return n === null ? "" : String(n);
+}
+
+function textToIntOrNull(text: string): number | null {
+  const t = text.trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+function textToFloatOrNull(text: string): number | null {
+  const t = text.trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+function profileToDraft(p: JobProfile): ProfileDraft {
+  return {
+    name: p.name,
+    enabled: p.enabled,
+    keywordsText: listToText(p.keywords),
+    locationsText: listToText(p.locations),
+    preferredSourcesText: listToText(p.preferredSources),
+    remoteModel: p.remoteModel ?? "",
+    employmentCountry: p.employmentCountry ?? "",
+    eorAllowed: p.eorAllowed === null ? "" : p.eorAllowed ? "true" : "false",
+    requireEntityVerification: p.requireEntityVerification,
+    salaryFloor: numberToText(p.salaryFloor),
+    salaryAskMin: numberToText(p.salaryAskMin),
+    salaryAskMax: numberToText(p.salaryAskMax),
+    workingLanguage: p.workingLanguage ?? "",
+    glassdoorMin: numberToText(p.glassdoorMin),
+    glassdoorMinReviews: numberToText(p.glassdoorMinReviews),
+    acceptedRoleTypesText: listToText(p.acceptedRoleTypes),
+    rejectedRoleTypesText: listToText(p.rejectedRoleTypes),
+  };
+}
+
+function emptyDraft(): ProfileDraft {
+  return {
+    name: "",
+    enabled: true,
+    keywordsText: "",
+    locationsText: "",
+    preferredSourcesText: "",
+    remoteModel: "",
+    employmentCountry: "",
+    eorAllowed: "",
+    requireEntityVerification: true,
+    salaryFloor: "",
+    salaryAskMin: "",
+    salaryAskMax: "",
+    workingLanguage: "",
+    glassdoorMin: "",
+    glassdoorMinReviews: "",
+    acceptedRoleTypesText: "",
+    rejectedRoleTypesText: "",
+  };
+}
+
+function draftToProfile(d: ProfileDraft): JobProfile {
+  return {
+    name: d.name.trim(),
+    enabled: d.enabled,
+    keywords: textToList(d.keywordsText),
+    locations: textToList(d.locationsText),
+    preferredSources: textToList(d.preferredSourcesText),
+    remoteModel: d.remoteModel.trim() || null,
+    employmentCountry: d.employmentCountry.trim() || null,
+    eorAllowed: d.eorAllowed === "" ? null : d.eorAllowed === "true",
+    requireEntityVerification: d.requireEntityVerification,
+    salaryFloor: textToIntOrNull(d.salaryFloor),
+    salaryAskMin: textToIntOrNull(d.salaryAskMin),
+    salaryAskMax: textToIntOrNull(d.salaryAskMax),
+    workingLanguage: d.workingLanguage.trim() || null,
+    glassdoorMin: textToFloatOrNull(d.glassdoorMin),
+    glassdoorMinReviews: textToIntOrNull(d.glassdoorMinReviews),
+    acceptedRoleTypes: textToList(d.acceptedRoleTypesText),
+    rejectedRoleTypes: textToList(d.rejectedRoleTypesText),
+  };
+}
+
+/** Job search profiles: each is a card of search criteria the agent matches
+ * postings against, plus the two run-shaping numbers (cooldown, per-run cap)
+ * that live alongside them on AgentConfig. Multi-item fields (keywords,
+ * locations, preferred sources, role types) are edited as comma-separated
+ * text; a blank field means that criterion is off. One explicit Save button
+ * PUTs only `profiles`/`cooldownDays`/`maxApplicationsPerRun`, so it never
+ * touches the schedule or blocklist sections' fields. */
+function ProfilesSection({
+  config,
+  onChange,
+}: {
+  config: AgentConfig;
+  onChange: (c: AgentConfig) => void;
+}) {
+  const [drafts, setDrafts] = useState<ProfileDraft[]>(() => config.profiles.map(profileToDraft));
+  const [cooldownDays, setCooldownDays] = useState(numberToText(config.cooldownDays));
+  const [maxApplicationsPerRun, setMaxApplicationsPerRun] = useState(
+    numberToText(config.maxApplicationsPerRun),
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  function updateDraft(index: number, patch: Partial<ProfileDraft>) {
+    setDrafts((cur) => cur.map((d, i) => (i === index ? { ...d, ...patch } : d)));
+  }
+
+  function handleAdd() {
+    setDrafts((cur) => [...cur, emptyDraft()]);
+  }
+
+  function handleRemove(index: number) {
+    setDrafts((cur) => cur.filter((_, i) => i !== index));
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const fresh = await updateAgentConfig({
+        profiles: drafts.map(draftToProfile),
+        cooldownDays: textToIntOrNull(cooldownDays),
+        maxApplicationsPerRun: textToIntOrNull(maxApplicationsPerRun),
+      });
+      onChange(fresh);
+      setDrafts(fresh.profiles.map(profileToDraft));
+      setCooldownDays(numberToText(fresh.cooldownDays));
+      setMaxApplicationsPerRun(numberToText(fresh.maxApplicationsPerRun));
+      setSaved(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't save the job profiles.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Section
+      title="Job profiles"
+      description="Search criteria the agent matches postings against. A blank field means that criterion is off — the agent won't filter on it."
+    >
+      <Stack spacing={2}>
+        {drafts.map((draft, index) => (
+          <Card key={index} variant="outlined">
+            <CardContent>
+              <Stack spacing={2}>
+                <Stack direction="row" spacing={2} sx={{ alignItems: "center", flexWrap: "wrap" }}>
+                  <TextField
+                    label="Name"
+                    size="small"
+                    value={draft.name}
+                    onChange={(e) => updateDraft(index, { name: e.target.value })}
+                  />
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={draft.enabled}
+                        onChange={(e) => updateDraft(index, { enabled: e.target.checked })}
+                      />
+                    }
+                    label="Enabled"
+                  />
+                  <Button variant="outlined" color="error" onClick={() => handleRemove(index)}>
+                    Remove
+                  </Button>
+                </Stack>
+                <TextField
+                  label="Keywords"
+                  size="small"
+                  fullWidth
+                  value={draft.keywordsText}
+                  onChange={(e) => updateDraft(index, { keywordsText: e.target.value })}
+                  helperText="Comma-separated. Blank means no keyword filter."
+                />
+                <TextField
+                  label="Locations"
+                  size="small"
+                  fullWidth
+                  value={draft.locationsText}
+                  onChange={(e) => updateDraft(index, { locationsText: e.target.value })}
+                  helperText="Comma-separated. Blank means no location filter."
+                />
+                <TextField
+                  label="Preferred sources"
+                  size="small"
+                  fullWidth
+                  value={draft.preferredSourcesText}
+                  onChange={(e) => updateDraft(index, { preferredSourcesText: e.target.value })}
+                  helperText="Comma-separated. Blank means no source preference."
+                />
+                <TextField
+                  label="Accepted role types"
+                  size="small"
+                  fullWidth
+                  value={draft.acceptedRoleTypesText}
+                  onChange={(e) => updateDraft(index, { acceptedRoleTypesText: e.target.value })}
+                  helperText="Comma-separated. Blank means all role types accepted."
+                />
+                <TextField
+                  label="Rejected role types"
+                  size="small"
+                  fullWidth
+                  value={draft.rejectedRoleTypesText}
+                  onChange={(e) => updateDraft(index, { rejectedRoleTypesText: e.target.value })}
+                  helperText="Comma-separated. Blank means none rejected."
+                />
+                <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
+                  <TextField
+                    label="Remote model"
+                    size="small"
+                    value={draft.remoteModel}
+                    onChange={(e) => updateDraft(index, { remoteModel: e.target.value })}
+                  />
+                  <TextField
+                    label="Employment country"
+                    size="small"
+                    value={draft.employmentCountry}
+                    onChange={(e) => updateDraft(index, { employmentCountry: e.target.value })}
+                  />
+                  <TextField
+                    label="Working language"
+                    size="small"
+                    value={draft.workingLanguage}
+                    onChange={(e) => updateDraft(index, { workingLanguage: e.target.value })}
+                  />
+                  <TextField
+                    select
+                    label="EOR allowed"
+                    size="small"
+                    value={draft.eorAllowed}
+                    onChange={(e) =>
+                      updateDraft(index, {
+                        eorAllowed: e.target.value as ProfileDraft["eorAllowed"],
+                      })
+                    }
+                    sx={{ minWidth: 140 }}
+                  >
+                    <option value="">Not set</option>
+                    <option value="true">Allowed</option>
+                    <option value="false">Not allowed</option>
+                  </TextField>
+                </Stack>
+                <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
+                  <TextField
+                    label="Salary floor"
+                    size="small"
+                    value={draft.salaryFloor}
+                    onChange={(e) => updateDraft(index, { salaryFloor: e.target.value })}
+                  />
+                  <TextField
+                    label="Salary ask min"
+                    size="small"
+                    value={draft.salaryAskMin}
+                    onChange={(e) => updateDraft(index, { salaryAskMin: e.target.value })}
+                  />
+                  <TextField
+                    label="Salary ask max"
+                    size="small"
+                    value={draft.salaryAskMax}
+                    onChange={(e) => updateDraft(index, { salaryAskMax: e.target.value })}
+                  />
+                  <TextField
+                    label="Glassdoor min"
+                    size="small"
+                    value={draft.glassdoorMin}
+                    onChange={(e) => updateDraft(index, { glassdoorMin: e.target.value })}
+                  />
+                  <TextField
+                    label="Glassdoor min reviews"
+                    size="small"
+                    value={draft.glassdoorMinReviews}
+                    onChange={(e) => updateDraft(index, { glassdoorMinReviews: e.target.value })}
+                  />
+                </Stack>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={draft.requireEntityVerification}
+                      onChange={(e) =>
+                        updateDraft(index, { requireEntityVerification: e.target.checked })
+                      }
+                    />
+                  }
+                  label="Require entity verification"
+                />
+              </Stack>
+            </CardContent>
+          </Card>
+        ))}
+      </Stack>
+      <Box>
+        <Button variant="outlined" onClick={handleAdd}>
+          Add profile
+        </Button>
+      </Box>
+      <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
+        <TextField
+          label="Cooldown days"
+          size="small"
+          value={cooldownDays}
+          onChange={(e) => setCooldownDays(e.target.value)}
+          helperText="Days a rejected target stays blocked. Blank disables cooldown."
+        />
+        <TextField
+          label="Max applications per run"
+          size="small"
+          value={maxApplicationsPerRun}
+          onChange={(e) => setMaxApplicationsPerRun(e.target.value)}
+          helperText="Blank means no per-run cap."
+        />
+      </Stack>
+      <Box>
+        <Button variant="contained" onClick={handleSave} disabled={saving}>
+          {saving && <ButtonSpinner />}
+          {saving ? "Saving…" : "Save profiles"}
+        </Button>
+      </Box>
+      {error && <Alert severity="error">{error}</Alert>}
+      {saved && !error && <Alert severity="success">Job profiles saved.</Alert>}
     </Section>
   );
 }

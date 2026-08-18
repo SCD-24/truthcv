@@ -21,7 +21,20 @@ from .store import load_all as load_screenings
 
 
 def application_cooldown_days() -> int:
-    """Days after an application's date before the company clears cooldown."""
+    """Days after an application's date before the company clears cooldown.
+    
+    Precedence: agent config cooldown_days -> APPLICATION_COOLDOWN_DAYS env -> 90.
+    """
+    # Check agent config first
+    try:
+        from agentconfig.store import load as agent_config_load
+        cfg = agent_config_load()
+        if cfg.cooldown_days is not None and cfg.cooldown_days >= 0:
+            return cfg.cooldown_days
+    except Exception:
+        pass
+    
+    # Fall back to env var
     raw = os.environ.get("APPLICATION_COOLDOWN_DAYS", "90")
     if not raw or not raw.strip():
         return 90
