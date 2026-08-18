@@ -46,7 +46,7 @@ wizard down:
 docker compose --profile agent up -d agent
 ```
 
-By default it runs at **09:00 and 15:00** (container time, `RUN_AT`). Every
+Schedule is configured on the Agents page (default **09:00 and 15:00** weekdays); `RUN_AT`/`RUN_DAYS` are fallback only, used when the agent config API is unreachable. Every
 capability it has goes through TruthCV's MCP tool surface — it deliberately
 does not mount the data volume.
 
@@ -58,10 +58,7 @@ does not mount the data volume.
 > agent aborts the run rather than proceeding blind.
 
 Configuration, the schedule, the interceptor precondition and the smoke test are
-documented in [`agent/README.md`](agent/README.md). The target list it works
-from is [`agent/targets.md`](agent/targets.md); what has actually been applied
-to, screened out or put in cooldown lives in the ledger and screening store on
-the data volume, not in that file.
+documented in [`agent/README.md`](agent/README.md). [`agent/targets.md`](agent/targets.md) is the operator's research scratchpad and is never read by the agent; the operative queue is `targetCompanies`, `companyBoards`, and `profiles` in the agent config. What has actually been applied to, screened out or put in cooldown lives in the ledger and screening store on the data volume, not in that file.
 
 ### The plain-text application log
 

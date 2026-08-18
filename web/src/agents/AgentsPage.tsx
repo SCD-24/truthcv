@@ -768,14 +768,14 @@ function ProfilesSection({
           size="small"
           value={cooldownDays}
           onChange={(e) => setCooldownDays(e.target.value)}
-          helperText="Days a rejected target stays blocked. Blank disables cooldown."
+          helperText="Days a rejected or applied-to company stays blocked. Blank uses the default (90); 0 disables."
         />
         <TextField
           label="Max applications per run"
           size="small"
           value={maxApplicationsPerRun}
           onChange={(e) => setMaxApplicationsPerRun(e.target.value)}
-          helperText="Blank means no per-run cap."
+          helperText="Saved here but not yet wired into agent runs — the container's MAX_APPLICATIONS_PER_RUN env var sets the actual per-run cap."
         />
       </Stack>
       <Box>

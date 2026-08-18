@@ -164,7 +164,7 @@ filesystem route to your data and should not acquire one.
 
 ## What the agent may and may not do
 
-Its allow-list (`daily-apply.sh`) is the six TruthCV MCP tools, the three
+Its allow-list (`daily-apply.sh`) is the nine TruthCV MCP tools, the three
 interceptor browser tools, and `Read`/`Write`/`WebSearch`/`WebFetch`. It has no
 tool for approving an inference: the approve/deny gate is the product, and the
 agent never stands on both sides of it. Everything the RUNBOOK carried over from

@@ -5,7 +5,7 @@
     "truthcv": {
       "type": "http",
       "url": "${TRUTHCV_MCP_URL:-http://app:8080/mcp}",
-      "_comment": "TruthCV's own tool surface: generate_cover_letter, record_application, record_screening, check_cooldown, get_canonical_cv, get_profile_answers (mcp/server.py, APIRouter(prefix='/mcp')). The default is the in-network address of the `app` compose service — reachable only from inside the compose network, not from the host or the open internet."
+      "_comment": "TruthCV's own tool surface: generate_cover_letter, record_application, record_screening, check_cooldown, get_canonical_cv, get_profile_answers, record_company_board, get_job_profiles, recommend_salary (mcp/server.py, APIRouter(prefix='/mcp')). The default is the in-network address of the `app` compose service — reachable only from inside the compose network, not from the host or the open internet."
     },
 
     "interceptor": {
