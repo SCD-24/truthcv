@@ -24,7 +24,7 @@ Two services, one image family:
 - **`app`** — the wizard, the API, the guardrail, the ledger. Started by
   `docker compose up`.
 - **`agent`** — the unattended application agent, on the `agent` compose
-  profile so it is never started implicitly. Runs at 09:00 and 15:00 and drives
+  profile so it is never started implicitly. Schedule is configured on the Agents page (default 09:00/15:00 weekdays; RUN_AT/RUN_DAYS are fallback only). Drives
   the operator's real Chrome on the host through a bind-mounted interceptor
   socket. There is no in-container browser and no headless fallback; see
   [`agent/README.md`](agent/README.md).

@@ -280,6 +280,7 @@ export interface SaveDocumentResult {
 export interface CooldownStatus {
   inCooldown: boolean;
   expires: string | null;
+  blocked: boolean;
 }
 
 /** A job the unattended application agent screened and rejected (or otherwise

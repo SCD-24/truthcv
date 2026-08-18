@@ -78,7 +78,7 @@ fi
 # --- Run ---------------------------------------------------------------------
 
 # agent/prompt.md carries the operating instructions (it references
-# agent/RUNBOOK.md and names the six tools); this script only adds the date.
+# agent/RUNBOOK.md and names the nine tools); this script only adds the date.
 PROMPT="$(cat "$PROMPT_FILE")"$'\n\n'"Today is $(date +%Y-%m-%d)."
 
 # MAX_APPLICATIONS_PER_RUN empty/unset means no cap (agent/RUNBOOK.md §1,
@@ -121,7 +121,7 @@ def fmt_band(min_v; max_v; cur): if (min_v != null and max_v != null) then "\(mi
 # Job profiles: when configured, append search strategies and requirements.
 # Fetch from the agent config endpoint (profiles, target_companies, cooldown_days,
 # maxApplicationsPerRun, companyBoards). If fetch fails or profiles are absent,
-# prompt stays unchanged (§5.1 default: the six RUNBOOK.md filters apply).
+# prompt stays unchanged (§2 default: the six RUNBOOK.md filters apply).
 if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_config 2>/dev/null)"; then
   PROFILES="$(jq -r '.profiles // [] | length' <<<"$JOB_CONFIG" 2>/dev/null || echo 0)"
   if [[ "$PROFILES" -gt 0 ]]; then

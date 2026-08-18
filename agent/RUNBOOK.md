@@ -8,8 +8,9 @@ volume in every case.
 Your only route to the operator's facts, their CV, their letter-writing, and
 their application history is the TruthCV tool surface: `generate_cover_letter`,
 `record_application`, `record_screening`, `check_cooldown`, `get_canonical_cv`,
-`get_profile_answers`, `get_job_profiles`, `recommend_salary`. There is no
-file on disk to read any of this from — call the tool.
+`get_profile_answers`, `get_job_profiles`, `recommend_salary`,
+`record_company_board`. There is no file on disk to read any of this from — call
+the tool.
 
 ---
 
@@ -295,7 +296,7 @@ before every application, never infer a cooldown from memory of an earlier run.
   Treat a posting as blocked if **either** call reports `in_cooldown: true`.
   See the open issue below about the two windows' actual granularity.
 
-  - After 3 months a re-application is allowed and often worth it, since the
+  - After the configured cooldown lapses (Agents page → Cooldown days; default 90 days), a re-application is allowed and often worth it, since the
     hiring team and the requirements frequently change. Note in the
     `record_application` call that it is a re-application and give the date
     of the previous one (in `notes`).

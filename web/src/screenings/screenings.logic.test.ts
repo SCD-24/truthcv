@@ -151,7 +151,7 @@ describe("screening list", () => {
   });
 
   it("getCooldown puts company and role in the query string", async () => {
-    const status: CooldownStatus = { inCooldown: true, expires: "2024-09-01T12:00:00+00:00" };
+    const status: CooldownStatus = { inCooldown: true, expires: "2024-09-01T12:00:00+00:00", blocked: false };
     fetchMock.mockResolvedValueOnce(jsonResponse(status));
 
     const result = await getCooldown("Acme", "Engineer");
@@ -162,7 +162,7 @@ describe("screening list", () => {
   });
 
   it("getCooldown omits role entirely when not supplied", async () => {
-    const status: CooldownStatus = { inCooldown: false, expires: null };
+    const status: CooldownStatus = { inCooldown: false, expires: null, blocked: false };
     fetchMock.mockResolvedValueOnce(jsonResponse(status));
 
     await getCooldown("Acme");
