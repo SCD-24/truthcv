@@ -121,6 +121,6 @@ Owns the user's job-application records (applications/) persisted as application
 **Tech:** Python, PyYAML/JSON
 <!-- generated:end comp:application-tracker -->
 
-<!-- generated:start comp:application-agent -->
-## Application Agent (`application-agent`, BACKEND)
-<!-- generated:end comp:application-agent -->
+<!-- generated:start comp:browser-runtime -->
+## Agent Browser (`browser-runtime`, CUSTOM)
+<!-- generated:end comp:browser-runtime -->

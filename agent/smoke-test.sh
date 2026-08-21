@@ -10,9 +10,10 @@
 # Ported from the retiring Jobs project's docker/smoke-test.sh, but the checks
 # are necessarily different: that image contained its own Chrome under Xvfb and
 # its smoke test verified the browser stack. THIS image contains no browser at
-# all on purpose (agent/Dockerfile, BROWSER STRATEGY) - the browser lives on
-# the host - so the equivalent question here is whether the socket to the host
-# browser and the MCP tool surface are actually reachable from inside.
+# all on purpose (agent/Dockerfile, BROWSER STRATEGY) - the browser lives in the
+# sibling `browser` compose service - so the equivalent question here is
+# whether that service and the MCP tool surface are actually reachable from
+# inside.
 set -uo pipefail
 
 pass=0; fail=0
@@ -21,7 +22,7 @@ bad() { echo "  FAIL  $*"; fail=$((fail+1)); }
 
 AGENT_DIR="${AGENT_DIR:-/app/agent}"
 RUN_LOG_DIR="${RUN_LOG_DIR:-/app/runs}"
-INTERCEPTOR_SOCKET="${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}"
+BROWSER_MCP_URL="${BROWSER_MCP_URL:-http://browser:8931/mcp}"
 
 echo "== truthcv agent smoke test =="
 
@@ -34,21 +35,27 @@ else
 fi
 
 # node ships with the base image (node:22-bookworm-slim) and is what the
-# socket and HTTP probes below are written in: this image installs no curl,
-# nc or socat, so node is the only thing here that can open a connection.
+# HTTP probes below are written in: this image installs no curl, nc or
+# socat, so node is the only thing here that can open a connection.
 command -v node >/dev/null 2>&1 \
   && ok "node present (used by the reachability probes below)" \
   || bad "node missing - the probes below cannot run"
 
+command -v jq >/dev/null 2>&1 \
+  && ok "jq present" \
+  || bad "jq missing - daily-apply.sh aborts without it"
+
 # The absence of a browser is a DELIBERATE property of this image, not an
 # oversight, so it is pinned here: if someone re-adds Chrome/Chromium/
-# Playwright, this test should turn red and make them justify it.
+# Playwright, this test should turn red and make them justify it. The
+# browser lives in its own `browser` compose service by design, so finding
+# one in the agent image would mean the images got crossed.
 browsers=""
 for b in google-chrome google-chrome-stable chromium chromium-browser Xvfb playwright; do
   command -v "$b" >/dev/null 2>&1 && browsers="$browsers $b"
 done
 [[ -z "$browsers" ]] \
-  && ok "no in-container browser, as intended (host Chrome is the only path)" \
+  && ok "no in-container browser, as intended (it lives in the browser service)" \
   || bad "in-container browser stack present:$browsers - see agent/Dockerfile"
 
 # --- The agent's own files ---------------------------------------------------
@@ -65,9 +72,9 @@ done
 if node -e '
   const c = require("'"$AGENT_DIR"'/mcp.json");
   const s = c.mcpServers || {};
-  if (!s.truthcv || !s.interceptor) { process.exit(1); }
+  if (!s.truthcv || !s.browser) { process.exit(1); }
 ' 2>/dev/null; then
-  ok "mcp.json is valid JSON and declares the truthcv + interceptor servers"
+  ok "mcp.json is valid JSON and declares the truthcv + browser servers"
 else
   bad "mcp.json is malformed or missing a server the allow-list names"
 fi
@@ -84,25 +91,22 @@ fi
 
 # --- Reachability ------------------------------------------------------------
 
-# A present socket FILE proves only that the bind mount worked; a stale socket
-# left by a dead interceptor daemon looks identical. daily-apply.sh can only
-# check the file, so this connects to it - the difference between "the mount is
-# there" and "the host browser can actually be driven".
-if [[ -S "$INTERCEPTOR_SOCKET" ]]; then
-  ok "interceptor socket bind-mounted at $INTERCEPTOR_SOCKET"
-  if node -e '
-    const net = require("net");
-    const s = net.connect("'"$INTERCEPTOR_SOCKET"'");
-    s.on("connect", () => { s.end(); process.exit(0); });
-    s.on("error", () => process.exit(1));
-    setTimeout(() => process.exit(1), 3000);
-  ' 2>/dev/null; then
-    ok "interceptor socket accepts a connection (daemon alive on the host)"
-  else
-    bad "interceptor socket is present but dead - the host daemon is not listening"
-  fi
+# This only proves the `browser` compose service is accepting connections and
+# speaking HTTP, NOT that the MCP session handshake succeeds - do NOT check
+# the status code here. MCP's streamable-HTTP transport answers a bare GET
+# (no session id, no `Accept: text/event-stream` header) with a 4xx - 400,
+# 405 or 406 - BY DESIGN, so a healthy server will never return 200 to this
+# probe. Only a connection error or a timeout means unreachable.
+if node -e '
+  const url = process.argv[1];
+  const mod = url.startsWith("https:") ? require("https") : require("http");
+  const req = mod.get(url, { timeout: 5000 }, () => process.exit(0));
+  req.on("timeout", () => { req.destroy(); process.exit(1); });
+  req.on("error", () => process.exit(1));
+' "$BROWSER_MCP_URL" 2>/dev/null; then
+  ok "BROWSER_MCP_URL reachable ($BROWSER_MCP_URL)"
 else
-  bad "no socket at $INTERCEPTOR_SOCKET - start the host interceptor daemon"
+  bad "BROWSER_MCP_URL unreachable ($BROWSER_MCP_URL) - check docker compose ps browser / docker compose logs browser"
 fi
 
 if [[ -n "${TRUTHCV_MCP_URL:-}" ]]; then
