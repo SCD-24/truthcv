@@ -142,10 +142,15 @@ native English as C1 — across 77 applications.
    blocklist can refuse before any text is generated.
 
 **Browser tooling is whatever this environment provides; nothing in this
-runbook depends on which one.** Every rule here applies identically regardless
-of the browser toolchain in use — especially §5.5, which matters *more* when
-the browser is containerised, because it is likelier to be silently blocked by
-ATS bot detection.
+runbook depends on which one.** The TruthCV deployment provides the Interceptor
+CLI, exposed as an MCP tool surface (`interceptor_browser`, `interceptor_read`,
+`interceptor_local`). Each tool takes a `verb` and an `args` array of strings
+passed verbatim to the CLI (`interceptor <verb> <args...>`). Exact verbs are
+discoverable via the Interceptor docs (https://interceptor.ai) — the tool
+table lists what each verb does and what arguments it accepts. Every rule here
+applies identically regardless of the browser toolchain in use — especially
+§5.5, which matters *more* when the browser is containerised, because it is
+likelier to be silently blocked by ATS bot detection.
 
 4. Fill every field from the `get_profile_answers` result (§3). If `name`,
    `email`, or `work_authorisation` comes back blank, no identity is seeded —

@@ -9,12 +9,17 @@
     },
 
     "interceptor": {
-      "command": "${INTERCEPTOR_MCP_COMMAND:-interceptor-mcp}",
-      "args": ["--socket", "${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}"],
-      "_unresolved": "The retiring Jobs repo does NOT contain an interceptor MCP server binary or its launch command — it allow-listed mcp__interceptor__interceptor_{browser,read,local} and relied on a server declared in the operator's personal Claude config, plus a Chrome extension that its own docs record as NOT INSTALLED as of 2026-08-12. So `interceptor-mcp` here is a PLACEHOLDER default, not a verified command: the operator must set INTERCEPTOR_MCP_COMMAND to whatever actually serves the socket on their host. Until then the agent has no working browser driver and its first run will fail at browser attach, which agent/entrypoint.sh's preflight should catch rather than letting a run start blind.",
-      "_comment": "PRIMARY browser driver. Reaches the operator's real, already-logged-in HOST Chrome via the Interceptor daemon, over the unix socket bind-mounted into this container at INTERCEPTOR_SOCKET's path (docker-compose.yml `agent` service). This is the whole reason the agent runs in its own container instead of reusing a containerised browser: see agent/Dockerfile's BROWSER STRATEGY comment — this image installs no browser of its own, on purpose."
+      "command": "${INTERCEPTOR_BIN:-/opt/interceptor/bin/interceptor}",
+      "args": ["mcp", "serve"],
+      "env": {
+        "INTERCEPTOR_SOCKET_PATH": "${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}",
+        "INTERCEPTOR_MCP_ALLOW": "${INTERCEPTOR_MCP_ALLOW:-}",
+        "INTERCEPTOR_MCP_FENCE": "${INTERCEPTOR_MCP_FENCE:-on}",
+        "INTERCEPTOR_MCP_GROUP": "${INTERCEPTOR_MCP_GROUP:-}"
+      },
+      "_comment": "PRIMARY browser driver. The `claude` CLI spawns `interceptor mcp serve` over stdio in-container (a process tree under the docker-compose agent service). That subprocess shells to the real `interceptor <verb>` command, which dials the bind-mounted unix socket at INTERCEPTOR_SOCKET_PATH to reach the HOST interceptor daemon, which in turn reaches Chrome via native messaging. Host Chrome is the only path to the operator's logged-in sessions (ATS, SSO, etc.) on which unattended applying depends; see agent/Dockerfile's BROWSER STRATEGY comment for the full reasoning."
     }
   },
 
-  "_fallbackComment": "Playwright (an in-container browser, as the retired Jobs project's docker/mcp.json used) remains the documented FALLBACK per architecture, not configured as a live server above: agent/Dockerfile deliberately installs no browser at all, so a `playwright` entry here could not actually launch anything. Host Chrome via `interceptor` is the primary and intended path because it alone preserves the operator's logged-in ATS/SSO sessions, which a fresh containerised browser cannot reproduce. Re-adding `playwright` here would require re-adding a browser to agent/Dockerfile, undoing that decision — see agent/RUNBOOK.md's note that browser tooling is whatever the environment provides."
+  "_fallbackComment": "Playwright (an in-container browser, as the retired Jobs project's docker/mcp.json used) remains the documented FALLBACK per architecture, not configured as a live server above: agent/Dockerfile deliberately installs no browser at all, so a `playwright` entry here could not actually launch anything. Host Chrome via `interceptor mcp serve` (connected to the bind-mounted unix socket reaching the host daemon) is the primary and intended path because it alone preserves the operator's logged-in ATS/SSO sessions, which a fresh containerised browser cannot reproduce. Re-adding `playwright` here would require re-adding a browser to agent/Dockerfile, undoing that decision — see agent/RUNBOOK.md's note that browser tooling is whatever the environment provides."
 }

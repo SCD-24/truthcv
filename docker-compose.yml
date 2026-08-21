@@ -65,12 +65,32 @@ services:
       - MAX_APPLICATIONS_PER_RUN=${MAX_APPLICATIONS_PER_RUN:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
+      # The Interceptor binary bind-mounted from the host and run as an MCP
+      # server over stdio. The claude CLI spawns this binary in-container, and
+      # it shells to the real `interceptor <verb>` command to reach the host
+      # daemon over the unix socket (INTERCEPTOR_SOCKET_PATH below).
+      - INTERCEPTOR_BIN=/opt/interceptor/bin/interceptor
+      - INTERCEPTOR_SOCKET_PATH=${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}
+      # Interceptor MCP safety tiers: read+mutate allowed by default; 
+      # destructive and arbitrary-exec refused unless opted in. Leave empty for
+      # an unattended submitter (filling and submitting ATS forms classifies as
+      # the `mutate` tier, allowed by default).
+      - INTERCEPTOR_MCP_ALLOW=${INTERCEPTOR_MCP_ALLOW:-}
+      # Prompt-injection protection when reading job postings (on by default).
+      - INTERCEPTOR_MCP_FENCE=${INTERCEPTOR_MCP_FENCE:-on}
+      # MCP group scope (tool surface name/namespace for billing and audit).
+      - INTERCEPTOR_MCP_GROUP=${INTERCEPTOR_MCP_GROUP:-truthcv-agent}
     volumes:
       # The host Chrome interceptor's unix socket, bind-mounted in so the
       # agent drives a real, already-logged-in browser on the host instead of
       # a fresh one inside the container (see agent/Dockerfile). Both sides
       # use the same env var so the mount always matches agent/mcp.json.
       - ${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}:${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}
+      # The host Interceptor binary, bind-mounted read-only. The `claude` CLI
+      # spawns `interceptor mcp serve` over stdio in-container, and that
+      # subprocess shells to the real `interceptor <verb>` command (the mounted
+      # binary), which reaches the host daemon over the socket bind-mount above.
+      - ${INTERCEPTOR_BIN_HOST:-/home/glenn/.local/bin/interceptor}:/opt/interceptor/bin/interceptor:ro
       # Per-run logs written by agent/daily-apply.sh (RUN_LOG_DIR, default
       # /app/runs). Its own named volume, NOT the app's data volume: these are
       # operator diagnostics for unattended runs, and without a volume they

@@ -7,12 +7,12 @@
 #   docker compose --profile agent run --rm \
 #     --entrypoint /app/agent/smoke-test.sh agent
 #
-# Ported from the retiring Jobs project's docker/smoke-test.sh, but the checks
-# are necessarily different: that image contained its own Chrome under Xvfb and
-# its smoke test verified the browser stack. THIS image contains no browser at
-# all on purpose (agent/Dockerfile, BROWSER STRATEGY) - the browser lives on
-# the host - so the equivalent question here is whether the socket to the host
-# browser and the MCP tool surface are actually reachable from inside.
+# Verifies that the `claude` CLI spawns `interceptor mcp serve` over stdio in-container,
+# and that subprocess shells to the real `interceptor <verb>` command (the bind-mounted
+# Bun binary) to reach the host interceptor daemon over the bind-mounted unix socket.
+# The daemon reaches Chrome via native messaging. This chain must be solid end-to-end:
+# if the binary is missing/incompatible with the container's glibc, or if the socket
+# is stale/dead, those failures surface here, where they belong, not mid-run.
 set -uo pipefail
 
 pass=0; fail=0
@@ -103,6 +103,52 @@ if [[ -S "$INTERCEPTOR_SOCKET" ]]; then
   fi
 else
   bad "no socket at $INTERCEPTOR_SOCKET - start the host interceptor daemon"
+fi
+
+# --- Interceptor binary chain ------------------------------------------------
+
+INTERCEPTOR_BIN="${INTERCEPTOR_BIN:-/opt/interceptor/bin/interceptor}"
+
+if [[ -x "$INTERCEPTOR_BIN" ]]; then
+  ok "interceptor binary exists and is executable ($INTERCEPTOR_BIN)"
+  
+  # The binary is Bun-compiled on the host and must run under the container's
+  # glibc — if there's a version mismatch, the loader will fail with a message
+  # like "version GLIBC_2.36 not found". That's our most likely failure mode.
+  binary_output=$("$INTERCEPTOR_BIN" 2>&1 | head -20)
+  if echo "$binary_output" | grep -q "version GLIBC_.*not found"; then
+    bad "interceptor binary glibc incompatibility: $(echo "$binary_output" | grep "version GLIBC_")"
+    bad "  This means the host's Bun-compiled binary needs glibc from the host — try the fallback: a host-side stdio→HTTP shim"
+  else
+    ok "interceptor binary runs in this container (no loader/glibc error)"
+  fi
+  
+  # Spawn the MCP server and verify it starts up correctly.
+  server_output=$(timeout 3 "$INTERCEPTOR_BIN" mcp serve 2>&1 || true)
+  if echo "$server_output" | grep -q "serving over stdio"; then
+    ok "interceptor mcp serve starts and announces stdio readiness"
+  else
+    bad "interceptor mcp serve did not emit 'serving over stdio' on startup"
+    [[ -n "$server_output" ]] && echo "    Server output: $server_output" >&2
+  fi
+else
+  bad "interceptor binary not executable or missing at $INTERCEPTOR_BIN"
+fi
+
+# --- mcp.json validation -----------------------------------------------
+
+if jq . "$AGENT_DIR/mcp.json" >/dev/null 2>&1; then
+  if jq '.mcpServers.interceptor.args' "$AGENT_DIR/mcp.json" | grep -q '"mcp"'; then
+    if ! grep -q "interceptor-mcp" "$AGENT_DIR/mcp.json"; then
+      ok "mcp.json interceptor entry: command removed, args set to [\"mcp\",\"serve\"], no old \"interceptor-mcp\" string"
+    else
+      bad "mcp.json still contains the string 'interceptor-mcp' — update to the real command"
+    fi
+  else
+    bad "mcp.json interceptor args are not [\"mcp\",\"serve\"]"
+  fi
+else
+  bad "mcp.json is not valid JSON"
 fi
 
 if [[ -n "${TRUTHCV_MCP_URL:-}" ]]; then

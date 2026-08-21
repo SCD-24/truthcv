@@ -24,15 +24,6 @@ a submission silently fails.
 This is the one place TruthCV diverges from the retired Jobs container, which
 ran its own Chrome under Xvfb. That trade was reconsidered and reversed.
 
-> **Known gap — the agent has no browser driver yet.** The Jobs repo never
-> contained the Interceptor MCP server; it relied on one declared in the
-> operator's personal Claude config plus a Chrome extension its own docs record
-> as not installed. `mcp.json` therefore defaults `interceptor` to a
-> **placeholder** command. Until you point `INTERCEPTOR_MCP_COMMAND` at the real
-> server on your host, every run will abort at browser attach. `smoke-test.sh`
-> tells you whether the socket is genuinely live before you find out the hard
-> way.
-
 ## The agent has no identity until you seed one
 
 `get_profile_answers` returns every field — name, email, phone, work
@@ -103,8 +94,11 @@ under the operator's name. Watch it.
 | `RUN_ONCE` | unset | `1` = run immediately and exit. |
 | `TZ` | container default | Timezone the schedule is expressed in. |
 | `TRUTHCV_MCP_URL` | `http://app:8080/mcp` | The `app` service's MCP tool surface. In-network only — not reachable from the host or the internet. |
-| `INTERCEPTOR_SOCKET` | `/tmp/interceptor.sock` | Host socket for the browser, bind-mounted at the same path inside. |
-| `INTERCEPTOR_MCP_COMMAND` | `interceptor-mcp` | **Placeholder.** The command that serves that socket — see the gap noted above. |
+| `INTERCEPTOR_SOCKET` | `/tmp/interceptor.sock` | The host browser daemon's unix socket, bind-mounted into the container at the same path. The daemon listens on the host; the mount carries the IPC channel into the container. |
+| `INTERCEPTOR_BIN` | `/opt/interceptor/bin/interceptor` | Path to the Bun-compiled Interceptor binary inside the container. The `claude` CLI spawns this binary as an MCP server over stdio (see `docker-compose.yml` volumes). |
+| `INTERCEPTOR_MCP_ALLOW` | empty | Interceptor MCP safety tier allow-list. Empty = read + mutate (allowed by default). Leave it empty for an unattended submitter — filling and submitting ATS forms classifies as `mutate`, allowed by default. |
+| `INTERCEPTOR_MCP_FENCE` | `on` | Prompt-injection protection when reading job postings. On by default. |
+| `INTERCEPTOR_MCP_GROUP` | `truthcv-agent` | MCP group scope for billing and audit. |
 | `MAX_APPLICATIONS_PER_RUN` | empty | Empty means **no cap**, matching RUNBOOK §1 ("there is no daily quota"). Not zero. |
 
 The agent runs the Claude Code CLI, so the **Model** setting on the Agents page accepts only the Claude connection — other providers are filtered out by design.

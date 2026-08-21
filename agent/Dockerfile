@@ -9,13 +9,16 @@
 # CHROMIUM, XVFB, OR ANY OTHER BROWSER — do not "fix" that by adding one back.
 #
 # TruthCV's agent instead drives the operator's real, already-logged-in browser on
-# the HOST, reached over a unix socket bind-mounted into the container (see
-# agent/mcp.json's `interceptor` server and docker-compose.yml's
-# INTERCEPTOR_SOCKET bind mount). A container's own browser starts from a
-# blank profile with no logins, and unattended applying depends entirely on
-# sessions that already exist in the operator's real browser (ATS accounts, SSO,
-# etc.) — a fresh containerised Chrome cannot reproduce that, so it cannot do
-# this job at all, it can only look like it can.
+# the HOST. The `claude` CLI spawns `interceptor mcp serve` over stdio in-container
+# (see agent/mcp.json), and that subprocess shells to the real `interceptor <verb>`
+# command (a Bun-compiled binary bind-mounted read-only at /opt/interceptor/bin/interceptor,
+# see docker-compose.yml's volumes). The binary dials the host interceptor daemon
+# over a unix socket bind-mounted into the container at INTERCEPTOR_SOCKET (also in
+# docker-compose.yml), and the daemon reaches Chrome via native messaging on the host.
+# A container's own browser starts from a blank profile with no logins, and unattended
+# applying depends entirely on sessions that already exist in the operator's real browser
+# (ATS accounts, SSO, etc.) — a fresh containerised Chrome cannot reproduce that, so it
+# cannot do this job at all, it can only look like it can.
 
 FROM node:22-bookworm-slim
 
@@ -41,7 +44,10 @@ RUN npm install -g @anthropic-ai/claude-code
 # docker-compose.yml mounts over it inherits that ownership — a volume mounted
 # onto a path the image does not contain is created root-owned, and the agent
 # (USER node) could then not write its run logs.
-RUN mkdir -p /app/agent /app/runs \
+# /opt/interceptor/bin is the mount target for the host interceptor binary
+# (docker-compose.yml volumes), created here so the mount succeeds even if
+# the path doesn't exist in the base image.
+RUN mkdir -p /app/agent /app/runs /opt/interceptor/bin \
  && chown -R node:node /app
 
 # The agent's own files — its operating spec, its prompt, its MCP config, the

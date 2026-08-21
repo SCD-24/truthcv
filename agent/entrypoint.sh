@@ -59,6 +59,10 @@ preflight() {
     log "credentials will be fetched from app at run time"
   fi
   [[ -x "$DAILY_APPLY" ]] || { log "ABORT: $DAILY_APPLY missing or not executable"; ok=1; }
+  # The Interceptor binary is bind-mounted into the container and spawned as an MCP
+  # server by the claude CLI. Without the mount, the server fails to start.
+  INTERCEPTOR_BIN="${INTERCEPTOR_BIN:-/opt/interceptor/bin/interceptor}"
+  [[ -x "$INTERCEPTOR_BIN" ]] || { log "ABORT: interceptor binary not executable at $INTERCEPTOR_BIN - check the docker-compose.yml volume mount (INTERCEPTOR_BIN_HOST)"; ok=1; }
   validate_run_at || ok=1
   return $ok
 }

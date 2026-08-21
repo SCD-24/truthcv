@@ -15,6 +15,7 @@ RUNBOOK="${RUNBOOK:-/app/agent/RUNBOOK.md}"
 PROMPT_FILE="${PROMPT_FILE:-/app/agent/prompt.md}"
 MCP_CONFIG="${MCP_CONFIG:-/app/agent/mcp.json}"
 INTERCEPTOR_SOCKET="${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}"
+INTERCEPTOR_BIN="${INTERCEPTOR_BIN:-/opt/interceptor/bin/interceptor}"
 STAMP="$(date +%Y-%m-%d_%H%M)"
 
 mkdir -p "$RUN_LOG_DIR"
@@ -38,6 +39,13 @@ CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude)}"
 # agent/mcp.json). Without it there is no way to apply, and no point
 # searching.
 [[ -S "$INTERCEPTOR_SOCKET" ]] || abort "interceptor socket absent: $INTERCEPTOR_SOCKET - is the interceptor daemon running on the host?"
+
+# The Interceptor binary is bind-mounted read-only into the container at
+# /opt/interceptor/bin/interceptor (docker-compose.yml volumes), spawned by the
+# claude CLI as an MCP server over stdio. The binary shells to the real
+# `interceptor <verb>` command to reach the host daemon. Without the mount, the
+# MCP server fails to start.
+[[ -x "$INTERCEPTOR_BIN" ]] || abort "interceptor binary not executable: $INTERCEPTOR_BIN - check the docker-compose.yml volume mount (INTERCEPTOR_BIN_HOST)"
 
 # The Jobs original also required a live Chrome process (`pgrep -x chrome` /
 # `pgrep -f google-chrome`) so interceptor had a browser on the same machine
@@ -180,13 +188,18 @@ fi
 MODEL_ARGS=()
 [[ -n "$AGENT_MODEL" ]] && MODEL_ARGS=(--model "$AGENT_MODEL")
 
+# Export the Interceptor MCP config so the spawned server inherits it
+export INTERCEPTOR_MCP_ALLOW="${INTERCEPTOR_MCP_ALLOW:-}"
+export INTERCEPTOR_MCP_FENCE="${INTERCEPTOR_MCP_FENCE:-on}"
+export INTERCEPTOR_MCP_GROUP="${INTERCEPTOR_MCP_GROUP:-truthcv-agent}"
+
 log "invoking claude..."
 
-# Playwright's mcp__plugin_playwright_playwright__* tools from the Jobs
-# original are dropped: agent/mcp.json documents Playwright as a fallback
-# only and does not configure it as a live server, because agent/Dockerfile
-# deliberately installs no browser (see its BROWSER STRATEGY comment) - a
-# Playwright entry here could not launch anything.
+# The Interceptor browser tools (interceptor_browser, interceptor_read,
+# interceptor_local) are named per the Interceptor tool table
+# (https://interceptor.ai/docs/concepts/tools-table). The binary is spawned
+# as an MCP server over stdio by the claude CLI, and reaches the host daemon
+# over the bind-mounted unix socket to drive the operator's real Chrome.
 "$CLAUDE_BIN" -p "$PROMPT" "${MODEL_ARGS[@]}" \
   --mcp-config "$MCP_CONFIG" \
   --allowedTools \

@@ -100,6 +100,3 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 - **Application Tracker** (`application-tracker`) — backend component. Owns the user's job-application records (applications/) persisted as applications.json on the Truth Data Volume. Each Application tracks a submission (Company, Website, Application URL, Submitted, Submission Type, Reached Out, To Who, Response Received, Method) and OWNS its generated documents: an editable CV and cover letter saved per-application (so old outputs are retained and traceable to the application they went out with). Applications may exist WITHOUT a job posting (General/portal submissions). CRUD helpers use atomic writes mirroring truth/store.py; re-renders edited document content via the Renderer.
 <!-- generated:end comp:application-tracker -->
 
-<!-- generated:start comp:application-agent -->
-- **Application Agent** (`application-agent`) — backend component.
-<!-- generated:end comp:application-agent -->
