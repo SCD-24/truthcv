@@ -20,9 +20,10 @@ from fastapi.testclient import TestClient
 
 from api.main import app
 from applications.store import load_all as load_applications
-from mcp import server as mcp_server
-from mcp import tools_ledger, tools_letter, tools_boards
+from agenttools import server as mcp_server
+from agenttools import tools_ledger, tools_letter, tools_boards
 from providers.fake import FakeProvider
+from truth.answers import register_canonical_cv
 from truth.model import Bullet, Experience, Skill, Truth
 from truth.store import save as save_truth
 
@@ -345,3 +346,29 @@ def test_record_company_board_persists_and_can_be_retrieved(data_dir):
     boards = store.load()
     assert "google" in boards
     assert boards["google"].careers_url == "https://careers.google.com"
+
+
+def test_get_canonical_cv_returns_a_download_url(data_dir, tmp_path_factory):
+    """The agent may run where the data volume is not mounted, so alongside
+    the filesystem `path` the tool must hand back an HTTP fallback pointing at
+    the existing `GET /api/download/{name}` route. `asset_id` and `path` are
+    unchanged by that addition — anything already reading them keeps working."""
+    source = tmp_path_factory.mktemp("cv-source") / "linkedin-export.pdf"
+    source.write_bytes(b"%PDF-1.4 not a real pdf")
+    register_canonical_cv(source)
+
+    result = tools_ledger.get_canonical_cv()
+
+    assert result["asset_id"] == "canonical_cv.pdf"
+    assert result["path"] == str(data_dir / "canonical_cv.pdf")
+    assert result["download_url"] == "/api/download/canonical_cv.pdf"
+
+
+def test_get_canonical_cv_returns_all_none_when_nothing_is_registered(data_dir):
+    """With no canonical CV registered every key is None — including the new
+    `download_url`, which must never point at a URL that would 404."""
+    assert tools_ledger.get_canonical_cv() == {
+        "asset_id": None,
+        "path": None,
+        "download_url": None,
+    }

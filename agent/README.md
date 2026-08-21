@@ -8,21 +8,79 @@ It is deliberately a separate service and a separate image: a browser session
 going wrong must never take the wizard down with it, and the wizard's image
 stays free of agent tooling.
 
-## The browser is on the host. On purpose.
+## The browser is in its own container, not this one.
 
 **This image contains no browser.** No Chrome, no Chromium, no Xvfb, no
 Playwright — and re-adding one is not a fix.
 
-The agent drives the operator's real, already-logged-in Chrome on the **host**, reached
-through the Interceptor daemon over a unix socket bind-mounted into the
-container (`INTERCEPTOR_SOCKET`, see [`mcp.json`](mcp.json)). Unattended applying
-depends entirely on sessions that already exist in that browser — ATS accounts,
-SSO, saved profiles. A container's own browser starts blank and logged out, so
-it cannot do this job; it can only look like it can, right up to the point where
-a submission silently fails.
+The agent drives a headful Chromium reached over in-network HTTP MCP at
+`BROWSER_MCP_URL` (default `http://browser:8931/mcp`, see
+[`mcp.json`](mcp.json)). That browser runs under Xvfb in its own Compose
+service, `browser`, built from `browser/Dockerfile` — see
+[`browser/README.md`](../browser/README.md) for how that container works.
+Keeping it in a sibling container rather than this one means a browser crash
+can never take the agent's own run loop down.
 
-This is the one place TruthCV diverges from the retired Jobs container, which
-ran its own Chrome under Xvfb. That trade was reconsidered and reversed.
+> **First run against a login-walled site (SSO, CAPTCHA, SMS MFA) needs a
+> one-time manual sign-in.** Watch or drive the real Chromium through the
+> noVNC viewport at http://localhost:7900; its profile persists on the named
+> volume `browser-profile`, so the session survives container restarts and
+> you should not need to sign in again. See
+> [`browser/README.md`](../browser/README.md) for detail.
+
+### The other driver: your own Chrome, via Interceptor
+
+If your host runs [Interceptor](https://interceptor.ai), you can skip the
+containerised browser and the noVNC sign-in entirely and drive the Chrome you
+are *already logged into*:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.interceptor.yml up
+```
+
+That overlay flips `AGENT_BROWSER_DRIVER` to `interceptor` and bind-mounts two
+host paths: the `interceptor` binary (read-only, at
+`/opt/interceptor/bin/interceptor`) and the daemon's unix socket. The `claude`
+CLI then spawns `interceptor mcp serve` over stdio inside the agent container;
+that subprocess shells to the real `interceptor <verb>` command, which dials the
+socket to reach the host daemon, which drives Chrome via native messaging.
+
+The two drivers are mutually exclusive by design — `daily-apply.sh` grants only
+the selected one's tools, because two ways to drive a browser with no rule
+saying which is how an unattended run applies from the wrong session.
+
+The bind mounts live in an overlay rather than in `docker-compose.yml` because
+their sources exist only on a host that actually runs Interceptor, and Docker
+answers a missing bind-mount source by silently creating a *directory* at the
+target — so mounting them unconditionally would break `docker compose up` for
+everyone else. For the same reason this driver is opt-in rather than the
+default: it depends on host state this repo neither controls nor can test in
+CI, while the `browser` service is self-contained.
+
+**Run the smoke test before trusting it.** The binary is compiled on your host
+and has to load under the agent image's glibc, which is not a given:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.interceptor.yml \
+  run --rm --entrypoint /app/agent/smoke-test.sh agent
+```
+
+It checks the binary loads, that `interceptor mcp serve` announces `serving over
+stdio`, and that the socket accepts a real connection.
+
+#### Safety tiers
+
+Interceptor classifies its own operations. `read` and `mutate` are permitted by
+default; `destructive` and arbitrary-exec operations are refused unless you opt
+into them via `INTERCEPTOR_MCP_ALLOW`. Filling and submitting an ATS form is
+`mutate`, so **leave `INTERCEPTOR_MCP_ALLOW` empty for an unattended
+submitter** — there is nothing it needs that is not already allowed, and
+widening it grants an unsupervised agent powers no one is watching.
+
+Keep `INTERCEPTOR_MCP_FENCE=on`. Job postings are attacker-controlled text that
+the agent reads and acts on, which is the textbook prompt-injection setup; the
+fence is what stands between a booby-trapped posting and your real browser
+session.
 
 ## The agent has no identity until you seed one
 
@@ -49,35 +107,42 @@ and reports it as an open issue rather than filing a blank application.
 
 ## Running it
 
-The agent is behind a compose profile, so a bare `docker compose up` does not
-start it:
+The agent and its `browser` both start on a bare `docker compose up` — they are
+no longer behind a compose profile. The agent waits for the browser to report
+healthy before its first run:
 
 ```bash
 export ANTHROPIC_API_KEY=...           # never commit this
-docker compose --profile agent build agent
-docker compose --profile agent up -d agent      # scheduled loop
-docker compose --profile agent logs -f agent
+docker compose up -d                            # app, browser, agent
+docker compose logs -f agent
+```
+
+Starting the scheduled loop on its own also brings the browser up, because the
+agent depends on it:
+
+```bash
+docker compose up -d agent
 ```
 
 Check the schedule without waiting for it — this starts nothing and applies to
 nothing:
 
 ```bash
-docker compose --profile agent run --rm \
+docker compose run --rm \
   --entrypoint /app/agent/entrypoint.sh agent --check-schedule
 ```
 
 Run the smoke test — also submits nothing (see [Verification](#verification)):
 
 ```bash
-docker compose --profile agent run --rm \
+docker compose run --rm \
   --entrypoint /app/agent/smoke-test.sh agent
 ```
 
 One immediate run:
 
 ```bash
-docker compose --profile agent run --rm -e RUN_ONCE=1 agent
+docker compose run --rm -e RUN_ONCE=1 agent
 ```
 
 **`RUN_ONCE=1` is a live test, not a dry run.** It submits real applications
@@ -93,13 +158,17 @@ under the operator's name. Watch it.
 | `RUN_DAYS` | `1,2,3,4,5` | Days to run, `1`=Mon … `7`=Sun. Fallback only — used when the agent config API is unreachable; see below. |
 | `RUN_ONCE` | unset | `1` = run immediately and exit. |
 | `TZ` | container default | Timezone the schedule is expressed in. |
-| `TRUTHCV_MCP_URL` | `http://app:8080/mcp` | The `app` service's MCP tool surface. In-network only — not reachable from the host or the internet. |
-| `INTERCEPTOR_SOCKET` | `/tmp/interceptor.sock` | The host browser daemon's unix socket, bind-mounted into the container at the same path. The daemon listens on the host; the mount carries the IPC channel into the container. |
-| `INTERCEPTOR_BIN` | `/opt/interceptor/bin/interceptor` | Path to the Bun-compiled Interceptor binary inside the container. The `claude` CLI spawns this binary as an MCP server over stdio (see `docker-compose.yml` volumes). |
-| `INTERCEPTOR_MCP_ALLOW` | empty | Interceptor MCP safety tier allow-list. Empty = read + mutate (allowed by default). Leave it empty for an unattended submitter — filling and submitting ATS forms classifies as `mutate`, allowed by default. |
-| `INTERCEPTOR_MCP_FENCE` | `on` | Prompt-injection protection when reading job postings. On by default. |
-| `INTERCEPTOR_MCP_GROUP` | `truthcv-agent` | MCP group scope for billing and audit. |
+| `TRUTHCV_MCP_URL` | `http://app:8080/mcp` | The `app` service's MCP streamable-HTTP JSON-RPC tool surface (`POST /mcp`, `agenttools/mcp_app.py`). In-network only — not reachable from the host or the internet. |
+| `AGENT_BROWSER_DRIVER` | `browser` | Which browser the agent may drive: `browser` (the containerised Chromium) or `interceptor` (your host Chrome). Only the selected driver's tools are granted to `claude`. |
+| `BROWSER_MCP_URL` | `http://browser:8931/mcp` | In-network address of the `browser` compose service's MCP endpoint (see [`browser/README.md`](../browser/README.md)). Also in-network only. Used by the `browser` driver. |
+| `INTERCEPTOR_BIN` | `/opt/interceptor/bin/interceptor` | Where the Bun-compiled Interceptor binary is mounted *inside* the container; `claude` spawns it as a stdio MCP server. Mounted by `docker-compose.interceptor.yml`. |
+| `INTERCEPTOR_BIN_HOST` | `/home/glenn/.local/bin/interceptor` | The *host* path that mount reads from. Set it to your own — `command -v interceptor`. |
+| `INTERCEPTOR_SOCKET` | `/tmp/interceptor.sock` | The Interceptor CLI-to-daemon IPC socket, bind-mounted at the same path inside and out. The daemon listens on the host; the mount only carries the channel in. |
+| `INTERCEPTOR_MCP_ALLOW` | empty | Safety-tier opt-in. Empty already permits `read` and `mutate`, which covers filling and submitting a form. **Leave it empty for an unattended submitter**; widening it grants `destructive` and arbitrary-exec powers to a process no one is watching. |
+| `INTERCEPTOR_MCP_FENCE` | `on` | Prompt-injection protection while reading job postings — attacker-controlled text the agent acts on. Keep it on. |
+| `INTERCEPTOR_MCP_GROUP` | `truthcv-agent` | Group scope recorded in the daemon's own audit trail. |
 | `MAX_APPLICATIONS_PER_RUN` | empty | Empty means **no cap**, matching RUNBOOK §1 ("there is no daily quota"). Not zero. |
+| `RUN_LOG_DIR` | `/app/runs` | Where `daily-apply.sh` writes per-run logs. Must stay inside the `agent-runs` volume or logs vanish on restart. |
 
 The agent runs the Claude Code CLI, so the **Model** setting on the Agents page accepts only the Claude connection — other providers are filtered out by design.
 
@@ -144,9 +213,6 @@ store, reached through the MCP tool surface.
 
 ## Volumes
 
-- `${INTERCEPTOR_SOCKET}` — the host browser socket, bind-mounted in. Without it
-  there is no way to apply, and `daily-apply.sh` aborts rather than starting a
-  run it cannot finish.
 - `agent-runs → /app/runs` — per-run logs, one file per run. Its own named
   volume, not the app's data volume: these are operator diagnostics, and without
   a volume they vanish on exactly the restart that makes you want them.
@@ -158,8 +224,10 @@ filesystem route to your data and should not acquire one.
 
 ## What the agent may and may not do
 
-Its allow-list (`daily-apply.sh`) is the nine TruthCV MCP tools, the three
-interceptor browser tools, and `Read`/`Write`/`WebSearch`/`WebFetch`. It has no
+Its allow-list (`daily-apply.sh`) is the nine TruthCV MCP tools, the whole
+`browser` MCP server (granted as `mcp__browser`, not as individually named
+tools — the upstream `@playwright/mcp` tool set is theirs to rename or extend
+on a version bump), and `Read`/`Write`/`WebSearch`/`WebFetch`. It has no
 tool for approving an inference: the approve/deny gate is the product, and the
 agent never stands on both sides of it. Everything the RUNBOOK carried over from
 the Jobs runbook still holds — the six filters, the truthfulness rules, the
@@ -175,8 +243,10 @@ confirmation page says so.
 - **no browser is present in the image** — this is pinned as a test, so re-adding
   one turns it red
 - `--check-schedule` resolves the configured slots
-- the interceptor socket is not merely mounted but **accepts a connection**, which
-  is the difference between a working host daemon and a stale socket file
+- `jq` is on `PATH`
+- `BROWSER_MCP_URL` is reachable over HTTP — the difference between the
+  `browser` service actually answering and merely being listed in
+  `docker-compose.yml`
 - `TRUTHCV_MCP_URL` answers
 - the run log volume is writable
 

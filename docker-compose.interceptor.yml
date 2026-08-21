@@ -1,0 +1,47 @@
+# Opt-in overlay: drive the operator's REAL, already-logged-in HOST Chrome
+# through the Interceptor daemon, instead of the containerised `browser`
+# service that docker-compose.yml starts by default.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.interceptor.yml up
+#
+# WHY THIS IS A SEPARATE FILE RATHER THAN PART OF docker-compose.yml
+# -----------------------------------------------------------------
+# Both bind mounts below point at HOST paths that only exist on a machine
+# actually running Interceptor. Docker does not fail politely on a missing
+# bind-mount source: it creates a DIRECTORY at the target path, so the agent
+# would start with a directory where its binary should be and fail deep inside
+# a scheduled run instead of at boot. Keeping them here means a checkout with
+# no Interceptor on the host still does `docker compose up` and applies
+# successfully via the containerised browser.
+#
+# WHAT THE CHAIN ACTUALLY IS
+# --------------------------
+# The `claude` CLI spawns `interceptor mcp serve` over stdio inside this
+# container (agent/mcp.json's `interceptor` entry). That subprocess shells to
+# the real `interceptor <verb>` command — the Bun-compiled binary mounted
+# below — which dials the unix socket to reach the HOST daemon, which drives
+# Chrome via native messaging. Its one advantage over the containerised
+# browser is that it inherits ATS/SSO sessions the operator is already logged
+# into, rather than needing them established once through noVNC.
+#
+# BEFORE RELYING ON IT, RUN THE SMOKE TEST — it proves the whole chain,
+# including that the host-built binary actually loads under this image's glibc:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.interceptor.yml \
+#     run --rm agent bash /app/agent/smoke-test.sh
+
+services:
+  agent:
+    environment:
+      # Switches agent/daily-apply.sh's tool grant and its preconditions from
+      # the containerised browser to the interceptor tools. Setting the mounts
+      # without this leaves the interceptor server declared but ungranted.
+      - AGENT_BROWSER_DRIVER=interceptor
+    volumes:
+      # The CLI-to-daemon IPC socket, at the SAME path inside and out so the
+      # value of INTERCEPTOR_SOCKET_PATH is correct on both sides.
+      - ${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}:${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}
+      # The host Interceptor binary, read-only — the agent must never be able to
+      # replace the executable it is about to run. Override INTERCEPTOR_BIN_HOST
+      # if yours is not on the default path (`command -v interceptor` on the host).
+      - ${INTERCEPTOR_BIN_HOST:-/home/glenn/.local/bin/interceptor}:/opt/interceptor/bin/interceptor:ro

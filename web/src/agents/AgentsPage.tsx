@@ -15,6 +15,7 @@ import MenuItem from "@mui/material/MenuItem";
 import Typography from "@mui/material/Typography";
 import CircularProgress from "@mui/material/CircularProgress";
 import Chip from "@mui/material/Chip";
+import Link from "@mui/material/Link";
 import {
   getAgentConfig,
   getProfileAnswers,
@@ -172,6 +173,7 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
           <ScheduleSection config={config} onChange={setConfig} />
           <ProfilesSection config={config} onChange={setConfig} />
           <BlocklistSection config={config} onChange={setConfig} />
+          <CanonicalCvSection answers={answers} />
           <ProfileAnswersSection answers={answers} onChange={setAnswers} />
         </Stack>
       ) : null}
@@ -226,9 +228,10 @@ function EnabledSection({
 }
 
 /** The model the unattended agent runs on — a claude-only ModelRoutePicker
- * (the agent drives the operator's own Chrome via the interceptor, which
- * only supports Claude) saving/clearing the `agent` route. Cleared falls
- * back to the container's ANTHROPIC_API_KEY. */
+ * (the agent is a headless Claude Code process — it is the `claude` CLI that
+ * drives the containerised Chromium in the sibling `browser` service over
+ * MCP, so no other provider can run it) saving/clearing the `agent` route.
+ * Cleared falls back to the container's ANTHROPIC_API_KEY. */
 function ModelSection({
   connections,
   routing,
@@ -865,6 +868,34 @@ function BlocklistSection({
         </Button>
       </Stack>
       {error && <Alert severity="error">{error}</Alert>}
+    </Section>
+  );
+}
+
+/**
+ * Read-only canonical CV notice. The CV is registered out-of-band by
+ * truth.answers.register_canonical_cv, not from this page. This section
+ * simply surfaces what file (if any) the unattended agent will attach.
+ */
+function CanonicalCvSection({ answers }: { answers: ProfileAnswers }) {
+  const downloadUrl = answers.canonicalCvAssetId
+    ? `/api/download/${encodeURIComponent(answers.canonicalCvAssetId)}`
+    : null;
+
+  return (
+    <Section
+      title="CV"
+      description="The canonical CV you uploaded is what the agent attaches to every automated application. It is not tailored per posting."
+    >
+      {downloadUrl ? (
+        <Link href={downloadUrl} target="_blank" rel="noreferrer">
+          {answers.canonicalCvAssetId}
+        </Link>
+      ) : (
+        <Alert severity="warning">
+          No CV is registered. The agent will skip applications rather than substitute another file.
+        </Alert>
+      )}
     </Section>
   );
 }
