@@ -1,0 +1,20 @@
+# Aether's own runtime state. Regenerated as the app runs; never worth
+# committing, and a source of constant merge conflicts if it is.
+#
+# The rest of this directory is your PROJECT's architecture — .config.aether,
+# checks.json, hooks.json, runbook.json — and IS meant to be committed.
+#
+# drift.json is committed ON PURPOSE: a finding stays in it until a human
+# resolves or dismisses it, and the team shares that state through git. The
+# scan bookkeeping that used to ride along inside it (when it last ran, at
+# which commit) now lives in drift-scan-state.json, below, so a scan that
+# finds nothing leaves drift.json untouched.
+sessions/
+debug/
+tmp/
+plugins/secrets.json
+settings.local.json
+planned-work.json
+drift-scan-trace.json
+drift-scan-state.json
+config.json

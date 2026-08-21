@@ -39,8 +39,8 @@ Use these exact names and ids when discussing the architecture.
 | Name | Id | Type |
 |---|---|---|
 | API | `api` | backend |
-| Application Agent | `application-agent` | backend |
 | Application Tracker | `application-tracker` | backend |
+| Agent Browser | `browser-runtime` | custom |
 | Cover Letter Engine | `cover-letter-engine` | backend |
 | Guardrail Validator | `guardrail-validator` | backend |
 | LLM Provider Layer | `llm-provider-layer` | backend |
@@ -57,5 +57,5 @@ Use these exact names and ids when discussing the architecture.
 <!-- generated:start cap:system-boundary -->
 ## System Boundary
 
-The declared system consists of 14 component(s) and 29 connection(s) — see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
+The declared system consists of 14 component(s) and 27 connection(s) — see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
 <!-- generated:end cap:system-boundary -->

@@ -28,14 +28,16 @@ RUN_DAYS="$RUN_DAYS_DEFAULT"
 
 log() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 
-# Chrome is deliberately not containerised here: the agent drives the
-# operator's real, already-logged-in browser on the HOST over a bind-mounted unix
-# socket (see agent/Dockerfile's BROWSER STRATEGY note and agent/mcp.json).
-# There is no in-container Xvfb/Chrome to start - do not add one back.
+# Chrome is deliberately not in THIS container: the browser is the sibling
+# `browser` compose service (headful Chromium under Xvfb served by
+# @playwright/mcp), which this agent drives over in-network HTTP MCP at
+# ${BROWSER_MCP_URL} - see agent/Dockerfile's BROWSER STRATEGY note and
+# agent/mcp.json. There is no in-container Xvfb/Chrome to start - do not add
+# one back.
 
 # --- Preconditions -----------------------------------------------------------
-# Per-run preconditions (claude CLI, runbook readable, interceptor socket
-# present, TRUTHCV_MCP_URL set) live in daily-apply.sh and are checked there,
+# Per-run preconditions (claude CLI, runbook readable, jq present, browser MCP
+# reachable, TRUTHCV_MCP_URL set) live in daily-apply.sh and are checked there,
 # every run - do not duplicate them here. This preflight only checks what is
 # worth failing fast at container START, before the first sleep.
 validate_run_at() {
