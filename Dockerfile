@@ -40,7 +40,7 @@ COPY agentconfig/ ./agentconfig/
 COPY companyboards/ ./companyboards/
 COPY connections/ ./connections/
 COPY modelrouting/ ./modelrouting/
-COPY mcp/ ./mcp/
+COPY agenttools/ ./agenttools/
 COPY api/ ./api/
 
 # Built frontend bundle from stage 1.

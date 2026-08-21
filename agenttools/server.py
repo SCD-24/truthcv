@@ -1,11 +1,14 @@
-"""The agent tool surface: a registry of in-process tools plus their HTTP surface.
+"""The agent tool surface: a registry of in-process tools plus their HTTP surfaces.
 
-This runs in-process inside the TruthCV container — there is no separate MCP
-server process and no dependency on the `mcp` PyPI SDK. It is per-application:
-every tool takes its state as arguments and returns it in its result, so no
-tool reads or writes a global posting file or a shared cached draft. It also
-deliberately exposes no tool that can approve an inference; GET /mcp/tools
-lists every tool's parameters so that can be verified from the outside.
+This runs in-process inside the TruthCV container using the MCP SDK (>=1.9).
+REST routes GET /mcp/tools and POST /mcp/tools/{name} provide the tool surface
+to non-MCP clients. The JSON-RPC endpoint (registered via mcp_app.py) exposes
+the same tools via the streamable-HTTP MCP transport at POST /mcp for the agent's
+Claude Code CLI invocation. It is per-application: every tool takes its state as
+arguments and returns it in its result, so no tool reads or writes global state.
+Critically: no tool accepts approval-related parameters; the tools/list endpoint
+(both REST and JSON-RPC) exposes every tool's parameters so that guarantee can be
+verified from the outside.
 """
 
 from __future__ import annotations
@@ -15,8 +18,8 @@ from typing import Any, Callable
 
 from fastapi import APIRouter, HTTPException
 
-from mcp.tools_letter import generate_cover_letter
-from mcp.tools_ledger import (
+from agenttools.tools_letter import generate_cover_letter
+from agenttools.tools_ledger import (
     check_cooldown,
     get_canonical_cv,
     get_job_profiles,
@@ -25,7 +28,7 @@ from mcp.tools_ledger import (
     record_screening,
     recommend_salary,
 )
-from mcp.tools_boards import record_company_board
+from agenttools.tools_boards import record_company_board
 
 TOOLS: dict[str, Callable[..., dict]] = {}
 

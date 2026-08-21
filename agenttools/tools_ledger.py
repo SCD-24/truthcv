@@ -79,11 +79,26 @@ def check_cooldown(company: str, role: str | None = None) -> dict:
 
 
 def get_canonical_cv() -> dict:
-    """The registered canonical CV's asset id and path, or both None if unset."""
+    """The registered canonical CV's asset id, path, and download_url.
+
+    Returns:
+        dict with three keys:
+        - asset_id: the asset's bare filename on the data volume, which is
+                    also the {name} the download route resolves
+        - path: filesystem path valid only where the data volume is mounted
+                (e.g. /app/data/canonical_cv.pdf for the browser container)
+        - download_url: HTTP fallback for a client that cannot see that
+                        filesystem — GET /api/download/{asset_id}
+        When no canonical CV is registered, all three keys are None.
+    """
     asset = _canonical_cv()
     if asset is None:
-        return {"asset_id": None, "path": None}
-    return {"asset_id": asset.asset_id, "path": str(asset.path)}
+        return {"asset_id": None, "path": None, "download_url": None}
+    return {
+        "asset_id": asset.asset_id,
+        "path": str(asset.path),
+        "download_url": f"/api/download/{asset.asset_id}",
+    }
 
 
 def get_profile_answers() -> dict:

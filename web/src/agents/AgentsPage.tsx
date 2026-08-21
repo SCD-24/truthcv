@@ -228,9 +228,10 @@ function EnabledSection({
 }
 
 /** The model the unattended agent runs on — a claude-only ModelRoutePicker
- * (the agent drives the operator's own Chrome via the interceptor, which
- * only supports Claude) saving/clearing the `agent` route. Cleared falls
- * back to the container's ANTHROPIC_API_KEY. */
+ * (the agent is a headless Claude Code process — it is the `claude` CLI that
+ * drives the containerised Chromium in the sibling `browser` service over
+ * MCP, so no other provider can run it) saving/clearing the `agent` route.
+ * Cleared falls back to the container's ANTHROPIC_API_KEY. */
 function ModelSection({
   connections,
   routing,

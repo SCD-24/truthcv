@@ -5,17 +5,27 @@
 # BROWSER STRATEGY — DELIBERATE DIVERGENCE FROM THE RETIRED "Jobs" CONTAINER
 # ----------------------------------------------------------------------------
 # The retired Jobs project's docker/Dockerfile ran a containerised, freshly
-# provisioned Google Chrome under Xvfb. THIS IMAGE DOES NOT INSTALL CHROME,
-# CHROMIUM, XVFB, OR ANY OTHER BROWSER — do not "fix" that by adding one back.
+# provisioned Google Chrome under Xvfb inside the SAME image as the agent.
+# THIS IMAGE DOES NOT INSTALL CHROME, CHROMIUM, XVFB, OR ANY OTHER BROWSER —
+# do not "fix" that by adding one back.
 #
-# TruthCV's agent instead drives the operator's real, already-logged-in browser on
-# the HOST, reached over a unix socket bind-mounted into the container (see
-# agent/mcp.json's `interceptor` server and docker-compose.yml's
-# INTERCEPTOR_SOCKET bind mount). A container's own browser starts from a
-# blank profile with no logins, and unattended applying depends entirely on
-# sessions that already exist in the operator's real browser (ATS accounts, SSO,
-# etc.) — a fresh containerised Chrome cannot reproduce that, so it cannot do
-# this job at all, it can only look like it can.
+# TruthCV does run a real browser, just not here: it lives in its own compose
+# service, `browser` (browser/Dockerfile — headful Chromium under Xvfb served by
+# @playwright/mcp), and this container drives it over in-network HTTP MCP at
+# ${BROWSER_MCP_URL} (default http://browser:8931/mcp; see agent/mcp.json's
+# `browser` server and docker-compose.yml). Keeping the two apart is the point:
+# a browser crash or a runaway Chromium cannot take the scheduled agent loop
+# down with it, and the two images can be rebuilt independently.
+#
+# The old objection to a containerised browser was that a blank profile has no
+# logins, and unattended applying depends on live ATS/SSO sessions. That is
+# answered by the browser service, not by the host: its Chromium profile lives
+# on the persistent `browser-profile` volume, and the operator establishes those
+# sessions once by hand through the noVNC viewport at http://localhost:7900,
+# after which they survive restarts. (The earlier design instead drove the
+# operator's real Chrome on the HOST through an "interceptor" daemon over a
+# bind-mounted unix socket. It was retired because that daemon was never
+# implemented in any repo — the agent had no working browser driver at all.)
 
 FROM node:22-bookworm-slim
 
@@ -24,14 +34,19 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # ca-certificates: TLS for the claude CLI and for this container's calls to
 # ${TRUTHCV_MCP_URL}. tzdata: RUN_AT (docker-compose.yml) is a container-TZ
-# schedule, same as the retired Jobs project's RUN_AT.
+# schedule, same as the retired Jobs project's RUN_AT. jq: agent/daily-apply.sh
+# renders the entire job-profile / criteria / salary prompt block with it, and
+# now aborts the run outright when it is missing rather than silently dropping
+# every configured profile.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates tzdata \
+      ca-certificates tzdata jq \
  && rm -rf /var/lib/apt/lists/*
 
 # The claude CLI — install command carried over unchanged from the Jobs
 # project's docker/Dockerfile. @playwright/mcp is deliberately NOT installed
-# here: see the BROWSER STRATEGY note above and agent/mcp.json.
+# here: it runs in the `browser` service (browser/Dockerfile), and this image
+# only needs to TALK to it over HTTP, which the claude CLI does from
+# agent/mcp.json's `browser` server entry. See the BROWSER STRATEGY note above.
 RUN npm install -g @anthropic-ai/claude-code
 
 # node:22-bookworm-slim already ships a `node` user at UID 1000 — reuse it
