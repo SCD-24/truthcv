@@ -14,11 +14,22 @@ RUN_LOG_DIR="${RUN_LOG_DIR:-/app/runs}"
 RUNBOOK="${RUNBOOK:-/app/agent/RUNBOOK.md}"
 PROMPT_FILE="${PROMPT_FILE:-/app/agent/prompt.md}"
 MCP_CONFIG="${MCP_CONFIG:-/app/agent/mcp.json}"
+# Which of agent/mcp.json's two browser drivers this run may use. Defaults to
+# the self-contained containerised browser; `interceptor` switches to the
+# operator's HOST Chrome and requires docker-compose.interceptor.yml. Every
+# driver-specific block below keys off this one variable.
+AGENT_BROWSER_DRIVER="${AGENT_BROWSER_DRIVER:-browser}"
+
 # The containerised Chromium's MCP endpoint (docker-compose.yml `browser`
 # service, browser/Dockerfile). Same default as agent/mcp.json's
 # ${BROWSER_MCP_URL:-...} expansion, so the probe below and the server the
 # claude CLI actually dials cannot drift apart.
 BROWSER_MCP_URL="${BROWSER_MCP_URL:-http://browser:8931/mcp}"
+
+# Interceptor driver settings. Same defaults as agent/mcp.json's `interceptor`
+# entry, for the same anti-drift reason. Inert unless that driver is selected.
+INTERCEPTOR_SOCKET="${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}"
+INTERCEPTOR_BIN="${INTERCEPTOR_BIN:-/opt/interceptor/bin/interceptor}"
 STAMP="$(date +%Y-%m-%d_%H%M)"
 
 mkdir -p "$RUN_LOG_DIR"
@@ -44,12 +55,14 @@ CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude)}"
 command -v jq >/dev/null || abort "jq not found - the job-profile prompt block cannot be rendered (agent/Dockerfile must install it)"
 
 # The browser is the agent's only way to apply, so an unreachable one means
-# there is no point searching either. Unlike the retired host-socket design -
-# where probing meant opening and dropping a connection on the operator's own
-# live browser daemon, and so had to be left to the deliberate smoke test -
-# this is an ordinary in-network HTTP server in a sibling container. Dialling
-# it once per run is cheap and disturbs nothing, so the run path can check
-# reachability for real rather than settling for a file-exists test.
+# there is no point searching either. Which browser that is depends on
+# AGENT_BROWSER_DRIVER, and so does the right way to check it - the two drivers
+# fail differently and cannot share one probe.
+
+# The containerised Chromium's MCP endpoint is an ordinary in-network HTTP
+# server in a sibling container. Dialling it once per run is cheap and disturbs
+# nothing, so the run path can check reachability for real rather than settling
+# for a file-exists test.
 #
 # Any HTTP response at all proves the server is listening and is what we
 # require here. The status code is deliberately NOT interpreted: MCP's
@@ -66,7 +79,50 @@ probe_browser() {
     req.on("error", () => process.exit(1));
   ' "$BROWSER_MCP_URL" 2>/dev/null
 }
-probe_browser || abort "browser MCP server unreachable at $BROWSER_MCP_URL - is the \`browser\` service up? (docker compose ps browser; docker compose logs browser)"
+
+case "$AGENT_BROWSER_DRIVER" in
+  browser)
+    probe_browser || abort "browser MCP server unreachable at $BROWSER_MCP_URL - is the \`browser\` service up? (docker compose ps browser; docker compose logs browser)"
+    ;;
+
+  interceptor)
+    # The Interceptor binary is bind-mounted read-only into the container at
+    # /opt/interceptor/bin/interceptor by docker-compose.interceptor.yml, and
+    # spawned by the claude CLI as an MCP server over stdio. The binary shells
+    # to the real `interceptor <verb>` command to reach the host daemon. Without
+    # the mount the MCP server cannot start, and because a missing bind-mount
+    # source makes Docker create a DIRECTORY at the target, the failure would
+    # otherwise surface as something far less obvious than "not executable".
+    [[ -x "$INTERCEPTOR_BIN" ]] || abort "interceptor binary not executable: $INTERCEPTOR_BIN - is docker-compose.interceptor.yml in the -f list, and is INTERCEPTOR_BIN_HOST correct? (\`command -v interceptor\` on the host)"
+
+    # The Jobs original also required a live Chrome process (`pgrep -x chrome` /
+    # `pgrep -f google-chrome`) so interceptor had a browser on the same machine
+    # to attach to. That check cannot survive containerisation: this agent runs
+    # in its own container while Chrome runs on the HOST, so the container's
+    # process table will never show it - kept unchanged it would abort every
+    # single run, unconditionally, which is as useless as deleting it outright.
+    # The honest replacement is to check that the socket is actually live
+    # (accepting connections), not merely a stale file left behind by an
+    # interceptor process that has since died. This image has no tool that can
+    # dial a unix socket to test that - agent/Dockerfile installs only
+    # ca-certificates, tzdata, jq and the claude CLI, no nc/socat/curl - so that
+    # connectability probe cannot be done with those. The base image does ship
+    # node, which CAN dial a unix socket - agent/smoke-test.sh uses it for
+    # exactly this - but a probe here would open and drop a connection on the
+    # operator's live browser daemon before every run, so it is kept in the
+    # smoke test where it is run deliberately. The -S check below is therefore
+    # the only guard on the run path; a present-but-dead socket surfaces when
+    # the interceptor MCP server fails to respond mid-run.
+    [[ -S "$INTERCEPTOR_SOCKET" ]] || abort "interceptor socket absent: $INTERCEPTOR_SOCKET - is the interceptor daemon running on the host?"
+    ;;
+
+  *)
+    # Fail closed rather than silently granting no browser tools at all: an
+    # unattended run that cannot apply to anything should say why, not spend an
+    # LLM budget searching and then quietly skip every posting it finds.
+    abort "unknown AGENT_BROWSER_DRIVER '$AGENT_BROWSER_DRIVER' - expected 'browser' or 'interceptor'"
+    ;;
+esac
 
 [[ -n "${TRUTHCV_MCP_URL:-}" ]] || abort "TRUTHCV_MCP_URL is not set - it is the agent's only route to the TruthCV tools"
 
@@ -198,27 +254,58 @@ fi
 MODEL_ARGS=()
 [[ -n "$AGENT_MODEL" ]] && MODEL_ARGS=(--model "$AGENT_MODEL")
 
-log "invoking claude..."
+# Interceptor MCP settings are exported so the stdio server the claude CLI
+# spawns inherits them. Harmless under the `browser` driver, where no such
+# server is ever started, but exporting them unconditionally keeps the values in
+# one place rather than duplicated per branch.
+export INTERCEPTOR_MCP_ALLOW="${INTERCEPTOR_MCP_ALLOW:-}"
+export INTERCEPTOR_MCP_FENCE="${INTERCEPTOR_MCP_FENCE:-on}"
+export INTERCEPTOR_MCP_GROUP="${INTERCEPTOR_MCP_GROUP:-truthcv-agent}"
 
-# The browser is granted as the whole server, `mcp__browser`, rather than as an
-# enumerated tool list. Every other grant below is a single named tool, and the
-# asymmetry is deliberate: the truthcv tools are OUR nine, fixed by
-# agenttools/server.py and changing only when we change it, so naming them keeps
-# the blast radius of a new tool at zero until it is granted on purpose. The
-# browser server is upstream @playwright/mcp (browser/Dockerfile), whose tool set
-# - browser_navigate, browser_click, browser_type, browser_file_upload,
-# browser_snapshot, browser_take_screenshot and the rest - is theirs to rename or
-# extend on any version bump; pinning a list here would silently disable whichever
-# tool got renamed, mid-run, in an unattended job. Containment for the browser
-# comes from the container instead: no host filesystem, no host network, its
-# profile on its own volume, and the app data volume mounted read-only.
-#
-# (Superseding the Jobs original's mcp__plugin_playwright_playwright__* grants,
-# which were dropped when this image had no browser at all.)
-#
+# Only the SELECTED driver's tools are granted. agent/mcp.json declares both
+# servers, but a declared server the agent holds no grant for is never called,
+# so this list - not the MCP config - is what decides which browser is in play.
+# Granting both at once is exactly what this avoids: two ways to drive a
+# browser, with no rule saying which, is how an unattended run ends up applying
+# from the wrong session.
+if [[ "$AGENT_BROWSER_DRIVER" == "interceptor" ]]; then
+  # The Interceptor tools (interceptor_browser, interceptor_read,
+  # interceptor_local) are named per the Interceptor tool table
+  # (https://interceptor.ai/docs/concepts/tools-table). Each takes a `verb` plus
+  # an `args` string array passed verbatim to the CLI. They ARE enumerated,
+  # unlike mcp__browser below, because this router surface is small and fixed:
+  # three tools, with the variability living in the verb rather than in the tool
+  # names, so a version bump cannot silently rename one out from under us.
+  BROWSER_TOOLS=(
+    "mcp__interceptor__interceptor_browser"
+    "mcp__interceptor__interceptor_read"
+    "mcp__interceptor__interceptor_local"
+  )
+else
+  # The containerised browser is granted as the whole server, `mcp__browser`,
+  # rather than as an enumerated tool list. Every truthcv grant below is a single
+  # named tool, and the asymmetry is deliberate: the truthcv tools are OUR nine,
+  # fixed by agenttools/server.py and changing only when we change it, so naming
+  # them keeps the blast radius of a new tool at zero until it is granted on
+  # purpose. The browser server is upstream @playwright/mcp (browser/Dockerfile),
+  # whose tool set - browser_navigate, browser_click, browser_type,
+  # browser_file_upload, browser_snapshot, browser_take_screenshot and the rest -
+  # is theirs to rename or extend on any version bump; pinning a list here would
+  # silently disable whichever tool got renamed, mid-run, in an unattended job.
+  # Containment for the browser comes from the container instead: no host
+  # filesystem, no host network, its profile on its own volume, and the app data
+  # volume mounted read-only.
+  #
+  # (Superseding the Jobs original's mcp__plugin_playwright_playwright__* grants,
+  # which were dropped when this image had no browser at all.)
+  BROWSER_TOOLS=("mcp__browser")
+fi
+
+log "invoking claude... (browser driver: $AGENT_BROWSER_DRIVER)"
+
 # --dangerously-skip-permissions: this is an unattended run with stdin at
 # /dev/null, so any trust or permission prompt would EOF and kill the run. The
-# --allowedTools list above, not an interactive prompt, is the actual boundary on
+# --allowedTools list below, not an interactive prompt, is the actual boundary on
 # what the agent may do; the flag only stops the run blocking on a question no
 # one is there to answer.
 "$CLAUDE_BIN" -p "$PROMPT" "${MODEL_ARGS[@]}" \
@@ -234,7 +321,7 @@ log "invoking claude..."
     "mcp__truthcv__record_company_board" \
     "mcp__truthcv__get_job_profiles" \
     "mcp__truthcv__recommend_salary" \
-    "mcp__browser" \
+    "${BROWSER_TOOLS[@]}" \
   --dangerously-skip-permissions \
   </dev/null >>"$RUN_LOG" 2>&1
 

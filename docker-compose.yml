@@ -135,6 +135,34 @@ services:
       # needs the operator's timezone or an unattended run fires at the wrong
       # hour. Same default as the `browser` service.
       - TZ=${TZ:-UTC}
+      # Which of agent/mcp.json's two browser drivers the agent may use:
+      #   browser     (default) the containerised @playwright/mcp service above
+      #   interceptor           the operator's HOST Chrome via the Interceptor
+      #                         daemon — requires docker-compose.interceptor.yml
+      # agent/daily-apply.sh grants ONLY the selected driver's tools to `claude`,
+      # and runs that driver's preconditions and no others. Keep the default at
+      # `browser`: it is self-contained, so a checkout with no Interceptor on the
+      # host still applies successfully out of the box.
+      - AGENT_BROWSER_DRIVER=${AGENT_BROWSER_DRIVER:-browser}
+      # --- Interceptor driver settings (inert unless AGENT_BROWSER_DRIVER=interceptor) ---
+      # Path INSIDE the container of the host Interceptor binary. Nothing mounts
+      # it here on purpose: see docker-compose.interceptor.yml, which adds the
+      # bind mount. A bind mount of a host path that does not exist makes Docker
+      # create a DIRECTORY at the target and the container then fails obscurely,
+      # so mounting it unconditionally would break `docker compose up` for every
+      # operator who does not run Interceptor.
+      - INTERCEPTOR_BIN=${INTERCEPTOR_BIN:-/opt/interceptor/bin/interceptor}
+      # The CLI-to-daemon IPC socket, same path inside and out (see the overlay).
+      - INTERCEPTOR_SOCKET_PATH=${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}
+      # Interceptor MCP safety tiers: read + mutate are allowed by default;
+      # destructive and arbitrary-exec are refused unless opted into here. Leave
+      # it EMPTY for an unattended submitter — filling and submitting an ATS form
+      # classifies as `mutate`, which is already allowed.
+      - INTERCEPTOR_MCP_ALLOW=${INTERCEPTOR_MCP_ALLOW:-}
+      # Prompt-injection protection while reading job postings. Keep it on.
+      - INTERCEPTOR_MCP_FENCE=${INTERCEPTOR_MCP_FENCE:-on}
+      # MCP group scope, for the daemon's own audit trail.
+      - INTERCEPTOR_MCP_GROUP=${INTERCEPTOR_MCP_GROUP:-truthcv-agent}
     volumes:
       # Per-run logs written by agent/daily-apply.sh (RUN_LOG_DIR, default
       # /app/runs). Its own named volume, NOT the app's data volume: these are

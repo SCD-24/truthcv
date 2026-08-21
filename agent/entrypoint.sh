@@ -61,6 +61,31 @@ preflight() {
     log "credentials will be fetched from app at run time"
   fi
   [[ -x "$DAILY_APPLY" ]] || { log "ABORT: $DAILY_APPLY missing or not executable"; ok=1; }
+
+  # Browser-driver preconditions, checked at BOOT so a broken mount is reported
+  # now rather than at the first scheduled run - which may be hours away, and
+  # unattended when it arrives.
+  #
+  # ONLY the selected driver is checked. Under the default `browser` driver
+  # nothing interceptor-related is mounted, by design (the bind mounts live in
+  # docker-compose.interceptor.yml), so checking for the binary unconditionally
+  # would refuse to start every default deployment. The `browser` service itself
+  # is not probed here: compose already gates startup on its healthcheck via
+  # depends_on: service_healthy, and agent/daily-apply.sh probes it per run.
+  local driver="${AGENT_BROWSER_DRIVER:-browser}"
+  case "$driver" in
+    browser)
+      : ;;
+    interceptor)
+      local interceptor_bin="${INTERCEPTOR_BIN:-/opt/interceptor/bin/interceptor}"
+      [[ -x "$interceptor_bin" ]] || { log "ABORT: AGENT_BROWSER_DRIVER=interceptor but no executable at $interceptor_bin - is docker-compose.interceptor.yml in the -f list, and is INTERCEPTOR_BIN_HOST correct?"; ok=1; }
+      ;;
+    *)
+      log "ABORT: unknown AGENT_BROWSER_DRIVER '$driver' - expected 'browser' or 'interceptor'"
+      ok=1
+      ;;
+  esac
+
   validate_run_at || ok=1
   return $ok
 }
