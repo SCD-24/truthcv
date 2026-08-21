@@ -35,9 +35,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # ca-certificates: TLS for the claude CLI and for this container's calls to
 # ${TRUTHCV_MCP_URL}. tzdata: RUN_AT (docker-compose.yml) is a container-TZ
 # schedule, same as the retired Jobs project's RUN_AT. jq: agent/daily-apply.sh
-# parses the Agents page's job config with it to build the profile block of the
-# prompt, and now aborts the run outright when it is missing rather than
-# silently dropping every configured profile.
+# renders the entire job-profile / criteria / salary prompt block with it, and
+# now aborts the run outright when it is missing rather than silently dropping
+# every configured profile.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tzdata jq \
  && rm -rf /var/lib/apt/lists/*

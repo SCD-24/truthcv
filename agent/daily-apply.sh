@@ -41,7 +41,7 @@ CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude)}"
 # configured profiles silently never reach the agent and the run proceeds on the
 # RUNBOOK defaults as though none were configured - a wrong run is worse than no
 # run, so this is a hard precondition, not a fallback.
-command -v jq >/dev/null || abort "jq not found - agent/Dockerfile must install it"
+command -v jq >/dev/null || abort "jq not found - the job-profile prompt block cannot be rendered (agent/Dockerfile must install it)"
 
 # The browser is the agent's only way to apply, so an unreachable one means
 # there is no point searching either. Unlike the retired host-socket design -
@@ -184,13 +184,17 @@ if [[ -n "${AGENT_API_TOKEN:-}" ]]; then
       export ANTHROPIC_API_KEY="$AUTH_TOKEN"
       log "using API key credentials from app"
     else
-      log "unrecognized auth type from app; using container ANTHROPIC_API_KEY"
+      abort "unrecognized auth type from app: $AUTH_TYPE (expected oauth or api_key)"
     fi
+    [[ -n "$AUTH_TOKEN" ]] || abort "credential fetch returned empty token for $AUTH_TYPE"
     unset CREDS AUTH_TOKEN
   else
-    log "credential fetch failed; falling back to container ANTHROPIC_API_KEY"
+    abort "credential fetch failed (app returned non-zero exit)"
   fi
 fi
+
+# Final gate: at least one credential source must be set
+[[ -n "${ANTHROPIC_API_KEY:-}" ]] || [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] || abort "no usable LLM credential: set ANTHROPIC_API_KEY or AGENT_API_TOKEN + app credentials"
 MODEL_ARGS=()
 [[ -n "$AGENT_MODEL" ]] && MODEL_ARGS=(--model "$AGENT_MODEL")
 
@@ -198,19 +202,25 @@ log "invoking claude..."
 
 # The browser is granted as the whole server, `mcp__browser`, rather than as an
 # enumerated tool list. Every other grant below is a single named tool, and the
-# asymmetry is deliberate: the truthcv tools are OUR nine, fixed by mcp/server.py
-# and changing only when we change it, so naming them keeps the blast radius of
-# a new tool at zero until it is granted on purpose. The browser server is
-# upstream @playwright/mcp (browser/Dockerfile), whose tool set - browser_navigate,
-# browser_click, browser_type, browser_file_upload, browser_snapshot,
-# browser_take_screenshot and the rest - is theirs to rename or extend on any
-# version bump; pinning a list here would silently disable whichever tool got
-# renamed, mid-run, in an unattended job. Containment for the browser comes from
-# the container instead: no host filesystem, no host network, its profile on its
-# own volume, and the app data volume mounted read-only.
+# asymmetry is deliberate: the truthcv tools are OUR nine, fixed by
+# agenttools/server.py and changing only when we change it, so naming them keeps
+# the blast radius of a new tool at zero until it is granted on purpose. The
+# browser server is upstream @playwright/mcp (browser/Dockerfile), whose tool set
+# - browser_navigate, browser_click, browser_type, browser_file_upload,
+# browser_snapshot, browser_take_screenshot and the rest - is theirs to rename or
+# extend on any version bump; pinning a list here would silently disable whichever
+# tool got renamed, mid-run, in an unattended job. Containment for the browser
+# comes from the container instead: no host filesystem, no host network, its
+# profile on its own volume, and the app data volume mounted read-only.
 #
 # (Superseding the Jobs original's mcp__plugin_playwright_playwright__* grants,
 # which were dropped when this image had no browser at all.)
+#
+# --dangerously-skip-permissions: this is an unattended run with stdin at
+# /dev/null, so any trust or permission prompt would EOF and kill the run. The
+# --allowedTools list above, not an interactive prompt, is the actual boundary on
+# what the agent may do; the flag only stops the run blocking on a question no
+# one is there to answer.
 "$CLAUDE_BIN" -p "$PROMPT" "${MODEL_ARGS[@]}" \
   --mcp-config "$MCP_CONFIG" \
   --allowedTools \
@@ -225,6 +235,7 @@ log "invoking claude..."
     "mcp__truthcv__get_job_profiles" \
     "mcp__truthcv__recommend_salary" \
     "mcp__browser" \
+  --dangerously-skip-permissions \
   </dev/null >>"$RUN_LOG" 2>&1
 
 RC=$?

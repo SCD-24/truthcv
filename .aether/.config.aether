@@ -84,7 +84,8 @@
               "techs": [
                 "Python",
                 "FastAPI",
-                "Uvicorn"
+                "Uvicorn",
+                "mcp (Model Context Protocol Python SDK, streamable-HTTP)"
               ]
             },
             "h": 200,
@@ -147,6 +148,11 @@
                   "desc": "Download a rendered artifact (CV/cover-letter PDF or DOCX) by filename.",
                   "method": "GET",
                   "path": "/api/download/{name}"
+                },
+                {
+                  "desc": "MCP streamable-HTTP JSON-RPC 2.0 endpoint (initialize, notifications/initialized, tools/list, tools/call). This is the surface the agent container's claude CLI registers as mcp__truthcv__*; the plain-REST /mcp/tools routes are retained for external inspection.",
+                  "method": "POST",
+                  "path": "/mcp"
                 }
               ]
             },

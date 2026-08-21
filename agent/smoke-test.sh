@@ -41,8 +41,9 @@ command -v node >/dev/null 2>&1 \
   && ok "node present (used by the reachability probes below)" \
   || bad "node missing - the probes below cannot run"
 
+# jq renders the job-profile / criteria / salary prompt block in daily-apply.sh
 command -v jq >/dev/null 2>&1 \
-  && ok "jq present" \
+  && ok "jq present (used by daily-apply.sh to render the profile prompt block)" \
   || bad "jq missing - daily-apply.sh aborts without it"
 
 # The absence of a browser is a DELIBERATE property of this image, not an
@@ -109,18 +110,108 @@ else
   bad "BROWSER_MCP_URL unreachable ($BROWSER_MCP_URL) - check docker compose ps browser / docker compose logs browser"
 fi
 
+# A bare GET here would prove nothing: the app serves an SPA catch-all, so every
+# URL under it answers 200 and the old probe passed while all nine tools failed
+# to register. Do the real MCP handshake instead - initialize, initialized,
+# tools/list - and insist on the nine tools by name.
 if [[ -n "${TRUTHCV_MCP_URL:-}" ]]; then
-  if node -e '
+  if MCP_OUT="$(node -e '
     const u = new URL(process.env.TRUTHCV_MCP_URL);
     const http = require(u.protocol === "https:" ? "https" : "http");
-    const r = http.request(u, { method: "GET", timeout: 5000 }, () => process.exit(0));
-    r.on("error", () => process.exit(1));
-    r.on("timeout", () => process.exit(1));
-    r.end();
-  ' 2>/dev/null; then
-    ok "TRUTHCV_MCP_URL reachable ($TRUTHCV_MCP_URL)"
+    let sessionId = null;
+
+    // The streamable-HTTP transport may answer as application/json OR as
+    // text/event-stream depending on how the server was configured, so accept
+    // both and unwrap SSE by taking the last data: line.
+    function parseBody(body, contentType) {
+      if ((contentType || "").includes("text/event-stream")) {
+        const data = body.split(/\r?\n/)
+          .filter((l) => l.startsWith("data:"))
+          .map((l) => l.slice(5).trim());
+        if (!data.length) throw new Error("SSE response carried no data: line");
+        return JSON.parse(data[data.length - 1]);
+      }
+      return JSON.parse(body);
+    }
+
+    function rpc(payload) {
+      return new Promise((resolve, reject) => {
+        const headers = {
+          "content-type": "application/json",
+          // Required by the streamable-HTTP transport.
+          "accept": "application/json, text/event-stream",
+        };
+        if (sessionId) headers["mcp-session-id"] = sessionId;
+        const req = http.request(u, { method: "POST", headers, timeout: 5000 }, (res) => {
+          let body = "";
+          res.on("data", (c) => { body += c; });
+          res.on("end", () => {
+            // Never follow a redirect: if the endpoint sits behind a Starlette
+            // Mount, POST /mcp 307s to /mcp/ and following it would hide exactly
+            // that trap.
+            if (res.statusCode >= 300 && res.statusCode < 400) {
+              return reject(new Error("HTTP " + res.statusCode + " redirect to " +
+                (res.headers.location || "(no Location)") + " - not followed"));
+            }
+            if (res.statusCode === 405) {
+              return reject(new Error("HTTP 405 - the URL is a plain-REST router, " +
+                "not an MCP JSON-RPC endpoint"));
+            }
+            if (res.statusCode >= 400) {
+              return reject(new Error("HTTP " + res.statusCode + ": " + body.slice(0, 200)));
+            }
+            if (res.headers["mcp-session-id"]) sessionId = res.headers["mcp-session-id"];
+            if (!body.trim()) return resolve(null);
+            try {
+              resolve(parseBody(body, res.headers["content-type"]));
+            } catch (e) {
+              reject(new Error("response is not JSON-RPC: " + e.message));
+            }
+          });
+        });
+        req.on("error", (e) => reject(new Error(e.message)));
+        req.on("timeout", () => { req.destroy(); reject(new Error("timeout after 5000ms")); });
+        req.end(JSON.stringify(payload));
+      });
+    }
+
+    const EXPECTED = [
+      "check_cooldown", "generate_cover_letter", "get_canonical_cv",
+      "get_job_profiles", "get_profile_answers", "recommend_salary",
+      "record_application", "record_company_board", "record_screening",
+    ].sort();
+
+    (async () => {
+      const init = await rpc({
+        jsonrpc: "2.0", id: 1, method: "initialize",
+        params: {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "truthcv-smoke-test", version: "1.0" },
+        },
+      });
+      if (!init || !init.result) {
+        throw new Error("initialize did not return a JSON-RPC result");
+      }
+      await rpc({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
+
+      const listed = await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+      if (!listed || !listed.result || !Array.isArray(listed.result.tools)) {
+        throw new Error("tools/list did not return a tools array");
+      }
+      const names = listed.result.tools.map((t) => t.name).sort();
+      const missing = EXPECTED.filter((n) => !names.includes(n));
+      if (missing.length) {
+        throw new Error("missing tool(s): " + missing.join(", ") +
+          " (got " + (names.length ? names.join(", ") : "none") + ")");
+      }
+      console.log(names.join(", "));
+    })().catch((e) => { console.error(e.message); process.exit(1); });
+  ' 2>&1)"; then
+    ok "TRUTHCV_MCP_URL MCP handshake OK ($TRUTHCV_MCP_URL)"
+    echo "   tools: $MCP_OUT"
   else
-    bad "TRUTHCV_MCP_URL set but unreachable ($TRUTHCV_MCP_URL) - is the app service up?"
+    bad "TRUTHCV_MCP_URL MCP handshake failed ($TRUTHCV_MCP_URL) - $MCP_OUT"
   fi
 else
   bad "TRUTHCV_MCP_URL is not set - the agent has no route to the TruthCV tools"

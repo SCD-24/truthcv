@@ -106,9 +106,11 @@ services:
       # page is the schedule's source of truth; see agent/entrypoint.sh's
       # refresh_schedule().
       - RUN_AT=${RUN_AT:-09:00,15:00}
-      # In-network address of the `app` service's MCP tool surface
-      # (mcp/server.py, mounted at /mcp) — only reachable inside the compose
-      # network, not from the host.
+      # In-network address of the `app` service's MCP streamable-HTTP JSON-RPC
+      # tool surface (POST /mcp, agenttools/mcp_app.py) — only reachable inside
+      # the compose network, not from the host. The same service also serves the
+      # REST tool routes GET /mcp/tools and POST /mcp/tools/{name}
+      # (agenttools/server.py).
       - TRUTHCV_MCP_URL=${TRUTHCV_MCP_URL:-http://app:8080/mcp}
       # In-network address of the `browser` service's MCP surface
       # (@playwright/mcp, browser/Dockerfile) — the agent's only way to apply.
@@ -142,10 +144,10 @@ services:
       - agent-runs:/app/runs
       # Deliberately NOT mounting the app's data volume here: every
       # capability the agent has goes through the TruthCV MCP tool surface
-      # (mcp/server.py), not the filesystem — agent/RUNBOOK.md says outright
-      # "There is no file on disk to read any of this from — call the tool."
-      # Keep this surface small; do not add ${DATA_DIR:-./data}:/app/data
-      # without a concrete, checked need.
+      # (agenttools/mcp_app.py POST /mcp JSON-RPC, or agenttools/server.py REST
+      # routes), not the filesystem — agent/RUNBOOK.md says outright "There is no
+      # file on disk to read any of this from — call the tool." Keep this surface
+      # small; do not add ${DATA_DIR:-./data}:/app/data without a concrete, checked need.
 
 volumes:
   ollama:
