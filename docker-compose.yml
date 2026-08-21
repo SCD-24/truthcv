@@ -54,6 +54,10 @@ services:
       # (mcp/server.py, mounted at /mcp) — only reachable inside the compose
       # network, not from the host.
       - TRUTHCV_MCP_URL=${TRUTHCV_MCP_URL:-http://app:8080/mcp}
+      # In-network address of the `app` service's MCP streamable-HTTP JSON-RPC
+      # tool surface (POST /mcp, agenttools/mcp_app.py) — only reachable inside
+      # the compose network. Also serves REST routes at GET /api/mcp/tools and
+      # POST /api/mcp/tools/{name} (agenttools/server.py).
       # In-container path of the bind-mounted unix socket the agent uses to
       # drive the operator's real HOST Chrome — see the volumes: entry below and
       # agent/mcp.json. Must match the host-side path the interceptor daemon
@@ -79,10 +83,10 @@ services:
       - agent-runs:/app/runs
       # Deliberately NOT mounting the app's data volume here: every
       # capability the agent has goes through the TruthCV MCP tool surface
-      # (mcp/server.py), not the filesystem — agent/RUNBOOK.md says outright
-      # "There is no file on disk to read any of this from — call the tool."
-      # Keep this surface small; do not add ${DATA_DIR:-./data}:/app/data
-      # without a concrete, checked need.
+      # (agenttools/mcp_app.py POST /mcp JSON-RPC, or agenttools/server.py REST
+      # routes), not the filesystem — agent/RUNBOOK.md says outright "There is no
+      # file on disk to read any of this from — call the tool." Keep this surface
+      # small; do not add ${DATA_DIR:-./data}:/app/data without a concrete, checked need.
 
 volumes:
   ollama:

@@ -40,6 +40,11 @@ command -v node >/dev/null 2>&1 \
   && ok "node present (used by the reachability probes below)" \
   || bad "node missing - the probes below cannot run"
 
+# jq renders the job-profile / criteria / salary prompt block in daily-apply.sh
+command -v jq >/dev/null 2>&1 \
+  && ok "jq present (used by daily-apply.sh to render the profile prompt block)" \
+  || bad "jq missing - daily-apply.sh's profile rendering will fail"
+
 # The absence of a browser is a DELIBERATE property of this image, not an
 # oversight, so it is pinned here: if someone re-adds Chrome/Chromium/
 # Playwright, this test should turn red and make them justify it.
@@ -109,12 +114,134 @@ if [[ -n "${TRUTHCV_MCP_URL:-}" ]]; then
   if node -e '
     const u = new URL(process.env.TRUTHCV_MCP_URL);
     const http = require(u.protocol === "https:" ? "https" : "http");
-    const r = http.request(u, { method: "GET", timeout: 5000 }, () => process.exit(0));
-    r.on("error", () => process.exit(1));
-    r.on("timeout", () => process.exit(1));
-    r.end();
-  ' 2>/dev/null; then
-    ok "TRUTHCV_MCP_URL reachable ($TRUTHCV_MCP_URL)"
+    
+    function makeRequest(method, payload) {
+      return new Promise((resolve, reject) => {
+        const req = http.request(u, {
+          method,
+          headers: {
+            "Content-Type": "application/json",
+            "accept": "application/json, text/event-stream"
+          },
+          timeout: 5000
+        }, (res) => {
+          let data = "";
+          res.on("data", (chunk) => { data += chunk; });
+          res.on("end", () => {
+            if (res.statusCode === 307 || res.statusCode === 308) {
+              reject(new Error(`Redirect ${res.statusCode} to ${res.headers.location}`));
+            } else if (res.statusCode >= 400) {
+              reject(new Error(`HTTP ${res.statusCode}`));
+            } else {
+              resolve(data);
+            }
+          });
+        });
+        req.on("error", reject);
+        req.on("timeout", () => {
+          req.destroy();
+          reject(new Error("timeout"));
+        });
+        if (payload) {
+          req.write(JSON.stringify(payload));
+        }
+        req.end();
+      });
+    }
+    
+    (async () => {
+      try {
+        // Initialize handshake
+        const initResp = await makeRequest("POST", {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2024-11-05",
+            capabilities: {},
+            clientInfo: { name: "smoke-test", version: "1.0" }
+          }
+        });
+        const init = JSON.parse(initResp);
+        if (!init.result && !init.error) {
+          throw new Error("not JSON-RPC format");
+        }
+        
+        // Send notifications/initialized
+        await makeRequest("POST", {
+          jsonrpc: "2.0",
+          method: "notifications/initialized",
+          params: {}
+        });
+        
+        // List tools
+        const toolsResp = await makeRequest("POST", {
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/list",
+          params: {}
+        });
+        const tools = JSON.parse(toolsResp);
+        if (!tools.result || !tools.result.tools) {
+          throw new Error("no tools in result");
+        }
+        
+        const toolList = tools.result.tools.map(t => t.name);
+        const expectedTools = [
+          "check_cooldown", "generate_cover_letter", "get_canonical_cv",
+          "get_job_profiles", "get_profile_answers", "recommend_salary",
+          "record_application", "record_company_board", "record_screening"
+        ].sort();
+        const actualTools = toolList.sort();
+        
+        if (JSON.stringify(expectedTools) !== JSON.stringify(actualTools)) {
+          throw new Error(`wrong tools: ${actualTools.join(", ")}`);
+        }
+        
+        console.log(actualTools.join(", "));
+        process.exit(0);
+      } catch (e) {
+        process.exit(1);
+      }
+    })();
+  ' 2>&1; then
+    tools=$?
+    if [[ "$tools" != "0" ]]; then
+      # Re-run to capture tool list for display
+      tool_list=$(node -e '
+        const u = new URL(process.env.TRUTHCV_MCP_URL);
+        const http = require(u.protocol === "https:" ? "https" : "http");
+        function makeRequest(method, payload) {
+          return new Promise((resolve, reject) => {
+            const req = http.request(u, {
+              method, headers: { "Content-Type": "application/json" },
+              timeout: 5000
+            }, (res) => {
+              let data = "";
+              res.on("data", (chunk) => { data += chunk; });
+              res.on("end", () => { resolve(data); });
+            });
+            req.on("error", reject);
+            req.on("timeout", () => { req.destroy(); reject(); });
+            if (payload) req.write(JSON.stringify(payload));
+            req.end();
+          });
+        }
+        (async () => {
+          try {
+            const initResp = await makeRequest("POST", { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+            await makeRequest("POST", { jsonrpc: "2.0", method: "notifications/initialized", params: {} });
+            const toolsResp = await makeRequest("POST", { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+            const tools = JSON.parse(toolsResp);
+            console.log(tools.result.tools.map(t => t.name).sort().join(", "));
+          } catch (e) { process.exit(1); }
+        })();
+      ' 2>/dev/null)
+      ok "TRUTHCV_MCP_URL JSON-RPC handshake successful ($TRUTHCV_MCP_URL)"
+      echo "        Tools: $tool_list"
+    else
+      bad "TRUTHCV_MCP_URL JSON-RPC handshake failed - endpoint does not speak MCP JSON-RPC"
+    fi
   else
     bad "TRUTHCV_MCP_URL set but unreachable ($TRUTHCV_MCP_URL) - is the app service up?"
   fi

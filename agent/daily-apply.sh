@@ -60,6 +60,8 @@ CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude)}"
 
 [[ -n "${TRUTHCV_MCP_URL:-}" ]] || abort "TRUTHCV_MCP_URL is not set - it is the agent's only route to the TruthCV tools"
 
+command -v jq >/dev/null || abort "jq not found - the job-profile prompt block cannot be rendered"
+
 log "preconditions OK"
 
 # --- Agent enable gate --------------------------------------------------------
@@ -129,15 +131,15 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     PROFILE_BLOCK="## Job profiles configured:"$'\n'
     PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Any profile passing all its criteria drives an application (single-profile-passes rule)."$'\n'
     PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Record which profile drove each application in the screening report."$'\n'
-    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Target companies (watchlist): $(jq -r '.targetCompanies | join(", ")' <<<"$JOB_CONFIG" 2>/dev/null)"$'\n'
+    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Target companies (watchlist): $(jq -r '.targetCompanies | join(", ")' <<<"$JOB_CONFIG")"$'\n'
     PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Resolved company boards and apply-channel URLs:"$'\n'
     
     # Add company boards (resolved)
-    BOARDS="$(jq -r '.companyBoards[]? | "\(.company): \(.careersUrl)"' <<<"$JOB_CONFIG" 2>/dev/null | sed 's/^/  - /')"
+    BOARDS="$(jq -r '.companyBoards[]? | "\(.company): \(.careersUrl)"' <<<"$JOB_CONFIG" | sed 's/^/  - /')"
     if [[ -n "$BOARDS" ]]; then
       PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$BOARDS"$'\n'
     fi
-    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Cooldown days (stale company filter): $(jq -r '.cooldownDays // "not configured"' <<<"$JOB_CONFIG" 2>/dev/null)"$'\n'
+    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Cooldown days (stale company filter): $(jq -r '.cooldownDays // "not configured"' <<<"$JOB_CONFIG")"$'\n'
 
     # Render each profile's full criteria: name, employment country, remote
     # model, salary band, Glassdoor minimum, EOR/entity-verification rules,
@@ -145,7 +147,7 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     # each posting against these instead of the RUNBOOK.md §2 defaults, and
     # must quote the matched profile's name back with get_job_profiles /
     # recommend_salary.
-    PROFILE_CRITERIA="$(jq -r "$PROFILE_CRITERIA_JQ" <<<"$JOB_CONFIG" 2>/dev/null)"
+    PROFILE_CRITERIA="$(jq -r "$PROFILE_CRITERIA_JQ" <<<"$JOB_CONFIG")"
     if [[ -n "$PROFILE_CRITERIA" ]]; then
       PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Profile criteria (call get_job_profiles to re-fetch verbatim; call"$'\n'"recommend_salary with the matched profile's name for any salary-expectation field):"$'\n\n'"$PROFILE_CRITERIA"$'\n'
     fi
@@ -170,13 +172,17 @@ if [[ -n "${AGENT_API_TOKEN:-}" ]]; then
       export ANTHROPIC_API_KEY="$AUTH_TOKEN"
       log "using API key credentials from app"
     else
-      log "unrecognized auth type from app; using container ANTHROPIC_API_KEY"
+      abort "unrecognized auth type from app: $AUTH_TYPE (expected oauth or api_key)"
     fi
+    [[ -n "$AUTH_TOKEN" ]] || abort "credential fetch returned empty token for $AUTH_TYPE"
     unset CREDS AUTH_TOKEN
   else
-    log "credential fetch failed; falling back to container ANTHROPIC_API_KEY"
+    abort "credential fetch failed (app returned non-zero exit)"
   fi
 fi
+
+# Final gate: at least one credential source must be set
+[[ -n "${ANTHROPIC_API_KEY:-}" ]] || [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] || abort "no usable LLM credential: set ANTHROPIC_API_KEY or AGENT_API_TOKEN + app credentials"
 MODEL_ARGS=()
 [[ -n "$AGENT_MODEL" ]] && MODEL_ARGS=(--model "$AGENT_MODEL")
 
@@ -187,6 +193,9 @@ log "invoking claude..."
 # only and does not configure it as a live server, because agent/Dockerfile
 # deliberately installs no browser (see its BROWSER STRATEGY comment) - a
 # Playwright entry here could not launch anything.
+# Skip trust/permission prompts: this is an unattended run with stdin at /dev/null,
+# so any prompt EOF-kills the run. The allow-list (not this flag) is the actual
+# boundary on what the agent may do — the flag just lets the run proceed uninterrupted.
 "$CLAUDE_BIN" -p "$PROMPT" "${MODEL_ARGS[@]}" \
   --mcp-config "$MCP_CONFIG" \
   --allowedTools \
@@ -203,6 +212,7 @@ log "invoking claude..."
     "mcp__interceptor__interceptor_browser" \
     "mcp__interceptor__interceptor_read" \
     "mcp__interceptor__interceptor_local" \
+  --dangerously-skip-permissions \
   </dev/null >>"$RUN_LOG" 2>&1
 
 RC=$?

@@ -20,8 +20,8 @@ from fastapi.testclient import TestClient
 
 from api.main import app
 from applications.store import load_all as load_applications
-from mcp import server as mcp_server
-from mcp import tools_ledger, tools_letter, tools_boards
+from agenttools import server as mcp_server
+from agenttools import tools_ledger, tools_letter, tools_boards
 from providers.fake import FakeProvider
 from truth.model import Bullet, Experience, Skill, Truth
 from truth.store import save as save_truth

@@ -5,7 +5,7 @@
     "truthcv": {
       "type": "http",
       "url": "${TRUTHCV_MCP_URL:-http://app:8080/mcp}",
-      "_comment": "TruthCV's own tool surface: generate_cover_letter, record_application, record_screening, check_cooldown, get_canonical_cv, get_profile_answers, record_company_board, get_job_profiles, recommend_salary (mcp/server.py, APIRouter(prefix='/mcp')). The default is the in-network address of the `app` compose service — reachable only from inside the compose network, not from the host or the open internet."
+      "_comment": "TruthCV's own tool surface: generate_cover_letter, record_application, record_screening, check_cooldown, get_canonical_cv, get_profile_answers, record_company_board, get_job_profiles, recommend_salary. REST routes at GET /api/mcp/tools and POST /api/mcp/tools/{name} (agenttools/server.py) provide HTTP access; JSON-RPC streamable-HTTP endpoint at POST /mcp (agenttools/mcp_app.py, registered via Server.streamable_http_app() with json_response=True, stateless_http=True) is what this `http` type MCP server calls. The default is the in-network address of the `app` compose service — reachable only from inside the compose network, not from the host or the open internet."
     },
 
     "interceptor": {
