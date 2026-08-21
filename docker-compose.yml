@@ -28,18 +28,74 @@ services:
     volumes:
       - ollama:/root/.ollama
 
+  # Containerised headful Chromium MCP server, reached by the agent over HTTP.
+  # Started on a bare `docker compose up` (no profiles) so the agent can drive
+  # it immediately without manual setup. The browser runs headful under Xvfb
+  # with a noVNC viewport at http://localhost:7900 for observation or manual
+  # one-time login (CAPTCHA, SMS MFA, etc.). The persistent /browser-profile
+  # named volume preserves sessions across restarts.
+  browser:
+    build:
+      context: .
+      dockerfile: browser/Dockerfile
+    restart: unless-stopped
+    ports:
+      # noVNC web viewer (public; use this to watch or debug a run)
+      - "7900:7900"
+    volumes:
+      # Persistent Chromium profile (survives container restarts)
+      - browser-profile:/browser-profile
+      # Read-only app data volume — so Playwright's browser_file_upload can
+      # resolve paths get_canonical_cv returns (e.g. /app/data/canonical_cv.pdf).
+      # The app service sets DATA_DIR=/app/data, so the paths line up.
+      - ${DATA_DIR:-./data}:/app/data:ro
+    environment:
+      - BROWSER_MCP_PORT=8931
+      - BROWSER_PROFILE_DIR=/browser-profile
+      - TZ=${TZ:-UTC}
+    healthcheck:
+      # Probe the MCP HTTP port with a simple GET. The base image ships node,
+      # so this is a cheap, safe check.
+      #
+      # ANY HTTP response counts as healthy and the status code is deliberately
+      # NOT interpreted. MCP's streamable-HTTP transport answers a bare GET -
+      # no session id, no `Accept: text/event-stream` - with a 4xx by design
+      # (400/405/406 depending on version), so a healthy @playwright/mcp never
+      # returns 200 here. Asserting 200 would leave this container permanently
+      # unhealthy and hang the `agent` service's service_healthy gate below,
+      # forever, against a browser that is working perfectly. Only a connection
+      # error or a timeout means the server is not listening. agent/smoke-test.sh
+      # and agent/daily-apply.sh's probe_browser() use the same rule; keep all
+      # three in step.
+      test: ["CMD", "node", "-e", "const r=require('http').get('http://localhost:8931/mcp',{timeout:5000},()=>process.exit(0));r.on('timeout',()=>{r.destroy();process.exit(1)});r.on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
   # Unattended job-application agent — its own container, deliberately
-  # separate from `app`, so a browser crash can never take the wizard down.
-  # Runs headless Claude Code on a schedule against agent/RUNBOOK.md and
-  # agent/prompt.md, reaching its tools per agent/mcp.json. Not started by a
-  # bare `docker compose up` — start it explicitly with:
-  #   docker compose --profile agent up -d agent
+  # separate from `app` and `browser`, so a browser crash can never take the
+  # wizard or agent down. Runs Claude Code on a schedule against
+  # agent/RUNBOOK.md and agent/prompt.md, reaching tools via agent/mcp.json.
+  # Now started on a bare `docker compose up` (no profiles) and drives the
+  # containerised browser over HTTP.
   agent:
     build:
       context: .
       dockerfile: agent/Dockerfile
-    depends_on: [app]
-    profiles: ["agent"]
+    depends_on:
+      app:
+        # `app` serves the TruthCV MCP tools; it has no healthcheck of its own,
+        # so this is start-ordering only. daily-apply.sh's TRUTHCV_MCP_URL
+        # precondition is what actually catches an app that is up but not ready.
+        condition: service_started
+      browser:
+        # Wait for the browser to actually be serving MCP, not merely started:
+        # the agent aborts a run outright when it cannot reach the browser, and
+        # on a cold `docker compose up` Chromium needs longer to come up than
+        # the agent does. See the browser healthcheck above - it passes on any
+        # HTTP response, so this gate cannot hang on a working browser.
+        condition: service_healthy
     # Scheduled long-running loop (the run loop itself is task t-4's
     # entrypoint), same as `app` — it should come back after a host reboot or
     # a crash rather than stay down silently.
@@ -50,31 +106,36 @@ services:
       # page is the schedule's source of truth; see agent/entrypoint.sh's
       # refresh_schedule().
       - RUN_AT=${RUN_AT:-09:00,15:00}
-      # In-network address of the `app` service's MCP tool surface
-      # (mcp/server.py, mounted at /mcp) — only reachable inside the compose
-      # network, not from the host.
-      - TRUTHCV_MCP_URL=${TRUTHCV_MCP_URL:-http://app:8080/mcp}
       # In-network address of the `app` service's MCP streamable-HTTP JSON-RPC
       # tool surface (POST /mcp, agenttools/mcp_app.py) — only reachable inside
-      # the compose network. Also serves REST routes at GET /api/mcp/tools and
-      # POST /api/mcp/tools/{name} (agenttools/server.py).
-      # In-container path of the bind-mounted unix socket the agent uses to
-      # drive the operator's real HOST Chrome — see the volumes: entry below and
-      # agent/mcp.json. Must match the host-side path the interceptor daemon
-      # actually listens on.
-      - INTERCEPTOR_SOCKET=${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}
+      # the compose network, not from the host. The same service also serves the
+      # REST tool routes GET /mcp/tools and POST /mcp/tools/{name}
+      # (agenttools/server.py).
+      - TRUTHCV_MCP_URL=${TRUTHCV_MCP_URL:-http://app:8080/mcp}
+      # In-network address of the `browser` service's MCP surface
+      # (@playwright/mcp, browser/Dockerfile) — the agent's only way to apply.
+      # agent/mcp.json expands the same variable with the same default, and
+      # agent/daily-apply.sh probes it as a precondition, so all three stay in
+      # step. Only reachable inside the compose network, not from the host.
+      - BROWSER_MCP_URL=${BROWSER_MCP_URL:-http://browser:8931/mcp}
       # No default: the architecture has no daily quota (agent/RUNBOOK.md
       # §1, "There is no daily quota"). Empty/unset must be treated by the
       # run loop (task t-4) as "no cap", not as zero.
       - MAX_APPLICATIONS_PER_RUN=${MAX_APPLICATIONS_PER_RUN:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
+      # Which weekdays the run loop fires on (1=Mon..7=Sun), read by
+      # agent/entrypoint.sh. Job applications are a weekday activity by
+      # default; the Agents page can override the schedule at runtime.
+      - RUN_DAYS=${RUN_DAYS:-1,2,3,4,5}
+      # Where agent/daily-apply.sh writes per-run logs. Must stay inside the
+      # agent-runs volume mounted below, or the logs vanish on restart.
+      - RUN_LOG_DIR=${RUN_LOG_DIR:-/app/runs}
+      # RUN_AT and RUN_DAYS above are container-local times, so the container
+      # needs the operator's timezone or an unattended run fires at the wrong
+      # hour. Same default as the `browser` service.
+      - TZ=${TZ:-UTC}
     volumes:
-      # The host Chrome interceptor's unix socket, bind-mounted in so the
-      # agent drives a real, already-logged-in browser on the host instead of
-      # a fresh one inside the container (see agent/Dockerfile). Both sides
-      # use the same env var so the mount always matches agent/mcp.json.
-      - ${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}:${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}
       # Per-run logs written by agent/daily-apply.sh (RUN_LOG_DIR, default
       # /app/runs). Its own named volume, NOT the app's data volume: these are
       # operator diagnostics for unattended runs, and without a volume they
@@ -91,3 +152,4 @@ services:
 volumes:
   ollama:
   agent-runs:
+  browser-profile:

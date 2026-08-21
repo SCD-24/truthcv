@@ -19,10 +19,17 @@ from fastapi.testclient import TestClient
 from api.main import app, _mcp_server
 
 
-@pytest.fixture
-def client() -> TestClient:
-    """Provide a TestClient with MCP server lifespan active."""
-    return TestClient(app)
+@pytest.fixture(scope="module")
+def client():
+    """A TestClient with the app's lifespan actually running.
+
+    TestClient only enters the lifespan when used as a context manager, and the
+    MCP streamable-HTTP session manager is started there — a bare
+    ``TestClient(app)`` makes every POST /mcp fail with "Task group is not
+    initialized".
+    """
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 def test_mcp_initialize_returns_json_rpc_result(client: TestClient) -> None:

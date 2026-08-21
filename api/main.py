@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from mcp import types
 from mcp.server import Server
+from mcp.server.transport_security import TransportSecuritySettings
 
 from agenttools.server import router as mcp_router
 from agenttools.mcp_app import _TOOL_REGISTRY
@@ -22,14 +23,30 @@ from .routes import router
 # Build MCP Server app for streamable-HTTP JSON-RPC endpoint
 _mcp_server = Server(name="truthcv")
 _mcp_http_app = _mcp_server.streamable_http_app(
-    streamable_http_path="/",
+    # Must match the path this app is reached at (the /mcp endpoint below
+    # forwards the request scope verbatim, so scope["path"] is still "/mcp").
+    streamable_http_path="/mcp",
+    # The SDK's DNS-rebinding guard defaults to allowing only the `host` below,
+    # which would 421 the agent's real requests: it reaches this service as
+    # http://app:8080/mcp (docker-compose.yml TRUTHCV_MCP_URL), so the Host
+    # header is "app:8080", not 127.0.0.1. That guard exists to stop a browser
+    # rebinding onto a localhost server; this endpoint is not browser-facing and
+    # is reachable only from inside the compose network, so turn it off rather
+    # than hard-code a host list that breaks on every rename.
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=False,
+    ),
     json_response=True,
     stateless_http=True,
 )
 
 # Register MCP tool handlers on the server
-async def _handle_list_tools(request: types.ListToolsRequest) -> types.ListToolsResult:
-    """Return the list of available tools."""
+async def _handle_list_tools(ctx, params) -> types.ListToolsResult:
+    """Return the list of available tools.
+
+    The SDK dispatches request handlers as ``handler(ctx, params)``; both
+    arguments are unused here because the tool list is static.
+    """
     tools = []
     for name, (fn, description) in _TOOL_REGISTRY.items():
         input_schema = {
@@ -46,22 +63,26 @@ async def _handle_list_tools(request: types.ListToolsRequest) -> types.ListTools
         )
     return types.ListToolsResult(tools=tools)
 
-async def _handle_call_tool(request: types.CallToolRequest) -> types.CallToolResult:
-    """Call a registered tool by name."""
-    if request.params.name not in _TOOL_REGISTRY:
+async def _handle_call_tool(ctx, params) -> types.CallToolResult:
+    """Call a registered tool by name.
+
+    The SDK dispatches request handlers as ``handler(ctx, params)``, where
+    ``params`` carries the tool name and arguments.
+    """
+    if params.name not in _TOOL_REGISTRY:
         return types.CallToolResult(
             content=[
                 types.TextContent(
                     type="text",
-                    text=f"Unknown tool '{request.params.name}'.",
+                    text=f"Unknown tool '{params.name}'.",
                 )
             ],
             isError=True,
         )
-    
-    fn, _ = _TOOL_REGISTRY[request.params.name]
+
+    fn, _ = _TOOL_REGISTRY[params.name]
     try:
-        result = fn(**request.params.arguments)
+        result = fn(**(params.arguments or {}))
         return types.CallToolResult(
             content=[
                 types.TextContent(
@@ -86,8 +107,13 @@ _mcp_server.add_request_handler("tools/call", types.CallToolRequest, _handle_cal
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Attach MCP server lifespan to FastAPI app."""
-    async with _mcp_server.lifespan():
+    """Run the MCP streamable-HTTP session manager for the app's lifetime.
+
+    StreamableHTTPSessionManager.run() is what creates the task group every
+    POST /mcp is dispatched through; without it each request raises
+    "Task group is not initialized".
+    """
+    async with _mcp_server.session_manager.run():
         yield
 
 app = FastAPI(title="TruthCV", version="1.0.0", lifespan=lifespan)

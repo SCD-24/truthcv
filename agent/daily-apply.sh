@@ -14,7 +14,11 @@ RUN_LOG_DIR="${RUN_LOG_DIR:-/app/runs}"
 RUNBOOK="${RUNBOOK:-/app/agent/RUNBOOK.md}"
 PROMPT_FILE="${PROMPT_FILE:-/app/agent/prompt.md}"
 MCP_CONFIG="${MCP_CONFIG:-/app/agent/mcp.json}"
-INTERCEPTOR_SOCKET="${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}"
+# The containerised Chromium's MCP endpoint (docker-compose.yml `browser`
+# service, browser/Dockerfile). Same default as agent/mcp.json's
+# ${BROWSER_MCP_URL:-...} expansion, so the probe below and the server the
+# claude CLI actually dials cannot drift apart.
+BROWSER_MCP_URL="${BROWSER_MCP_URL:-http://browser:8931/mcp}"
 STAMP="$(date +%Y-%m-%d_%H%M)"
 
 mkdir -p "$RUN_LOG_DIR"
@@ -33,34 +37,38 @@ CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude)}"
 
 [[ -r "$RUNBOOK" ]] || abort "runbook missing: $RUNBOOK"
 
-# Interceptor drives the operator's real, already-logged-in browser on the HOST over
-# a unix socket bind-mounted into this container (docker-compose.yml,
-# agent/mcp.json). Without it there is no way to apply, and no point
-# searching.
-[[ -S "$INTERCEPTOR_SOCKET" ]] || abort "interceptor socket absent: $INTERCEPTOR_SOCKET - is the interceptor daemon running on the host?"
+# jq builds the job-profile block of the prompt below. Without it the operator's
+# configured profiles silently never reach the agent and the run proceeds on the
+# RUNBOOK defaults as though none were configured - a wrong run is worse than no
+# run, so this is a hard precondition, not a fallback.
+command -v jq >/dev/null || abort "jq not found - the job-profile prompt block cannot be rendered (agent/Dockerfile must install it)"
 
-# The Jobs original also required a live Chrome process (`pgrep -x chrome` /
-# `pgrep -f google-chrome`) so interceptor had a browser on the same machine
-# to attach to. That check cannot survive containerisation: this agent now
-# runs in its own container while Chrome runs on the HOST, so the container's
-# process table will never show it - kept unchanged it would abort every
-# single run, unconditionally, which is as useless as deleting it outright.
-# The honest replacement is to check that the socket is actually live
-# (accepting connections), not merely a stale file left behind by an
-# interceptor process that has since died. This image has no tool that can
-# dial a unix socket to test that - agent/Dockerfile installs only
-# ca-certificates, tzdata and the claude CLI, no nc/socat/curl - so that
-# connectability probe cannot be done with those. The base image does ship
-# node, which CAN dial a unix socket - agent/smoke-test.sh uses it for exactly
-# this - but a probe here would open and drop a connection on the operator's
-# live browser daemon before every run, so it is kept in the smoke test where
-# it is run deliberately. The -S check above is therefore the only guard on the
-# run path; a present-but-dead socket surfaces when the interceptor MCP server
-# fails to respond mid-run.
+# The browser is the agent's only way to apply, so an unreachable one means
+# there is no point searching either. Unlike the retired host-socket design -
+# where probing meant opening and dropping a connection on the operator's own
+# live browser daemon, and so had to be left to the deliberate smoke test -
+# this is an ordinary in-network HTTP server in a sibling container. Dialling
+# it once per run is cheap and disturbs nothing, so the run path can check
+# reachability for real rather than settling for a file-exists test.
+#
+# Any HTTP response at all proves the server is listening and is what we
+# require here. The status code is deliberately NOT interpreted: MCP's
+# streamable-HTTP transport answers a bare GET (no session, no
+# `Accept: text/event-stream`) with a 4xx by design, and treating that as
+# failure would abort every run against a perfectly healthy browser. A dead
+# or wrong-addressed server fails as a connection error or a timeout instead.
+probe_browser() {
+  node -e '
+    const url = process.argv[1];
+    const mod = url.startsWith("https:") ? require("https") : require("http");
+    const req = mod.get(url, { timeout: 5000 }, () => process.exit(0));
+    req.on("timeout", () => { req.destroy(); process.exit(1); });
+    req.on("error", () => process.exit(1));
+  ' "$BROWSER_MCP_URL" 2>/dev/null
+}
+probe_browser || abort "browser MCP server unreachable at $BROWSER_MCP_URL - is the \`browser\` service up? (docker compose ps browser; docker compose logs browser)"
 
 [[ -n "${TRUTHCV_MCP_URL:-}" ]] || abort "TRUTHCV_MCP_URL is not set - it is the agent's only route to the TruthCV tools"
-
-command -v jq >/dev/null || abort "jq not found - the job-profile prompt block cannot be rendered"
 
 log "preconditions OK"
 
@@ -125,7 +133,11 @@ def fmt_band(min_v; max_v; cur): if (min_v != null and max_v != null) then "\(mi
 # maxApplicationsPerRun, companyBoards). If fetch fails or profiles are absent,
 # prompt stays unchanged (§2 default: the six RUNBOOK.md filters apply).
 if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_config 2>/dev/null)"; then
-  PROFILES="$(jq -r '.profiles // [] | length' <<<"$JOB_CONFIG" 2>/dev/null || echo 0)"
+  # No `|| echo 0` and no stderr suppression on the jq calls in this block: jq is
+  # a checked precondition above, so a jq failure here means malformed config,
+  # not a missing tool - and it must be visible in the run log rather than
+  # quietly collapsing to "no profiles configured".
+  PROFILES="$(jq -r '.profiles // [] | length' <<<"$JOB_CONFIG")"
   if [[ "$PROFILES" -gt 0 ]]; then
     # Append a block for each enabled profile
     PROFILE_BLOCK="## Job profiles configured:"$'\n'
@@ -188,14 +200,27 @@ MODEL_ARGS=()
 
 log "invoking claude..."
 
-# Playwright's mcp__plugin_playwright_playwright__* tools from the Jobs
-# original are dropped: agent/mcp.json documents Playwright as a fallback
-# only and does not configure it as a live server, because agent/Dockerfile
-# deliberately installs no browser (see its BROWSER STRATEGY comment) - a
-# Playwright entry here could not launch anything.
-# Skip trust/permission prompts: this is an unattended run with stdin at /dev/null,
-# so any prompt EOF-kills the run. The allow-list (not this flag) is the actual
-# boundary on what the agent may do — the flag just lets the run proceed uninterrupted.
+# The browser is granted as the whole server, `mcp__browser`, rather than as an
+# enumerated tool list. Every other grant below is a single named tool, and the
+# asymmetry is deliberate: the truthcv tools are OUR nine, fixed by
+# agenttools/server.py and changing only when we change it, so naming them keeps
+# the blast radius of a new tool at zero until it is granted on purpose. The
+# browser server is upstream @playwright/mcp (browser/Dockerfile), whose tool set
+# - browser_navigate, browser_click, browser_type, browser_file_upload,
+# browser_snapshot, browser_take_screenshot and the rest - is theirs to rename or
+# extend on any version bump; pinning a list here would silently disable whichever
+# tool got renamed, mid-run, in an unattended job. Containment for the browser
+# comes from the container instead: no host filesystem, no host network, its
+# profile on its own volume, and the app data volume mounted read-only.
+#
+# (Superseding the Jobs original's mcp__plugin_playwright_playwright__* grants,
+# which were dropped when this image had no browser at all.)
+#
+# --dangerously-skip-permissions: this is an unattended run with stdin at
+# /dev/null, so any trust or permission prompt would EOF and kill the run. The
+# --allowedTools list above, not an interactive prompt, is the actual boundary on
+# what the agent may do; the flag only stops the run blocking on a question no
+# one is there to answer.
 "$CLAUDE_BIN" -p "$PROMPT" "${MODEL_ARGS[@]}" \
   --mcp-config "$MCP_CONFIG" \
   --allowedTools \
@@ -209,9 +234,7 @@ log "invoking claude..."
     "mcp__truthcv__record_company_board" \
     "mcp__truthcv__get_job_profiles" \
     "mcp__truthcv__recommend_salary" \
-    "mcp__interceptor__interceptor_browser" \
-    "mcp__interceptor__interceptor_read" \
-    "mcp__interceptor__interceptor_local" \
+    "mcp__browser" \
   --dangerously-skip-permissions \
   </dev/null >>"$RUN_LOG" 2>&1
 

@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-13 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+14 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -17,7 +17,7 @@ React single-page wizard (web/) that walks the user through Upload LinkedIn PDF 
 
 FastAPI backend (api/) that serves the static React bundle and exposes the wizard REST routes. Orchestrates the pipeline: PDF upload → truth extraction → job tailoring → guardrail validation → render/download. Configured entirely from env / .env at container start (no secrets entered in the UI).
 
-**Tech:** Python, FastAPI, Uvicorn, mcp (Model Context Protocol Python SDK, FastMCP streamable-HTTP)
+**Tech:** Python, FastAPI, Uvicorn, mcp (Model Context Protocol Python SDK, streamable-HTTP)
 <!-- generated:end comp:api -->
 
 <!-- generated:start comp:truth-store -->
@@ -121,3 +121,6 @@ Owns the user's job-application records (applications/) persisted as application
 **Tech:** Python, PyYAML/JSON
 <!-- generated:end comp:application-tracker -->
 
+<!-- generated:start comp:browser-runtime -->
+## Agent Browser (`browser-runtime`, CUSTOM)
+<!-- generated:end comp:browser-runtime -->
