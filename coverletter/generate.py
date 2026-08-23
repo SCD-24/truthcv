@@ -14,6 +14,7 @@ from typing import Any
 
 from guardrail import Scope, validate
 from providers.base import LLMProvider
+from truth.answers import Answers
 from truth.model import Truth
 from truth.store import data_dir
 
@@ -64,8 +65,12 @@ _SCHEMA: dict[str, Any] = {
 
 
 def _all_values(truth: Truth) -> list[str]:
-    """Every factual value in the truth — the letter may reference any of them
-    (a cover letter weaves the whole career, so validation is global here)."""
+    """Every factual value in the truth — the letter may reference any of them.
+
+    Includes experiences, education, skills, and the profile header (name, email,
+    phone, location, links, summary). A cover letter weaves the whole career, so
+    validation is global here. Falsy values are dropped.
+    """
     vals: list[str] = []
     for e in truth.experiences:
         vals += [e.role, e.company, e.start, e.end]
@@ -73,7 +78,46 @@ def _all_values(truth: Truth) -> list[str]:
     for ed in truth.education:
         vals += [ed.degree, ed.school, ed.start, ed.end]
     vals += [s.value for s in truth.skills]
+    # Profile header values
+    profile = truth.profile
+    vals += [profile.name, profile.email, profile.phone, profile.location, profile.summary]
+    for link in profile.links:
+        vals += [link.label, link.url]
     return [v for v in vals if v]
+
+
+def _answer_values(answers: Answers | None) -> list[str]:
+    """Every non-blank text field from the screening answers.
+
+    Excludes canonical_cv_asset_id (an internal asset UUID, never a claim).
+    Returns [] for None.
+    """
+    if not answers:
+        return []
+    # Every field except canonical_cv_asset_id
+    fields = [
+        answers.phone,
+        answers.work_authorisation,
+        answers.notice_period,
+        answers.location_preference,
+        answers.name,
+        answers.email,
+        answers.linkedin,
+        answers.github,
+        answers.website,
+        answers.requires_sponsorship,
+        answers.authorized_non_german_country,
+        answers.languages,
+        answers.highest_relevant_degree,
+        answers.other_degree,
+        answers.cs_degree,
+        answers.gpa,
+        answers.gender,
+        answers.years_of_experience,
+        answers.current_role,
+        answers.how_did_you_hear,
+    ]
+    return [v for v in fields if v]
 
 
 # Stable scope id for the letter's single validation scope. Callers derive a
@@ -91,6 +135,7 @@ def build_letter(
     approved_texts: set[str] | None = None,
     denied_texts: set[str] | None = None,
     paragraphs: list[dict] | None = None,
+    answers: Answers | None = None,
 ) -> dict:
     """Generate a guardrailed cover letter.
 
@@ -107,13 +152,17 @@ def build_letter(
     prior attempt (see load_letter_draft) so an approve/decline round-trip
     re-validates the SAME letter the user reviewed. When omitted, the letter is
     generated fresh and cached for the next round-trip.
+
+    ``answers`` (optional screening answers) are passed to the guardrail as
+    allowed claim sources for THIS generation only (never written to truth),
+    along with profile-header values and approved_texts.
     """
     if paragraphs is None:
-        paragraphs = _generate_paragraphs(posting, tone, length, truth, provider)
+        paragraphs = _generate_paragraphs(posting, tone, length, truth, provider, answers)
         save_letter_draft(paragraphs)
 
     shown = _excise_denied(paragraphs, denied_texts or set())
-    scope = _letter_scope(shown, truth, approved_texts or set(), denied_texts or set())
+    scope = _letter_scope(shown, truth, approved_texts or set(), denied_texts or set(), answers)
     check = validate([scope])
     if not check.ok:
         return {
@@ -128,10 +177,15 @@ def build_letter(
 
 
 def _generate_paragraphs(
-    posting: str, tone: str, length: str, truth: Truth, provider: LLMProvider
+    posting: str,
+    tone: str,
+    length: str,
+    truth: Truth,
+    provider: LLMProvider,
+    answers: Answers | None = None,
 ) -> list[dict]:
     """Ask the provider for the letter's paragraphs + tagged factual claims."""
-    user = f"POSTING:\n{posting}\n\nCANDIDATE FACTS:\n{prompts.cover_letter_facts_block(truth)}"
+    user = f"POSTING:\n{posting}\n\nCANDIDATE FACTS:\n{prompts.cover_letter_facts_block(truth, answers)}"
     result = provider.extract_json(
         prompts.cover_letter_system(tone, length),
         [{"role": "user", "content": user}],
@@ -161,16 +215,19 @@ def _letter_scope(
     truth: Truth,
     approved_texts: set[str],
     denied_texts: set[str],
+    answers: Answers | None = None,
 ) -> Scope:
     """The single validation scope for the letter's factual claims.
 
     ``paragraphs`` is expected to already be the surviving set (post
     ``_excise_denied``), so validation only ever runs over — and any
     resulting ``blocked_claims`` only ever name — claims that will actually
-    be emitted. Approved claim texts are appended to `allowed` (traceable for
-    THIS generation only, no truth write); the ``denied_texts`` filter here is
-    a defensive no-op given already-excised input, kept in case this is ever
-    called with un-excised paragraphs.
+    be emitted. Approved claim texts and answer values are appended to
+    `allowed` (traceable for THIS generation only, no truth write); profile-
+    header and screening-answer values are generation-scoped allowed sources
+    never persisted to truth. The ``denied_texts`` filter here is a defensive
+    no-op given already-excised input, kept in case this is ever called with
+    un-excised paragraphs.
     """
     claims = [
         c
@@ -178,5 +235,7 @@ def _letter_scope(
         for c in para.get("claims", [])
         if c and c not in denied_texts
     ]
-    allowed = _all_values(truth) + [t for t in approved_texts if t]
+    allowed = (
+        _all_values(truth) + _answer_values(answers) + [t for t in approved_texts if t]
+    )
     return Scope(id=LETTER_SCOPE_ID, texts=claims, allowed=allowed)

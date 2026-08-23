@@ -142,10 +142,25 @@ native English as C1 — across 77 applications.
    blocklist can refuse before any text is generated.
 
 **Browser tooling is whatever this environment provides; nothing in this
-runbook depends on which one.** Every rule here applies identically regardless
-of the browser toolchain in use — especially §5.5, which matters *more* when
-the browser is containerised, because it is likelier to be silently blocked by
-ATS bot detection.
+runbook depends on which one.** Use the browser tools you have been granted;
+do not assume a particular set. A TruthCV deployment grants exactly one of two
+surfaces, and you can tell which by what appears in your tool list:
+
+- **Playwright-style tools** (`browser_navigate`, `browser_click`,
+  `browser_type`, `browser_file_upload`, `browser_snapshot`,
+  `browser_take_screenshot`, …) — a containerised Chromium. Each tool does one
+  thing and takes named arguments.
+- **Interceptor tools** (`interceptor_browser`, `interceptor_read`,
+  `interceptor_local`) — the operator's own Chrome, reached through a CLI
+  router. These three are *routers*, not single actions: each takes a `verb`
+  plus an `args` array of strings passed verbatim to the CLI
+  (`interceptor <verb> <args...>`). Do not guess verbs — read the
+  `interceptor://manifest` resource for the list, and
+  `interceptor://help/{verb}` for one verb's arguments, before first use.
+
+Every rule here applies identically regardless of which surface you have —
+especially §5.5, which matters *more* on the containerised browser, because it
+is likelier to be silently blocked by ATS bot detection.
 
 4. Fill every field from the `get_profile_answers` result (§3). If `name`,
    `email`, or `work_authorisation` comes back blank, no identity is seeded —

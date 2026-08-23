@@ -28,14 +28,16 @@ RUN_DAYS="$RUN_DAYS_DEFAULT"
 
 log() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 
-# Chrome is deliberately not containerised here: the agent drives the
-# operator's real, already-logged-in browser on the HOST over a bind-mounted unix
-# socket (see agent/Dockerfile's BROWSER STRATEGY note and agent/mcp.json).
-# There is no in-container Xvfb/Chrome to start - do not add one back.
+# Chrome is deliberately not in THIS container: the browser is the sibling
+# `browser` compose service (headful Chromium under Xvfb served by
+# @playwright/mcp), which this agent drives over in-network HTTP MCP at
+# ${BROWSER_MCP_URL} - see agent/Dockerfile's BROWSER STRATEGY note and
+# agent/mcp.json. There is no in-container Xvfb/Chrome to start - do not add
+# one back.
 
 # --- Preconditions -----------------------------------------------------------
-# Per-run preconditions (claude CLI, runbook readable, interceptor socket
-# present, TRUTHCV_MCP_URL set) live in daily-apply.sh and are checked there,
+# Per-run preconditions (claude CLI, runbook readable, jq present, browser MCP
+# reachable, TRUTHCV_MCP_URL set) live in daily-apply.sh and are checked there,
 # every run - do not duplicate them here. This preflight only checks what is
 # worth failing fast at container START, before the first sleep.
 validate_run_at() {
@@ -59,6 +61,31 @@ preflight() {
     log "credentials will be fetched from app at run time"
   fi
   [[ -x "$DAILY_APPLY" ]] || { log "ABORT: $DAILY_APPLY missing or not executable"; ok=1; }
+
+  # Browser-driver preconditions, checked at BOOT so a broken mount is reported
+  # now rather than at the first scheduled run - which may be hours away, and
+  # unattended when it arrives.
+  #
+  # ONLY the selected driver is checked. Under the default `browser` driver
+  # nothing interceptor-related is mounted, by design (the bind mounts live in
+  # docker-compose.interceptor.yml), so checking for the binary unconditionally
+  # would refuse to start every default deployment. The `browser` service itself
+  # is not probed here: compose already gates startup on its healthcheck via
+  # depends_on: service_healthy, and agent/daily-apply.sh probes it per run.
+  local driver="${AGENT_BROWSER_DRIVER:-browser}"
+  case "$driver" in
+    browser)
+      : ;;
+    interceptor)
+      local interceptor_bin="${INTERCEPTOR_BIN:-/opt/interceptor/bin/interceptor}"
+      [[ -x "$interceptor_bin" ]] || { log "ABORT: AGENT_BROWSER_DRIVER=interceptor but no executable at $interceptor_bin - is docker-compose.interceptor.yml in the -f list, and is INTERCEPTOR_BIN_HOST correct?"; ok=1; }
+      ;;
+    *)
+      log "ABORT: unknown AGENT_BROWSER_DRIVER '$driver' - expected 'browser' or 'interceptor'"
+      ok=1
+      ;;
+  esac
+
   validate_run_at || ok=1
   return $ok
 }

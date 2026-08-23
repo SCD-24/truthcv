@@ -8,6 +8,7 @@ text (a cover letter weaves the full history, unlike the id-referenced CV).
 
 from __future__ import annotations
 
+from truth.answers import Answers
 from truth.model import Truth
 
 from .style import LETTER_STYLE
@@ -101,10 +102,79 @@ def cover_letter_system(tone: str, length: str) -> str:
     )
 
 
-def cover_letter_facts_block(truth: Truth) -> str:
-    """Render the candidate's whole career (experiences, education, skills) as the
-    plain-text CANDIDATE FACTS the letter may draw from."""
+def _profile_lines(profile) -> list[str]:
+    """Extract non-blank profile header fields for the facts block."""
+    lines = []
+    if profile.name:
+        lines.append(f"Name: {profile.name}")
+    if profile.location:
+        lines.append(f"Location: {profile.location}")
+    if profile.email:
+        lines.append(f"Email: {profile.email}")
+    if profile.phone:
+        lines.append(f"Phone: {profile.phone}")
+    for link in profile.links:
+        if link.label and link.url:
+            lines.append(f"{link.label}: {link.url}")
+    if profile.summary:
+        lines.append(f"Summary: {profile.summary}")
+    return lines
+
+
+def _answer_lines(answers: Answers | None) -> list[str]:
+    """Extract non-blank answer fields for the facts block.
+
+    Excludes canonical_cv_asset_id (internal asset UUID, not a claim).
+    """
+    if not answers:
+        return []
+    label_map = {
+        "name": "Name",
+        "email": "Email",
+        "linkedin": "LinkedIn",
+        "github": "GitHub",
+        "website": "Website",
+        "requires_sponsorship": "Requires sponsorship",
+        "authorized_non_german_country": "Authorised in a non-German country",
+        "languages": "Languages",
+        "highest_relevant_degree": "Highest relevant degree",
+        "other_degree": "Other degree",
+        "cs_degree": "CS degree",
+        "gpa": "GPA",
+        "gender": "Gender",
+        "years_of_experience": "Years of experience",
+        "current_role": "Current role",
+        "how_did_you_hear": "How did you hear about us",
+        "phone": "Phone",
+        "work_authorisation": "Work authorisation",
+        "notice_period": "Notice period",
+        "location_preference": "Location preference",
+    }
+    lines = []
+    for field_name in [
+        f.name for f in Answers.__dataclass_fields__.values()  # type: ignore
+    ]:
+        if field_name == "canonical_cv_asset_id":
+            continue
+        value = getattr(answers, field_name, "")
+        if value:
+            label = label_map.get(field_name, field_name.replace("_", " ").title())
+            lines.append(f"{label}: {value}")
+    return lines
+
+
+def cover_letter_facts_block(truth: Truth, answers: Answers | None = None) -> str:
+    """Render the candidate's whole career plus profile and screening answers.
+
+    The CANDIDATE FACTS the letter may draw from: experiences, education, skills,
+    profile header, and any supplied screening answers (name, email, location,
+    years of experience, etc). All facts are plain text, never fabricated.
+    """
     lines: list[str] = []
+    profile_lines = _profile_lines(truth.profile)
+    if profile_lines:
+        lines.append("Candidate profile:")
+        lines.extend(f"  {line}" for line in profile_lines)
     for e in truth.experiences:
         span = f"{e.start} to {e.end}" if e.start and e.end else (e.start or e.end)
         lines.append(
@@ -118,4 +188,6 @@ def cover_letter_facts_block(truth: Truth) -> str:
         lines.append(f"{ed.degree}, {ed.school} ({span})" if span else f"{ed.degree}, {ed.school}")
     if truth.skills:
         lines.append("Skills: " + ", ".join(s.value for s in truth.skills))
+    answer_lines = _answer_lines(answers)
+    lines.extend(answer_lines)
     return "\n".join(lines)

@@ -25,6 +25,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **POST** | `/api/cover-letter` | Generate a guardrail-truthful cover letter (tone, length). Returns {blocked, unverifiable, pdfUrl, docxUrl}; blocked if any factual claim fails truth validation. |
 | **GET** | `/api/profile` | Saved-profile status ({hasProfile}) so the wizard can offer "use saved profile" and skip re-upload. |
 | **GET** | `/api/download/{name}` | Download a rendered artifact (CV/cover-letter PDF or DOCX) by filename. |
+| **POST** | `/mcp` | MCP streamable-HTTP JSON-RPC 2.0 endpoint (initialize, notifications/initialized, tools/list, tools/call). This is the surface the agent container's claude CLI registers as mcp__truthcv__*; the plain-REST /mcp/tools routes are retained for external inspection. |
 | **GET** | `/api/settings` | Provider settings status (encryptionAvailable, activeProvider, model, *KeySet booleans, ollamaHost). Never returns raw secrets. |
 | **POST** | `/api/settings` | Save provider selection + API key/model/host; encrypts to ./data/secrets.enc via ENCRYPTION_KEY. Empty apiKey leaves the stored key unchanged. |
 | **POST** | `/api/settings/test` | Test connection: a tiny live provider call with saved/submitted credentials. Returns {ok, detail}. |

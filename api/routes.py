@@ -822,9 +822,13 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
 
     from coverletter import build_letter, load_letter_draft
     from render.cover_letter import render_letter_html
+    from truth.answers import load as load_answers
 
     approved_texts, denied_texts, paragraphs = _letter_approvals(body.approvals)
 
+    # The profile answers (Agents page) are handed to the writer as allowed
+    # claim sources for this generation only, never written to truth.
+    answers = load_answers()
     try:
         letter = build_letter(
             posting_file.read_text(encoding="utf-8"),
@@ -835,6 +839,7 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
             approved_texts=approved_texts,
             denied_texts=denied_texts,
             paragraphs=paragraphs,
+            answers=answers,
         )
     except ProviderError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
