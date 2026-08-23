@@ -36,7 +36,13 @@ def test_api_key_path(client):
     secretstore.set_connection("claude", {"apiKey": "sk-ant-agent", "authMode": "apikey"})
     modelrouting.save(Routing(agent=Route("claude", "claude-opus-4-8")))
     body = client.get("/api/agent/llm-credentials", headers=_hdr()).json()
-    assert body == {"authType": "api_key", "token": "sk-ant-agent", "model": "claude-opus-4-8"}
+    assert body == {
+        "authType": "api_key",
+        "token": "sk-ant-agent",
+        "model": "claude-opus-4-8",
+        # Empty for Anthropic itself: the CLI keeps its built-in endpoint.
+        "baseUrl": "",
+    }
 
 
 def test_oauth_path_uses_fresh_token(client, monkeypatch):
@@ -88,10 +94,31 @@ def test_nothing_configured_404(client):
 
 def test_response_shape_matches_agent_parser(client):
     # agent/agent-config.js's llm_credentials verb parses the 200 body by
-    # reading exactly these three keys, in this shape — a field renamed or
-    # dropped here breaks the agent's parser silently. This test is the seam
-    # guard between the two.
+    # reading exactly these keys, in this shape — a field renamed or dropped
+    # here breaks the agent's parser silently. This test is the seam guard
+    # between the two.
     secretstore.set_connection("claude", {"apiKey": "sk-ant-agent", "authMode": "apikey"})
     modelrouting.save(Routing(agent=Route("claude", "claude-opus-4-8")))
     body = client.get("/api/agent/llm-credentials", headers=_hdr()).json()
-    assert set(body.keys()) == {"authType", "token", "model"}
+    assert set(body.keys()) == {"authType", "token", "model", "baseUrl"}
+
+
+def test_openrouter_route_returns_anthropic_compat_base_url(client):
+    # The claude CLI appends /v1/messages to ANTHROPIC_BASE_URL, so the value
+    # handed to it must NOT already end in /v1 — that yields /api/v1/v1/messages
+    # and every request fails.
+    secretstore.set_connection("openrouter", {"apiKey": "sk-or-1"})
+    modelrouting.save(Routing(agent=Route("openrouter", "stealth/ox-alpha")))
+    body = client.get("/api/agent/llm-credentials", headers=_hdr()).json()
+    assert body == {
+        "authType": "api_key",
+        "token": "sk-or-1",
+        "model": "stealth/ox-alpha",
+        "baseUrl": "https://openrouter.ai/api",
+    }
+    assert not body["baseUrl"].endswith("/v1")
+
+
+def test_openrouter_route_without_key_404(client):
+    modelrouting.save(Routing(agent=Route("openrouter", "stealth/ox-alpha")))
+    assert client.get("/api/agent/llm-credentials", headers=_hdr()).status_code == 404

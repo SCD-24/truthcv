@@ -14,7 +14,7 @@ from mcp.server import Server
 from mcp.server.transport_security import TransportSecuritySettings
 
 from agenttools.server import router as mcp_router
-from agenttools.mcp_app import _TOOL_REGISTRY
+from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
 from truth.store import data_dir
 
 from .config import cors_origins, port, static_dir
@@ -47,20 +47,14 @@ async def _handle_list_tools(ctx, params) -> types.ListToolsResult:
     The SDK dispatches request handlers as ``handler(ctx, params)``; both
     arguments are unused here because the tool list is static.
     """
-    tools = []
-    for name, (fn, description) in _TOOL_REGISTRY.items():
-        input_schema = {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        }
-        tools.append(
-            types.Tool(
-                name=name,
-                description=description,
-                inputSchema=input_schema,
-            )
+    tools = [
+        types.Tool(
+            name=name,
+            description=description,
+            inputSchema=_input_schema(fn),
         )
+        for name, (fn, description) in _TOOL_REGISTRY.items()
+    ]
     return types.ListToolsResult(tools=tools)
 
 async def _handle_call_tool(ctx, params) -> types.CallToolResult:
@@ -102,8 +96,17 @@ async def _handle_call_tool(ctx, params) -> types.CallToolResult:
             isError=True,
         )
 
-_mcp_server.add_request_handler("tools/list", types.ListToolsRequest, _handle_list_tools)
-_mcp_server.add_request_handler("tools/call", types.CallToolRequest, _handle_call_tool)
+# The SDK validates the incoming `params` member against the type given here
+# and hands the handler the result, so these must be the *params* models.
+# Passing the whole request model (CallToolRequest) rejects every call with
+# -32602 before the handler is reached, because the payload under `params`
+# carries no nested `params` member for it to bind.
+_mcp_server.add_request_handler(
+    "tools/list", types.PaginatedRequestParams, _handle_list_tools
+)
+_mcp_server.add_request_handler(
+    "tools/call", types.CallToolRequestParams, _handle_call_tool
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

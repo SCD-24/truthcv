@@ -120,19 +120,26 @@ afterEach(() => {
 });
 
 describe("AgentsPage model section", () => {
-  it("lists only claude among mixed connections", async () => {
+  it("lists the Anthropic-compatible connections and no others", async () => {
+    // The agent is the `claude` CLI, so a connection is only offered here if
+    // it serves the Anthropic Messages API. OpenRouter does (reached via
+    // ANTHROPIC_BASE_URL); codex and ollama are OpenAI-shaped only.
     const connections: ConnectionList = {
       encryptionAvailable: true,
       connections: [
         makeStatus({ provider: "claude", label: "Claude", subscriptionConnected: true }),
+        makeStatus({ provider: "openrouter", label: "OpenRouter", apiKeyConnected: true }),
         makeStatus({ provider: "codex", label: "Codex", subscriptionConnected: true }),
+        makeStatus({ provider: "ollama", label: "Ollama", apiKeyConnected: true }),
       ],
     };
     await renderLoaded(connections, makeRouting());
 
     fireEvent.mouseDown(screen.getByLabelText(/connection/i));
     expect(screen.getByRole("option", { name: "Claude" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "OpenRouter" })).toBeTruthy();
     expect(screen.queryByRole("option", { name: "Codex" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Ollama" })).toBeNull();
   });
 
   it("Save calls updateRouting with {agent: {connection, model}}", async () => {

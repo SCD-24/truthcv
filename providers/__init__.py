@@ -21,6 +21,13 @@ _cache: dict[tuple[str, str | None, str], LLMProvider] = {}
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
+# The same host, one path segment shorter, and deliberately so. The OpenAI SDK
+# is given a base that already includes /v1 and appends "/chat/completions";
+# the claude CLI is given ANTHROPIC_BASE_URL and appends "/v1/messages" itself,
+# so handing it the /v1 form yields .../api/v1/v1/messages and every request
+# fails. Do not "fix" these to match.
+ANTHROPIC_COMPAT_OPENROUTER_BASE_URL = "https://openrouter.ai/api"
+
 
 def build_connection_provider(
     card: str, model: str | None, effort: str | None = None

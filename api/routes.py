@@ -43,7 +43,12 @@ from agentconfig import store as agent_config_store
 from connections import catalog
 from connections.auth.claude import AuthError, get_valid_access_token
 from connections.auth import claude as claude_auth
-from providers import OPENROUTER_BASE_URL, build_connection_provider, reset_provider
+from providers import (
+    ANTHROPIC_COMPAT_OPENROUTER_BASE_URL,
+    OPENROUTER_BASE_URL,
+    build_connection_provider,
+    reset_provider,
+)
 from providers.base import supports_effort_levels
 from screening import store as screening_store
 from screening.cooldown import cooldown as check_cooldown
@@ -759,9 +764,28 @@ def get_agent_llm_credentials(x_agent_token: str = Header(default="")) -> AgentL
 
     route = modelrouting.load().agent
     card = route.connection if route else "claude"
-    if card != "claude":
-        raise HTTPException(status_code=409, detail="Agent supports only the Claude connection.")
     model = route.model if route else ""
+
+    # The agent IS the `claude` CLI, which speaks the Anthropic Messages API
+    # and nothing else. OpenRouter serves that API too, so the CLI can be
+    # pointed at it with ANTHROPIC_BASE_URL. Cards that only offer an
+    # OpenAI-shaped surface (codex, ollama) have no path here.
+    if card == "openrouter":
+        api_key = secretstore.get_connection("openrouter").get("apiKey")
+        if not api_key:
+            raise HTTPException(status_code=404)
+        return AgentLlmCredentials(
+            auth_type="api_key",
+            token=api_key,
+            model=model,
+            base_url=ANTHROPIC_COMPAT_OPENROUTER_BASE_URL,
+        )
+    if card != "claude":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Agent cannot run on the '{card}' connection: it does not "
+            "serve the Anthropic Messages API the claude CLI requires.",
+        )
 
     conn = secretstore.get_connection("claude")
     oauth = conn.get("oauth") or {}
