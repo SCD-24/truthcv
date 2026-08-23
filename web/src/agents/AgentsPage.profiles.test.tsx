@@ -17,6 +17,12 @@ import { AgentsPage } from "./AgentsPage";
  * module directly and render with @testing-library/react + jsdom. */
 vi.mock("../api/client", () => ({
   getAgentConfig: vi.fn(),
+  // RunNowSection polls this on mount; default to idle so sibling sections'
+  // tests don't have to know about it.
+  getAgentStatus: vi
+    .fn()
+    .mockResolvedValue({ running: false, lastStartedAt: null, lastFinishedAt: null, lastExitCode: null }),
+  triggerAgentRun: vi.fn(),
   getProfileAnswers: vi.fn(),
   getRouting: vi.fn(),
   listConnections: vi.fn(),

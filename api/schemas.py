@@ -672,6 +672,22 @@ class AgentLlmCredentials(_Camel):
     model: str = ""
 
 
+class AgentStatus(_Camel):
+    """GET /api/agent/status — forwarded from the supervisor.js control server."""
+
+    running: bool
+    last_started_at: str | None = None
+    last_finished_at: str | None = None
+    last_exit_code: int | None = None
+
+
+class AgentRunResult(_Camel):
+    """POST /api/agent/run — forwarded from the supervisor.js control server."""
+
+    started: bool
+    running: bool
+
+
 class RoutingUpdate(_Camel):
     """Partial PUT /api/routing body — every field optional.
 

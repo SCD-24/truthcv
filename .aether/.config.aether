@@ -84,8 +84,7 @@
               "techs": [
                 "Python",
                 "FastAPI",
-                "Uvicorn",
-                "mcp (Model Context Protocol Python SDK, streamable-HTTP)"
+                "Uvicorn"
               ]
             },
             "h": 200,
@@ -148,11 +147,6 @@
                   "desc": "Download a rendered artifact (CV/cover-letter PDF or DOCX) by filename.",
                   "method": "GET",
                   "path": "/api/download/{name}"
-                },
-                {
-                  "desc": "MCP streamable-HTTP JSON-RPC 2.0 endpoint (initialize, notifications/initialized, tools/list, tools/call). This is the surface the agent container's claude CLI registers as mcp__truthcv__*; the plain-REST /mcp/tools routes are retained for external inspection.",
-                  "method": "POST",
-                  "path": "/mcp"
                 }
               ]
             },
@@ -1064,14 +1058,6 @@
       "id": "application-tracker",
       "name": "Application Tracker",
       "type": "backend"
-    },
-    {
-      "canvas": {
-        "widgets": []
-      },
-      "id": "browser-runtime",
-      "name": "Agent Browser",
-      "type": "custom"
     }
   ],
   "connections": [
@@ -1204,11 +1190,6 @@
       "from": "application-tracker",
       "protocol": "in-process",
       "to": "renderer"
-    },
-    {
-      "from": "browser-runtime",
-      "protocol": "file I/O (read-only)",
-      "to": "truth-data-volume"
     }
   ],
   "definitions": [
@@ -1312,8 +1293,7 @@
         "cover-letter-engine",
         "prompt-store",
         "secret-store",
-        "application-tracker",
-        "browser-runtime"
+        "application-tracker"
       ],
       "name": "TruthCV Container (single Docker image)",
       "w": 1861.8301559792023,
@@ -1332,10 +1312,6 @@
     "application-tracker": {
       "x": 76.80069324090118,
       "y": 306.2287694974003
-    },
-    "browser-runtime": {
-      "x": 200,
-      "y": 200
     },
     "cover-letter-engine": {
       "x": 691.9341421143848,
