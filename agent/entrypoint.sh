@@ -152,17 +152,7 @@ if [[ "${RUN_ONCE:-0}" == "1" ]]; then
   exit $?
 fi
 
-while true; do
-  refresh_schedule
-  if ! secs=$(seconds_until_next_slot); then
-    log "ERROR: could not compute next slot from RUN_AT=$RUN_AT RUN_DAYS=$RUN_DAYS"
-    exit 1
-  fi
-  if (( secs > 300 )); then
-    sleep 300
-    continue          # re-fetch and recompute; the slot may have moved
-  fi
-  log "next run in ${secs}s ($(date -d "@$(( $(date +%s) + secs ))" '+%a %Y-%m-%d %H:%M %Z'))"
-  sleep "$secs"
-  do_run || log "run failed; continuing to next slot"
-done
+# Hand scheduling and the control-server HTTP surface over to supervisor.js.
+# All environment variables are inherited; supervisor.js mirrors the
+# seconds_until_next_slot / refresh_schedule logic from this script.
+exec node /app/agent/supervisor.js

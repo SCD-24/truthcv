@@ -8,7 +8,10 @@ the unverifiable tokens.
 from __future__ import annotations
 
 import hmac
+import json
 import os
+import urllib.error
+import urllib.request
 
 from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -49,6 +52,8 @@ from .schemas import (
     AgentConfigModel,
     AgentConfigUpdate,
     AgentLlmCredentials,
+    AgentRunResult,
+    AgentStatus,
     AnswersModel,
     AnswersUpdate,
     ApiKeyRequest,
@@ -773,6 +778,63 @@ def get_agent_llm_credentials(x_agent_token: str = Header(default="")) -> AgentL
         return AgentLlmCredentials(auth_type="api_key", token=api_key, model=model)
 
     raise HTTPException(status_code=404)
+
+
+def _agent_control_url(path: str) -> str:
+    """Build the supervisor.js control URL from env, defaulting port 9099."""
+    port = os.environ.get("AGENT_CONTROL_PORT", "9099")
+    return f"http://agent:{port}{path}"
+
+
+def _forward_to_supervisor(path: str, method: str = "GET") -> dict:
+    """Forward a request to the agent supervisor.js control server.
+
+    Raises HTTPException(503) when the agent is unreachable.
+    """
+    token = os.environ.get("AGENT_API_TOKEN", "")
+    url = _agent_control_url(path)
+    req = urllib.request.Request(
+        url,
+        method=method,
+        headers={"X-Agent-Token": token},
+        data=b"" if method == "POST" else None,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=503, detail="Agent service unreachable") from exc
+
+
+@router.get("/agent/status", response_model=AgentStatus)
+def get_agent_status() -> AgentStatus:
+    """Return the agent supervisor's running/idle state.
+
+    Forwards to supervisor.js GET /status over the compose network.
+    Returns 503 when the agent container is unreachable.
+    """
+    data = _forward_to_supervisor("/status", method="GET")
+    return AgentStatus(
+        running=data.get("running", False),
+        last_started_at=data.get("lastStartedAt"),
+        last_finished_at=data.get("lastFinishedAt"),
+        last_exit_code=data.get("lastExitCode"),
+    )
+
+
+@router.post("/agent/run", response_model=AgentRunResult)
+def post_agent_run() -> AgentRunResult:
+    """Trigger an immediate agent run via the supervisor control server.
+
+    Fire-and-forget: returns as soon as the supervisor acknowledges the
+    trigger — does NOT wait for the run to complete. Returns 503 when the
+    agent container is unreachable.
+    """
+    data = _forward_to_supervisor("/run", method="POST")
+    return AgentRunResult(
+        started=data.get("started", False),
+        running=data.get("running", False),
+    )
 
 
 def _letter_approvals(

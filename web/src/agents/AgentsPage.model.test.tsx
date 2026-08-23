@@ -1,25 +1,29 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, act } from "@testing-library/react";
 import {
   getAgentConfig,
+  getAgentStatus,
   getProfileAnswers,
   getRouting,
   listConnectionModels,
   listConnections,
+  triggerAgentRun,
   updateRouting,
 } from "../api/client";
-import type { AgentConfig, ConnectionList, ConnectionStatus, ProfileAnswers, Routing } from "../api/types";
+import type { AgentConfig, AgentStatus, ConnectionList, ConnectionStatus, ProfileAnswers, Routing } from "../api/types";
 import { AgentsPage } from "./AgentsPage";
 
 /** Mirrors AccountsSection.test.tsx's boundary choice — mock the API client
  * module directly and render with @testing-library/react + jsdom. */
 vi.mock("../api/client", () => ({
   getAgentConfig: vi.fn(),
+  getAgentStatus: vi.fn(),
   getProfileAnswers: vi.fn(),
   getRouting: vi.fn(),
   listConnections: vi.fn(),
   listConnectionModels: vi.fn(),
+  triggerAgentRun: vi.fn(),
   updateAgentConfig: vi.fn(),
   saveProfileAnswers: vi.fn(),
   updateRouting: vi.fn(),
@@ -73,8 +77,19 @@ function makeRouting(overrides: Partial<Routing> = {}): Routing {
   };
 }
 
-async function renderLoaded(connections: ConnectionList, routing: Routing) {
-  vi.mocked(getAgentConfig).mockResolvedValue(makeConfig());
+function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
+  return {
+    running: false,
+    lastStartedAt: null,
+    lastFinishedAt: null,
+    lastExitCode: null,
+    ...overrides,
+  };
+}
+
+async function renderLoaded(connections: ConnectionList, routing: Routing, agentConfig?: Partial<AgentConfig>) {
+  vi.mocked(getAgentConfig).mockResolvedValue(makeConfig(agentConfig));
+  vi.mocked(getAgentStatus).mockResolvedValue(makeAgentStatus());
   vi.mocked(getProfileAnswers).mockResolvedValue(makeAnswers());
   vi.mocked(getRouting).mockResolvedValue(routing);
   vi.mocked(listConnections).mockResolvedValue(connections);
@@ -153,5 +168,71 @@ describe("AgentsPage model section", () => {
     expect(screen.getByRole("heading", { name: "Schedule" })).toBeTruthy();
     expect(await screen.findByText("routing unavailable")).toBeTruthy();
     expect(screen.queryByLabelText(/connection/i)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RunNowSection
+// ---------------------------------------------------------------------------
+
+describe("AgentsPage RunNowSection", () => {
+  const noConnections: ConnectionList = { encryptionAvailable: false, connections: [] };
+
+  it("(1) idle state renders an enabled Run now button when agent is enabled", async () => {
+    vi.mocked(getAgentStatus).mockResolvedValue(makeAgentStatus({ running: false }));
+    await renderLoaded(noConnections, makeRouting(), { enabled: true });
+
+    const btn = await screen.findByRole("button", { name: /run agent now/i });
+    expect(btn).toBeTruthy();
+    expect(btn.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("(2) clicking Run now calls triggerAgentRun and shows spinner while running:true", async () => {
+    vi.mocked(getAgentStatus).mockResolvedValue(makeAgentStatus({ running: false }));
+    vi.mocked(triggerAgentRun).mockResolvedValue({ started: true, running: true });
+    await renderLoaded(noConnections, makeRouting(), { enabled: true });
+
+    const btn = await screen.findByRole("button", { name: /run agent now/i });
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+
+    expect(triggerAgentRun).toHaveBeenCalled();
+    // Button should now show running state (disabled)
+    const updatedBtn = screen.getByRole("button", { name: /run agent now/i });
+    expect(updatedBtn.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("(3) 503 from triggerAgentRun renders the inline unreachable message", async () => {
+    vi.mocked(getAgentStatus).mockResolvedValue(makeAgentStatus({ running: false }));
+    vi.mocked(triggerAgentRun).mockRejectedValue(new Error("Agent service unreachable"));
+    await renderLoaded(noConnections, makeRouting(), { enabled: true });
+
+    const btn = await screen.findByRole("button", { name: /run agent now/i });
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+
+    expect(await screen.findByText("Agent service unreachable")).toBeTruthy();
+  });
+
+  it("(4) interval is cleared after unmount (no timer leak)", async () => {
+    // Set up all mocks BEFORE rendering so effects resolve correctly
+    vi.mocked(getAgentConfig).mockResolvedValue(makeConfig({ enabled: true }));
+    vi.mocked(getAgentStatus).mockResolvedValue(makeAgentStatus({ running: false }));
+    vi.mocked(getProfileAnswers).mockResolvedValue(makeAnswers());
+    vi.mocked(getRouting).mockRejectedValue(new Error("routing n/a"));
+    vi.mocked(listConnections).mockResolvedValue(noConnections);
+
+    const clearSpy = vi.spyOn(globalThis, "clearInterval");
+
+    const { unmount } = render(<AgentsPage onBack={vi.fn()} />);
+
+    // Wait for the initial getAgentStatus call (and thus the setPoll setInterval) to resolve
+    await screen.findByRole("button", { name: /run agent now/i });
+
+    unmount();
+    expect(clearSpy).toHaveBeenCalled();
+    clearSpy.mockRestore();
   });
 });

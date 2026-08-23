@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Paper from "@mui/material/Paper";
@@ -17,10 +17,12 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Chip from "@mui/material/Chip";
 import {
   getAgentConfig,
+  getAgentStatus,
   getProfileAnswers,
   getRouting,
   listConnections,
   saveProfileAnswers,
+  triggerAgentRun,
   updateAgentConfig,
   updateRouting,
 } from "../api/client";
@@ -29,6 +31,7 @@ import { ModelRoutePicker } from "../settings/ModelRoutePicker";
 import { isValidRunTime, WEEKDAYS } from "./schedule";
 import type {
   AgentConfig,
+  AgentStatus,
   ConnectionStatus,
   JobProfile,
   ProfileAnswers,
@@ -160,6 +163,7 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
             config={config}
             onChange={(updater) => setConfig((cur) => (cur ? updater(cur) : cur))}
           />
+          <RunNowSection agentEnabled={config.enabled} />
           {routing ? (
             <ModelSection connections={connections} routing={routing} onSaved={setRouting} />
           ) : (
@@ -176,6 +180,145 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
         </Stack>
       ) : null}
     </Box>
+  );
+}
+
+/** Polling interval (ms) for the run-now status poller in idle state. */
+const STATUS_POLL_IDLE_MS = 10_000;
+/** Faster polling interval used while a run is active or was just triggered. */
+const STATUS_POLL_ACTIVE_MS = 2_000;
+
+/**
+ * Run now control with live running/idle status.
+ *
+ * Polls GET /api/agent/status every 10 s in idle state, every 2 s while a run
+ * is active. Uses a ref to track the current interval so that pace changes
+ * (active → idle) never leak an interval. Clears on unmount. Inline 503 error
+ * rather than a global alert — the agent container may simply be stopped.
+ */
+function RunNowSection({ agentEnabled }: { agentEnabled: boolean }) {
+  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+  const [triggering, setTriggering] = useState(false);
+  const [unreachable, setUnreachable] = useState<string | null>(null);
+
+  // Ref always holds the *current* active interval ID so the cleanup function
+  // clears whichever interval is live at unmount time, including any that were
+  // started by pace changes inside the poll callback.
+  const pollIdRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  /** Replace the current poll with one at a new interval. */
+  function setPoll(intervalMs: number) {
+    if (pollIdRef.current != null) clearInterval(pollIdRef.current);
+    pollIdRef.current = setInterval(() => {
+      getAgentStatus()
+        .then((s) => {
+          setAgentStatus(s);
+          setUnreachable(null);
+          // Slow down once the run finishes
+          if (!s.running && intervalMs === STATUS_POLL_ACTIVE_MS) {
+            setPoll(STATUS_POLL_IDLE_MS);
+          }
+        })
+        .catch((e: unknown) => {
+          setUnreachable(e instanceof Error ? e.message : "Agent service unreachable");
+        });
+    }, intervalMs);
+  }
+
+  useEffect(() => {
+    let alive = true;
+
+    // Kick off an immediate status fetch, then start the poller
+    getAgentStatus()
+      .then((s) => {
+        if (!alive) return;
+        setAgentStatus(s);
+        setUnreachable(null);
+        setPoll(s.running ? STATUS_POLL_ACTIVE_MS : STATUS_POLL_IDLE_MS);
+      })
+      .catch((e: unknown) => {
+        if (!alive) return;
+        setUnreachable(e instanceof Error ? e.message : "Agent service unreachable");
+        // Keep polling so we recover when the container comes back up
+        setPoll(STATUS_POLL_IDLE_MS);
+      });
+
+    return () => {
+      alive = false;
+      if (pollIdRef.current != null) clearInterval(pollIdRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const running = agentStatus?.running ?? false;
+  const buttonDisabled = !agentEnabled || triggering || running;
+
+  async function handleRunNow() {
+    setTriggering(true);
+    setUnreachable(null);
+    try {
+      const result = await triggerAgentRun();
+      if (result.running) {
+        setAgentStatus((prev) =>
+          prev
+            ? { ...prev, running: true }
+            : { running: true, lastStartedAt: null, lastFinishedAt: null, lastExitCode: null },
+        );
+        // Poll faster while the run is active
+        setPoll(STATUS_POLL_ACTIVE_MS);
+      }
+    } catch (e: unknown) {
+      setUnreachable(e instanceof Error ? e.message : "Agent service unreachable");
+    } finally {
+      setTriggering(false);
+    }
+  }
+
+  return (
+    <Section
+      title="Run now"
+      description="Trigger an immediate agent run outside the scheduled slots."
+    >
+      <Stack direction="row" spacing={2} alignItems="center">
+        {agentEnabled ? (
+          <Button
+            variant="outlined"
+            onClick={handleRunNow}
+            disabled={buttonDisabled}
+            aria-label="Run agent now"
+          >
+            {(triggering || running) && <ButtonSpinner />}
+            {running ? "Running…" : triggering ? "Starting…" : "Run now"}
+          </Button>
+        ) : (
+          <Button variant="outlined" disabled aria-label="Run agent now">
+            Run now
+          </Button>
+        )}
+        {agentStatus && !running && agentStatus.lastFinishedAt && (
+          <Typography variant="body2" color="text.secondary">
+            Last run finished at{" "}
+            {new Date(agentStatus.lastFinishedAt).toLocaleString(undefined, {
+              dateStyle: "short",
+              timeStyle: "short",
+            })}
+            {agentStatus.lastExitCode !== null && agentStatus.lastExitCode !== 0 && (
+              <> &mdash; exit&nbsp;{agentStatus.lastExitCode}</>
+            )}
+          </Typography>
+        )}
+      </Stack>
+      {!agentEnabled && (
+        <Typography variant="body2" color="text.secondary">
+          Enable the agent above to trigger a run.
+        </Typography>
+      )}
+      {unreachable && (
+        <Alert severity="warning" sx={{ mt: 1 }}>
+          {unreachable}
+        </Alert>
+      )}
+    </Section>
   );
 }
 

@@ -335,6 +335,20 @@ export interface CompanyBoard {
   resolvedAt: string;
 }
 
+/** Running/idle status returned by the agent supervisor control server. */
+export interface AgentStatus {
+  running: boolean;
+  lastStartedAt: string | null;
+  lastFinishedAt: string | null;
+  lastExitCode: number | null;
+}
+
+/** Result of triggering a run via POST /api/agent/run. */
+export interface AgentRunResult {
+  started: boolean;
+  running: boolean;
+}
+
 /** Configuration for the unattended job application agent. */
 export interface AgentConfig {
   enabled: boolean;

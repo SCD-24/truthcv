@@ -11,6 +11,9 @@ services:
       - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
+      # Port the agent's supervisor.js control server listens on. The app
+      # service forwards /api/agent/run and /api/agent/status to it.
+      - AGENT_CONTROL_PORT=${AGENT_CONTROL_PORT:-9099}
       # In-container path the app writes to — must equal the volume mount target
       # below. Do NOT derive this from the host's .env DATA_DIR (that's a host path).
       - DATA_DIR=/app/data
@@ -65,6 +68,8 @@ services:
       - MAX_APPLICATIONS_PER_RUN=${MAX_APPLICATIONS_PER_RUN:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
+      # Port supervisor.js listens on — matched to the app service entry above.
+      - AGENT_CONTROL_PORT=${AGENT_CONTROL_PORT:-9099}
     volumes:
       # The host Chrome interceptor's unix socket, bind-mounted in so the
       # agent drives a real, already-logged-in browser on the host instead of

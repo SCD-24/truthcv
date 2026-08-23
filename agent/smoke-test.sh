@@ -82,6 +82,67 @@ else
   bad "--check-schedule failed: $slots"
 fi
 
+# --- Supervisor ---------------------------------------------------------------
+
+if [[ -r "$AGENT_DIR/supervisor.js" ]]; then
+  ok "supervisor.js present"
+else
+  bad "$AGENT_DIR/supervisor.js missing"
+fi
+
+if node --check "$AGENT_DIR/supervisor.js" 2>/dev/null; then
+  ok "supervisor.js parses (node --check)"
+else
+  bad "supervisor.js has a syntax error"
+fi
+
+# Spin up supervisor on an ephemeral port, exercise auth and GET /status,
+# then shut it down.  We use a tiny inline node harness so no nc/curl needed.
+_SUPER_PORT=19099
+_SUPER_TOKEN="smoke-test-token-$$"
+AGENT_API_TOKEN="$_SUPER_TOKEN" \
+AGENT_CONTROL_PORT="$_SUPER_PORT" \
+RUN_ONCE="" \
+DAILY_APPLY="/bin/true" \
+  node "$AGENT_DIR/supervisor.js" >/tmp/supervisor-smoke.log 2>&1 &
+_SUPER_PID=$!
+
+# Give the server a moment to start
+sleep 1
+
+if SUPER_TOKEN="$_SUPER_TOKEN" node -e '
+  const http = require("http");
+  const TOKEN = process.env.SUPER_TOKEN;
+  function req(token, path, cb) {
+    const opts = {
+      hostname: "127.0.0.1", port: '"$_SUPER_PORT"', path, method: "GET",
+      headers: token ? { "x-agent-token": token } : {},
+    };
+    const r = http.request(opts, (res) => { let b=""; res.on("data",(c)=>b+=c); res.on("end",()=>cb(null,res.statusCode,b)); });
+    r.on("error", (e) => cb(e));
+    r.end();
+  }
+  // 1) Unauthenticated => 403
+  req(null, "/status", (e1, s1) => {
+    if (e1 || s1 !== 403) { process.stderr.write("expected 403 without token, got " + (e1||s1) + "\n"); process.exit(1); }
+    // 2) Authenticated => 200 with running field
+    req(TOKEN, "/status", (e2, s2, body) => {
+      if (e2 || s2 !== 200) { process.stderr.write("expected 200 with token, got " + (e2||s2) + "\n"); process.exit(1); }
+      let obj;
+      try { obj = JSON.parse(body); } catch { process.stderr.write("status not JSON\n"); process.exit(1); }
+      if (typeof obj.running !== "boolean") { process.stderr.write("missing running field\n"); process.exit(1); }
+      process.exit(0);
+    });
+  });
+' 2>/dev/null; then
+  ok "supervisor: unauthenticated -> 403, authenticated GET /status -> JSON with 'running'"
+else
+  bad "supervisor auth or GET /status check failed (see /tmp/supervisor-smoke.log)"
+fi
+
+kill "$_SUPER_PID" 2>/dev/null
+wait "$_SUPER_PID" 2>/dev/null
+
 # --- Reachability ------------------------------------------------------------
 
 # A present socket FILE proves only that the bind mount worked; a stale socket

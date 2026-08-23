@@ -22,6 +22,8 @@ import type {
   CooldownStatus,
   AgentConfig,
   AgentConfigUpdate,
+  AgentStatus,
+  AgentRunResult,
   ConnectionStatus,
   ConnectionList,
   StartLoginResult,
@@ -301,6 +303,17 @@ export function updateAgentConfig(body: AgentConfigUpdate): Promise<AgentConfig>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+/** Trigger an immediate agent run. Fire-and-forget: returns before the run
+ * finishes. Throws when the agent container is unreachable (503). */
+export function triggerAgentRun(): Promise<AgentRunResult> {
+  return request("/api/agent/run", { method: "POST" });
+}
+
+/** Poll the agent supervisor for running/idle status. */
+export function getAgentStatus(): Promise<AgentStatus> {
+  return request("/api/agent/status");
 }
 
 /** List all provider connections and their status. */
