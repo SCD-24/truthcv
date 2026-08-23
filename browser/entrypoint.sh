@@ -11,6 +11,12 @@ BROWSER_MCP_PORT="${BROWSER_MCP_PORT:-8931}"
 BROWSER_MCP_HOST="${BROWSER_MCP_HOST:-0.0.0.0}"
 BROWSER_PROFILE_DIR="${BROWSER_PROFILE_DIR:-/browser-profile}"
 BROWSER_VIEWPORT_SIZE="${BROWSER_VIEWPORT_SIZE:-1920,1080}"
+# @playwright/mcp rejects requests whose Host header is not in its allowlist
+# (DNS-rebinding protection). It defaults to the bind host, so with
+# --host 0.0.0.0 every cross-container request to http://browser:8931 comes
+# back 403. The agent reaches this service by its compose service name, so
+# that name must be listed here.
+BROWSER_ALLOWED_HOSTS="${BROWSER_ALLOWED_HOSTS:-browser:${BROWSER_MCP_PORT},localhost:${BROWSER_MCP_PORT}}"
 NOVNC_PORT="${NOVNC_PORT:-7900}"
 
 # Logging helper (match agent/entrypoint.sh style)
@@ -51,7 +57,9 @@ log "x11vnc running on PID $X11VNC_PID"
 
 # Start noVNC / websockify (web-based VNC at http://localhost:7900)
 log "starting noVNC on port $NOVNC_PORT..."
-novnc_server --listen "$NOVNC_PORT" --vnc localhost:5900 -o /tmp/novnc.log 2>&1 &
+# Ubuntu's novnc package ships only the web assets (/usr/share/novnc),
+# no launcher binary — websockify serves them and bridges to x11vnc.
+websockify --web=/usr/share/novnc "$NOVNC_PORT" localhost:5900 >/tmp/novnc.log 2>&1 &
 NOVNC_PID=$!
 sleep 1
 
@@ -73,4 +81,5 @@ exec env DISPLAY="$DISPLAY" \
     --port "$BROWSER_MCP_PORT" \
     --host "$BROWSER_MCP_HOST" \
     --user-data-dir "$BROWSER_PROFILE_DIR" \
-    --viewport-size "$BROWSER_VIEWPORT_SIZE"
+    --viewport-size "$BROWSER_VIEWPORT_SIZE" \
+    --allowed-hosts "$BROWSER_ALLOWED_HOSTS"

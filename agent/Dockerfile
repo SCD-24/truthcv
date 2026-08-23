@@ -97,6 +97,9 @@ COPY --chown=node:node agent/entrypoint.sh   /app/agent/entrypoint.sh
 # page) — see entrypoint.sh's refresh_schedule() and daily-apply.sh's enable
 # gate, both of which invoke this via `node`.
 COPY --chown=node:node agent/agent-config.js /app/agent/agent-config.js
+# The scheduling loop and control-server HTTP surface. entrypoint.sh execs
+# this as its final step, so the image does not start without it.
+COPY --chown=node:node agent/supervisor.js   /app/agent/supervisor.js
 # The smoke test is shipped IN the image, not just kept in the repo: it is run
 # via `--entrypoint /app/agent/smoke-test.sh` against the built container, and
 # its whole point is to test the image as shipped (agent/README.md).
