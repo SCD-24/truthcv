@@ -51,7 +51,7 @@ salary, remote, country and role-type screening.
 
 ### Screening
 
-Three fields, added to `Screening` and to `EDITABLE`:
+Three fields on `Screening`, deliberately **not** in `EDITABLE`:
 
 | Field | Values | Meaning |
 |---|---|---|
@@ -59,9 +59,22 @@ Three fields, added to `Screening` and to `EDITABLE`:
 | `apply_attempts` | int, default 0 | Incremented per failed attempt |
 | `apply_error` | str | Last failure, shown on the page |
 
-`record_screening(verdict="deferred")` sets `approval="pending"` server-side.
-The agent never writes `approval`. Existing `deferred` records are queue
+`EDITABLE` is the whitelist `store.create()`/`update()` copy from
+client-supplied fields, and the agent's `record_screening(**fields)` reaches
+`create()` directly — so a field in `EDITABLE` is a field the agent can set.
+Keeping these three out of it is what makes "the agent never approves"
+structural. They are written only by dedicated store functions:
+
+- `set_approval(screening_id, approval)` — the approval routes
+- `record_apply_failure(screening_id, error)` — the agent's failure tool
+- `mark_applied(screening_id)` — the server, on a confirmed application
+
+`store.create()` sets `approval="pending"` itself when `verdict == "deferred"`,
+rather than accepting it from the caller. Existing `deferred` records are queue
 entries as they stand; no migration.
+
+Because the fields are outside `EDITABLE`, `_screening_model` must map them
+onto the wire model explicitly.
 
 `Screening` thereby stops being a pure audit record and gains mutable state.
 Accepted deliberately: a `deferred` screening already denotes an unresolved
