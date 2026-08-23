@@ -15,6 +15,7 @@ import MenuItem from "@mui/material/MenuItem";
 import Typography from "@mui/material/Typography";
 import CircularProgress from "@mui/material/CircularProgress";
 import Chip from "@mui/material/Chip";
+import Link from "@mui/material/Link";
 import {
   getAgentConfig,
   getAgentStatus,
@@ -38,15 +39,31 @@ import type {
   Routing,
 } from "../api/types";
 
-/** The four canonical ATS answers before they're loaded from the server.
- * Salary is deliberately absent: it now comes from the matched job profile's
- * band via recommend_salary, not from a free-text answer. */
+/** The 20 text answers to ATS screening questions and cover-letter claim sources.
+ * Salary is deliberately absent: it comes from the matched job profile's
+ * band via recommend_salary. canonicalCvAssetId is read-only, never sent in saves. */
 const EMPTY_ANSWERS: ProfileAnswers = {
   phone: "",
   workAuthorisation: "",
   noticePeriod: "",
   locationPreference: "",
   canonicalCvAssetId: null,
+  name: "",
+  email: "",
+  linkedin: "",
+  github: "",
+  website: "",
+  requiresSponsorship: "",
+  authorizedNonGermanCountry: "",
+  languages: "",
+  highestRelevantDegree: "",
+  otherDegree: "",
+  csDegree: "",
+  gpa: "",
+  gender: "",
+  yearsOfExperience: "",
+  currentRole: "",
+  howDidYouHear: "",
 };
 
 /** A titled Paper block — the one section pattern the page's panels share. */
@@ -176,6 +193,7 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
           <ScheduleSection config={config} onChange={setConfig} />
           <ProfilesSection config={config} onChange={setConfig} />
           <BlocklistSection config={config} onChange={setConfig} />
+          <CanonicalCvSection answers={answers} />
           <ProfileAnswersSection answers={answers} onChange={setAnswers} />
         </Stack>
       ) : null}
@@ -369,9 +387,10 @@ function EnabledSection({
 }
 
 /** The model the unattended agent runs on — a claude-only ModelRoutePicker
- * (the agent drives the operator's own Chrome via the interceptor, which
- * only supports Claude) saving/clearing the `agent` route. Cleared falls
- * back to the container's ANTHROPIC_API_KEY. */
+ * (the agent is a headless Claude Code process — it is the `claude` CLI that
+ * drives the containerised Chromium in the sibling `browser` service over
+ * MCP, so no other provider can run it) saving/clearing the `agent` route.
+ * Cleared falls back to the container's ANTHROPIC_API_KEY. */
 function ModelSection({
   connections,
   routing,
@@ -1012,9 +1031,38 @@ function BlocklistSection({
   );
 }
 
-/** The four ATS answers, with their own Save that PUTs only these four keys
- * (a partial body). Salary expectation is not among them — the agent derives
- * its figure from the matched job profile's band instead. */
+/**
+ * Read-only canonical CV notice. The CV is registered out-of-band by
+ * truth.answers.register_canonical_cv, not from this page. This section
+ * simply surfaces what file (if any) the unattended agent will attach.
+ */
+function CanonicalCvSection({ answers }: { answers: ProfileAnswers }) {
+  const downloadUrl = answers.canonicalCvAssetId
+    ? `/api/download/${encodeURIComponent(answers.canonicalCvAssetId)}`
+    : null;
+
+  return (
+    <Section
+      title="CV"
+      description="The canonical CV you uploaded is what the agent attaches to every automated application. It is not tailored per posting."
+    >
+      {downloadUrl ? (
+        <Link href={downloadUrl} target="_blank" rel="noreferrer">
+          {answers.canonicalCvAssetId}
+        </Link>
+      ) : (
+        <Alert severity="warning">
+          No CV is registered. The agent will skip applications rather than substitute another file.
+        </Alert>
+      )}
+    </Section>
+  );
+}
+
+/** The 20 ATS answers and cover-letter claim sources. Each has its own MUI
+ * TextField and is sent on Save. Salary is absent; canonicalCvAssetId is never
+ * sent from the form (the read-only CV section above surfaces it instead).
+ * The agent uses these; the cover-letter writer sources facts from them. */
 function ProfileAnswersSection({
   answers,
   onChange,
@@ -1026,17 +1074,42 @@ function ProfileAnswersSection({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  const ANSWER_FIELDS = [
+    { key: "name" as const, label: "Name" },
+    { key: "email" as const, label: "Email" },
+    { key: "phone" as const, label: "Phone" },
+    { key: "linkedin" as const, label: "LinkedIn" },
+    { key: "github" as const, label: "GitHub" },
+    { key: "website" as const, label: "Website" },
+    { key: "locationPreference" as const, label: "Location preference" },
+    { key: "workAuthorisation" as const, label: "Work authorisation" },
+    { key: "noticePeriod" as const, label: "Notice period" },
+    { key: "requiresSponsorship" as const, label: "Requires sponsorship" },
+    {
+      key: "authorizedNonGermanCountry" as const,
+      label: "Authorised in a non-German country",
+    },
+    { key: "languages" as const, label: "Languages" },
+    { key: "highestRelevantDegree" as const, label: "Highest relevant degree" },
+    { key: "otherDegree" as const, label: "Other degree" },
+    { key: "csDegree" as const, label: "CS degree" },
+    { key: "gpa" as const, label: "GPA" },
+    { key: "gender" as const, label: "Gender" },
+    { key: "yearsOfExperience" as const, label: "Years of experience" },
+    { key: "currentRole" as const, label: "Current role" },
+    { key: "howDidYouHear" as const, label: "How did you hear about us" },
+  ];
+
   async function handleSave() {
     setSaving(true);
     setError(null);
     setSaved(false);
     try {
-      const fresh = await saveProfileAnswers({
-        phone: answers.phone,
-        workAuthorisation: answers.workAuthorisation,
-        noticePeriod: answers.noticePeriod,
-        locationPreference: answers.locationPreference,
-      });
+      const body: Partial<ProfileAnswers> = {};
+      for (const field of ANSWER_FIELDS) {
+        body[field.key] = answers[field.key];
+      }
+      const fresh = await saveProfileAnswers(body);
       onChange(fresh);
       setSaved(true);
     } catch (e) {
@@ -1049,36 +1122,22 @@ function ProfileAnswersSection({
   return (
     <Section
       title="Profile answers"
-      description="The canonical answers the unattended application agent types into ATS forms when it submits on your behalf. Keep them accurate — they go out with every application. Salary is not one of them: the agent derives its figure from the matched job profile's ask band below."
+      description="Answers to ATS screening questions (name, email, location, work rights, etc.) which the unattended application agent submits on your behalf and the cover-letter writer receives as allowed claim sources. Keep them accurate. Salary is not one of them: the agent derives its figure from the matched job profile's ask band below."
     >
-      <TextField
-        fullWidth
-        label="Phone"
-        value={answers.phone}
-        onChange={(e) => onChange({ ...answers, phone: e.target.value })}
-        helperText="What the agent types into ATS phone fields."
-      />
-      <TextField
-        fullWidth
-        label="Work authorisation"
-        value={answers.workAuthorisation}
-        onChange={(e) => onChange({ ...answers, workAuthorisation: e.target.value })}
-        helperText='What the agent types into ATS work-authorisation questions — e.g. "Authorised to work in the UK, no sponsorship required."'
-      />
-      <TextField
-        fullWidth
-        label="Notice period"
-        value={answers.noticePeriod}
-        onChange={(e) => onChange({ ...answers, noticePeriod: e.target.value })}
-        helperText="What the agent types into ATS notice-period fields."
-      />
-      <TextField
-        fullWidth
-        label="Location preference"
-        value={answers.locationPreference}
-        onChange={(e) => onChange({ ...answers, locationPreference: e.target.value })}
-        helperText="What the agent types into ATS location/relocation fields."
-      />
+      {ANSWER_FIELDS.map((field) => (
+        <TextField
+          key={field.key}
+          fullWidth
+          label={field.label}
+          value={answers[field.key]}
+          onChange={(e) =>
+            onChange({
+              ...answers,
+              [field.key]: e.target.value,
+            })
+          }
+        />
+      ))}
       <Box>
         <Button variant="contained" onClick={handleSave} disabled={saving}>
           {saving && <ButtonSpinner />}

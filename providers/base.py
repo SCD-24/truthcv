@@ -10,6 +10,7 @@ has passed through the truth store and the guardrail.
 from __future__ import annotations
 
 import os
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -22,6 +23,64 @@ from typing import Any, Literal
 # intentionally left uncapped (its default is already the model's full budget,
 # and forcing max_tokens would break the o-series, which rejects it).
 MAX_OUTPUT_TOKENS = 16000
+
+EFFORT_LEVELS = ("low", "medium", "high")
+
+# Maps effort level name to Anthropic extended-thinking budget_tokens.
+# Values are clamped to MAX_OUTPUT_TOKENS at call time (high exceeds the cap).
+_EFFORT_BUDGET: dict[str, int] = {"low": 4096, "medium": 8192, "high": 16384}
+
+
+def supports_effort_levels(provider: str, model_id: str) -> list[str]:
+    """Return the effort levels *model_id* supports under *provider*.
+
+    *provider* is a catalog card key: ``claude``, ``codex``, ``openrouter``,
+    or ``ollama``.  Unknown providers or unrecognised model ids return ``[]``.
+    """
+    if provider == "claude":
+        return _claude_effort(model_id)
+    if provider == "codex":
+        return _codex_effort(model_id)
+    if provider == "openrouter":
+        return _openrouter_effort(model_id)
+    return []
+
+
+def _claude_effort(model_id: str) -> list[str]:
+    """Effort levels for Anthropic-hosted models (extended thinking).
+
+    Covers the claude-3.5, 3.7, and 4.x families.
+    """
+    if re.match(r"claude-3-[57]", model_id) or re.match(
+        r"claude-(?:opus|sonnet|haiku)-4", model_id
+    ):
+        return ["low", "medium", "high"]
+    return []
+
+
+def _codex_effort(model_id: str) -> list[str]:
+    """Effort levels for OpenAI models (``reasoning_effort`` parameter).
+
+    gpt-5* supports four levels; o1/o3/o4 reasoning series supports three.
+    """
+    if model_id.startswith("gpt-5"):
+        return ["minimal", "low", "medium", "high"]
+    if re.match(r"o[134]\d*", model_id):
+        return ["low", "medium", "high"]
+    return []
+
+
+def _openrouter_effort(model_id: str) -> list[str]:
+    """Effort levels for OpenRouter-routed reasoning models.
+
+    Matches on model-id substrings, since OpenRouter prefixes ids with the
+    originating provider (e.g. ``openai/gpt-5``, ``openai/o3``).
+    """
+    if "gpt-5" in model_id:
+        return ["minimal", "low", "medium", "high"]
+    if re.search(r"[/:]o[134]\d*$", model_id) or re.match(r"o[134]\d*", model_id):
+        return ["low", "medium", "high"]
+    return []
 
 
 def env_model(default: str, override: str | None = None) -> str:

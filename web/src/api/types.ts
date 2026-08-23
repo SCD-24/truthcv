@@ -145,6 +145,9 @@ export interface SettingsStatus {
 export interface ModelInfo {
   id: string;
   label: string;
+  /** Effort levels this model supports (e.g. "low" | "medium" | "high").
+   * Empty means the model has no effort concept and no effort select is shown. */
+  effortLevels?: string[];
 }
 
 /** Response from POST /api/models. */
@@ -173,12 +176,31 @@ export interface ProfileStatus {
 
 /** The canonical ATS form answers the unattended application agent types into
  * job application forms on the user's behalf. */
+/** Answers to ATS screening questions, also used as allowed claim sources for the
+ * cover-letter writer. Feed the unattended application agent and provide facts
+ * the letter may reference without being blocked by the guardrail. */
 export interface ProfileAnswers {
   phone: string;
   workAuthorisation: string;
   noticePeriod: string;
   locationPreference: string;
   canonicalCvAssetId: string | null;
+  name: string;
+  email: string;
+  linkedin: string;
+  github: string;
+  website: string;
+  requiresSponsorship: string;
+  authorizedNonGermanCountry: string;
+  languages: string;
+  highestRelevantDegree: string;
+  otherDegree: string;
+  csDegree: string;
+  gpa: string;
+  gender: string;
+  yearsOfExperience: string;
+  currentRole: string;
+  howDidYouHear: string;
 }
 
 /** A partial patch of the canonical answers; the PUT route merges only the
@@ -405,6 +427,8 @@ export interface StartLoginResult {
 export interface RouteChoice {
   connection: string;
   model: string;
+  /** Chosen effort level for models that support it; omit or "" for provider default. */
+  effort?: string;
 }
 
 /** Routing configuration for tasks and defaults. */

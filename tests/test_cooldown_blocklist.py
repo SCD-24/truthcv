@@ -45,7 +45,7 @@ def test_api_and_tool_carry_blocked_flag(client, data_dir):
     _block(data_dir, "Acme GmbH")
     r = client.get("/api/cooldown", params={"company": "Acme GmbH"})
     assert r.json() == {"inCooldown": True, "expires": None, "blocked": True}
-    from mcp.tools_ledger import check_cooldown
+    from agenttools.tools_ledger import check_cooldown
 
     assert check_cooldown("Acme GmbH") == {"in_cooldown": True, "expires": None, "blocked": True}
 

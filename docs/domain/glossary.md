@@ -85,7 +85,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:end cap:definitions -->
 
 <!-- generated:start comp:cover-letter-engine -->
-- **Cover Letter Engine** (`cover-letter-engine`) — backend component. Guardrailed cover-letter generation (coverletter/). build_letter() asks the LLM (via the provider layer) for a cover letter as tagged paragraphs, each declaring the factual claims it makes. Every claim is validated by the Guardrail Validator against the Truth Store; if any claim is unverifiable the letter is BLOCKED (returns {blocked: true, unverifiable, text: ""}). Otherwise the paragraph text is joined and handed to the Renderer for HTML/PDF/DOCX output. Serves /api/cover-letter together with render/.
+- **Cover Letter Engine** (`cover-letter-engine`) — backend component. Guardrailed cover-letter generation (coverletter/). build_letter() asks the LLM (via the provider layer) for a cover letter as tagged paragraphs, each declaring the factual claims it makes. It draws on the whole candidate record: the Truth Store's experiences, education and skills, the Profile header edited at Review (name, location, contact links and summary), and the profile answers kept on the Agents page (current role, years of experience, languages, work authorisation and the rest), which the API loads and passes in. All of those are allowed claim sources for the generation only, never written back to truth. Every claim is validated by the Guardrail Validator; if any claim is unverifiable the letter is BLOCKED (returns {blocked: true, unverifiable, text: ""}). Otherwise the paragraph text is joined and handed to the Renderer for HTML/PDF/DOCX output. Serves /api/cover-letter together with render/.
 <!-- generated:end comp:cover-letter-engine -->
 
 <!-- generated:start comp:prompt-store -->
@@ -100,6 +100,6 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 - **Application Tracker** (`application-tracker`) — backend component. Owns the user's job-application records (applications/) persisted as applications.json on the Truth Data Volume. Each Application tracks a submission (Company, Website, Application URL, Submitted, Submission Type, Reached Out, To Who, Response Received, Method) and OWNS its generated documents: an editable CV and cover letter saved per-application (so old outputs are retained and traceable to the application they went out with). Applications may exist WITHOUT a job posting (General/portal submissions). CRUD helpers use atomic writes mirroring truth/store.py; re-renders edited document content via the Renderer.
 <!-- generated:end comp:application-tracker -->
 
-<!-- generated:start comp:application-agent -->
-- **Application Agent** (`application-agent`) — backend component.
-<!-- generated:end comp:application-agent -->
+<!-- generated:start comp:browser-runtime -->
+- **Agent Browser** (`browser-runtime`) — custom component.
+<!-- generated:end comp:browser-runtime -->

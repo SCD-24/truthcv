@@ -38,26 +38,27 @@ screens each posting against your filters, generates the CV and cover letter
 through the same guardrailed engine the wizard uses, submits the form, and
 writes the result back into the ledger.
 
-It is a **separate container on its own compose profile**, so it is never
-started by a bare `docker compose up` and a browser crash can never take the
-wizard down:
+It is a **separate container from the wizard, and the browser is a third**, so
+a browser crash can never take either of them down. All three start together:
 
 ```bash
-docker compose --profile agent up -d agent
+docker compose up -d              # app, browser, agent
 ```
 
 Schedule is configured on the Agents page (default **09:00 and 15:00** weekdays); `RUN_AT`/`RUN_DAYS` are fallback only, used when the agent config API is unreachable. Every
 capability it has goes through TruthCV's MCP tool surface — it deliberately
 does not mount the data volume.
 
-> **It drives your real, logged-in Chrome on the host**, over a bind-mounted
-> interceptor socket, so applications are submitted from your actual browser
-> sessions. There is no in-container browser and no headless fallback: that was
-> a deliberate choice, because a fresh browser would be logged out of every ATS
-> and would apply as nobody. If the interceptor daemon is not listening, the
-> agent aborts the run rather than proceeding blind.
+> **It submits from a real Chromium**, running headful in its own `browser`
+> container, not this one. Watch a run live, or do the one-time manual login
+> an ATS needs (SSO, CAPTCHA, SMS MFA), at the noVNC viewport on
+> http://localhost:7900 — that login then persists on the `browser-profile`
+> volume, so it survives container restarts. There is no headless fallback:
+> that was a deliberate choice, because a fresh, logged-out browser would
+> apply as nobody. If the `browser` service is not reachable, the agent aborts
+> the run rather than proceeding blind.
 
-Configuration, the schedule, the interceptor precondition and the smoke test are
+Configuration, the schedule, the browser precondition and the smoke test are
 documented in [`agent/README.md`](agent/README.md). [`agent/targets.md`](agent/targets.md) is the operator's research scratchpad and is never read by the agent; the operative queue is `targetCompanies`, `companyBoards`, and `profiles` in the agent config. What has actually been applied to, screened out or put in cooldown lives in the ledger and screening store on the data volume, not in that file.
 
 ### The plain-text application log

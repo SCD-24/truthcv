@@ -70,6 +70,14 @@ export function ModelRoutePicker({
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [test, setTest] = useState<TestState>({ kind: "idle" });
+  const [effort, setEffort] = useState(route?.effort ?? "");
+
+  /** Effort levels advertised by the currently selected listed model.
+   * Empty when the model is a custom id, blank, or has no effort support. */
+  const activeEffortLevels: string[] =
+    !customModel && model
+      ? (models.find((m) => m.id === model)?.effortLevels ?? [])
+      : [];
 
   // Pull the connection's model list live. Returns the list so callers can
   // decide whether the current model is a known option or a custom id.
@@ -141,7 +149,9 @@ export function ModelRoutePicker({
     setError(null);
     setSaved(false);
     try {
-      await onSave({ connection, model });
+      const routeChoice: RouteChoice = { connection, model };
+      if (effort) routeChoice.effort = effort;
+      await onSave(routeChoice);
       setSaved(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't save routing.");
@@ -192,6 +202,7 @@ export function ModelRoutePicker({
           setConnection(next);
           setModel("");
           setCustomModel(false);
+          setEffort("");
           setTest({ kind: "idle" });
         }}
       >
@@ -213,9 +224,13 @@ export function ModelRoutePicker({
             if (v === CUSTOM_MODEL) {
               setCustomModel(true);
               setModel("");
+              setEffort("");
             } else {
               setCustomModel(false);
               setModel(v);
+              // Reset effort when switching to a model whose capability set differs.
+              const newLevels = models.find((m) => m.id === v)?.effortLevels ?? [];
+              if (effort && !newLevels.includes(effort)) setEffort("");
             }
           }}
           slotProps={{
@@ -262,6 +277,24 @@ export function ModelRoutePicker({
           />
         )}
       </Box>
+
+      {activeEffortLevels.length > 0 && (
+        <TextField
+          select
+          fullWidth
+          label="Effort level"
+          value={effort}
+          onChange={(e) => setEffort(e.target.value)}
+          helperText="Controls the model's reasoning depth. Provider default leaves it unset."
+        >
+          <MenuItem value="">Provider default</MenuItem>
+          {activeEffortLevels.map((level) => (
+            <MenuItem key={level} value={level}>
+              {level.charAt(0).toUpperCase() + level.slice(1)}
+            </MenuItem>
+          ))}
+        </TextField>
+      )}
 
       {test.kind === "ok" && <Alert severity="success">{test.detail}</Alert>}
       {test.kind === "fail" && <Alert severity="error">{test.detail}</Alert>}

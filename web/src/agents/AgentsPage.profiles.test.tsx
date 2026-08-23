@@ -72,6 +72,22 @@ function makeAnswers(): ProfileAnswers {
     noticePeriod: "",
     locationPreference: "",
     canonicalCvAssetId: null,
+    name: "",
+    email: "",
+    linkedin: "",
+    github: "",
+    website: "",
+    requiresSponsorship: "",
+    authorizedNonGermanCountry: "",
+    languages: "",
+    highestRelevantDegree: "",
+    otherDegree: "",
+    csDegree: "",
+    gpa: "",
+    gender: "",
+    yearsOfExperience: "",
+    currentRole: "",
+    howDidYouHear: "",
   };
 }
 
@@ -242,7 +258,9 @@ describe("AgentsPage profiles section", () => {
     await renderLoaded(makeConfig());
 
     fireEvent.click(screen.getByRole("button", { name: "Add profile" }));
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "" } });
+    // Target the first Name field (the profile name, not the answer), which comes before Keywords
+    const nameFields = screen.getAllByLabelText("Name");
+    fireEvent.change(nameFields[0], { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Save profiles" }));
 
     expect(await screen.findByText("Profile name is required")).toBeTruthy();
@@ -263,11 +281,41 @@ describe("AgentsPage profiles section", () => {
 
     await vi.waitFor(() => expect(saveProfileAnswers).toHaveBeenCalled());
     expect(Object.keys(vi.mocked(saveProfileAnswers).mock.calls[0][0]).sort()).toEqual([
+      "authorizedNonGermanCountry",
+      "csDegree",
+      "currentRole",
+      "email",
+      "gender",
+      "github",
+      "gpa",
+      "highestRelevantDegree",
+      "howDidYouHear",
+      "languages",
+      "linkedin",
       "locationPreference",
+      "name",
       "noticePeriod",
+      "otherDegree",
       "phone",
+      "requiresSponsorship",
+      "website",
       "workAuthorisation",
+      "yearsOfExperience",
     ]);
+  });
+
+  it("editing a new field like current role and saving includes it in the PUT body", async () => {
+    await renderLoaded(makeConfig());
+
+    vi.mocked(saveProfileAnswers).mockResolvedValueOnce(makeAnswers());
+    fireEvent.change(screen.getByLabelText("Current role"), {
+      target: { value: "Staff Engineer" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save answers" }));
+
+    await vi.waitFor(() => expect(saveProfileAnswers).toHaveBeenCalled());
+    const body = vi.mocked(saveProfileAnswers).mock.calls[0][0];
+    expect(body.currentRole).toBe("Staff Engineer");
   });
 
   it("a salary floor above the ask minimum shows an inline error and makes no API call", async () => {

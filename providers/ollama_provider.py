@@ -14,7 +14,11 @@ from ._json import parse_json_object
 
 class OllamaProvider(LLMProvider):
     def __init__(
-        self, model: str | None = None, host: str | None = None, bearer: str | None = None
+        self,
+        model: str | None = None,
+        host: str | None = None,
+        bearer: str | None = None,
+        effort: str | None = None,  # noqa: ARG002 — accepted for API uniformity; Ollama has no effort concept
     ) -> None:
         self._host = (host or os.environ.get("OLLAMA_HOST", "http://localhost:11434")).rstrip(
             "/"

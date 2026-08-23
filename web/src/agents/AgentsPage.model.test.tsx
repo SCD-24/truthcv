@@ -51,6 +51,22 @@ function makeAnswers(): ProfileAnswers {
     noticePeriod: "",
     locationPreference: "",
     canonicalCvAssetId: null,
+    name: "",
+    email: "",
+    linkedin: "",
+    github: "",
+    website: "",
+    requiresSponsorship: "",
+    authorizedNonGermanCountry: "",
+    languages: "",
+    highestRelevantDegree: "",
+    otherDegree: "",
+    csDegree: "",
+    gpa: "",
+    gender: "",
+    yearsOfExperience: "",
+    currentRole: "",
+    howDidYouHear: "",
   };
 }
 
