@@ -18,6 +18,8 @@ from applications.store import save_attachments as _save_attachments
 from applications.store import save_confirmation as _save_confirmation
 from applications.store import save_fields_submitted as _save_fields_submitted
 from applications.store import save_screening as _save_screening
+import applications.store as _apps_store
+import screening.store as _screening_store
 from screening.cooldown import cooldown as _cooldown
 from screening.store import create as create_screening
 from truth.answers import canonical_cv as _canonical_cv
@@ -38,6 +40,9 @@ def record_application(**fields) -> dict:
     the agent-facing alias for the record's ``application_date`` field.
     """
     fields = dict(fields)
+    # Not an Application field: it names the approved queue item this
+    # application settles.
+    screening_id = fields.pop("screening_id", "")
     applied_date = fields.pop("applied_date", None)
     if applied_date is not None:
         fields["application_date"] = applied_date
@@ -58,6 +63,11 @@ def record_application(**fields) -> dict:
     if attachments is not None:
         values = [Attachment.from_dict(a) for a in attachments]
         app = _save_attachments(app.id, values) or app
+
+    # An approved queue item retires on evidence of a confirmed application,
+    # not on the agent electing to retire it.
+    if screening_id:
+        _screening_store.mark_applied(screening_id)
 
     return app.to_dict()
 
@@ -137,3 +147,51 @@ def recommend_salary(profile_name: str, proposed: int | None = None) -> dict:
         # proposed=None the band minimum is supplied, not adjusted.
         "clamped": proposed is not None and proposed != clamped,
     }
+
+
+def get_approved_applications() -> list[dict]:
+    """Postings the operator approved and this run should apply to.
+
+    Two guards live here rather than in the prompt, because a wrong judgement by
+    the model would be costly and silent:
+
+    - An item whose URL already appears in the applications ledger is dropped.
+      The retry policy keeps failed items queued indefinitely, so a submission
+      whose confirmation capture failed would otherwise be sent twice.
+    - An item whose company is in cooldown comes back with ``blocked_reason``
+      set instead of being hidden, so the run report can say why it did not go
+      out rather than the posting silently vanishing.
+    """
+    applied_urls = {
+        a.application_url for a in _apps_store.load_all() if a.application_url
+    }
+    items = []
+    for s in _screening_store.load_all():
+        if s.approval != "approved":
+            continue
+        if s.url and s.url in applied_urls:
+            continue
+        status = _cooldown(s.company, s.role or None)
+        items.append(
+            {
+                "screening_id": s.id,
+                "company": s.company,
+                "role": s.role,
+                "url": s.url,
+                "attempts": s.apply_attempts,
+                "blocked_reason": "cooldown" if status.blocked else "",
+            }
+        )
+    return items
+
+
+def report_apply_failure(screening_id: str, error: str) -> dict:
+    """Record why an approved application could not be completed this run.
+
+    Leaves the item approved and queued: the operator chose retry-on-next-run,
+    and this tool cannot change an approval either way.
+    """
+    updated = _screening_store.record_apply_failure(screening_id, error)
+    if updated is None:
+        return {"ok": False, "reason": "unknown screening id"}
+    return {"ok": True, "attempts": updated.apply_attempts}

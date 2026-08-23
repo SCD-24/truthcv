@@ -284,6 +284,49 @@ export function deleteScreening(id: string): Promise<void> {
   });
 }
 
+/** The approval queue: screenings the agent deferred and is waiting on. */
+export function listPendingApprovals(): Promise<ScreeningRecord[]> {
+  return request("/api/screenings?approval=pending");
+}
+
+/** Approved but not yet applied — kept visible so repeated failures are noticed. */
+export function listApprovedApplications(): Promise<ScreeningRecord[]> {
+  return request("/api/screenings?approval=approved");
+}
+
+/** Record the operator's decision on one screening. */
+export function setScreeningApproval(
+  id: string,
+  approval: "approved" | "rejected",
+): Promise<ScreeningRecord> {
+  return request("/api/screenings/" + encodeURIComponent(id), {
+    method: "PATCH",
+    body: JSON.stringify({ approval }),
+  });
+}
+
+/** One decision across many screenings; the result reports each id separately. */
+export function bulkSetApproval(
+  ids: string[],
+  approval: "approved" | "rejected",
+): Promise<{ results: { id: string; ok: boolean }[] }> {
+  return request("/api/screenings/approvals", {
+    method: "PATCH",
+    body: JSON.stringify({ ids, approval }),
+  });
+}
+
+/** Company-level trust: clears deferral blockers, never skips role screening. */
+export function setCompanyApproval(
+  company: string,
+  approved: boolean,
+): Promise<{ company: string; approved: boolean }> {
+  return request("/api/company-boards/" + encodeURIComponent(company), {
+    method: "PATCH",
+    body: JSON.stringify({ approved }),
+  });
+}
+
 /** Whether `company` (optionally narrowed by `role`) is currently in cooldown. */
 export function getCooldown(company: string, role?: string): Promise<CooldownStatus> {
   const params = new URLSearchParams({ company });

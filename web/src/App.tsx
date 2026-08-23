@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import CircularProgress from "@mui/material/CircularProgress";
 import Typography from "@mui/material/Typography";
@@ -17,12 +17,20 @@ import { ApplicationsPage } from "./applications/ApplicationsPage";
 import { AnalyticsPage } from "./analytics/AnalyticsPage";
 import { AgentsPage } from "./agents/AgentsPage";
 import { ScreeningsPage } from "./screenings/ScreeningsPage";
+import { ApprovalsPage } from "./approvals/ApprovalsPage";
+import { listPendingApprovals } from "./api/client";
 
 /**
  * Top-level view: the wizard, the applications ledger, its analytics, the
  * agents page, or the screenings page.
  */
-type View = "wizard" | "applications" | "analytics" | "agents" | "screenings";
+type View =
+  | "wizard"
+  | "applications"
+  | "analytics"
+  | "agents"
+  | "screenings"
+  | "approvals";
 
 /**
  * A request to open the Download step (step 5) with an already-saved document
@@ -48,6 +56,21 @@ export function App() {
   const [reached, setReached] = useState<StepId>("upload");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [view, setView] = useState<View>("wizard");
+  // Pending-approval count for the rail badge; refreshed on mount and whenever
+  // the Approvals page is left, since decisions there change it.
+  const [pendingApprovals, setPendingApprovals] = useState(0);
+
+  // A failure here leaves the badge at its last value rather than surfacing an
+  // error: the count is an affordance, and the page itself reports problems.
+  const refreshPendingApprovals = useCallback(() => {
+    listPendingApprovals()
+      .then((rows) => setPendingApprovals(rows.length))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshPendingApprovals();
+  }, [refreshPendingApprovals]);
   // A saved document the user chose to re-edit from the ledger, if any. When
   // set, the Download step opens seeded with it instead of a fresh render.
   const [editRequest, setEditRequest] = useState<EditRequest | null>(null);
@@ -115,10 +138,13 @@ export function App() {
         onOpenAnalytics={() => setView("analytics")}
         onOpenAgents={() => setView("agents")}
         onOpenScreenings={() => setView("screenings")}
+        onOpenApprovals={() => setView("approvals")}
         applicationsActive={view === "applications"}
         analyticsActive={view === "analytics"}
         agentsActive={view === "agents"}
         screeningsActive={view === "screenings"}
+        approvalsActive={view === "approvals"}
+        pendingApprovals={pendingApprovals}
       />
       <main className="stage">
         <div
@@ -139,6 +165,13 @@ export function App() {
             <AgentsPage onBack={() => setView("wizard")} />
           ) : view === "screenings" ? (
             <ScreeningsPage onBack={() => setView("wizard")} />
+          ) : view === "approvals" ? (
+            <ApprovalsPage
+              onBack={() => {
+                setView("wizard");
+                refreshPendingApprovals();
+              }}
+            />
           ) : (
             <div className="stage__step" key={current}>
               {current === "upload" && <UploadStep {...stepProps} />}

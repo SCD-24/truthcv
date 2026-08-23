@@ -2,7 +2,7 @@
 
 These tests cover the JSON-RPC 2.0 endpoint at POST /mcp, verifying that:
 - The initialize handshake works
-- The nine tools are listed with their descriptions
+- The eleven tools are listed with their descriptions
 - Tool invocations return correct results
 - The endpoint is accessible without 307 redirects
 - No tool parameter names expose approval-related functionality
@@ -59,8 +59,8 @@ def test_mcp_initialize_returns_json_rpc_result(client: TestClient) -> None:
             assert "serverInfo" in body["result"], "Missing serverInfo in result"
 
 
-def test_mcp_tools_list_returns_nine_tools(client: TestClient) -> None:
-    """POST /mcp with tools/list returns exactly nine tools with descriptions."""
+def test_mcp_tools_list_returns_eleven_tools(client: TestClient) -> None:
+    """POST /mcp with tools/list returns exactly eleven tools with descriptions."""
     response = client.post(
         "/mcp",
         json={
@@ -82,7 +82,7 @@ def test_mcp_tools_list_returns_nine_tools(client: TestClient) -> None:
     assert "tools" in result, f"Missing tools in result: {result}"
 
     tools = result["tools"]
-    assert len(tools) == 9, f"Expected 9 tools, got {len(tools)}: {[t['name'] for t in tools]}"
+    assert len(tools) == 11, f"Expected 11 tools, got {len(tools)}: {[t['name'] for t in tools]}"
 
     expected_names = {
         "generate_cover_letter",
@@ -94,6 +94,8 @@ def test_mcp_tools_list_returns_nine_tools(client: TestClient) -> None:
         "get_job_profiles",
         "recommend_salary",
         "record_company_board",
+        "get_approved_applications",
+        "report_apply_failure",
     }
     actual_names = {t["name"] for t in tools}
     assert actual_names == expected_names, f"Tool names mismatch: {actual_names} vs {expected_names}"
@@ -186,7 +188,7 @@ def test_mcp_tools_no_approval_parameters(client: TestClient) -> None:
 # request models (CallToolRequest) instead of the params models, so the SDK
 # rejected every call with -32602 before the handler ran, and every tool
 # advertised an empty property set, so a caller had no way to learn that seven
-# of the nine take arguments.
+# of the eleven take arguments.
 #
 # These assertions are deliberately strict about the ABSENCE of a JSON-RPC
 # error. test_mcp_tools_call_check_cooldown above accepts ``"result" in body or

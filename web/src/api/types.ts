@@ -320,6 +320,10 @@ export interface ScreeningRecord {
   /** ISO timestamp the cooldown lapses; empty when there is no cooldown. */
   cooldownExpires: string;
   source: string;
+  /** "" when this record is not an approval item. */
+  approval: "" | "pending" | "approved" | "rejected" | "applied";
+  applyAttempts: number;
+  applyError: string;
   createdAt: string;
   updatedAt: string;
 }

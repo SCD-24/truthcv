@@ -14,6 +14,29 @@ the tool.
 
 ---
 
+## 0. The approved queue — work it first
+
+Call `get_approved_applications` before anything else. It returns the postings
+the operator approved on the Approvals page since the last run, each with a
+`screening_id`, `company`, `role`, `url`, `attempts` and `blocked_reason`.
+
+These are already decided. Apply to them before spending the run's time — and
+its browser — on discovery.
+
+- **Do not re-screen them.** The operator's approval settles the §2 judgement
+  that deferred the posting in the first place.
+- **`blocked_reason` is absolute.** A non-empty value (currently `cooldown`)
+  means the posting must NOT be applied to. Name it in the run report and move
+  on. §8 still governs.
+- **§4 still governs.** An application approval is not permission to assert a
+  claim the cover-letter guardrail rejects. If the letter blocks, §6 applies
+  exactly as it does for any other application.
+- **On success**, call `record_application` with that entry's `screening_id`
+  so the item retires from the queue.
+- **On failure**, call `report_apply_failure` with the reason. The item stays
+  queued and is retried next run; the operator sees the attempt count and your
+  error on the Approvals page.
+
 ## 1. There is no daily quota
 
 Apply to every role that clears the filters. If that is four, apply to four. If
@@ -227,6 +250,18 @@ regardless.
 ---
 
 ## 6. The approve/deny boundary
+
+**Two different things are called approval, and only one of them is ever
+yours to read.**
+
+*Claim approval* — approving an unverifiable fact so it may appear in a
+letter — is the subject of this section. It is never available to you.
+
+*Application approval* — the operator's permission to apply to one specific
+posting — is a decision they make between runs on the Approvals page. You
+read it with `get_approved_applications` (§0) and act on it. You never grant
+it, and holding one never licenses a claim the guardrail rejects. Everything
+below is about claim approval.
 
 **The human approves unverifiable claims. You never do.** The tool surface
 gives you no tool that can approve an inference — there is no "approve this

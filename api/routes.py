@@ -50,12 +50,18 @@ from providers import (
     reset_provider,
 )
 from providers.base import supports_effort_levels
+from companyboards import store as companyboards_store
 from screening import store as screening_store
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
 
 from .schemas import (
     AgentConfigModel,
+    ApprovalUpdate,
+    BulkApprovalResult,
+    BulkApprovalUpdate,
+    CompanyApprovalUpdate,
+    CompanyBoardModel,
     AgentConfigUpdate,
     AgentLlmCredentials,
     AgentRunResult,
@@ -104,22 +110,31 @@ router = APIRouter(prefix="/api")
 
 
 def _screening_model(screening: Screening) -> ScreeningModel:
-    """Map a stored Screening to its wire model."""
+    """Map a stored Screening to its wire model.
+
+    The approval fields sit outside EDITABLE — so the agent cannot set them —
+    and are therefore mapped explicitly rather than picked up by the loop.
+    """
     data = {f: getattr(screening, f) for f in Screening.EDITABLE}
     return ScreeningModel(
         id=screening.id,
         created_at=screening.created_at,
         updated_at=screening.updated_at,
+        approval=screening.approval,
+        apply_attempts=screening.apply_attempts,
+        apply_error=screening.apply_error,
         **data,
     )
 
 
 @router.get("/screenings", response_model=list[ScreeningModel])
-def list_screenings() -> list[ScreeningModel]:
-    """Every screening record, most recent first."""
+def list_screenings(approval: str | None = None) -> list[ScreeningModel]:
+    """Every screening record, most recent first; `approval` narrows to the queue."""
     screenings = sorted(
         screening_store.load_all(), key=lambda s: s.created_at, reverse=True
     )
+    if approval is not None:
+        screenings = [s for s in screenings if s.approval == approval]
     return [_screening_model(s) for s in screenings]
 
 
@@ -128,6 +143,56 @@ def create_screening(body: ScreeningCreate) -> ScreeningModel:
     """Create a new screening record from client-supplied fields."""
     screening = screening_store.create(body.model_dump(by_alias=False))
     return _screening_model(screening)
+
+
+# Declared BEFORE /screenings/{screening_id}: otherwise the router binds
+# "approvals" as an id and this route is unreachable.
+@router.patch("/screenings/approvals", response_model=BulkApprovalResult)
+def bulk_set_approval(body: BulkApprovalUpdate) -> BulkApprovalResult:
+    """Apply one approval decision to many screenings.
+
+    Reports per-id outcomes rather than failing wholesale, so a partial failure
+    is visible instead of silently dropping some ids.
+    """
+    try:
+        results = [
+            {"id": sid, "ok": screening_store.set_approval(sid, body.approval) is not None}
+            for sid in body.ids
+        ]
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    return BulkApprovalResult(results=results)
+
+
+@router.patch("/screenings/{screening_id}", response_model=ScreeningModel)
+def set_screening_approval(screening_id: str, body: ApprovalUpdate) -> ScreeningModel:
+    """The operator's approval decision for one screening."""
+    try:
+        screening = screening_store.set_approval(screening_id, body.approval)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    if screening is None:
+        raise HTTPException(status_code=404, detail="Screening not found.")
+    return _screening_model(screening)
+
+
+@router.patch("/company-boards/{company}", response_model=CompanyBoardModel)
+def set_company_approval(company: str, body: CompanyApprovalUpdate) -> CompanyBoardModel:
+    """Grant or revoke company-level trust.
+
+    Weaker than approving a posting: it clears the blockers that caused a
+    deferral, and never skips per-role screening.
+    """
+    entry = companyboards_store.set_approved(company, body.approved)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Company board not found.")
+    return CompanyBoardModel(
+        company=entry.company,
+        careers_url=entry.careers_url,
+        ats=entry.ats,
+        status=entry.status,
+        approved=entry.approved,
+    )
 
 
 @router.delete("/screenings/{screening_id}", status_code=204)
