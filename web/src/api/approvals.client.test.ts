@@ -1,0 +1,61 @@
+/** The approval writers send a JSON body with the header that makes it JSON.
+ *
+ * Without `Content-Type: application/json` the browser labels a string body
+ * text/plain, FastAPI cannot parse it into the request model, and every call
+ * fails with 422 "Input should be a valid dictionary or object to extract
+ * fields from". The page tests mock this module wholesale, so nothing else
+ * exercises the actual request.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  bulkSetApproval,
+  setCompanyApproval,
+  setScreeningApproval,
+} from "./client";
+
+function stubFetch(payload: unknown) {
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    headers: { get: () => "application/json" },
+    json: async () => payload,
+    text: async () => JSON.stringify(payload),
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+beforeEach(() => vi.unstubAllGlobals());
+afterEach(() => vi.unstubAllGlobals());
+
+describe("approval writers", () => {
+  it("setScreeningApproval PATCHes JSON with the JSON content type", async () => {
+    const fetchMock = stubFetch({ id: "s1", approval: "rejected" });
+    await setScreeningApproval("s1", "rejected");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/screenings/s1");
+    expect(init.method).toBe("PATCH");
+    expect(init.headers["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(init.body)).toEqual({ approval: "rejected" });
+  });
+
+  it("bulkSetApproval PATCHes JSON with the JSON content type", async () => {
+    const fetchMock = stubFetch({ results: [] });
+    await bulkSetApproval(["a", "b"], "approved");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/screenings/approvals");
+    expect(init.method).toBe("PATCH");
+    expect(init.headers["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(init.body)).toEqual({ ids: ["a", "b"], approval: "approved" });
+  });
+
+  it("setCompanyApproval PATCHes JSON with the JSON content type", async () => {
+    const fetchMock = stubFetch({ company: "n8n", approved: true });
+    await setCompanyApproval("n8n", true);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/company-boards/n8n");
+    expect(init.method).toBe("PATCH");
+    expect(init.headers["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(init.body)).toEqual({ approved: true });
+  });
+});

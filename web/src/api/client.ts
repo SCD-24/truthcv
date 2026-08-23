@@ -301,6 +301,7 @@ export function setScreeningApproval(
 ): Promise<ScreeningRecord> {
   return request("/api/screenings/" + encodeURIComponent(id), {
     method: "PATCH",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ approval }),
   });
 }
@@ -312,6 +313,7 @@ export function bulkSetApproval(
 ): Promise<{ results: { id: string; ok: boolean }[] }> {
   return request("/api/screenings/approvals", {
     method: "PATCH",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ids, approval }),
   });
 }
@@ -323,6 +325,7 @@ export function setCompanyApproval(
 ): Promise<{ company: string; approved: boolean }> {
   return request("/api/company-boards/" + encodeURIComponent(company), {
     method: "PATCH",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ approved }),
   });
 }
