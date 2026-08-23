@@ -41,6 +41,7 @@ from connections import catalog
 from connections.auth.claude import AuthError, get_valid_access_token
 from connections.auth import claude as claude_auth
 from providers import OPENROUTER_BASE_URL, build_connection_provider, reset_provider
+from providers.base import supports_effort_levels
 from screening import store as screening_store
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
@@ -986,6 +987,8 @@ def _provider_from_update(body: SettingsUpdate):
 @router.post("/models", response_model=ModelList)
 def list_models(body: SettingsUpdate) -> ModelList:
     """Live model list for the selected provider, pulled from its API/SDK."""
+    name = (body.active_provider or "").strip().lower()
+    card = _V1_PROVIDER_TO_CARD.get(name, "")
     try:
         provider = _provider_from_update(body)
         models = provider.list_models()
@@ -995,9 +998,7 @@ def list_models(body: SettingsUpdate) -> ModelList:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}") from e
-    return ModelList(
-        models=[ModelInfo(id=m["id"], label=m.get("label") or m["id"]) for m in models]
-    )
+    return _models_result(models, card)
 
 
 def _require_card(provider: str) -> dict:
@@ -1024,9 +1025,17 @@ def _connection_status(card_key: str) -> ConnectionStatus:
     )
 
 
-def _models_result(models: list[dict]) -> ModelList:
+def _models_result(models: list[dict], provider_key: str = "") -> ModelList:
+    """Build a ModelList, annotating each entry with its supported effort levels."""
     return ModelList(
-        models=[ModelInfo(id=m["id"], label=m.get("label") or m["id"]) for m in models]
+        models=[
+            ModelInfo(
+                id=m["id"],
+                label=m.get("label") or m["id"],
+                effort_levels=supports_effort_levels(provider_key, m["id"]),
+            )
+            for m in models
+        ]
     )
 
 
@@ -1110,7 +1119,7 @@ def post_connection_key(provider: str, body: ApiKeyRequest) -> ModelList:
     if updates:
         secretstore.set_connection(provider, updates)
     reset_provider()
-    return _models_result(models)
+    return _models_result(models, provider)
 
 
 @router.get("/auth/{provider}/models", response_model=ModelList)
@@ -1122,7 +1131,7 @@ def get_connection_models(provider: str) -> ModelList:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001 — surface upstream LLM/SDK errors cleanly
         raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}") from e
-    return _models_result(models)
+    return _models_result(models, provider)
 
 
 @router.post("/auth/{provider}/test", response_model=TestResult)
@@ -1151,9 +1160,9 @@ def get_routing() -> RoutingModel:
     """Get the current model routing configuration."""
     routing = modelrouting.load()
     return RoutingModel(
-        tasks={k: RouteModel(connection=v.connection, model=v.model) for k, v in routing.tasks.items()},
-        agent=RouteModel(connection=routing.agent.connection, model=routing.agent.model) if routing.agent else None,
-        default=RouteModel(connection=routing.default.connection, model=routing.default.model) if routing.default else None,
+        tasks={k: _route_model(v) for k, v in routing.tasks.items()},
+        agent=_route_model(routing.agent) if routing.agent else None,
+        default=_route_model(routing.default) if routing.default else None,
     )
 
 
@@ -1173,11 +1182,17 @@ def put_routing(body: RoutingUpdate) -> RoutingModel:
     # survives into update_dict and is distinguishable from an absent field.
     update_dict = body.model_dump(exclude_unset=True, by_alias=False)
 
-    # Validate all connections in the update before applying
+    # Validate all connections and effort levels in the update before applying
     for route_dict in _all_routes_in_dict(update_dict):
         connection = route_dict.get("connection")
         if connection not in catalog.CARDS:
             raise HTTPException(status_code=400, detail=f"unknown connection: {connection}")
+        effort = route_dict.get("effort", "")
+        if effort and not supports_effort_levels(connection, route_dict.get("model", "")):
+            raise HTTPException(
+                status_code=400,
+                detail=f"effort '{effort}' is not supported for {connection}/{route_dict.get('model', '')}",
+            )
 
     # Merge: update the stored dict with only the fields that were sent.
     # A None value clears the corresponding route rather than being ignored.
@@ -1199,9 +1214,9 @@ def put_routing(body: RoutingUpdate) -> RoutingModel:
 
     # Return fresh routing
     return RoutingModel(
-        tasks={k: RouteModel(connection=v.connection, model=v.model) for k, v in routing.tasks.items()},
-        agent=RouteModel(connection=routing.agent.connection, model=routing.agent.model) if routing.agent else None,
-        default=RouteModel(connection=routing.default.connection, model=routing.default.model) if routing.default else None,
+        tasks={k: _route_model(v) for k, v in routing.tasks.items()},
+        agent=_route_model(routing.agent) if routing.agent else None,
+        default=_route_model(routing.default) if routing.default else None,
     )
 
 
@@ -1217,3 +1232,8 @@ def _all_routes_in_dict(d: dict) -> list[dict]:
             if isinstance(route, dict):
                 routes.append(route)
     return routes
+
+
+def _route_model(route: modelrouting.Route) -> RouteModel:
+    """Convert a stored Route to its API wire model."""
+    return RouteModel(connection=route.connection, model=route.model, effort=route.effort)

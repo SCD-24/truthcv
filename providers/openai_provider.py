@@ -7,13 +7,17 @@ import os
 import re
 from typing import Any
 
-from .base import LLMProvider, ProviderError, env_model
+from .base import LLMProvider, ProviderError, env_model, supports_effort_levels
 from ._json import parse_json_object
 
 
 class OpenAIProvider(LLMProvider):
     def __init__(
-        self, model: str | None = None, api_key: str | None = None, base_url: str | None = None
+        self,
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        effort: str | None = None,
     ) -> None:
         try:
             import openai  # noqa: F401
@@ -29,6 +33,9 @@ class OpenAIProvider(LLMProvider):
             kwargs["base_url"] = base_url
         self._client = openai.OpenAI(**kwargs)
         self._model = env_model("gpt-4o", model)
+        # Derived from base_url so effort validation uses the right pattern set.
+        self._provider_key = "openrouter" if base_url else "codex"
+        self._effort = effort or ""
 
     def _chat(self, system: str, messages: list[dict[str, str]], json_mode: bool) -> str:
         # Intentionally no max_tokens: unset lets the model use its full output
@@ -41,6 +48,8 @@ class OpenAIProvider(LLMProvider):
         }
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
+        if self._effort and supports_effort_levels(self._provider_key, self._model):
+            kwargs["reasoning_effort"] = self._effort
         resp = self._client.chat.completions.create(**kwargs)
         return resp.choices[0].message.content or ""
 
