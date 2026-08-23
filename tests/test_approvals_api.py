@@ -92,12 +92,16 @@ def test_no_agent_route_writes_approval(client):
     """The agent authenticates only against /api/agent/*. No path under that
     prefix may write approval, and no tool on its surface may either — the
     structural half of "the human approves, the agent never does"."""
-    agent_paths = [
-        r.path for r in app.routes if getattr(r, "path", "").startswith("/api/agent")
-    ]
+    paths = app.openapi()["paths"]
+    agent_paths = [p for p in paths if p.startswith("/api/agent")]
     assert agent_paths, "expected some /api/agent routes to exist"
     for path in agent_paths:
         assert "approval" not in path
+
+    # And the approval writers are reachable only outside that prefix.
+    approval_paths = [p for p in paths if "approval" in p]
+    assert approval_paths, "expected the approval routes to exist"
+    assert not any(p.startswith("/api/agent") for p in approval_paths)
 
     from agenttools.mcp_app import _TOOL_REGISTRY
 
