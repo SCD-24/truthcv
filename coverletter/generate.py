@@ -9,10 +9,11 @@ unverifiable the letter is blocked and nothing is returned as text.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
-from guardrail import Scope, validate
+from guardrail import BlockedClaim, Scope, validate
 from providers.base import LLMProvider
 from truth.answers import Answers
 from truth.model import Truth
@@ -173,7 +174,39 @@ def build_letter(
         }
 
     text = "\n\n".join(p["text"] for p in shown)
+    leaked = _placeholders(text)
+    if leaked:
+        return {
+            "blocked": True,
+            "unverifiable": [],
+            "blocked_claims": [
+                BlockedClaim(scope_id=LETTER_SCOPE_ID, text=t, tokens=[t])
+                for t in leaked
+            ],
+            "text": "",
+        }
     return {"blocked": False, "unverifiable": [], "blocked_claims": [], "text": text}
+
+
+# A template slot the model failed to fill: "[Your Name]", "[Company]". Bounded
+# and letters-only so real bracketed prose ("[sic]", "[2024]") does not trip it.
+_PLACEHOLDER = re.compile(r"\[[A-Za-z][A-Za-z ./'-]{0,38}\]")
+
+
+def _placeholders(text: str) -> list[str]:
+    """Unfilled template placeholders in the finished letter.
+
+    Nothing in this module emits a template — the letter is the model's own
+    paragraphs joined — so a bracketed slot can only arrive if the model wrote
+    one. Rare, but it ships straight to an employer when it happens, and no
+    other check looks for it: the guardrail validates claims, and a placeholder
+    asserts nothing to validate.
+    """
+    seen: list[str] = []
+    for match in _PLACEHOLDER.findall(text):
+        if match not in seen:
+            seen.append(match)
+    return seen
 
 
 def _generate_paragraphs(
@@ -236,6 +269,24 @@ def _letter_scope(
         if c and c not in denied_texts
     ]
     allowed = (
-        _all_values(truth) + _answer_values(answers) + [t for t in approved_texts if t]
+        _all_values(truth)
+        + _answer_values(answers)
+        + [t for t in approved_texts if t]
+        + _facts_block_lines(truth, answers)
     )
     return Scope(id=LETTER_SCOPE_ID, texts=claims, allowed=allowed)
+
+
+def _facts_block_lines(truth: Truth, answers: Answers | None) -> list[str]:
+    """The facts block's own lines, as allowed claim sources.
+
+    The block presents each fact labelled — ``Location: Karlsruhe`` — and the
+    system prompt tells the model to list every fact it uses *verbatim* in its
+    claims. A model that follows that instruction exactly emits the label too,
+    and the label word ("location") appears in no truth value, so the guardrail
+    flagged it and blocked the letter over a fact the operator really had.
+    Whatever we present to the model as a fact has to be traceable when quoted
+    back, so the block's lines are allowed sources alongside the raw values.
+    """
+    block = prompts.cover_letter_facts_block(truth, answers)
+    return [line.strip() for line in block.splitlines() if line.strip()]
