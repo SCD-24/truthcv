@@ -118,7 +118,7 @@ A new **Phase 0**, before discovery: work the approved queue first, because
 those postings are already vetted and should get the browser budget ahead of
 speculative screening.
 
-Two new tools (nine → ten; `test_mcp_tools_list_returns_nine_tools` updates):
+Two new tools (nine → eleven; `test_mcp_tools_list_returns_nine_tools` updates):
 
 - **`get_approved_applications()`** — read-only. Returns approved items with
   company, role, url, screening id.
@@ -180,7 +180,7 @@ company-level trust without leaving the queue.
   cooldown company is returned flagged rather than absent.
 - **Semantics** — company approval clears deferral blockers but does not bypass
   salary/remote/country/role-type screening.
-- **Tool surface** — ten tools listed with correct schemas;
+- **Tool surface** — eleven tools listed with correct schemas;
   `report_apply_failure` cannot alter `approval`.
 - **Frontend** — pending list renders; approve/reject and bulk call through;
   empty state; failure detail visible; badge count matches the filter.
