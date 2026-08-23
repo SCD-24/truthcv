@@ -5,6 +5,7 @@
 graph TD
     api["API <br/> <small>(BACKEND)</small>"]
     application-tracker["Application Tracker <br/> <small>(BACKEND)</small>"]
+    browser-runtime["Agent Browser <br/> <small>(CUSTOM)</small>"]
     cover-letter-engine["Cover Letter Engine <br/> <small>(BACKEND)</small>"]
     guardrail-validator["Guardrail Validator <br/> <small>(BACKEND)</small>"]
     llm-provider-layer["LLM Provider Layer <br/> <small>(BACKEND)</small>"]
@@ -25,6 +26,7 @@ graph TD
     api -->|in-process| truth-store
     application-tracker -->|in-process| renderer
     application-tracker -->|file I/O| truth-data-volume
+    browser-runtime -->|file I/O (read-only)| truth-data-volume
     cover-letter-engine -->|in-process| guardrail-validator
     cover-letter-engine -->|in-process| llm-provider-layer
     cover-letter-engine -->|in-process| prompt-store
@@ -48,6 +50,7 @@ graph TD
 
 - [API](overview.md) (`api`, backend)
 - [Application Tracker](overview.md) (`application-tracker`, backend)
+- [Agent Browser](overview.md) (`browser-runtime`, custom)
 - [Cover Letter Engine](overview.md) (`cover-letter-engine`, backend)
 - [Guardrail Validator](overview.md) (`guardrail-validator`, backend)
 - [LLM Provider Layer](overview.md) (`llm-provider-layer`, backend)
@@ -71,6 +74,7 @@ graph TD
 - [api → truth-store](interactions/api--truth-store.md) via `in-process`
 - [application-tracker → renderer](interactions/application-tracker--renderer.md) via `in-process`
 - [application-tracker → truth-data-volume](interactions/application-tracker--truth-data-volume.md) via `file I/O`
+- [browser-runtime → truth-data-volume](interactions/browser-runtime--truth-data-volume.md) via `file I/O (read-only)`
 - [cover-letter-engine → guardrail-validator](interactions/cover-letter-engine--guardrail-validator.md) via `in-process`
 - [cover-letter-engine → llm-provider-layer](interactions/cover-letter-engine--llm-provider-layer.md) via `in-process`
 - [cover-letter-engine → prompt-store](interactions/cover-letter-engine--prompt-store.md) via `in-process`
@@ -91,5 +95,5 @@ graph TD
 
 ## Groups
 
-- [TruthCV Container (single Docker image)](groups/truthcv-container-single-docker-image.md) (`truthcv-container-single-docker-image`, 12 member(s))
+- [TruthCV Container (single Docker image)](groups/truthcv-container-single-docker-image.md) (`truthcv-container-single-docker-image`, 13 member(s))
 <!-- generated:end file:system-map -->
