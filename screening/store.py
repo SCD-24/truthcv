@@ -13,7 +13,7 @@ from pathlib import Path
 
 from truth.store import data_dir
 
-from .model import Screening, new_id
+from .model import APPROVAL_VALUES, Screening, new_id
 
 
 def screenings_path() -> Path:
@@ -64,6 +64,12 @@ def create(fields: dict) -> Screening:
     now = _now()
     screening = Screening(id=new_id(), created_at=now, updated_at=now)
     _apply_editable(screening, fields)
+    # A deferred screening is an unresolved decision, so it enters the operator's
+    # approval queue. Set here rather than accepted from `fields`: the agent's
+    # record_screening reaches this function directly, and approval is not its
+    # to grant.
+    if screening.verdict == "deferred":
+        screening.approval = "pending"
     screenings = load_all()
     screenings.append(screening)
     _write_all(screenings)
@@ -90,6 +96,47 @@ def delete(screening_id: str) -> bool:
         return False
     _write_all([s for s in screenings if s.id != screening_id])
     return True
+
+
+def set_approval(screening_id: str, approval: str) -> Screening | None:
+    """Set a screening's approval state — the operator's decision, never the agent's.
+
+    Raises ValueError on an unknown state rather than writing it.
+    """
+    if approval not in APPROVAL_VALUES:
+        raise ValueError(f"Unknown approval state '{approval}'.")
+    return _mutate(screening_id, lambda s: setattr(s, "approval", approval))
+
+
+def record_apply_failure(screening_id: str, error: str) -> Screening | None:
+    """Count one failed application attempt and keep its error for the operator.
+
+    Leaves `approval` untouched: a failure is not a decision, and the item stays
+    queued for the next run.
+    """
+
+    def _bump(s: Screening) -> None:
+        s.apply_attempts += 1
+        s.apply_error = error
+
+    return _mutate(screening_id, _bump)
+
+
+def mark_applied(screening_id: str) -> Screening | None:
+    """Retire an approved item once its application is confirmed."""
+    return _mutate(screening_id, lambda s: setattr(s, "approval", "applied"))
+
+
+def _mutate(screening_id: str, apply) -> Screening | None:
+    """Load, mutate one record outside EDITABLE, stamp, and write back."""
+    screenings = load_all()
+    screening = next((s for s in screenings if s.id == screening_id), None)
+    if screening is None:
+        return None
+    apply(screening)
+    screening.updated_at = _now()
+    _write_all(screenings)
+    return screening
 
 
 def _apply_editable(screening: Screening, fields: dict) -> None:
