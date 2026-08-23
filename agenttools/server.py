@@ -2,7 +2,7 @@
 
 This runs in-process inside the TruthCV container using the MCP SDK (>=1.9).
 REST routes GET /mcp/tools and POST /mcp/tools/{name} provide the tool surface
-to non-MCP clients. The JSON-RPC endpoint (registered via mcp_app.py) exposes
+to non-MCP clients. The JSON-RPC endpoint (registered in api/main.py) exposes
 the same tools via the streamable-HTTP MCP transport at POST /mcp for the agent's
 Claude Code CLI invocation. It is per-application: every tool takes its state as
 arguments and returns it in its result, so no tool reads or writes global state.
