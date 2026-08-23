@@ -581,8 +581,46 @@ class ScreeningModel(_Camel):
     reason: str = ""
     cooldown_expires: str = ""
     source: str = ""
+    approval: str = ""
+    apply_attempts: int = 0
+    apply_error: str = ""
     created_at: str = ""
     updated_at: str = ""
+
+
+class ApprovalUpdate(_Camel):
+    """PATCH /screenings/{id}: the operator's approval decision."""
+
+    approval: str
+
+
+class BulkApprovalUpdate(_Camel):
+    """PATCH /screenings/approvals: one decision across many screenings."""
+
+    ids: list[str] = []
+    approval: str
+
+
+class BulkApprovalResult(_Camel):
+    """Per-id outcome, so a partial failure is visible rather than silent."""
+
+    results: list[dict] = []
+
+
+class CompanyApprovalUpdate(_Camel):
+    """PATCH /company-boards/{company}: company-level trust."""
+
+    approved: bool
+
+
+class CompanyBoardModel(_Camel):
+    """A company's resolved careers board and the operator's trust in it."""
+
+    company: str = ""
+    careers_url: str = ""
+    ats: str = ""
+    status: str = ""
+    approved: bool = False
 
 
 class ScreeningCreate(_Camel):
