@@ -32,9 +32,13 @@ class OpenAIProvider(LLMProvider):
         if base_url is not None:
             kwargs["base_url"] = base_url
         self._client = openai.OpenAI(**kwargs)
-        self._model = env_model("gpt-4o", model)
         # Derived from base_url so effort validation uses the right pattern set.
         self._provider_key = "openrouter" if base_url else "codex"
+        # OpenRouter namespaces every model id as vendor/model and rejects a
+        # bare "gpt-4o", so the fallback for a route with no model chosen has
+        # to be the namespaced form of the same model.
+        default_model = "openai/gpt-4o" if self._provider_key == "openrouter" else "gpt-4o"
+        self._model = env_model(default_model, model)
         self._effort = effort or ""
 
     def _chat(self, system: str, messages: list[dict[str, str]], json_mode: bool) -> str:
@@ -54,11 +58,19 @@ class OpenAIProvider(LLMProvider):
         return resp.choices[0].message.content or ""
 
     def list_models(self) -> list[dict[str, str]]:
-        """Live model list from the OpenAI Models API, narrowed to chat models
-        (the endpoint also returns embeddings/audio/image models we can't chat with)."""
+        """Live model list from the Models API.
+
+        OpenAI's endpoint also returns embeddings/audio/image models we can't
+        chat with, so its ids are narrowed to the chat families. OpenRouter
+        serves only chat models and namespaces every id as ``vendor/model``
+        (``openai/gpt-4o``, ``anthropic/claude-sonnet-4``), which that narrowing
+        would reject wholesale — leaving the model picker empty. So it is
+        applied to OpenAI only.
+        """
         ids = [m.id for m in self._client.models.list().data]
-        chat = sorted(i for i in ids if i.startswith("gpt-") or re.match(r"o\d", i))
-        return [{"id": i, "label": i} for i in chat]
+        if self._provider_key != "openrouter":
+            ids = [i for i in ids if i.startswith("gpt-") or re.match(r"o\d", i)]
+        return [{"id": i, "label": i} for i in sorted(ids)]
 
     def complete(self, system: str, messages: list[dict[str, str]]) -> str:
         return self._chat(system, messages, json_mode=False)
