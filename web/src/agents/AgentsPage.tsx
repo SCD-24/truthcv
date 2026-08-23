@@ -297,7 +297,7 @@ function RunNowSection({ agentEnabled }: { agentEnabled: boolean }) {
       title="Run now"
       description="Trigger an immediate agent run outside the scheduled slots."
     >
-      <Stack direction="row" spacing={2} alignItems="center">
+      <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
         {agentEnabled ? (
           <Button
             variant="outlined"
