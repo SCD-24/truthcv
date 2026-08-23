@@ -51,4 +51,8 @@ RUN mkdir -p /browser-profile /app/data
 #   7900: noVNC (web-based VNC viewer, useful for debugging/manual login)
 EXPOSE 8931 7900
 
+# Entrypoint: starts Xvfb, x11vnc, noVNC and @playwright/mcp.
+COPY browser/entrypoint.sh /browser/entrypoint.sh
+RUN chmod +x /browser/entrypoint.sh
+
 ENTRYPOINT ["/browser/entrypoint.sh"]
