@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { listConnectionModels, testConnectionProvider } from "../api/client";
+import { listConnectionModels } from "../api/client";
 import type { ConnectionStatus, ModelInfo, RouteChoice } from "../api/types";
 import { ModelRoutePicker } from "./ModelRoutePicker";
 
