@@ -178,6 +178,7 @@ class TestResult(_Camel):
 class ModelInfo(_Camel):
     id: str
     label: str
+    effort_levels: list[str] = Field(default_factory=list)
 
 
 class ModelList(_Camel):
@@ -648,10 +649,11 @@ class ConnectionTestRequest(_Camel):
 
 
 class RouteModel(_Camel):
-    """A single connection + model pair."""
+    """A single connection + model pair, with an optional effort level."""
 
     connection: str
     model: str = ""
+    effort: str = ""
 
 
 class RoutingModel(_Camel):

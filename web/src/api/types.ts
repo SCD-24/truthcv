@@ -145,6 +145,9 @@ export interface SettingsStatus {
 export interface ModelInfo {
   id: string;
   label: string;
+  /** Effort levels this model supports (e.g. "low" | "medium" | "high").
+   * Empty means the model has no effort concept and no effort select is shown. */
+  effortLevels?: string[];
 }
 
 /** Response from POST /api/models. */
@@ -410,6 +413,8 @@ export interface StartLoginResult {
 export interface RouteChoice {
   connection: string;
   model: string;
+  /** Chosen effort level for models that support it; omit or "" for provider default. */
+  effort?: string;
 }
 
 /** Routing configuration for tasks and defaults. */

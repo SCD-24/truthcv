@@ -19,16 +19,26 @@ def routing_path() -> Path:
 class Route:
     connection: str
     model: str = ""
+    effort: str = ""
 
     @classmethod
     def from_dict(cls, raw: object) -> Route | None:
+        """Parse a route dict; unknown/missing fields use defaults.
+
+        Legacy files without an ``effort`` key load unchanged (defaults to ``""``).
+        """
         if not isinstance(raw, dict) or not isinstance(raw.get("connection"), str):
             return None
         model = raw.get("model")
-        return cls(raw["connection"], model if isinstance(model, str) else "")
+        effort = raw.get("effort")
+        return cls(
+            raw["connection"],
+            model if isinstance(model, str) else "",
+            effort if isinstance(effort, str) else "",
+        )
 
     def to_dict(self) -> dict:
-        return {"connection": self.connection, "model": self.model}
+        return {"connection": self.connection, "model": self.model, "effort": self.effort}
 
 
 @dataclass
