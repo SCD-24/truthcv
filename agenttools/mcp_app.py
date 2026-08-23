@@ -12,10 +12,12 @@ from typing import Any
 from agenttools.tools_boards import record_company_board as _record_company_board
 from agenttools.tools_ledger import (
     check_cooldown as _check_cooldown,
+    get_approved_applications as _get_approved_applications,
     get_canonical_cv as _get_canonical_cv,
     get_job_profiles as _get_job_profiles,
     get_profile_answers as _get_profile_answers,
     recommend_salary as _recommend_salary,
+    report_apply_failure as _report_apply_failure,
     record_application as _record_application,
     record_screening as _record_screening,
 )
@@ -54,6 +56,15 @@ _TOOL_REGISTRY = {
     "recommend_salary": (
         _recommend_salary,
         "Given the matched profile's name (and optionally a derived proposed figure), returns the operator's salary ask for that profile, clamped to its configured band.",
+    ),
+    "get_approved_applications": (
+        _get_approved_applications,
+        "Returns the postings the operator approved for this run to apply to. "
+        "An entry with a non-empty blocked_reason must NOT be applied to — report it instead.",
+    ),
+    "report_apply_failure": (
+        _report_apply_failure,
+        "Records why an approved application could not be completed. The item stays queued for the next run.",
     ),
     "record_company_board": (
         _record_company_board,
