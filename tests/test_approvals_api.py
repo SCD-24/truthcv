@@ -103,6 +103,11 @@ def test_no_agent_route_writes_approval(client):
     assert approval_paths, "expected the approval routes to exist"
     assert not any(p.startswith("/api/agent") for p in approval_paths)
 
+    # No tool on the agent's surface can WRITE approval. Checked against the
+    # store functions themselves rather than tool names: the surface legitimately
+    # includes get_approved_applications, which only reads.
+    import screening.store as store_module
     from agenttools.mcp_app import _TOOL_REGISTRY
 
-    assert not any("approve" in name or "approval" in name for name in _TOOL_REGISTRY)
+    writers = {store_module.set_approval, store_module.mark_applied}
+    assert not (writers & {fn for fn, _ in _TOOL_REGISTRY.values()})
