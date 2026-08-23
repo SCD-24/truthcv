@@ -40,11 +40,11 @@ function PendingCard({
 }) {
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
-      <Stack direction="row" spacing={2} alignItems="flex-start">
+      <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start" }}>
         <Checkbox
           checked={checked}
           onChange={() => onToggle(record.id)}
-          inputProps={{ "aria-label": `Select ${record.company}` }}
+          slotProps={{ input: { "aria-label": `Select ${record.company}` } }}
         />
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="subtitle1">{record.company}</Typography>
@@ -56,7 +56,7 @@ function PendingCard({
               {record.url}
             </Link>
           ) : null}
-          <Stack direction="row" spacing={1} sx={{ mt: 1 }} alignItems="center">
+          <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: "center" }}>
             {record.failingCriterion ? (
               <Chip size="small" label={record.failingCriterion} />
             ) : null}
@@ -194,7 +194,7 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
 
   return (
     <Box>
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
+      <Stack direction="row" spacing={1} sx={{ mb: 2, alignItems: "center" }}>
         <Button startIcon={<ArrowBackIcon />} onClick={onBack}>
           Back
         </Button>
@@ -221,13 +221,13 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
         <Stack spacing={2}>
           {pending.length > 0 ? (
             <>
-              <Stack direction="row" spacing={2} alignItems="center">
+              <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
                 <FormControlLabel
                   control={
                     <Checkbox
                       checked={selected.length === pending.length && pending.length > 0}
                       onChange={toggleAll}
-                      inputProps={{ "aria-label": "Select all" }}
+                      slotProps={{ input: { "aria-label": "Select all" } }}
                     />
                   }
                   label="Select all"

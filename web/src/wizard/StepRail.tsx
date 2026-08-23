@@ -4,6 +4,8 @@ import Typography from "@mui/material/Typography";
 import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import InsightsOutlinedIcon from "@mui/icons-material/InsightsOutlined";
 import SmartToyOutlinedIcon from "@mui/icons-material/SmartToyOutlined";
+import Badge from "@mui/material/Badge";
+import PlaylistAddCheckOutlinedIcon from "@mui/icons-material/PlaylistAddCheckOutlined";
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import { STEPS, stepIndex, type StepId } from "./steps";
@@ -17,6 +19,7 @@ interface Props {
   onOpenAnalytics: () => void;
   onOpenAgents: () => void;
   onOpenScreenings: () => void;
+  onOpenApprovals: () => void;
   /** True when the applications page (not the wizard) is the active view. */
   applicationsActive?: boolean;
   /** True when the analytics page (not the wizard) is the active view. */
@@ -25,6 +28,9 @@ interface Props {
   agentsActive?: boolean;
   /** True when the screenings page (not the wizard) is the active view. */
   screeningsActive?: boolean;
+  approvalsActive?: boolean;
+  /** Pending queue size; the badge hides itself at 0. */
+  pendingApprovals?: number;
 }
 
 /**
@@ -41,10 +47,13 @@ export function StepRail({
   onOpenAnalytics,
   onOpenAgents,
   onOpenScreenings,
+  onOpenApprovals,
   applicationsActive = false,
   analyticsActive = false,
   agentsActive = false,
   screeningsActive = false,
+  approvalsActive = false,
+  pendingApprovals = 0,
 }: Props) {
   const reachedIdx = stepIndex(reached);
   const currentIdx = stepIndex(current);
@@ -124,6 +133,20 @@ export function StepRail({
           sx={{ justifyContent: "flex-start" }}
         >
           Screenings
+        </Button>
+        <Button
+          fullWidth
+          variant={approvalsActive ? "contained" : "outlined"}
+          startIcon={
+            <Badge badgeContent={pendingApprovals} color="primary">
+              <PlaylistAddCheckOutlinedIcon fontSize="small" />
+            </Badge>
+          }
+          onClick={onOpenApprovals}
+          aria-current={approvalsActive ? "page" : undefined}
+          sx={{ justifyContent: "flex-start" }}
+        >
+          Approvals
         </Button>
         <Button
           fullWidth
