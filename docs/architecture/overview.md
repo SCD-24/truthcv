@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-14 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+13 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -92,7 +92,7 @@ External LLM inference reached by the provider layer: Anthropic or OpenAI cloud 
 <!-- generated:start comp:cover-letter-engine -->
 ## Cover Letter Engine (`cover-letter-engine`, BACKEND)
 
-Guardrailed cover-letter generation (coverletter/). build_letter() asks the LLM (via the provider layer) for a cover letter as tagged paragraphs, each declaring the factual claims it makes. Every claim is validated by the Guardrail Validator against the Truth Store; if any claim is unverifiable the letter is BLOCKED (returns {blocked: true, unverifiable, text: ""}). Otherwise the paragraph text is joined and handed to the Renderer for HTML/PDF/DOCX output. Serves /api/cover-letter together with render/.
+Guardrailed cover-letter generation (coverletter/). build_letter() asks the LLM (via the provider layer) for a cover letter as tagged paragraphs, each declaring the factual claims it makes. It draws on the whole candidate record: the Truth Store's experiences, education and skills, the Profile header edited at Review (name, location, contact links and summary), and the profile answers kept on the Agents page (current role, years of experience, languages, work authorisation and the rest), which the API loads and passes in. All of those are allowed claim sources for the generation only, never written back to truth. Every claim is validated by the Guardrail Validator; if any claim is unverifiable the letter is BLOCKED (returns {blocked: true, unverifiable, text: ""}). Otherwise the paragraph text is joined and handed to the Renderer for HTML/PDF/DOCX output. Serves /api/cover-letter together with render/.
 
 **Tech:** Python
 <!-- generated:end comp:cover-letter-engine -->

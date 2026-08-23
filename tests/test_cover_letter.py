@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from coverletter.generate import build_letter
 from providers.fake import FakeProvider
-from truth.model import Bullet, Experience, Skill, Truth
+from truth.answers import Answers
+from truth.model import Bullet, Experience, Profile, Skill, Truth
 
 
 def _truth() -> Truth:
@@ -115,3 +116,88 @@ def test_denied_claim_empties_letter_when_it_is_the_only_paragraph(data_dir):
     )
     assert out["blocked"] is False
     assert out["text"] == ""
+
+
+def test_profile_header_is_allowed_claim_source(data_dir):
+    """A letter claiming the profile summary text is not blocked, proving the
+    Review-page profile is now an allowed claim source."""
+    truth = Truth(
+        profile=Profile(
+            name="Alice Engineer",
+            email="alice@example.com",
+            phone="+1 555-0123",
+            location="San Francisco, CA",
+            summary="Experienced software engineer focused on backend systems.",
+        ),
+        experiences=[],
+        skills=[],
+    )
+
+    def router_profile_claim(system, messages, schema):
+        return {
+            "paragraphs": [
+                {
+                    "text": "I am an experienced software engineer focused on backend systems.",
+                    "claims": ["experienced software engineer focused on backend systems"],
+                }
+            ]
+        }
+
+    out = build_letter("A role", "Professional", "Short", truth, FakeProvider(router=router_profile_claim))
+    assert out["blocked"] is False
+    assert "experienced software engineer" in out["text"]
+
+
+def test_answers_block_without_parameter_unblock_with_parameter(data_dir):
+    """A letter claiming a value that exists only in truth.answers.Answers is
+    blocked without answers=, and unblocked when answers= carries it."""
+    truth = _truth()
+    answers = Answers(current_role="Staff Engineer")
+
+    def router_answer_claim(system, messages, schema):
+        return {
+            "paragraphs": [
+                {
+                    "text": "I currently work as a Staff Engineer.",
+                    "claims": ["Staff Engineer"],
+                }
+            ]
+        }
+
+    # Without answers: blocked
+    out_no_answers = build_letter(
+        "A role", "Professional", "Short", truth, FakeProvider(router=router_answer_claim)
+    )
+    assert out_no_answers["blocked"] is True
+
+    # With answers: unblocked
+    out_with_answers = build_letter(
+        "A role", "Professional", "Short", truth, FakeProvider(router=router_answer_claim),
+        answers=answers
+    )
+    assert out_with_answers["blocked"] is False
+    assert "Staff Engineer" in out_with_answers["text"]
+
+
+def test_canonical_cv_asset_id_never_allowed(data_dir):
+    """A paragraph claiming the canonical_cv_asset_id value stays blocked even
+    when answers= carries it, since it is an internal asset UUID, not a claim."""
+    truth = _truth()
+    answers = Answers(canonical_cv_asset_id="cv-12345")
+
+    def router_asset_claim(system, messages, schema):
+        return {
+            "paragraphs": [
+                {
+                    "text": "My CV is cv-12345.",
+                    "claims": ["cv-12345"],
+                }
+            ]
+        }
+
+    out = build_letter(
+        "A role", "Professional", "Short", truth, FakeProvider(router=router_asset_claim),
+        answers=answers
+    )
+    assert out["blocked"] is True
+    assert "cv-12345" in out["unverifiable"]
