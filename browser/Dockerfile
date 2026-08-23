@@ -39,6 +39,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # so `npm install -g` works immediately.
 RUN npm install -g @playwright/mcp@latest
 
+# Then install the Chromium build that THIS @playwright/mcp expects.
+#
+# The base image ships the browsers matching its own tag (v1.49.0 ->
+# chromium-1148), but @playwright/mcp@latest bundles its own, newer
+# playwright-core and looks for that version's build (chromium-1237 at the time
+# of writing). The two drift apart silently: the MCP server starts and answers
+# its healthcheck, so the container reports healthy, and only an actual
+# browser_navigate fails — "expected executable at
+# /ms-playwright/chromium-1237/chrome-linux64/chrome". A whole unattended run
+# reaches zero applications that way.
+#
+# Installing through the MCP package's own playwright-core is what keeps the
+# two in step: it resolves the version the server will actually ask for, so
+# this stays correct when the package updates. PLAYWRIGHT_BROWSERS_PATH puts it
+# beside the base image's copies rather than in root's home.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN npx --yes playwright-core@$(node -p "require('/usr/lib/node_modules/@playwright/mcp/node_modules/playwright-core/package.json').version") install chromium \
+ && rm -rf /root/.npm
+
 # Create mount points:
 #   /browser-profile: persistent Chromium user profile (named volume)
 #   /app/data:        read-only mount of the app's data directory
