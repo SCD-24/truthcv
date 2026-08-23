@@ -15,6 +15,10 @@ class CompanyBoard:
     ats: str = ""
     status: str = "ok"
     resolved_at: str = ""
+    # Operator-granted, company-level trust. Clears deferral blockers for any
+    # role here; never bypasses per-role screening. record_company_board takes
+    # no such argument, so the agent cannot set it.
+    approved: bool = False
 
     @classmethod
     def from_dict(cls, raw: dict) -> "CompanyBoard":
@@ -41,6 +45,10 @@ class CompanyBoard:
         if "resolved_at" in raw and isinstance(raw["resolved_at"], str):
             kwargs["resolved_at"] = raw["resolved_at"]
 
+        # approved: bool
+        if "approved" in raw and isinstance(raw["approved"], bool):
+            kwargs["approved"] = raw["approved"]
+
         return cls(**kwargs)
 
     def to_dict(self) -> dict:
@@ -51,6 +59,7 @@ class CompanyBoard:
             "ats": self.ats,
             "status": self.status,
             "resolved_at": self.resolved_at,
+            "approved": self.approved,
         }
 
 
@@ -99,16 +108,39 @@ def _normalize_company(name: str) -> str:
 
 
 def record(company: str, careers_url: str, ats: str = "", status: str = "ok") -> None:
-    """Record or overwrite a company board entry."""
+    """Record or update a company board entry.
+
+    Merges onto any existing entry rather than replacing it. The agent
+    re-records boards every run, and rebuilding from these arguments alone would
+    silently drop the operator's `approved` flag (and the resolution stamp).
+    """
     boards = load()
     normalized = _normalize_company(company)
+    existing = boards.get(normalized)
     boards[normalized] = CompanyBoard(
         company=company,
         careers_url=careers_url,
         ats=ats,
         status=status,
+        resolved_at=existing.resolved_at if existing else "",
+        approved=existing.approved if existing else False,
     )
     save(boards)
+
+
+def set_approved(company: str, approved: bool) -> CompanyBoard | None:
+    """Grant or revoke company-level approval.
+
+    Returns the updated entry so callers need not re-normalise the name to read
+    it back; None when the company has no board.
+    """
+    boards = load()
+    normalized = _normalize_company(company)
+    if normalized not in boards:
+        return None
+    boards[normalized].approved = approved
+    save(boards)
+    return boards[normalized]
 
 
 def mark_dead(company: str) -> None:
