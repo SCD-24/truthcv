@@ -25,7 +25,10 @@ if (field === "llm_credentials") {
     res.on("end", () => {
       try {
         const creds = JSON.parse(body);
-        process.stdout.write(`${creds.authType}\n${creds.token}\n${creds.model || ""}\n`);
+        // Line 4 is the Anthropic-compatible base URL, empty for Anthropic
+        // itself. Appended last so an older daily-apply.sh reading only
+        // three lines is unaffected.
+        process.stdout.write(`${creds.authType}\n${creds.token}\n${creds.model || ""}\n${creds.baseUrl || ""}\n`);
         process.exit(0);
       } catch { process.exit(1); }
     });

@@ -232,7 +232,22 @@ if [[ -n "${AGENT_API_TOKEN:-}" ]]; then
     AUTH_TYPE="$(sed -n 1p <<<"$CREDS")"
     AUTH_TOKEN="$(sed -n 2p <<<"$CREDS")"
     AGENT_MODEL="$(sed -n 3p <<<"$CREDS")"
-    if [[ "$AUTH_TYPE" == "oauth" ]]; then
+    AGENT_BASE_URL="$(sed -n 4p <<<"$CREDS")"
+    # A base URL means the route points at an Anthropic-compatible third party
+    # (OpenRouter) rather than Anthropic itself. The claude CLI appends
+    # /v1/messages to ANTHROPIC_BASE_URL and authenticates with
+    # ANTHROPIC_AUTH_TOKEN, so ANTHROPIC_API_KEY must be unset or it wins and
+    # the run goes to Anthropic with a key that is not one.
+    if [[ -n "$AGENT_BASE_URL" ]]; then
+      export ANTHROPIC_BASE_URL="$AGENT_BASE_URL"
+      export ANTHROPIC_AUTH_TOKEN="$AUTH_TOKEN"
+      unset ANTHROPIC_API_KEY
+      # The CLI only knows Anthropic's own model ids and warns on anything
+      # else while still honouring it; this silences a warning, it does not
+      # change which model runs.
+      export CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1
+      log "using $AGENT_BASE_URL credentials from app"
+    elif [[ "$AUTH_TYPE" == "oauth" ]]; then
       export CLAUDE_CODE_OAUTH_TOKEN="$AUTH_TOKEN"
       unset ANTHROPIC_API_KEY
       log "using Claude subscription credentials from app"
@@ -250,7 +265,7 @@ if [[ -n "${AGENT_API_TOKEN:-}" ]]; then
 fi
 
 # Final gate: at least one credential source must be set
-[[ -n "${ANTHROPIC_API_KEY:-}" ]] || [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] || abort "no usable LLM credential: set ANTHROPIC_API_KEY or AGENT_API_TOKEN + app credentials"
+[[ -n "${ANTHROPIC_API_KEY:-}" ]] || [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] || [[ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]] || abort "no usable LLM credential: set ANTHROPIC_API_KEY or AGENT_API_TOKEN + app credentials"
 MODEL_ARGS=()
 [[ -n "$AGENT_MODEL" ]] && MODEL_ARGS=(--model "$AGENT_MODEL")
 

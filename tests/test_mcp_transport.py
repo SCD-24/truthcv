@@ -178,3 +178,61 @@ def test_mcp_tools_no_approval_parameters(client: TestClient) -> None:
     schema = gen_letter.get("inputSchema", {})
     properties = schema.get("properties", {})
     assert "provider" not in properties, "generate_cover_letter exposes 'provider' parameter"
+
+
+# --- tools/call dispatch and advertised schemas -----------------------------
+#
+# Both were broken together: the handlers were registered against the whole
+# request models (CallToolRequest) instead of the params models, so the SDK
+# rejected every call with -32602 before the handler ran, and every tool
+# advertised an empty property set, so a caller had no way to learn that seven
+# of the nine take arguments.
+#
+# These assertions are deliberately strict about the ABSENCE of a JSON-RPC
+# error. test_mcp_tools_call_check_cooldown above accepts ``"result" in body or
+# "error" in body``, which a -32602 satisfies — that is why this regressed
+# unnoticed.
+
+def _rpc(client: TestClient, method: str, params: dict, rpc_id: int = 1) -> dict:
+    response = client.post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params},
+        follow_redirects=False,
+    )
+    assert response.status_code == 200, f"{response.status_code}: {response.text}"
+    return response.json()
+
+
+def test_tools_call_returns_a_result_not_an_error(client: TestClient) -> None:
+    body = _rpc(client, "tools/call", {"name": "get_canonical_cv", "arguments": {}})
+    assert "error" not in body, f"tools/call rejected: {body.get('error')}"
+    assert body["result"]["content"], body
+
+
+def test_tools_call_accepts_omitted_arguments(client: TestClient) -> None:
+    """A caller may omit `arguments` entirely for a no-argument tool."""
+    body = _rpc(client, "tools/call", {"name": "get_canonical_cv"})
+    assert "error" not in body, f"tools/call rejected: {body.get('error')}"
+
+
+def test_unknown_tool_is_a_tool_error_not_a_protocol_error(client: TestClient) -> None:
+    body = _rpc(client, "tools/call", {"name": "no_such_tool", "arguments": {}})
+    assert "error" not in body, f"expected a tool-level error, got {body.get('error')}"
+    assert body["result"]["isError"] is True
+
+
+def test_schemas_declare_the_parameters_each_tool_takes(client: TestClient) -> None:
+    body = _rpc(client, "tools/list", {})
+    schemas = {t["name"]: t["inputSchema"] for t in body["result"]["tools"]}
+
+    # Required-with-no-default becomes required; defaulted becomes optional.
+    assert schemas["check_cooldown"]["required"] == ["company"]
+    assert set(schemas["check_cooldown"]["properties"]) == {"company", "role"}
+    assert schemas["recommend_salary"]["properties"]["proposed"]["type"] == "integer"
+
+    # A no-argument tool stays empty, and must not be marked open-ended.
+    assert schemas["get_canonical_cv"]["properties"] == {}
+    assert "additionalProperties" not in schemas["get_canonical_cv"]
+
+    # A **kwargs tool accepts arbitrary fields instead of declaring none.
+    assert schemas["record_application"]["additionalProperties"] is True

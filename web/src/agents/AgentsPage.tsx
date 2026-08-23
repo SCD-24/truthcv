@@ -386,10 +386,14 @@ function EnabledSection({
   );
 }
 
-/** The model the unattended agent runs on — a claude-only ModelRoutePicker
+/** The model the unattended agent runs on — an Anthropic-compatible-only
+ * ModelRoutePicker
  * (the agent is a headless Claude Code process — it is the `claude` CLI that
  * drives the containerised Chromium in the sibling `browser` service over
- * MCP, so no other provider can run it) saving/clearing the `agent` route.
+ * MCP, so the only usable connections are the ones serving the Anthropic
+ * Messages API: Anthropic itself and OpenRouter, which the CLI reaches via
+ * ANTHROPIC_BASE_URL. codex and ollama offer an OpenAI-shaped surface only)
+ * saving/clearing the `agent` route.
  * Cleared falls back to the container's ANTHROPIC_API_KEY. */
 function ModelSection({
   connections,
@@ -410,7 +414,7 @@ function ModelSection({
       }}
       title="Model"
       description="Model and account the unattended agent runs on. Cleared = the container's ANTHROPIC_API_KEY."
-      filterCards={["claude"]}
+      filterCards={["claude", "openrouter"]}
       allowClear
       showTest={false}
     />

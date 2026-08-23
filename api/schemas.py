@@ -670,6 +670,9 @@ class AgentLlmCredentials(_Camel):
     auth_type: str
     token: str
     model: str = ""
+    # Set only for Anthropic-compatible third parties (OpenRouter). Empty means
+    # the agent talks to Anthropic directly, as it always did.
+    base_url: str = ""
 
 
 class AgentStatus(_Camel):
