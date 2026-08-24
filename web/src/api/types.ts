@@ -320,11 +320,25 @@ export interface ScreeningRecord {
   /** ISO timestamp the cooldown lapses; empty when there is no cooldown. */
   cooldownExpires: string;
   source: string;
+  /** The posting as the agent read it, captured for drafting the letter later. */
+  postingText: string;
+  /** The employer's publication date; empty when unknown (many boards omit it). */
+  postedDate: string;
   /** "" when this record is not an approval item. */
   approval: "" | "pending" | "approved" | "rejected" | "applied";
   applyAttempts: number;
   applyError: string;
   createdAt: string;
+  updatedAt: string;
+}
+
+/** A screening's current cover letter. `source` says whether the guardrail
+ * vouches for the text: "generated" is what the model wrote and the guardrail
+ * validated, "operator" is text you wrote, saved verbatim and unvalidated. */
+export interface CoverLetterDraft {
+  text: string;
+  paragraphs: Record<string, unknown>[];
+  source: "generated" | "operator";
   updatedAt: string;
 }
 

@@ -19,6 +19,7 @@ import type {
   ApplicationUpdate,
   SaveDocumentResult,
   ScreeningRecord,
+  CoverLetterDraft,
   CooldownStatus,
   AgentConfig,
   AgentConfigUpdate,
@@ -313,6 +314,42 @@ export function setScreeningUrl(id: string, url: string): Promise<ScreeningRecor
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url }),
+  });
+}
+
+/** The stored draft, or null when none has been generated yet.
+ *
+ * `request`'s errors are plain `Error`s carrying only a message (see its
+ * definition above) — no status code survives the throw. The 404 route
+ * (api/routes.py get_screening_letter) always sends the same detail string,
+ * so that string is what distinguishes "no draft yet" from a real failure. */
+export async function getScreeningLetter(id: string): Promise<CoverLetterDraft | null> {
+  try {
+    return await request<CoverLetterDraft>(
+      "/api/screenings/" + encodeURIComponent(id) + "/letter",
+    );
+  } catch (e) {
+    if (e instanceof Error && e.message === "No cover letter drafted yet.") return null;
+    throw e;
+  }
+}
+
+/** Draft the letter from the stored posting text. `force` discards an edit of
+ * yours; without it the server refuses to overwrite your own words. */
+export function generateScreeningLetter(id: string, force = false): Promise<CoverLetterDraft> {
+  return request("/api/screenings/" + encodeURIComponent(id) + "/letter", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ force }),
+  });
+}
+
+/** Save your own text. It is stored verbatim and never validated. */
+export function saveScreeningLetter(id: string, text: string): Promise<CoverLetterDraft> {
+  return request("/api/screenings/" + encodeURIComponent(id) + "/letter", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
   });
 }
 

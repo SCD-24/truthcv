@@ -9,6 +9,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   bulkSetApproval,
+  generateScreeningLetter,
+  saveScreeningLetter,
   setCompanyApproval,
   setScreeningApproval,
   setScreeningUrl,
@@ -68,5 +70,24 @@ describe("approval writers", () => {
     expect(init.method).toBe("PATCH");
     expect(init.headers["Content-Type"]).toBe("application/json");
     expect(JSON.parse(init.body)).toEqual({ approved: true });
+  });
+
+  it("generateScreeningLetter POSTs JSON with the JSON content type", async () => {
+    const fetchMock = stubFetch({ text: "Dear team,", source: "generated" });
+    await generateScreeningLetter("s1");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/screenings/s1/letter");
+    expect(init.method).toBe("POST");
+    expect(init.headers["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(init.body)).toEqual({ force: false });
+  });
+
+  it("saveScreeningLetter PUTs the text verbatim", async () => {
+    const fetchMock = stubFetch({ text: "Mine.", source: "operator" });
+    await saveScreeningLetter("s1", "Mine.");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/screenings/s1/letter");
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body)).toEqual({ text: "Mine." });
   });
 });

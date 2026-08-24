@@ -5,6 +5,7 @@ import Button from "@mui/material/Button";
 import Checkbox from "@mui/material/Checkbox";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
+import Collapse from "@mui/material/Collapse";
 import Divider from "@mui/material/Divider";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Link from "@mui/material/Link";
@@ -15,13 +16,160 @@ import Typography from "@mui/material/Typography";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import {
   bulkSetApproval,
+  generateScreeningLetter,
+  getScreeningLetter,
   listApprovedApplications,
   listPendingApprovals,
+  saveScreeningLetter,
   setCompanyApproval,
   setScreeningApproval,
   setScreeningUrl,
 } from "../api/client";
-import type { ScreeningRecord } from "../api/types";
+import type { CoverLetterDraft, ScreeningRecord } from "../api/types";
+
+/** The letter draft for one posting: fetches its own state on mount because
+ * the list endpoint (GET /api/screenings) never carries drafts. Offers
+ * Generate when there is none, an editable field with Save when there is —
+ * the caption is the audit trail, since "generated" means the guardrail
+ * checked this exact text and "operator" means the operator's words went in
+ * unchecked. */
+function CoverLetterSection({
+  record,
+  onDraftChange,
+}: {
+  record: ScreeningRecord;
+  onDraftChange: (id: string, draft: CoverLetterDraft | null) => void;
+}) {
+  const [draft, setDraft] = useState<CoverLetterDraft | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [showPosting, setShowPosting] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    getScreeningLetter(record.id).then((d) => {
+      if (!live) return;
+      setDraft(d);
+      setText(d?.text ?? "");
+      setLoaded(true);
+      onDraftChange(record.id, d);
+    });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [record.id]);
+
+  async function generate() {
+    setBusy(true);
+    setError("");
+    try {
+      const d = await generateScreeningLetter(record.id);
+      setDraft(d);
+      setText(d.text);
+      onDraftChange(record.id, d);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      const d = await saveScreeningLetter(record.id, text);
+      setDraft(d);
+      setText(d.text);
+      onDraftChange(record.id, d);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!loaded) return null;
+
+  return (
+    <Box sx={{ mt: 1 }}>
+      {(record.postedDate || record.screenedDate) && (
+        <Typography variant="body2" sx={{ color: "text.secondary" }}>
+          {record.postedDate ? `Posted ${record.postedDate}` : null}
+          {record.postedDate && record.screenedDate ? " · " : null}
+          {record.screenedDate ? `Found ${record.screenedDate}` : null}
+        </Typography>
+      )}
+      {record.postingText ? (
+        <>
+          <Button size="small" onClick={() => setShowPosting((s) => !s)} sx={{ mt: 0.5 }}>
+            {showPosting ? "Hide posting text" : "Show posting text"}
+          </Button>
+          <Collapse in={showPosting}>
+            <Typography
+              variant="body2"
+              sx={{ whiteSpace: "pre-wrap", color: "text.secondary", mt: 0.5 }}
+            >
+              {record.postingText}
+            </Typography>
+          </Collapse>
+        </>
+      ) : null}
+
+      {error ? (
+        <Alert severity="error" sx={{ mt: 1 }}>
+          {error}
+        </Alert>
+      ) : null}
+
+      {draft ? (
+        <Stack spacing={1} sx={{ mt: 1 }}>
+          <TextField
+            label="Cover letter"
+            multiline
+            minRows={4}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+            <Button
+              variant="outlined"
+              size="small"
+              disabled={busy || !text.trim() || text === draft.text}
+              onClick={save}
+            >
+              Save letter
+            </Button>
+            <Typography variant="caption" sx={{ color: "text.secondary" }}>
+              {draft.source === "generated"
+                ? "As generated — checked against your CV"
+                : "Edited by you — saved as written, not checked"}
+            </Typography>
+          </Stack>
+        </Stack>
+      ) : (
+        <Box sx={{ mt: 1 }}>
+          <Button
+            variant="outlined"
+            size="small"
+            disabled={busy || !record.postingText}
+            onClick={generate}
+          >
+            Generate cover letter
+          </Button>
+          {!record.postingText ? (
+            <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }}>
+              No posting text was captured for this screening — there is nothing to draft from.
+            </Typography>
+          ) : null}
+        </Box>
+      )}
+    </Box>
+  );
+}
 
 /** Shown in place of the link when a record has no URL — postings imported
  * from the historical log carry none, and the agent cannot apply without one. */
@@ -73,6 +221,9 @@ function PendingCard({
   onApproveCompany: (company: string) => void;
   onSaveUrl: (id: string, url: string) => void;
 }) {
+  // The server enforces this at approval time too (PATCH 409s with no draft
+  // stored) — this only makes the reason visible before the click.
+  const [hasDraft, setHasDraft] = useState(false);
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
       <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start" }}>
@@ -99,12 +250,17 @@ function PendingCard({
             ) : null}
             <Typography variant="body2">{record.reason}</Typography>
           </Stack>
+          <CoverLetterSection
+            record={record}
+            onDraftChange={(_id, draft) => setHasDraft(draft !== null)}
+          />
         </Box>
         <Stack spacing={1}>
           <Button
             variant="contained"
             size="small"
-            disabled={busy}
+            disabled={busy || !hasDraft}
+            title={hasDraft ? undefined : "Draft a cover letter first"}
             onClick={() => onDecide(record.id, "approved")}
           >
             Approve

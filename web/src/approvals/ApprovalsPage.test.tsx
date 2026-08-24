@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 /** Approvals page: the operator's queue. Stubbing follows ScreeningsPage.test.tsx. */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   bulkSetApproval,
+  generateScreeningLetter,
+  getScreeningLetter,
   listApprovedApplications,
   listPendingApprovals,
+  saveScreeningLetter,
   setScreeningApproval,
   setScreeningUrl,
 } from "../api/client";
@@ -19,9 +22,17 @@ vi.mock("../api/client", () => ({
   bulkSetApproval: vi.fn(),
   setCompanyApproval: vi.fn(),
   setScreeningUrl: vi.fn(),
+  getScreeningLetter: vi.fn(),
+  generateScreeningLetter: vi.fn(),
+  saveScreeningLetter: vi.fn(),
 }));
 
 afterEach(cleanup);
+
+// The list endpoint never carries drafts (PendingCard fetches its own), so
+// every test needs a stub; the no-draft case is the common one, and the
+// cover-letter tests below override it before rendering.
+beforeEach(() => vi.mocked(getScreeningLetter).mockResolvedValue(null));
 
 function makeRecord(overrides: Partial<ScreeningRecord> = {}): ScreeningRecord {
   return {
@@ -35,6 +46,8 @@ function makeRecord(overrides: Partial<ScreeningRecord> = {}): ScreeningRecord {
     reason: "German hiring entity unverified",
     cooldownExpires: "",
     source: "agent",
+    postingText: "Staff AI Engineer, Germany (Remote).",
+    postedDate: "2026-08-20",
     approval: "pending",
     applyAttempts: 0,
     applyError: "",
@@ -64,9 +77,21 @@ describe("ApprovalsPage", () => {
   });
 
   it("approving calls through and removes the row", async () => {
+    // Approve is disabled until a draft exists (Task 10), so this needs one stubbed.
+    vi.mocked(getScreeningLetter).mockResolvedValue({
+      text: "Dear hiring team,",
+      paragraphs: [],
+      source: "generated",
+      updatedAt: "2026-08-24T10:00:00Z",
+    });
     vi.mocked(setScreeningApproval).mockResolvedValue(makeRecord({ approval: "approved" }));
     await renderPage([makeRecord()]);
-    fireEvent.click(await screen.findByRole("button", { name: /^approve$/i }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^approve$/i }).hasAttribute("disabled")).toBe(
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
     await waitFor(() => expect(setScreeningApproval).toHaveBeenCalledWith("s1", "approved"));
   });
 
@@ -127,5 +152,68 @@ describe("ApprovalsPage", () => {
     await renderPage([], [makeRecord({ approval: "approved", url: "" })]);
     expect(await screen.findByLabelText(/posting url/i)).toBeTruthy();
     expect(screen.getByText(/cannot be applied to on the next run/i)).toBeTruthy();
+  });
+});
+
+describe("ApprovalsPage cover letter", () => {
+  it("offers Generate when there is no draft, and blocks Approve until there is one", async () => {
+    vi.mocked(getScreeningLetter).mockResolvedValue(null);
+    await renderPage([makeRecord()]);
+    expect(await screen.findByRole("button", { name: /Generate cover letter/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Reject" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("generating shows the text and unblocks Approve", async () => {
+    vi.mocked(getScreeningLetter).mockResolvedValue(null);
+    vi.mocked(generateScreeningLetter).mockResolvedValue({
+      text: "Dear hiring team,",
+      paragraphs: [],
+      source: "generated",
+      updatedAt: "2026-08-24T10:00:00Z",
+    });
+    await renderPage([makeRecord()]);
+    fireEvent.click(await screen.findByRole("button", { name: /Generate cover letter/ }));
+    await waitFor(() => expect(generateScreeningLetter).toHaveBeenCalledWith("s1"));
+    expect(await screen.findByDisplayValue("Dear hiring team,")).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled")).toBe(false),
+    );
+  });
+
+  it("saving an edit sends the text verbatim and marks it as yours", async () => {
+    vi.mocked(getScreeningLetter).mockResolvedValue({
+      text: "Dear hiring team,",
+      paragraphs: [],
+      source: "generated",
+      updatedAt: "2026-08-24T10:00:00Z",
+    });
+    vi.mocked(saveScreeningLetter).mockResolvedValue({
+      text: "My own words.",
+      paragraphs: [],
+      source: "operator",
+      updatedAt: "2026-08-24T10:05:00Z",
+    });
+    await renderPage([makeRecord()]);
+    const field = await screen.findByDisplayValue("Dear hiring team,");
+    fireEvent.change(field, { target: { value: "My own words." } });
+    fireEvent.click(screen.getByRole("button", { name: "Save letter" }));
+    await waitFor(() => expect(saveScreeningLetter).toHaveBeenCalledWith("s1", "My own words."));
+    expect(await screen.findByText(/not checked/)).toBeTruthy();
+  });
+
+  it("says why Generate is unavailable when no posting text was captured", async () => {
+    vi.mocked(getScreeningLetter).mockResolvedValue(null);
+    await renderPage([makeRecord({ postingText: "" })]);
+    const button = await screen.findByRole("button", { name: /Generate cover letter/ });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(/No posting text/)).toBeTruthy();
+  });
+
+  it("shows the posted and found dates", async () => {
+    vi.mocked(getScreeningLetter).mockResolvedValue(null);
+    await renderPage([makeRecord()]);
+    expect(await screen.findByText(/Posted 2026-08-20/)).toBeTruthy();
+    expect(screen.getByText(/Found 2026-08-23/)).toBeTruthy();
   });
 });

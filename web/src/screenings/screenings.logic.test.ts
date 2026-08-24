@@ -85,6 +85,8 @@ function makeScreening(overrides: Partial<ScreeningRecord> = {}): ScreeningRecor
     reason: "Salary below stated minimum.",
     cooldownExpires: "2024-09-01T12:00:00+00:00",
     source: "agent",
+    postingText: "",
+    postedDate: "",
     approval: "",
     applyAttempts: 0,
     applyError: "",
