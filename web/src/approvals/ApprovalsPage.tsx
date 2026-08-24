@@ -15,6 +15,8 @@ import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import { isCooldownActive } from "../settings/cooldown";
+import { cooldownBlockLabel } from "../screenings/ScreeningsPage";
 import {
   bulkSetApproval,
   generateScreeningLetter,
@@ -334,6 +336,7 @@ function ReviewRow({
   onMoveToApprovals: (id: string) => void;
   rejectedLabel?: string;
 }) {
+  const active = isCooldownActive(record.cooldownExpires);
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
       <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
@@ -342,6 +345,15 @@ function ReviewRow({
           <Typography variant="body2" sx={{ color: "text.secondary" }}>
             {record.role}
           </Typography>
+          {active && record.failingCriterion === "cooldown" ? (
+            <Chip
+              size="small"
+              variant="outlined"
+              color="warning"
+              label={cooldownBlockLabel(record.cooldownWindow ?? null)}
+              sx={{ mt: 0.5 }}
+            />
+          ) : null}
           <Stack direction="row" spacing={1} sx={{ mt: 0.5, alignItems: "center" }}>
             {rejectedLabel ? <Chip size="small" label={rejectedLabel} /> : null}
             {record.failingCriterion ? (

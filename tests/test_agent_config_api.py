@@ -24,6 +24,8 @@ def test_get_returns_defaults(client, data_dir):
         "profiles": [],
         "targetCompanies": [],
         "cooldownDays": None,
+        "cooldownDaysSameRole": None,
+        "cooldownDaysSameCompany": None,
         "maxApplicationsPerRun": None,
         "companyBoards": [],
         "mode": "full",
@@ -207,11 +209,13 @@ def test_put_accepts_valid_salary_range(client, data_dir):
     assert profile["salaryAskMax"] == 130000
 
 
-def test_currency_survives_the_wire_and_defaults_to_eur(client, data_dir):
+def test_currency_survives_the_wire_and_defaults_to_none(client, data_dir):
     """A profile's currency must round-trip through PUT and GET.
 
     recommend_salary formats its figure with the profile's currency, so a save
-    that silently reset it to EUR would make the agent quote the wrong unit.
+    that silently reset it to a regional default would make the agent quote
+    the wrong unit. A profile saved without a currency stays unset (None) —
+    there is no eurozone default to inherit.
     """
     r = client.put(
         "/api/agent/config",
@@ -223,7 +227,7 @@ def test_currency_survives_the_wire_and_defaults_to_eur(client, data_dir):
     assert client.get("/api/agent/config").json()["profiles"][0]["currency"] == "GBP"
 
     r = client.put("/api/agent/config", json={"profiles": [{"name": "Default"}]})
-    assert r.json()["profiles"][0]["currency"] == "EUR"
+    assert r.json()["profiles"][0]["currency"] is None
 
 
 def test_put_rejects_glassdoor_min_out_of_range(client, data_dir):
@@ -391,6 +395,35 @@ def test_put_target_companies_and_globals_merge_separately(client, data_dir):
     assert r.json()["targetCompanies"] == ["Google", "Apple"]
     assert r.json()["cooldownDays"] == 14
     assert r.json()["maxApplicationsPerRun"] == 5
+
+
+def test_put_accepts_new_cooldown_windows(client, data_dir):
+    """cooldownDaysSameRole / cooldownDaysSameCompany round-trip through PUT/GET."""
+    r = client.put(
+        "/api/agent/config",
+        json={"cooldownDaysSameRole": 90, "cooldownDaysSameCompany": 30},
+    )
+    assert r.status_code == 200
+    assert r.json()["cooldownDaysSameRole"] == 90
+    assert r.json()["cooldownDaysSameCompany"] == 30
+    got = client.get("/api/agent/config").json()
+    assert got["cooldownDaysSameRole"] == 90
+    assert got["cooldownDaysSameCompany"] == 30
+
+
+def test_put_rejects_negative_cooldown_windows(client, data_dir):
+    for field in ("cooldownDaysSameRole", "cooldownDaysSameCompany"):
+        r = client.put("/api/agent/config", json={field: -1})
+        assert r.status_code == 422, field
+
+
+def test_omitted_cooldown_window_leaves_stored_value(data_dir, client):
+    """Merge semantics: an omitted window keeps its stored value."""
+    client.put("/api/agent/config", json={"cooldownDaysSameRole": 90})
+    # A later PUT that omits the window must not reset it.
+    r = client.put("/api/agent/config", json={"mode": "semi"})
+    assert r.status_code == 200
+    assert r.json()["cooldownDaysSameRole"] == 90
 
 
 def test_get_returns_mode_and_derived_enabled(client, data_dir):

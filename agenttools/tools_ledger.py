@@ -112,7 +112,14 @@ def check_cooldown(company: str, role: str | None = None) -> dict:
     ``GET /api/cooldown``, so the two surfaces can never disagree.
     """
     status = _cooldown(company, role)
-    return {"in_cooldown": status.in_cooldown, "expires": status.expires, "blocked": status.blocked}
+    return {
+        "in_cooldown": status.in_cooldown,
+        "expires": status.expires,
+        "blocked": status.blocked,
+        # Kept byte-identical with GET /api/cooldown (tests/test_agent_mcp.py
+        # asserts the two dicts are equal) — both surfaces change together.
+        "window": getattr(status, "window", None),
+    }
 
 
 def get_canonical_cv() -> dict:

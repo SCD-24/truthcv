@@ -37,6 +37,8 @@ function makeConfig(): AgentConfig {
     profiles: [],
     targetCompanies: [],
     cooldownDays: null,
+    cooldownDaysSameRole: null,
+    cooldownDaysSameCompany: null,
     maxApplicationsPerRun: null,
     companyBoards: [],
   };
@@ -54,7 +56,8 @@ function makeAnswers(overrides: Partial<ProfileAnswers> = {}): ProfileAnswers {
     linkedin: "",
     github: "",
     website: "",
-    requiresSponsorship: "",
+    workAuthorisationNote: "",
+  requiresSponsorship: "",
     authorizedNonGermanCountry: "",
     languages: "",
     highestRelevantDegree: "",

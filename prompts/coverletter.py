@@ -11,7 +11,8 @@ from __future__ import annotations
 from truth.answers import Answers
 from truth.model import Truth
 
-from .style import LETTER_STYLE
+from .conventions import CvConventions, DEFAULT_CONVENTIONS
+from .style import letter_style
 
 
 _TONE_DIRECTION = {
@@ -30,6 +31,20 @@ _TONE_DIRECTION = {
 }
 
 
+def _tone_direction(tone: str) -> str:
+    """The voice guidance for ``tone``.
+
+    A recognised tone maps to its direction; an UNRECOGNISED one is passed
+    through as the caller's own words rather than silently rewritten to
+    'professional' — the caller may know a tone this module does not, and a
+    silent substitution hides the mismatch.
+    """
+    key = tone.lower()
+    if key in _TONE_DIRECTION:
+        return _TONE_DIRECTION[key]
+    return f" Voice: {tone.strip()}."
+
+
 # The craft standard the letter is written to: elite career-services quality plus
 # hard constraints that strip the usual AI-generated tells. Style only; it adds
 # no facts and never overrides the guardrail contract below.
@@ -40,7 +55,7 @@ _WRITING_STANDARD = (
     "of the organization, and connects the candidate's background to the "
     "employer's needs. Highlight relevant accomplishments and transferable skills. "
     "Sound confident, articulate, and professional; avoid generic phrasing and "
-    "empty enthusiasm. Keep it to 3 to 5 short paragraphs, under one page. "
+    "empty enthusiasm. {PARAGRAPH_GUIDANCE} "
     "Principles: clear, direct prose in active voice; prioritize evidence and "
     "examples over claims; show impact through measurable outcomes when the facts "
     "support them; do not repeat the resume verbatim, reframe achievements toward "
@@ -80,19 +95,36 @@ _ANTI_TELL_RULES = (
 )
 
 
-def cover_letter_system(tone: str, length: str) -> str:
+def cover_letter_system(
+    tone: str,
+    length: str,
+    conventions: CvConventions = DEFAULT_CONVENTIONS,
+) -> str:
     """System prompt: write an engaging, guardrail-truthful cover letter to elite
     career-services standards in the requested voice, tagging every factual claim
-    verbatim so it can be validated."""
-    direction = _TONE_DIRECTION.get(tone.lower(), _TONE_DIRECTION["professional"])
+    verbatim so it can be validated.
+
+    The paragraph budget and page target come from ``conventions`` — the
+    caller's ``length`` argument shapes the rendered guidance rather than
+    being overridden by a hardcoded paragraph count.
+    """
+    direction = _tone_direction(tone)
+    standard = _WRITING_STANDARD.replace(
+        "{PARAGRAPH_GUIDANCE}",
+        (
+            f"Keep it to {conventions.letter_paragraphs_min} to "
+            f"{conventions.letter_paragraphs_max} short paragraphs, under "
+            f"{conventions.page_target}."
+        ),
+    )
     return (
         f"You are writing a compelling, {length.lower()}-length cover letter that "
         "makes a hiring manager want to meet this candidate. Write a genuine, engaging "
         "letter with a clear throughline about why this candidate fits this specific "
         "role, not a dry recitation of facts."
-        + _WRITING_STANDARD
+        + standard
         + direction
-        + LETTER_STYLE
+        + letter_style(conventions)
         + _ANTI_TELL_RULES
         + " Guardrail contract: every sentence that states a FACT about the candidate "
         "(employer, title, date, metric, skill, achievement) must list that fact "
@@ -135,7 +167,12 @@ def _answer_lines(answers: Answers | None) -> list[str]:
         "github": "GitHub",
         "website": "Website",
         "requires_sponsorship": "Requires sponsorship",
-        "authorized_non_german_country": "Authorised in a non-German country",
+        # Neutral label: the operator's work-authorisation status in their own
+        # words. The legacy country-specific key maps to the same neutral label
+        # so an un-migrated answers.yaml still renders (the truth/answers.py
+        # loader migrates its value into work_authorisation_note on load).
+        "work_authorisation_note": "Work authorisation",
+        "authorized_non_german_country": "Work authorisation",
         "languages": "Languages",
         "highest_relevant_degree": "Highest relevant degree",
         "other_degree": "Other degree",

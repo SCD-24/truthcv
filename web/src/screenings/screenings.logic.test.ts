@@ -4,6 +4,7 @@ import { deleteScreening, getCooldown, listScreenings } from "../api/client";
 import type { CooldownStatus, ScreeningRecord } from "../api/types";
 import { isCooldownActive } from "../settings/cooldown";
 import { lastAgentActivity } from "../settings/agentActivity";
+import { cooldownBlockLabel } from "./ScreeningsPage";
 
 /** Build a fetch Response stub with only the members request<T>() reads
  * (ok, status, json()) — enough to drive the client without a real DOM/Fetch
@@ -155,8 +156,28 @@ describe("screening list", () => {
     expect(result).toBeUndefined();
   });
 
+/** Pins the human wording for a cooldown block: the window field decides
+ * which message the user sees, so they know which setting to change. */
+describe("cooldownBlockLabel", () => {
+  it("names the role window when the block is same_role", () => {
+    expect(cooldownBlockLabel("same_role")).toBe(
+      "blocked: already applied to this role",
+    );
+  });
+
+  it("names the company window when the block is same_company", () => {
+    expect(cooldownBlockLabel("same_company")).toBe(
+      "blocked: recently applied to this company",
+    );
+  });
+
+  it("falls back to the blocklist wording when there is no window (blocked: true, no expiry)", () => {
+    expect(cooldownBlockLabel(null)).toBe("blocked: on the blocklist");
+  });
+});
+
   it("getCooldown puts company and role in the query string", async () => {
-    const status: CooldownStatus = { inCooldown: true, expires: "2024-09-01T12:00:00+00:00", blocked: false };
+    const status: CooldownStatus = { inCooldown: true, expires: "2024-09-01T12:00:00+00:00", blocked: false, window: null };
     fetchMock.mockResolvedValueOnce(jsonResponse(status));
 
     const result = await getCooldown("Acme", "Engineer");
@@ -167,7 +188,7 @@ describe("screening list", () => {
   });
 
   it("getCooldown omits role entirely when not supplied", async () => {
-    const status: CooldownStatus = { inCooldown: false, expires: null, blocked: false };
+    const status: CooldownStatus = { inCooldown: false, expires: null, blocked: false, window: null };
     fetchMock.mockResolvedValueOnce(jsonResponse(status));
 
     await getCooldown("Acme");

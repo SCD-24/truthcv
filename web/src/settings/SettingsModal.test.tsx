@@ -68,7 +68,8 @@ describe("profile answers round-trip", () => {
       linkedin: "",
       github: "",
       website: "",
-      requiresSponsorship: "",
+      workAuthorisationNote: "",
+  requiresSponsorship: "",
       authorizedNonGermanCountry: "",
       languages: "",
       highestRelevantDegree: "",
@@ -94,6 +95,7 @@ describe("profile answers round-trip", () => {
   it("saveProfileAnswers PUTs only the passed keys and returns the response body as the fresh values", async () => {
     const fresh: ProfileAnswers = {
       phone: "555-0199",
+      workAuthorisationNote: "",
       workAuthorisation: "Authorised to work",
       noticePeriod: "2 weeks",
       locationPreference: "Remote",

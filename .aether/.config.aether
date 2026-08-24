@@ -1427,6 +1427,22 @@
       "id": "connections",
       "name": "Connections",
       "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "id": "agent-config",
+      "name": "Agent Config",
+      "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "id": "screening-engine",
+      "name": "Screening Engine",
+      "type": "backend"
     }
   ],
   "connections": [
@@ -1584,6 +1600,51 @@
       "from": "connections",
       "protocol": "HTTPS",
       "to": "gmail-api"
+    },
+    {
+      "from": "agent-config",
+      "protocol": "file I/O",
+      "to": "truth-data-volume"
+    },
+    {
+      "from": "screening-engine",
+      "protocol": "in-process",
+      "to": "agent-config"
+    },
+    {
+      "from": "screening-engine",
+      "protocol": "in-process",
+      "to": "application-tracker"
+    },
+    {
+      "from": "screening-engine",
+      "protocol": "file I/O",
+      "to": "truth-data-volume"
+    },
+    {
+      "from": "application-agent",
+      "protocol": "HTTP/REST",
+      "to": "agent-config"
+    },
+    {
+      "from": "guardrail-validator",
+      "protocol": "file I/O",
+      "to": "truth-data-volume"
+    },
+    {
+      "from": "tailor-engine",
+      "protocol": "file I/O",
+      "to": "truth-data-volume"
+    },
+    {
+      "from": "api",
+      "protocol": "in-process",
+      "to": "screening-engine"
+    },
+    {
+      "from": "api",
+      "protocol": "in-process",
+      "to": "agent-config"
     }
   ],
   "definitions": [
@@ -1684,7 +1745,9 @@
         "llm-provider-layer",
         "cover-letter-engine",
         "prompt-store",
-        "application-tracker"
+        "application-tracker",
+        "agent-config",
+        "screening-engine"
       ],
       "name": "TruthCV Container (single Docker image)",
       "w": 1861.8301559792023,
@@ -1696,6 +1759,10 @@
   "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
   "systemIntent": "TruthCV is a self-hostable, single-user web application that generates ATS-passing, truthful CVs tailored to a specific job posting. Every fact originates exclusively from a per-user \"truth file\" (truth.yaml) derived from the user's LinkedIn profile; the app may reword and reorder those facts freely, but any new claim must be explicitly confirmed by the user before it can enter a CV — enforced mechanically by a deterministic guardrail that diffs every factual token against the truth file. It is bring-your-own-API-key, Docker-deployable (docker compose up → localhost:8080), needs no database or accounts, and renders both PDF and DOCX from one ATS-safe source.",
   "topologyLayout": {
+    "agent-config": {
+      "x": 1500,
+      "y": 200
+    },
     "api": {
       "x": 436,
       "y": 212
@@ -1739,6 +1806,10 @@
     "renderer": {
       "x": 1028,
       "y": 140
+    },
+    "screening-engine": {
+      "x": 200,
+      "y": 380
     },
     "secret-store": {
       "x": 692,

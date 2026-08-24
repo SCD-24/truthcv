@@ -134,3 +134,49 @@ def test_unknown_top_level_key_ignored(data_dir):
     cfg = store.load()
     assert cfg.enabled is True
     assert not hasattr(cfg, "unknown_field")
+
+
+# --- Per-window cooldown fields -------------------------------------------
+
+
+def test_cooldown_windows_round_trip(data_dir):
+    """Both new cooldown windows survive from_dict -> to_dict -> disk."""
+    cfg = store.AgentConfig(cooldown_days_same_role=90, cooldown_days_same_company=30)
+    restored = store.AgentConfig.from_dict(cfg.to_dict())
+    assert restored.cooldown_days_same_role == 90
+    assert restored.cooldown_days_same_company == 30
+    store.save(cfg)
+    again = store.load()
+    assert again.cooldown_days_same_role == 90
+    assert again.cooldown_days_same_company == 30
+
+
+def test_legacy_only_cooldown_leaves_windows_unset(data_dir):
+    """A config JSON with only the legacy cooldown_days still loads unchanged.
+
+    The new windows stay None so the cooldown resolver's fallback chain
+    (window field -> legacy cooldown_days -> env -> 90) behaves exactly as
+    before they existed.
+    """
+    (data_dir / "agent_config.json").write_text('{"cooldown_days": 14}', encoding="utf-8")
+    cfg = store.load()
+    assert cfg.cooldown_days == 14
+    assert cfg.cooldown_days_same_role is None
+    assert cfg.cooldown_days_same_company is None
+
+
+def test_non_int_window_value_falls_back_to_none():
+    """A hand-edited non-int window value degrades to None, never raises."""
+    cfg = store.AgentConfig.from_dict(
+        {"cooldown_days_same_role": "ninety", "cooldown_days_same_company": [30]}
+    )
+    assert cfg.cooldown_days_same_role is None
+    assert cfg.cooldown_days_same_company is None
+
+
+def test_job_profile_currency_defaults_to_none():
+    """JobProfile has no regional default currency; the user states their own."""
+    profile = store.JobProfile()
+    assert profile.currency is None
+    restored = store.JobProfile.from_dict(profile.to_dict())
+    assert restored.currency is None

@@ -212,6 +212,61 @@ def test_cooldown_no_match_reports_not_in_cooldown(client):
     assert body["expires"] is None
 
 
+def test_cooldown_reports_blocking_window(client, data_dir, monkeypatch):
+    """GET /api/cooldown names the window: role-matched vs company-only."""
+    from agentconfig import store as agent_config_store
+
+    monkeypatch.delenv("APPLICATION_COOLDOWN_DAYS", raising=False)
+    cfg = agent_config_store.load()
+    cfg.cooldown_days = 30
+    agent_config_store.save(cfg)
+
+    recent = (datetime.now(timezone.utc) - timedelta(days=5)).date().isoformat()
+    client.post("/api/applications", json={"company": "Acme", "role": "Engineer", "applicationDate": recent})
+
+    role_match = client.get("/api/cooldown", params={"company": "Acme", "role": "Engineer"})
+    assert role_match.json()["window"] == "same_role"
+
+    company_only = client.get("/api/cooldown", params={"company": "Acme"})
+    assert company_only.json()["window"] == "same_company"
+
+
+def test_cooldown_window_none_when_clear_or_blocklisted(client, data_dir):
+    from agentconfig import store as agent_config_store
+
+    cfg = agent_config_store.load()
+    cfg.blocked_companies = ["BlockCo"]
+    agent_config_store.save(cfg)
+
+    blocked = client.get("/api/cooldown", params={"company": "BlockCo"})
+    assert blocked.json()["blocked"] is True
+    assert blocked.json()["window"] is None
+
+    clear = client.get("/api/cooldown", params={"company": "QuietCo"})
+    assert clear.json()["inCooldown"] is False
+    assert clear.json()["window"] is None
+
+
+def test_answers_wire_carries_work_authorisation_note(client, data_dir):
+    """workAuthorisationNote round-trips; the legacy field still does too."""
+    r = client.put(
+        "/api/profile/answers",
+        json={
+            "workAuthorisationNote": "EU citizen, no sponsorship needed",
+            "authorizedNonGermanCountry": "legacy value",
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["workAuthorisationNote"] == "EU citizen, no sponsorship needed"
+    assert r.json()["authorizedNonGermanCountry"] == "legacy value"
+
+    got = client.get("/api/profile/answers").json()
+    assert got["workAuthorisationNote"] == "EU citizen, no sponsorship needed"
+    # The legacy field stays present on the wire for un-migrated clients.
+    assert "authorizedNonGermanCountry" in got
+    assert got["authorizedNonGermanCountry"] == "legacy value"
+
+
 # --- GET/PUT /api/profile/answers -------------------------------------------------
 
 def test_get_answers_returns_defaults(client):

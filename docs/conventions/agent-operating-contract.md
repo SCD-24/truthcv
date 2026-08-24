@@ -38,6 +38,7 @@ Use these exact names and ids when discussing the architecture.
 
 | Name | Id | Type |
 |---|---|---|
+| Agent Config | `agent-config` | backend |
 | API | `api` | backend |
 | Application Agent | `application-agent` | backend |
 | Application Tracker | `application-tracker` | backend |
@@ -49,6 +50,7 @@ Use these exact names and ids when discussing the architecture.
 | LLM Provider Service | `llm-provider-service` | custom |
 | Prompt Store | `prompt-store` | backend |
 | Renderer | `renderer` | backend |
+| Screening Engine | `screening-engine` | backend |
 | Secret Store | `secret-store` | backend |
 | Tailor Engine | `tailor-engine` | backend |
 | Truth Data Volume | `truth-data-volume` | storage |
@@ -59,5 +61,5 @@ Use these exact names and ids when discussing the architecture.
 <!-- generated:start cap:system-boundary -->
 ## System Boundary
 
-The declared system consists of 16 component(s) and 31 connection(s) — see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
+The declared system consists of 18 component(s) and 40 connection(s) — see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
 <!-- generated:end cap:system-boundary -->

@@ -188,9 +188,14 @@ def build_letter(
     return {"blocked": False, "unverifiable": [], "blocked_claims": [], "text": text}
 
 
-# A template slot the model failed to fill: "[Your Name]", "[Company]". Bounded
-# and letters-only so real bracketed prose ("[sic]", "[2024]") does not trip it.
-_PLACEHOLDER = re.compile(r"\[[A-Za-z][A-Za-z ./'-]{0,38}\]")
+# A template slot the model failed to fill: "[Your Name]", "[Company]" — or
+# the same slot written in any script, e.g. "[名前]" or "[Имя]". The character
+# classes are Unicode-aware (\w with re.UNICODE) for exactly that reason; only
+# digits are excluded from the first position so real bracketed prose like
+# "[2024]" never trips it. The 0,38 length bound keeps genuine bracketed
+# asides ("[sic]", short citations) out of the detector: a template slot holds
+# a name/phrase, not a sentence.
+_PLACEHOLDER = re.compile(r"\[[^\W\d][\w ./'-]{0,38}\]", re.UNICODE)
 
 
 def _placeholders(text: str) -> list[str]:
@@ -280,7 +285,7 @@ def _letter_scope(
 def _facts_block_lines(truth: Truth, answers: Answers | None) -> list[str]:
     """The facts block's own lines, as allowed claim sources.
 
-    The block presents each fact labelled — ``Location: Karlsruhe`` — and the
+    The block presents each fact labelled — ``Location: <city>`` — and the
     system prompt tells the model to list every fact it uses *verbatim* in its
     claims. A model that follows that instruction exactly emits the label too,
     and the label word ("location") appears in no truth value, so the guardrail
