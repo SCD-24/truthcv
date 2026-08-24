@@ -19,6 +19,7 @@ from applications.store import save_confirmation as _save_confirmation
 from applications.store import save_fields_submitted as _save_fields_submitted
 from applications.store import save_screening as _save_screening
 import applications.store as _apps_store
+import coverletter.store as _letter_store
 import screening.store as _screening_store
 from screening.cooldown import cooldown as _cooldown
 from screening.store import create as create_screening
@@ -164,6 +165,9 @@ def get_approved_applications() -> list[dict]:
     - An item with no URL (many imported records predate URL capture) comes
       back with ``blocked_reason`` set to "no_url" rather than hidden, since
       the agent has nothing to open and would otherwise flail trying to apply.
+    - The operator's stored letter travels with the item. The agent applies with
+      that text verbatim and does not regenerate: regenerating would discard the
+      operator's edit, which is the whole point of semi-auto.
     """
     applied_urls = {
         a.application_url for a in _apps_store.load_all() if a.application_url
@@ -181,6 +185,7 @@ def get_approved_applications() -> list[dict]:
             blocked_reason = "no_url"
         else:
             blocked_reason = ""
+        draft = _letter_store.load(s.id)
         items.append(
             {
                 "screening_id": s.id,
@@ -189,6 +194,8 @@ def get_approved_applications() -> list[dict]:
                 "url": s.url,
                 "attempts": s.apply_attempts,
                 "blocked_reason": blocked_reason,
+                "cover_letter": draft.text if draft else "",
+                "letter_source": draft.source if draft else "",
             }
         )
     return items

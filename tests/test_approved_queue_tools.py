@@ -71,3 +71,22 @@ def test_url_present_no_cooldown_blocked_reason_empty(data_dir):
     _approved(url="https://grafana.com/jobs/1")
     items = get_approved_applications()
     assert [i["blocked_reason"] for i in items] == [""]
+
+
+def test_approved_item_carries_the_stored_letter(data_dir):
+    """The agent applies with the operator's text verbatim; regenerating would
+    discard the edit, which is the whole point of semi-auto."""
+    import coverletter.store as letters
+
+    s = _approved()
+    letters.save(s.id, letters.CoverLetterDraft(text="My own words.", source="operator"))
+    item = get_approved_applications()[0]
+    assert item["cover_letter"] == "My own words."
+    assert item["letter_source"] == "operator"
+
+
+def test_approved_item_without_a_letter_reports_empty(data_dir):
+    s = _approved()
+    item = get_approved_applications()[0]
+    assert item["cover_letter"] == ""
+    assert item["letter_source"] == ""

@@ -41,7 +41,10 @@ def test_wire_model_exposes_approval_fields(client):
 
 
 def test_patch_sets_approval(client):
+    import coverletter.store as letters
+
     s = _deferred()
+    letters.save(s.id, letters.CoverLetterDraft(text="Dear team,"))
     body = client.patch(f"/api/screenings/{s.id}", json={"approval": "approved"}).json()
     assert body["approval"] == "approved"
     assert store.get(s.id).approval == "approved"
@@ -67,7 +70,10 @@ def test_patch_sets_url_only(client):
 
 
 def test_patch_sets_url_and_approval(client):
+    import coverletter.store as letters
+
     s = _deferred()
+    letters.save(s.id, letters.CoverLetterDraft(text="Dear team,"))
     body = client.patch(
         f"/api/screenings/{s.id}",
         json={"url": "https://x.com/1", "approval": "approved"},
@@ -89,7 +95,11 @@ def test_patch_url_unknown_id_404(client):
 
 
 def test_bulk_patch_reports_per_id(client):
+    import coverletter.store as letters
+
     a, b = _deferred("Grafana Labs"), _deferred("n8n")
+    letters.save(a.id, letters.CoverLetterDraft(text="Dear team,"))
+    letters.save(b.id, letters.CoverLetterDraft(text="Dear team,"))
     body = client.patch(
         "/api/screenings/approvals",
         json={"ids": [a.id, b.id, "missing"], "approval": "approved"},
@@ -148,3 +158,39 @@ def test_no_agent_route_writes_approval(client):
 
     writers = {store_module.set_approval, store_module.mark_applied}
     assert not (writers & {fn for fn, _ in _TOOL_REGISTRY.values()})
+
+
+def test_approving_without_a_letter_is_refused(client):
+    """The agent applies with the stored letter verbatim, so approving with no
+    letter would queue an application with nothing to send."""
+    s = _deferred()
+    r = client.patch(f"/api/screenings/{s.id}", json={"approval": "approved"})
+    assert r.status_code == 409
+    assert store.get(s.id).approval == "pending"
+
+
+def test_approving_with_a_letter_succeeds(client):
+    import coverletter.store as letters
+
+    s = _deferred()
+    letters.save(s.id, letters.CoverLetterDraft(text="Dear team,", source="operator"))
+    r = client.patch(f"/api/screenings/{s.id}", json={"approval": "approved"})
+    assert r.status_code == 200
+    assert store.get(s.id).approval == "approved"
+
+
+def test_rejecting_never_needs_a_letter(client):
+    s = _deferred()
+    assert client.patch(f"/api/screenings/{s.id}", json={"approval": "rejected"}).status_code == 200
+
+
+def test_bulk_approve_reports_a_draftless_item_instead_of_approving_it(client):
+    import coverletter.store as letters
+
+    a, b = _deferred("Grafana Labs"), _deferred("n8n")
+    letters.save(a.id, letters.CoverLetterDraft(text="Dear team,"))
+    body = client.patch(
+        "/api/screenings/approvals", json={"ids": [a.id, b.id], "approval": "approved"}
+    ).json()
+    assert {r["id"]: r["ok"] for r in body["results"]} == {a.id: True, b.id: False}
+    assert store.get(b.id).approval == "pending"
