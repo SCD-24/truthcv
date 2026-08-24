@@ -18,16 +18,21 @@ the tool.
 
 Call `get_approved_applications` before anything else. It returns the postings
 the operator approved on the Approvals page since the last run, each with a
-`screening_id`, `company`, `role`, `url`, `attempts` and `blocked_reason`.
+`screening_id`, `company`, `role`, `url`, `attempts`, `blocked_reason`,
+`cover_letter`, and `letter_source`.
 
 These are already decided. Apply to them before spending the run's time — and
 its browser — on discovery.
 
 - **Do not re-screen them.** The operator's approval settles the §2 judgement
   that deferred the posting in the first place.
-- **`blocked_reason` is absolute.** A non-empty value (currently `cooldown`)
-  means the posting must NOT be applied to. Name it in the run report and move
-  on. §8 still governs.
+- **`blocked_reason` is absolute.** Any non-empty value means the posting must
+  NOT be applied to — treat this as true of the field itself, not of a list
+  of known values, so a value you don't recognise still blocks rather than
+  being read as unset. The values that exist today: `cooldown` (in cooldown,
+  §8 still governs), `no_url` (no posting URL was ever captured, so there is
+  nothing to open), and `no_letter` (no cover letter is stored for this
+  entry). Name the reason in the run report and move on.
 - **§4 still governs.** An application approval is not permission to assert a
   claim the cover-letter guardrail rejects. If the letter blocks, §6 applies
   exactly as it does for any other application.
