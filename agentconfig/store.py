@@ -218,6 +218,20 @@ class AgentConfig:
             "max_applications_per_run": self.max_applications_per_run,
         }
 
+    def _storage_dict(self) -> dict:
+        """On-disk shape — distinct from `to_dict()`'s wire shape.
+
+        Here `enabled` means `mode == "full"`, not the wire meaning
+        (`mode != "off"`). A pre-mode build only ever reads `enabled`, so this
+        is what makes a rollback fail closed: both `semi` and `off` land back
+        on a disabled agent, and only `full` survives a rollback still
+        running. Storing the wire meaning instead would roll a `semi` config
+        back to a fully autonomous one — the opposite of fail-closed.
+        """
+        d = self.to_dict()
+        d["enabled"] = self.mode == "full"
+        return d
+
 
 def load() -> AgentConfig:
     """Load the agent config from agent_config.json.
@@ -244,7 +258,7 @@ def save(cfg: AgentConfig) -> AgentConfig:
     p = config_path()
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(
-        json.dumps(cfg.to_dict(), indent=2),
+        json.dumps(cfg._storage_dict(), indent=2),
         encoding="utf-8",
     )
     tmp.replace(p)

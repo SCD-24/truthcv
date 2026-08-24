@@ -7,6 +7,9 @@ a running deployment behaving exactly as it did before the upgrade.
 
 from __future__ import annotations
 
+import json
+
+from agentconfig import store
 from agentconfig.store import AgentConfig
 
 
@@ -49,3 +52,29 @@ def test_to_dict_carries_mode_and_derived_enabled():
     d = AgentConfig(mode="semi").to_dict()
     assert d["mode"] == "semi"
     assert d["enabled"] is True
+
+
+def test_saved_enabled_is_mode_equals_full_not_derived(data_dir):
+    """On disk, `enabled` means `mode == "full"` — not the wire meaning.
+
+    This is what makes a rollback to a pre-mode build (which reads only
+    `enabled`) fail closed: a `semi` config must not roll back to a running
+    agent, even though `semi`'s derived/wire `enabled` is True.
+    """
+    for mode, expected_on_disk in (("off", False), ("semi", False), ("full", True)):
+        store.save(AgentConfig(mode=mode))
+        raw = json.loads((data_dir / "agent_config.json").read_text(encoding="utf-8"))
+        assert raw["enabled"] is expected_on_disk, mode
+
+
+def test_semi_round_trips_through_save_and_load(data_dir):
+    """A stored semi config loads back as semi, with the wire `enabled` True,
+    despite the on-disk `enabled` being False."""
+    store.save(AgentConfig(mode="semi"))
+    raw = json.loads((data_dir / "agent_config.json").read_text(encoding="utf-8"))
+    assert raw["mode"] == "semi"
+    assert raw["enabled"] is False
+
+    again = store.load()
+    assert again.mode == "semi"
+    assert again.enabled is True

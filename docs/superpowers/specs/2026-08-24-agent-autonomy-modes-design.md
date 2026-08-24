@@ -57,11 +57,14 @@ to send. Reject is available at every step, including before generating.
 
 One new field, `mode: str = "full"`, persisted in `data/agent_config.json`.
 
-`enabled` stops being persisted and becomes **derived** — `mode != "off"` — on
-the wire model and in `to_dict()`. Every current consumer keeps working
-untouched: `agent/agent-config.js enabled`, `daily-apply.sh`'s fail-closed
-enable gate, `RunNowSection`, and the `AgentConfigModel` field the Agents page
-already reads.
+`enabled` is still persisted, but as a different value than the wire model
+carries: on disk it is `mode == "full"`, so a rollback to a pre-mode build —
+which reads only `enabled` — fails closed for `semi` and `off` alike, rather
+than promoting a `semi` operator to full auto. On the wire (`to_dict()` as
+consumed by `AgentConfigModel`) `enabled` keeps its derived meaning,
+`mode != "off"`. Every current wire consumer keeps working untouched:
+`agent/agent-config.js enabled`, `daily-apply.sh`'s fail-closed enable gate,
+and `RunNowSection`.
 
 Migration lives in `AgentConfig.from_dict`: a stored config with `enabled` and
 no `mode` reads as `"full"` when `enabled` is true and `"off"` when false.
