@@ -11,6 +11,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agentconfig.store import load as _agent_config_load
 from truth.store import data_dir
 
 from .model import APPROVAL_VALUES, Screening, new_id
@@ -65,10 +66,13 @@ def create(fields: dict) -> Screening:
     screening = Screening(id=new_id(), created_at=now, updated_at=now)
     _apply_editable(screening, fields)
     # A deferred screening is an unresolved decision, so it enters the operator's
-    # approval queue. Set here rather than accepted from `fields`: the agent's
-    # record_screening reaches this function directly, and approval is not its
-    # to grant.
+    # approval queue. In semi-auto a *passing* one does too: the operator, not
+    # the agent, decides whether to apply. Set here rather than accepted from
+    # `fields`: the agent's record_screening reaches this function directly, and
+    # approval is not its to grant.
     if screening.verdict == "deferred":
+        screening.approval = "pending"
+    elif screening.verdict == "passed" and _agent_config_load().mode == "semi":
         screening.approval = "pending"
     screenings = load_all()
     screenings.append(screening)

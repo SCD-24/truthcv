@@ -29,6 +29,14 @@ class Screening:
     reason: str = ""
     cooldown_expires: str = ""
     source: str = ""
+    # The posting as the agent read it. Stored because the operator drafts the
+    # letter from it later, in the app, long after the run that found it — and
+    # several of these boards cannot be re-fetched at all.
+    posting_text: str = ""
+    # The employer's publication date, best-effort: many boards publish none.
+    # Empty means unknown and is never inferred. `screened_date` is the date
+    # this posting was found, which is a different thing.
+    posted_date: str = ""
     # Approval state. Deliberately absent from EDITABLE: that tuple is what
     # store.create()/update() copy from caller-supplied fields, and the agent's
     # record_screening(**fields) reaches create() directly. Listing these there
@@ -51,6 +59,8 @@ class Screening:
         "reason",
         "cooldown_expires",
         "source",
+        "posting_text",
+        "posted_date",
     )
 
     @classmethod
