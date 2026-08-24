@@ -300,6 +300,12 @@ export function listRejectedApprovals(): Promise<ScreeningRecord[]> {
   return request("/api/screenings?approval=rejected");
 }
 
+/** Postings already applied to — the queue items that settled into tracked
+ * applications. Read-only here; they are managed on the Applications page. */
+export function listAppliedScreenings(): Promise<ScreeningRecord[]> {
+  return request("/api/screenings?approval=applied");
+}
+
 /** Postings the agent rejected on a criterion — never queued, and reviewable
  * so a filter you disagree with does not silently lose a role. Filtered
  * client-side: an agent-criteria rejection has an empty `approval`, but so

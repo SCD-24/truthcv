@@ -6,6 +6,7 @@ import {
   bulkSetApproval,
   generateScreeningLetter,
   getScreeningLetter,
+  listAppliedScreenings,
   listApprovedApplications,
   listDidNotPass,
   listPendingApprovals,
@@ -22,6 +23,7 @@ vi.mock("../api/client", () => ({
   listApprovedApplications: vi.fn(),
   listRejectedApprovals: vi.fn(),
   listDidNotPass: vi.fn(),
+  listAppliedScreenings: vi.fn(),
   setScreeningApproval: vi.fn(),
   bulkSetApproval: vi.fn(),
   setScreeningUrl: vi.fn(),
@@ -39,6 +41,7 @@ beforeEach(() => {
   vi.mocked(getScreeningLetter).mockResolvedValue(null);
   vi.mocked(listRejectedApprovals).mockResolvedValue([]);
   vi.mocked(listDidNotPass).mockResolvedValue([]);
+  vi.mocked(listAppliedScreenings).mockResolvedValue([]);
 });
 
 function makeRecord(overrides: Partial<ScreeningRecord> = {}): ScreeningRecord {
@@ -64,14 +67,50 @@ function makeRecord(overrides: Partial<ScreeningRecord> = {}): ScreeningRecord {
   };
 }
 
-async function renderPage(pending: ScreeningRecord[], approved: ScreeningRecord[] = []) {
+async function renderPage(
+  pending: ScreeningRecord[],
+  approved: ScreeningRecord[] = [],
+  lists: {
+    rejected?: ScreeningRecord[];
+    didNotPass?: ScreeningRecord[];
+    applied?: ScreeningRecord[];
+  } = {},
+) {
   vi.mocked(listPendingApprovals).mockResolvedValue(pending);
   vi.mocked(listApprovedApplications).mockResolvedValue(approved);
+  if (lists.rejected) vi.mocked(listRejectedApprovals).mockResolvedValue(lists.rejected);
+  if (lists.didNotPass) vi.mocked(listDidNotPass).mockResolvedValue(lists.didNotPass);
+  if (lists.applied) vi.mocked(listAppliedScreenings).mockResolvedValue(lists.applied);
   render(<ApprovalsPage onBack={() => {}} />);
   await waitFor(() => expect(listPendingApprovals).toHaveBeenCalled());
 }
 
+/** Tabs lazy-mount their panels, so anything not on the default Found tab
+ * must be revealed by clicking its tab first. */
+function clickTab(name: string | RegExp) {
+  fireEvent.click(screen.getByRole("tab", { name }));
+}
+
 describe("ApprovalsPage", () => {
+  it("renders four tabs with the counts of each queue", async () => {
+    await renderPage(
+      [makeRecord(), makeRecord({ id: "s2", company: "n8n" })],
+      [makeRecord({ id: "a1", approval: "approved" })],
+      {
+        rejected: [makeRecord({ id: "r1", approval: "rejected" })],
+        didNotPass: [makeRecord({ id: "d1", verdict: "rejected", approval: "" })],
+        applied: [
+          makeRecord({ id: "ap1", approval: "applied" }),
+          makeRecord({ id: "ap2", approval: "applied" }),
+        ],
+      },
+    );
+    expect(await screen.findByRole("tab", { name: "Found (2)" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Queued (1)" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Rejected (2)" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Applied (2)" })).toBeTruthy();
+  });
+
   it("renders a pending item with the agent's deferral reason", async () => {
     await renderPage([makeRecord()]);
     expect(await screen.findByText("Grafana Labs")).toBeTruthy();
@@ -81,6 +120,18 @@ describe("ApprovalsPage", () => {
   it("shows the empty state when nothing is waiting", async () => {
     await renderPage([]);
     expect(await screen.findByText(/nothing waiting/i)).toBeTruthy();
+  });
+
+  it("each tab renders its own empty state", async () => {
+    await renderPage([makeRecord()]);
+    clickTab(/queued/i);
+    expect(await screen.findByText(/nothing queued/i)).toBeTruthy();
+    clickTab(/rejected/i);
+    expect(screen.getByText(/nothing rejected/i)).toBeTruthy();
+    clickTab(/applied/i);
+    expect(screen.getByText(/nothing applied/i)).toBeTruthy();
+    clickTab(/found/i);
+    expect(screen.getByText("Grafana Labs")).toBeTruthy();
   });
 
   it("approving calls through and removes the row", async () => {
@@ -124,6 +175,7 @@ describe("ApprovalsPage", () => {
       [],
       [makeRecord({ approval: "approved", applyAttempts: 3, applyError: "form 404" })],
     );
+    clickTab(/queued/i);
     expect(await screen.findByText(/form 404/)).toBeTruthy();
     expect(screen.getByText(/3 attempts/i)).toBeTruthy();
   });
@@ -157,6 +209,7 @@ describe("ApprovalsPage", () => {
 
   it("shows a warning and URL field for an approved record with no url", async () => {
     await renderPage([], [makeRecord({ approval: "approved", url: "" })]);
+    clickTab(/queued/i);
     expect(await screen.findByLabelText(/posting url/i)).toBeTruthy();
     expect(screen.getByText(/cannot be applied to on the next run/i)).toBeTruthy();
   });
@@ -209,8 +262,7 @@ describe("ApprovalsPage cover letter", () => {
     expect(await screen.findByText(/not checked/)).toBeTruthy();
   });
 
-  // This module mocks ../api/client wholesale, so generateScreeningLetter
-  // here rejects with an already-composed Error — the mock stands in for
+  // The mock here rejects with an already-composed Error — the mock stands in for
   // whatever message errorDetailToMessage would have produced, it doesn't
   // go through errorDetailToMessage. So this only proves the page renders
   // an error it's handed verbatim, not that the guardrail-block message is
@@ -246,32 +298,57 @@ describe("ApprovalsPage cover letter", () => {
 });
 
 describe("ApprovalsPage reviewable lists", () => {
-  it("lists what the agent rejected on a criterion, apart from what you rejected", async () => {
-    vi.mocked(listDidNotPass).mockResolvedValue([
-      makeRecord({ id: "d1", company: "SumUp", verdict: "rejected", approval: "", failingCriterion: "remote" }),
-    ]);
-    vi.mocked(listRejectedApprovals).mockResolvedValue([
-      makeRecord({ id: "r1", company: "Pleo", approval: "rejected" }),
-    ]);
-    await renderPage([]);
-    expect(await screen.findByRole("heading", { name: "Did not pass" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Rejected" })).toBeTruthy();
-    expect(screen.getByText("SumUp")).toBeTruthy();
+  it("the Rejected tab lists agent-rejected and user-rejected records with distinct labels", async () => {
+    await renderPage([], [], {
+      didNotPass: [
+        makeRecord({ id: "d1", company: "SumUp", verdict: "rejected", approval: "", failingCriterion: "remote" }),
+      ],
+      rejected: [
+        makeRecord({ id: "r1", company: "Pleo", approval: "rejected" }),
+      ],
+    });
+    clickTab(/rejected \(2\)/i);
+    expect(await screen.findByText("SumUp")).toBeTruthy();
     expect(screen.getByText("Pleo")).toBeTruthy();
+    expect(screen.getByText("Rejected by agent")).toBeTruthy();
+    expect(screen.getByText("Rejected by you")).toBeTruthy();
   });
 
-  it("moving one back queues it and takes it out of the list it came from", async () => {
-    vi.mocked(listRejectedApprovals).mockResolvedValue([
-      makeRecord({ id: "r1", company: "Pleo", approval: "rejected" }),
-    ]);
+  it("moving one back queues it and takes it out of the Rejected tab", async () => {
     vi.mocked(setScreeningApproval).mockResolvedValue(
       makeRecord({ id: "r1", company: "Pleo", approval: "pending" }),
     );
-    await renderPage([]);
+    await renderPage([], [], {
+      rejected: [makeRecord({ id: "r1", company: "Pleo", approval: "rejected" })],
+    });
+    clickTab(/rejected/i);
     fireEvent.click(await screen.findByRole("button", { name: "Move to approvals" }));
     await waitFor(() => expect(setScreeningApproval).toHaveBeenCalledWith("r1", "pending"));
     await waitFor(() =>
       expect(screen.queryAllByRole("button", { name: "Move to approvals" }).length).toBe(0),
     );
+    // The row joined the Found queue without a refetch.
+    clickTab(/found/i);
+    expect(await screen.findByText("Pleo")).toBeTruthy();
+  });
+});
+
+describe("ApprovalsPage applied tab", () => {
+  it("lists applied records read-only, with no action buttons", async () => {
+    await renderPage([], [], {
+      applied: [
+        makeRecord({ id: "ap1", company: "Wolt", approval: "applied" }),
+        makeRecord({ id: "ap2", company: "Spotify", approval: "applied", url: "" }),
+      ],
+    });
+    clickTab(/applied/i);
+    // AppliedRow prints "company — role" in one node, so match on a substring.
+    expect(await screen.findByText(/Wolt/)).toBeTruthy();
+    expect(screen.getByText(/Spotify/)).toBeTruthy();
+    expect(screen.getByText(/applications page/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^approve$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^reject$/i })).toBeNull();
+    expect(screen.queryAllByRole("button", { name: "Move to approvals" }).length).toBe(0);
+    expect(screen.queryByRole("button", { name: /save url/i })).toBeNull();
   });
 });
