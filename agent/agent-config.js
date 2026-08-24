@@ -1,11 +1,11 @@
 // Fetch one field of the agent config from the app service. The agent image
 // has no curl (see daily-apply.sh's note); node is the only HTTP client.
-// Usage: node agent-config.js enabled|run_at|run_days|llm_credentials
+// Usage: node agent-config.js mode|enabled|run_at|run_days|llm_credentials
 // Errors print nothing and exit 1 — callers fall back to env defaults.
 const field = process.argv[2];
 const DAY_NUM = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
 const base = process.env.TRUTHCV_MCP_URL;
-if (!base || !["enabled", "run_at", "run_days", "llm_credentials", "job_config"].includes(field)) process.exit(1);
+if (!base || !["enabled", "mode", "run_at", "run_days", "llm_credentials", "job_config"].includes(field)) process.exit(1);
 
 if (field === "llm_credentials") {
   // Distinct exit code (2) when the shared secret itself is missing, so
@@ -46,7 +46,11 @@ const req = http.get(u, { timeout: 5000 }, (res) => {
   res.on("end", () => {
     try {
       const cfg = JSON.parse(body);
-      if (field === "enabled") {
+      if (field === "mode") {
+        if (typeof cfg.mode !== "string") { process.exit(1); return; }
+        process.stdout.write(cfg.mode);
+      }
+      else if (field === "enabled") {
         if (typeof cfg.enabled !== "boolean") { process.exit(1); return; }
         process.stdout.write(String(cfg.enabled));
       }

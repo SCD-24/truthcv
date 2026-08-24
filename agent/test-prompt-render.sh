@@ -145,6 +145,60 @@ if [[ "$CAP_LINE_6" != "Apply to at most 7 role(s) this run." ]]; then
 fi
 echo "PASS: cap line falls back to env var when config does not set it"
 
+# --- Autonomy mode rule rendered into the prompt ----------------------------
+# Reproduces daily-apply.sh's mode-rule block verbatim (see "Render the mode
+# rule into the prompt" there), so a divergence between this simulation and
+# the real script is a bug in one of the two, not just here.
+render_mode() {
+  local agent_mode="$1"
+  local prompt=""
+  if [[ "$agent_mode" == "semi" ]]; then
+    prompt="$prompt"$'\n\n'"## Autonomy mode: SEMI-AUTO
+
+Do NOT apply to a posting you find this run, however well it scores, and do not
+write a cover letter for it. For a posting that passes every criterion, call
+record_screening with verdict \"passed\", the full posting text in posting_text,
+and the employer's publication date in posted_date when the board states one.
+It enters the operator's approval queue; they draft the letter and decide.
+
+Phase 0 is unchanged: postings the operator already approved ARE applied to,
+using the cover_letter text that arrives with each item, verbatim."
+  else
+    prompt="$prompt"$'\n\n'"## Autonomy mode: FULL AUTO
+
+A posting that passes every criterion is applied to this run, as described in
+agent/RUNBOOK.md. Record the full posting text in posting_text and the
+employer's publication date in posted_date on every record_screening call."
+  fi
+  echo "$prompt"
+}
+
+# Case 7: semi renders SEMI-AUTO and the "Do NOT apply" line.
+echo "Testing: semi mode renders SEMI-AUTO block..."
+MODE_SEMI="$(render_mode "semi")"
+if [[ "$MODE_SEMI" != *"SEMI-AUTO"* ]] || [[ "$MODE_SEMI" != *"Do NOT apply"* ]]; then
+  echo "FAIL: semi mode did not render expected SEMI-AUTO block"
+  exit 1
+fi
+echo "PASS: semi mode renders SEMI-AUTO block"
+
+# Case 8: full renders FULL AUTO.
+echo "Testing: full mode renders FULL AUTO block..."
+MODE_FULL="$(render_mode "full")"
+if [[ "$MODE_FULL" != *"FULL AUTO"* ]]; then
+  echo "FAIL: full mode did not render expected FULL AUTO block"
+  exit 1
+fi
+echo "PASS: full mode renders FULL AUTO block"
+
+# Case 9: the two blocks never both appear in either rendering.
+echo "Testing: SEMI-AUTO and FULL AUTO are mutually exclusive..."
+if [[ "$MODE_SEMI" == *"FULL AUTO"* ]] || [[ "$MODE_FULL" == *"SEMI-AUTO"* ]]; then
+  echo "FAIL: SEMI-AUTO and FULL AUTO blocks are not mutually exclusive"
+  exit 1
+fi
+echo "PASS: SEMI-AUTO and FULL AUTO never both appear"
+
 echo ""
 echo "All tests passed!"
 exit 0
