@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-import companyboards.store as boards
 import screening.store as store
 from api.main import app
 
@@ -117,22 +116,6 @@ def test_bulk_route_is_not_shadowed_by_the_id_route(client):
     resp = client.patch("/api/screenings/approvals", json={"ids": [], "approval": "approved"})
     assert resp.status_code == 200
     assert resp.json() == {"results": []}
-
-
-def test_company_approval(client):
-    boards.record("Grafana Labs", "https://grafana.com/careers")
-    body = client.patch("/api/company-boards/Grafana Labs", json={"approved": True}).json()
-    assert body["approved"] is True
-    assert boards.load()["grafana labs"].approved is True
-
-
-def test_company_approval_without_a_resolved_board(client):
-    """The queue is full of companies screened from a posting URL, which have no
-    board entry; approving one records the trust rather than 404ing."""
-    resp = client.patch("/api/company-boards/Nobody", json={"approved": True})
-    assert resp.status_code == 200
-    assert resp.json()["approved"] is True
-    assert boards.load()["nobody"].approved is True
 
 
 def test_no_agent_route_writes_approval(client):

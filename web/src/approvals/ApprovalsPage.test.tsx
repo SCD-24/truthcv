@@ -24,7 +24,6 @@ vi.mock("../api/client", () => ({
   listDidNotPass: vi.fn(),
   setScreeningApproval: vi.fn(),
   bulkSetApproval: vi.fn(),
-  setCompanyApproval: vi.fn(),
   setScreeningUrl: vi.fn(),
   getScreeningLetter: vi.fn(),
   generateScreeningLetter: vi.fn(),
