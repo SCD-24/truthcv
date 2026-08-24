@@ -33,8 +33,11 @@ def _queued(posting_text="Staff AI Engineer, Germany (Remote). Python, LLMs."):
 
 
 class _StubProvider:
-    """Returns one paragraph whose every content token is a stopword, so the
-    guardrail has nothing to block. Keeps these tests off the network."""
+    """Returns one paragraph with an empty ``claims`` list. The guardrail only
+    validates a paragraph's self-tagged claims (coverletter/generate.py's
+    ``_letter_scope`` builds its Scope from ``claims``, never from ``text``),
+    so an empty claims list clears validation regardless of the prose. Keeps
+    these tests off the network."""
 
     def extract_json(self, system, messages, schema=None):
         return {"paragraphs": [{"text": "It is the work that was created.", "claims": []}]}
@@ -149,6 +152,25 @@ def test_blocked_generation_writes_nothing_and_names_the_claims(client, monkeypa
     s = _queued()
     r = client.post(f"/api/screenings/{s.id}/letter", json={})
     assert r.status_code == 422
+    assert letters.load(s.id) is None
+
+
+def test_generate_422_when_company_is_blocklisted(client, stub_provider):
+    """The blocklist short-circuits before the model is ever called (see
+    agenttools/tools_letter.py's is_blocked check), returning the same
+    blocked=True shape as a guardrail rejection. That path is untested at
+    the route layer even though it's safe by inspection, so exercise it
+    directly: nothing should be written to the letter store either."""
+    import agentconfig.store as agent_config_store
+
+    cfg = agent_config_store.load()
+    cfg.blocked_companies = ["Grafana Labs"]
+    agent_config_store.save(cfg)
+
+    s = _queued()
+    r = client.post(f"/api/screenings/{s.id}/letter", json={})
+    assert r.status_code == 422
+    assert r.json()["detail"]["blockedReason"] == "company_blocked"
     assert letters.load(s.id) is None
 
 

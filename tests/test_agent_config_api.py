@@ -294,12 +294,16 @@ def test_get_omits_boards_for_removed_target_companies(client, data_dir):
     assert len(r.json()["companyBoards"]) == 0
 
 
-def test_put_does_not_accept_company_boards_field(client, data_dir):
-    """PUT /api/agent/config rejects companyBoards in request (response-only).
+def test_put_rejects_unknown_fields_including_company_boards(client, data_dir):
+    """PUT /api/agent/config rejects any undeclared field, companyBoards included.
 
-    AgentConfigUpdate now sets extra="forbid" (needed to reject writes to the
-    derived `enabled` field), so an unknown field like companyBoards is a 422
-    rather than being silently dropped.
+    AgentConfigUpdate sets extra="forbid" (needed to reject writes to the
+    derived `enabled` field), so this 422s for the same reason it would for
+    any field nobody has ever heard of — that part of the coverage is generic,
+    not companyBoards-specific. What IS specific to companyBoards is the
+    second assertion below: it is a server-resolved, read-only field, so it
+    must never land in the stored config even if the reject-unknown-fields
+    behavior above were ever loosened.
     """
     from agentconfig import store as agent_config_store
 
