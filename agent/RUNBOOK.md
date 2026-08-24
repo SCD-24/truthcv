@@ -66,37 +66,46 @@ Always report what you rejected and on which criterion.
 
 ---
 
-## 2. Hard filters — all six must pass (defaults when no job profiles configured)
+## 2. Hard filters — every criterion of the matched profile must pass
 
-These six filters apply only when no job profiles are configured via `/api/agent/config`.
-When profiles ARE configured, a rendered profile-specific requirements block in the
-run prompt supersedes these defaults. Each profile may waive any criterion (e.g.,
-salary, entity verification) independently.
+The run's search criteria come entirely from the operator's configured job
+profiles — there are no built-in defaults. A profile-specific requirements
+block is rendered into your run prompt from `get_job_profiles`' data; match
+each posting against it and apply only when every non-waived criterion passes.
 
-1. **Fully remote.** Not hybrid, not "remote-first with N days in office."
-   If the posting's own fields contradict each other, see §7.
-2. **German employment contract.** The employer must hire in Germany through a
-   German entity. **An Employer-of-Record arrangement does NOT qualify** — this
-   depends on the operator's stored work authorisation (`get_profile_answers`),
-   which requires a qualifying direct employment contract with the employer,
-   not an EOR placement. Watch for the tell: "you'll be hired via Remote.com / Deel /
-   Velocity Global / our global employer partner." That killed Camunda.
-3. **≥ €85,000** gross. If the posted band tops out at or below 85k, reject.
-   If no band is posted, it passes this filter — see §3 for how to answer a
-   salary-expectation field when the posting states none. The figure to ask
-   for always comes from the matched profile's own band, never a fixed number
-   written here.
-4. **English as the working language.** "German required" or "fluent German" in
-   requirements = reject. "German is a plus" = fine.
-5. **Glassdoor ≥ 3.5**, OR waived if the company has fewer than 20 reviews.
-   Record the rating and review count you found.
-6. **Role type.** Agentic / AI engineering is the target; data engineering is the
-   accepted second. Reject generic full-stack, frontend, SRE, and Java-heavy
-   backend roles.
+Judge each posting by the matched profile's own fields:
 
-**Verify entity and remote policy on the employer's own posting.** Aggregators
-lie — Arbeitnow tagged RobCo's role TELECOMMUTE when RobCo's own board said
-Hybrid. Never trust a job board's metadata over the company's own page.
+- **`remoteModel`** — the working arrangement the operator will accept (e.g.
+  fully remote vs hybrid vs on-site). If the posting's own fields contradict
+  each other, see §7.
+- **`employmentCountry` / `eorAllowed` / `requireEntityVerification`** — where
+  and how the employer must be able to hire. When the profile requires entity
+  verification, an Employer-of-Record placement does not satisfy it; check the
+  operator's stored work authorisation (`get_profile_answers`) for what their
+  situation actually allows. Watch for the tell: "you'll be hired via <EOR
+  provider> / our global employer partner."
+- **`salaryFloor` / `salaryAskMin` / `salaryAskMax` + `currency`** — the pay
+  band, in the currency the operator chose. A posted band that tops out below
+  the floor fails. If no band is posted, it passes this filter — see §3 for
+  how to answer a salary-expectation field when the posting states none; the
+  figure to ask for always comes from the matched profile's own band via
+  `recommend_salary`, never a number stated here.
+- **`workingLanguage`** — the language the role must be workable in. A hard
+  requirement of a different working language in the posting fails; "is a
+  plus" phrasing does not.
+- **`glassdoorMin` / `glassdoorMinReviews`** — the employer-review threshold,
+  and the review count under which it is waived. Record the rating and review
+  count you found.
+- **`acceptedRoleTypes` / `rejectedRoleTypes`** — which kinds of roles this
+  profile targets and which it excludes.
+
+A single profile passing all its criteria drives an application
+(single-profile-passes rule); each profile waives criteria independently.
+Record which profile drove each application in the screening report.
+
+**Verify entity and remote policy on the employer's own posting.** Never
+trust a job board's metadata over the company's own page — boards get remote/
+hybrid flags wrong.
 
 ---
 
@@ -159,9 +168,11 @@ When an ATS field asks for a salary expectation, figure, or range:
   `generate_cover_letter`. Concrete facts it lets through are good; anything
   you try to add outside it is not — see §6.
 
-These exist because the previous automation answered "Yes" to Spanish work
-authorization, "No" to having a CS degree, claimed a referral, and understated
-native English as C1 — across 77 applications.
+Canonical answers come from `get_profile_answers` and nowhere else because a
+screening answer is a factual claim about the operator: anything sourced from
+your own memory or inference can be wrong in a way nobody reviews before it
+reaches an employer. The tool is the single reviewed source; this runbook
+deliberately does not duplicate its values.
 
 ---
 
@@ -224,13 +235,12 @@ is likelier to be silently blocked by ATS bot detection.
      unchanged. Record what the field actually contains, never what you
      intended to type — this record is evidence, and §4 applies to it exactly
      as it applies to the form.
-   - `screening`: the §2 filter verdicts — `entity` (the German-entity / EOR
-     finding), `remote`, `salary` (how the band was handled — the posted
+   - `screening`: the §2 filter verdicts — `entity` (the employment-entity /
+     EOR finding), `remote`, `salary` (how the band was handled — the posted
      number, or the exact string `recommend_salary` returned when the posting
      had none, per §3), `language`, `role_type`, and `glassdoor` as
      `{rating, reviews, waiver_applied}`, where `waiver_applied` is `true`
-     only when you invoked the under-20-reviews waiver in §2.5 and `false`
-     otherwise.
+     only when you invoked the review-count waiver and `false` otherwise.
    - `profile`: the name of the matched profile that drove this application
      (§3, §2), recorded on every screening.
    - `gaps_disclosed`: every gap you disclosed in the cover letter, one entry
@@ -320,7 +330,7 @@ not yours to route around now.
 
 The operator has chosen full autonomy: submit rather than queue. But:
 
-- If a posting's own fields conflict (e.g. location "Germany - Remote" but type
+- If a posting's own fields conflict (e.g. location "<country> - Remote" but type
   "Hybrid"), apply **and raise the question explicitly in the cover letter** so
   the employer resolves it. Log it as an open issue.
 - If a screening question cannot be answered truthfully from `get_profile_answers`
@@ -338,42 +348,44 @@ There is no log file to read for this. Cooldown state lives in TruthCV's own
 records, and the `check_cooldown` tool is the only way to read it — call it
 before every application, never infer a cooldown from memory of an earlier run.
 
-- **Never re-apply to the same position within 3 months.** Call
-  `check_cooldown(company, role)` before applying and treat `in_cooldown: true`
-  as a hard stop until the `expires` date it returns.
+There are two independently configured cooldown windows: a same-role window
+and a same-company window, both set by the operator in their agent config.
+The durations are whatever the operator configured — they are not stated
+here, because a duration written here would drift from the tool's actual
+behaviour.
+
+**`check_cooldown(company, role)` is the sole authority on cooldown.** Call it
+before every application and obey exactly what it returns:
+
+- `in_cooldown: true` with an `expires` date is a hard stop until that date.
+- The `window` field names which window produced the block (`same_role` =
+  same company and substantially the same role; `same_company` = any role at
+  the company). Report it so the operator knows which setting governs.
+- `blocked: true` with no expiry means the company is blocklisted outright —
+  see Blocked companies below.
+
   - "Same position" = same company **and** substantially the same role, even if
     the listing was deleted and reposted, the requisition ID changed, or the
     title was lightly reworded ("Senior AI Engineer" vs "Senior AI Engineer
     (Core Engine)"). Reposts are the common case and still count.
-- **Never apply to the same company more than once in 1 month**, regardless of
-  role. A genuinely different role at a company applied to 5 weeks ago is fine;
-  the same company 5 days ago is not, even for a completely different
-  position. Call `check_cooldown(company)` with no `role` to check this —
-  it matches any application to that company regardless of role.
 
-  The two cooldowns compose — take whichever is longer:
+| Situation | Wait |
+|---|---|
+| Same company, same position | the operator's same-role window, per `check_cooldown`'s `expires` |
+| Same company, different position | the operator's same-company window, per `check_cooldown`'s `expires` |
+| Different company | none |
 
-  | Situation | Wait |
-  |---|---|
-  | Same company, same position | **3 months** |
-  | Same company, different position | **1 month** |
-  | Different company | none |
+Never compute a window yourself — no fixed months or days, no arithmetic from
+a previous run's dates. If the tool says not in cooldown, it is not in cooldown.
 
-  Treat a posting as blocked if **either** call reports `in_cooldown: true`.
-  See the open issue below about the two windows' actual granularity.
-
-  - After the configured cooldown lapses (Agents page → Cooldown days; default 90 days), a re-application is allowed and often worth it, since the
-    hiring team and the requirements frequently change. Note in the
+  - After a cooldown lapses, a re-application is allowed and often worth it,
+    since the hiring team and the requirements frequently change. Note in the
     `record_application` call that it is a re-application and give the date
     of the previous one (in `notes`).
-  - **The previous (JobCopilot) automation's applications are only partly
-    tracked.** What reached TruthCV is the 21-row export that was carried over
-    during the migration, and all 21 are companies already in the ledger; the
-    rest of that older population was never recorded anywhere that survives.
-    Applications the ledger holds are in scope for this rule exactly like any
-    other tracked application — but absence from the ledger is NOT evidence
-    that nobody applied. If a target looks familiar and the ledger is silent,
-    ask rather than assuming it is untouched.
+  - Absence from the application ledger is NOT evidence that nobody applied:
+    records can predate the tracker or live outside TruthCV entirely. If a
+    target looks familiar and `check_cooldown` is silent, ask rather than
+    assuming it is untouched.
 - Never use One-Click / bulk apply on any platform.
 - Never re-enable any auto-fill browser extension — it is deliberately off.
 - Never put the operator's data into a third-party form that isn't the employer's ATS.
@@ -386,21 +398,6 @@ company reports `in_cooldown: true` with `blocked: true` and no expiry from
 do not apply, do not retry later, do not attempt to work around it.
 `generate_cover_letter` will also refuse (`blocked_reason:
 "company_blocked"`) when you pass the company name.
-
-**Open issue:** `check_cooldown`'s derived (non-screening) cooldown window is a
-single server-configured duration applied identically whether you call it with
-a `role` or without one — the tool does not expose two independently
-configurable windows for "same position" (3 months) vs. "same company, any
-position" (1 month). In practice, calling `check_cooldown(company)` without a
-`role` already yields the more conservative of the two windows whenever the
-configured duration is at least 1 month, so following the rule above (treat
-either call's `in_cooldown: true` as blocking) never under-blocks — but it may
-over-block a genuinely-different-role reapplication that the old 1-month rule
-would have allowed after 30 days. This is a real gap between the runbook's
-stated policy and what the tool surface can currently express; it is not
-something this agent can work around, and it should be reported rather than
-patched by, for example, inventing a cooldown-duration parameter that
-`check_cooldown` does not accept.
 
 ---
 

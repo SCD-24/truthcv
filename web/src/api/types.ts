@@ -191,6 +191,10 @@ export interface ProfileAnswers {
   github: string;
   website: string;
   requiresSponsorship: string;
+  /** Neutral, country-agnostic work-authorisation note. Supersedes
+   * authorizedNonGermanCountry (still accepted for one release). */
+  workAuthorisationNote: string;
+  /** DEPRECATED legacy key, kept so an un-migrated client still round-trips. */
   authorizedNonGermanCountry: string;
   languages: string;
   highestRelevantDegree: string;
@@ -303,6 +307,10 @@ export interface CooldownStatus {
   inCooldown: boolean;
   expires: string | null;
   blocked: boolean;
+  /** Which cooldown window produced the block: "same_role" (same company and
+   * substantially the same role) or "same_company" (any role at the company).
+   * null when not in cooldown or blocked via the blocklist. */
+  window: "same_role" | "same_company" | null;
 }
 
 /** A job the unattended application agent screened and rejected (or otherwise
@@ -319,6 +327,10 @@ export interface ScreeningRecord {
   reason: string;
   /** ISO timestamp the cooldown lapses; empty when there is no cooldown. */
   cooldownExpires: string;
+  /** Which cooldown window produced this block, when the agent recorded one
+   * from check_cooldown's response ("same_role" | "same_company"); null when
+   * unknown (older records) or the block came from the blocklist. */
+  cooldownWindow?: "same_role" | "same_company" | null;
   source: string;
   /** The posting as the agent read it, captured for drafting the letter later. */
   postingText: string;
@@ -358,7 +370,9 @@ export interface JobProfile {
   salaryAskMax: number | null;
   /** Currency the salary band is expressed in. Not editable in the UI yet, but
    * round-tripped through save so a hand-set value is never silently reset. */
-  currency: string;
+  /** User-chosen currency code; null means not configured — no regional
+   * default exists, and display renders "not configured" instead. */
+  currency: string | null;
   workingLanguage: string | null;
   glassdoorMin: number | null;
   glassdoorMinReviews: number | null;
@@ -402,6 +416,9 @@ export interface AgentConfig {
   profiles: JobProfile[];
   targetCompanies: string[];
   cooldownDays: number | null;
+  /** Per-window overrides; null inherits the legacy single cooldownDays. */
+  cooldownDaysSameRole: number | null;
+  cooldownDaysSameCompany: number | null;
   maxApplicationsPerRun: number | null;
   readonly companyBoards: CompanyBoard[];
 }
@@ -420,6 +437,8 @@ export type AgentConfigUpdate = Partial<
     | "profiles"
     | "targetCompanies"
     | "cooldownDays"
+    | "cooldownDaysSameRole"
+    | "cooldownDaysSameCompany"
     | "maxApplicationsPerRun"
   >
 >;

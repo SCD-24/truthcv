@@ -20,21 +20,8 @@ from applications.store import load_all as load_applications
 from .store import load_all as load_screenings
 
 
-def application_cooldown_days() -> int:
-    """Days after an application's date before the company clears cooldown.
-    
-    Precedence: agent config cooldown_days -> APPLICATION_COOLDOWN_DAYS env -> 90.
-    """
-    # Check agent config first
-    try:
-        from agentconfig.store import load as agent_config_load
-        cfg = agent_config_load()
-        if cfg.cooldown_days is not None and cfg.cooldown_days >= 0:
-            return cfg.cooldown_days
-    except Exception:
-        pass
-    
-    # Fall back to env var
+def _window_from_env() -> int:
+    """APPLICATION_COOLDOWN_DAYS env value, or 90 when blank/unparsable."""
     raw = os.environ.get("APPLICATION_COOLDOWN_DAYS", "90")
     if not raw or not raw.strip():
         return 90
@@ -44,13 +31,64 @@ def application_cooldown_days() -> int:
         return 90
 
 
+def _configured_days(window: int | None, legacy: int | None) -> int | None:
+    """Resolve one cooldown window from config values.
+
+    A window's own field wins when set (>= 0); otherwise the legacy single
+    `cooldown_days` applies so present installs are unchanged; None means no
+    configured value and the caller falls back to the environment.
+    """
+    for value in (window, legacy):
+        if value is not None and value >= 0:
+            return value
+    return None
+
+
+def same_role_cooldown_days() -> int:
+    """Cooldown days for re-applying to a role already applied to.
+
+    Precedence: AgentConfig.cooldown_days_same_role -> AgentConfig.cooldown_days
+    (legacy single window) -> APPLICATION_COOLDOWN_DAYS env -> 90. Config-load
+    failures fail safe to the env/default path.
+    """
+    try:
+        cfg = agent_config_load()
+        days = _configured_days(cfg.cooldown_days_same_role, cfg.cooldown_days)
+    except Exception:
+        days = None
+    return days if days is not None else _window_from_env()
+
+
+def application_cooldown_days() -> int:
+    """Cooldown days for a company-only match (same-company window).
+
+    Precedence: AgentConfig.cooldown_days_same_company ->
+    AgentConfig.cooldown_days (legacy single window) -> APPLICATION_COOLDOWN_DAYS
+    env -> 90. Kept as the historical name; it now resolves the SAME-COMPANY
+    window, used whenever no role was supplied or the record's role differs.
+    """
+    try:
+        cfg = agent_config_load()
+        days = _configured_days(cfg.cooldown_days_same_company, cfg.cooldown_days)
+    except Exception:
+        days = None
+    return days if days is not None else _window_from_env()
+
+
 @dataclass
 class CooldownStatus:
-    """Whether a company (optionally role) is currently in cooldown."""
+    """Whether a company (optionally role) is currently in cooldown.
+
+    ``window`` names which cooldown window produced the block — 'same_role'
+    or 'same_company' — so the UI can tell the user which setting to change.
+    None when not in cooldown, or when blocked via the permanent blocklist
+    (which has no window).
+    """
 
     in_cooldown: bool
     expires: str | None = None
     blocked: bool = False
+    window: str | None = None
 
 
 def _matches(company: str, role: str | None, rec_company: str, rec_role: str) -> bool:
@@ -81,26 +119,54 @@ def _parse(ts: str) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def _screening_expiries(company: str, role: str | None) -> list[datetime]:
-    """Explicit ``cooldown_expires`` from screening records matching company/role."""
+def _screening_expiries(company: str, role: str | None) -> list[tuple[datetime, str]]:
+    """(expiry, window) pairs from screening records' own ``cooldown_expires``.
+
+    A screening record carries an explicit expiry set when it was recorded, so
+    the window that produced it is not re-derived here; the record's role is
+    what matched, so a role-matched record reports the same-role window and
+    any other match the same-company one.
+    """
     expiries = []
     for s in load_screenings():
         if _matches(company, role, s.company, s.role):
             dt = _parse(s.cooldown_expires)
             if dt:
-                expiries.append(dt)
+                window = "same_role" if role else "same_company"
+                expiries.append((dt, window))
     return expiries
 
 
-def _application_expiries(company: str, role: str | None) -> list[datetime]:
-    """Derived expiries (application_date + configured duration) for matches."""
-    days = application_cooldown_days()
+def _application_expiries(company: str, role: str | None) -> list[tuple[datetime, str]]:
+    """Derived (expiry, window) pairs for matching applications.
+
+    The same-role window applies only when a role was supplied AND the
+    record's role matches; every other match uses the same-company window.
+    """
+    same_role_days = None
+    if role:
+        same_role_days = same_role_cooldown_days()
+    company_days = application_cooldown_days()
     expiries = []
     for a in load_applications():
-        if _matches(company, role, a.company, a.role):
-            dt = _parse(a.application_date)
-            if dt:
-                expiries.append(dt + timedelta(days=days))
+        if not isinstance(a.company, str):
+            continue
+        company_matched = (
+            company.strip().casefold() == a.company.strip().casefold()
+        )
+        if not company_matched:
+            continue
+        role_matched = bool(role) and _matches(company, role, a.company, a.role)
+        days = same_role_days if role_matched else company_days
+        dt = _parse(a.application_date)
+        if not dt:
+            continue
+        # A single application can block under BOTH windows: its own role
+        # (same-role window) and the company as a whole (same-company
+        # window). Emit each window's expiry; the later one governs.
+        expiries.append((dt + timedelta(days=days), "same_role" if role_matched else "same_company"))
+        if role_matched:
+            expiries.append((dt + timedelta(days=company_days), "same_company"))
     return expiries
 
 
@@ -123,7 +189,9 @@ def cooldown(company: str, role: str | None = None) -> CooldownStatus:
     expiries = _screening_expiries(company, role) + _application_expiries(company, role)
     if not expiries:
         return CooldownStatus(in_cooldown=False)
-    latest = max(expiries)
+    latest_expiry, latest_window = max(expiries, key=lambda pair: pair[0])
     return CooldownStatus(
-        in_cooldown=latest > datetime.now(timezone.utc), expires=latest.isoformat()
+        in_cooldown=latest_expiry > datetime.now(timezone.utc),
+        expires=latest_expiry.isoformat(),
+        window=None if not (latest_expiry > datetime.now(timezone.utc)) else latest_window,
     )

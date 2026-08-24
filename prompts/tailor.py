@@ -11,28 +11,30 @@ from __future__ import annotations
 
 from truth.model import Truth
 
-from .style import CV_STYLE
+from .conventions import CvConventions, DomainVocabulary, DEFAULT_CONVENTIONS, DEFAULT_VOCABULARY
+from .style import cv_style
 
 
 # --- Keyword extraction -----------------------------------------------------
 
-def keywords_system() -> str:
+def keywords_system(vocabulary: DomainVocabulary = DEFAULT_VOCABULARY) -> str:
     """System prompt: pull screenable keywords out of a job posting.
 
     Restricted to real, screenable skills because these keywords later drive both
     the inference step and the ATS 'missing keyword' review — feeding in job
     titles or locations there would flag the CV for things a CV body should never
-    contain (nobody writes 'Remote in Germany' as a skill).
+    contain (nobody writes 'Remote in <city>' as a skill). The domain's own
+    keyword scope comes from ``vocabulary``; the default is the historical
+    software-engineering scope.
     """
     return (
         "Extract ONLY the concrete, screenable skills a candidate is judged on from "
-        "this job posting: technologies, tools, programming languages, frameworks, "
-        "platforms, methodologies, and hard requirements (e.g. specific certifications "
-        "or years with a named tool). Return a deduplicated list of short keyword "
-        "phrases.\n"
+        "this job posting: "
+        + vocabulary.keyword_scope
+        + ". Return a deduplicated list of short keyword phrases.\n"
         "EXCLUDE, do not return any of these: job titles and seniority labels (e.g. "
         "'Senior Data Engineer', 'Lead', 'Junior'); locations and work arrangement "
-        "(e.g. 'Remote in Germany', 'hybrid', 'onsite', 'relocation', city or country "
+        "(e.g. 'Remote in <city>', 'hybrid', 'onsite', 'relocation', city or country "
         "names); company or team names; salary, benefits, and perks; and generic soft "
         "phrases (e.g. 'team player', 'fast-paced environment', 'communication "
         "skills'). Do not invent anything not implied by the text."
@@ -41,7 +43,7 @@ def keywords_system() -> str:
 
 # --- Missing-qualification inference ----------------------------------------
 
-def infer_system() -> str:
+def infer_system(vocabulary: DomainVocabulary = DEFAULT_VOCABULARY) -> str:
     """System prompt: surface truthful, inferable skills for the user to confirm.
 
     This is the ONLY stage allowed to relabel real experience in the posting's
@@ -49,17 +51,17 @@ def infer_system() -> str:
     candidate can legitimately claim — 'ETL' for someone whose bullets describe
     moving data between systems — reaches the confirmation gate instead of being
     silently dropped. Keyword-driven so real coverage gaps get proposed, and
-    strictly gated so nothing unsupported is ever invented.
+    strictly gated so nothing unsupported is ever invented. The support examples
+    are domain vocabulary, not constants: supply a domain-appropriate profile.
     """
     return (
         "You are given a job posting's keywords and a candidate's existing verified "
         "experiences (each with an id and its bullets).\n"
         "Walk through EACH keyword that is NOT already present in the facts and decide "
         "whether an existing experience bullet genuinely SUPPORTS or IMPLIES it. "
-        "Examples of legitimate support: a bullet describing moving or converting data "
-        "between systems supports 'ETL' and 'Data transformation'; building checks on "
-        "input data supports 'Data validation'; tuning a system for speed supports "
-        "'Performance optimization'.\n"
+        "Examples of legitimate support: "
+        + vocabulary.inference_examples
+        + ".\n"
         "When (and only when) a bullet genuinely supports the keyword, propose it as an "
         "inference: give the claim phrased in the posting's vocabulary, a short "
         "rationale naming the real experience that implies it, and the experienceId of "
@@ -92,26 +94,57 @@ def infer_truth_block(truth: Truth) -> str:
 # --- CV selection / rephrasing ----------------------------------------------
 
 # The craft standard the CV is written to: elite career-services quality. Style
-# only; adds no facts and never overrides the id contract below.
-_CV_STANDARD = (
-    " You write to elite university career-services standards: a polished, "
-    "ATS-friendly CV that is concise, results-oriented, and easy to skim. Make it "
-    "achievement-focused, not responsibility-focused, and written for recruiters who "
-    "scan quickly: specific rather than general, active rather than passive, and "
-    "fact-based with quantified outcomes wherever the referenced fact supports them. "
-    "No personal pronouns. No narrative paragraphs in experience sections. Start "
-    "every bullet with a strong action verb (built, led, shipped, owned, cut, raised, "
-    "designed, implemented, streamlined). Keep bullets concise and impact-oriented; "
-    "cut filler and redundancy; drop empty, placeholder, or weak entries. Keep each "
-    "section in reverse chronological order with consistent formatting. Each role "
-    "gets 2 to 6 bullets, each showing a measurable outcome where the facts allow and "
-    "demonstrating leadership, technical ability, communication, analysis, ownership, "
-    "or problem-solving. Group skills by category (languages, frameworks, cloud "
-    "platforms, databases, tools, analytics, certifications) when the facts permit. "
-    "Prioritize the experiences most relevant to the posting, reorder bullets for "
-    "strongest alignment, and incorporate the posting's important keywords naturally "
-    "where a real fact backs them."
-)
+# only; adds no facts and never overrides the id contract below. Rendered by
+# cv_standard() from CvConventions/DomainVocabulary; the constant is the
+# default-conventions rendering, kept for byte-stability with older callers.
+def _pronoun_sentence(conventions: CvConventions) -> str:
+    return (
+        "Personal pronouns are allowed."
+        if conventions.allow_pronouns
+        else "No personal pronouns."
+    )
+
+
+def _ordering_sentence(conventions: CvConventions) -> str:
+    if conventions.ordering == "functional":
+        return "Order each section by relevance to the posting with consistent formatting."
+    return (
+        "Keep each section in reverse chronological order with consistent formatting."
+    )
+
+
+def cv_standard(
+    conventions: CvConventions = DEFAULT_CONVENTIONS,
+    vocabulary: DomainVocabulary = DEFAULT_VOCABULARY,
+) -> str:
+    """Render the tailoring craft standard from conventions + vocabulary."""
+    bullet_range = f"{conventions.bullets_min} to {conventions.bullets_max}"
+    return (
+        " You write to elite university career-services standards: a polished, "
+        "ATS-friendly CV that is concise, results-oriented, and easy to skim. Make it "
+        "achievement-focused, not responsibility-focused, and written for recruiters who "
+        "scan quickly: specific rather than general, active rather than passive, and "
+        "fact-based with quantified outcomes wherever the referenced fact supports them. "
+        + _pronoun_sentence(conventions)
+        + " No narrative paragraphs in experience sections. Start "
+        "every bullet with a strong action verb ("
+        + vocabulary.action_verbs
+        + "). Keep bullets concise and impact-oriented; "
+        "cut filler and redundancy; drop empty, placeholder, or weak entries. "
+        + _ordering_sentence(conventions)
+        + " Each role "
+        f"gets {bullet_range} bullets, each showing a measurable outcome where the facts allow and "
+        "demonstrating leadership, technical ability, communication, analysis, ownership, "
+        "or problem-solving. Group skills by category ("
+        + vocabulary.skill_categories
+        + ") when the facts permit. "
+        "Prioritize the experiences most relevant to the posting, reorder bullets for "
+        "strongest alignment, and incorporate the posting's important keywords naturally "
+        "where a real fact backs them."
+    )
+
+
+_CV_STANDARD = cv_standard()
 
 
 # Constraints that remove the common markers of AI-written prose. Purely
@@ -130,7 +163,10 @@ _CV_ANTI_TELL_RULES = (
 )
 
 
-def select_system() -> str:
+def select_system(
+    conventions: CvConventions = DEFAULT_CONVENTIONS,
+    vocabulary: DomainVocabulary = DEFAULT_VOCABULARY,
+) -> str:
     """System prompt: choose, order, and lightly rephrase facts by id (+ CV style)."""
     return (
         "You tailor a CV to a job posting using ONLY the candidate's verified facts. "
@@ -142,8 +178,8 @@ def select_system() -> str:
         "with, never move a bullet to another job; (3) NEVER invent a fact, number, "
         "employer, or date; rephrasing must not add information. Do not touch roles, "
         "companies, or dates, those are fixed."
-        + _CV_STANDARD
-        + CV_STYLE
+        + cv_standard(conventions, vocabulary)
+        + cv_style(conventions)
         + _CV_ANTI_TELL_RULES
     )
 

@@ -29,6 +29,7 @@ import {
 } from "../api/client";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { ModelRoutePicker } from "../settings/ModelRoutePicker";
+import { SettingsModal } from "../settings/SettingsModal";
 import { isValidRunTime, WEEKDAYS } from "./schedule";
 import type {
   AgentConfig,
@@ -53,6 +54,7 @@ const EMPTY_ANSWERS: ProfileAnswers = {
   linkedin: "",
   github: "",
   website: "",
+  workAuthorisationNote: "",
   requiresSponsorship: "",
   authorizedNonGermanCountry: "",
   languages: "",
@@ -107,6 +109,9 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
   const [answers, setAnswers] = useState<ProfileAnswers>(EMPTY_ANSWERS);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Set when the user asks to edit a setting that lives in the Settings
+  // modal (e.g. the cooldown windows) — opens it scrolled to that section.
+  const [settingsSection, setSettingsSection] = useState<"job-search-policy" | null>(null);
 
   const [connections, setConnections] = useState<ConnectionStatus[]>([]);
   const [routing, setRouting] = useState<Routing | null>(null);
@@ -191,8 +196,18 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
             )
           )}
           <ScheduleSection config={config} onChange={setConfig} />
-          <ProfilesSection config={config} onChange={setConfig} />
+          <ProfilesSection
+            config={config}
+            onChange={setConfig}
+            onOpenSettings={() => setSettingsSection("job-search-policy")}
+          />
           <BlocklistSection config={config} onChange={setConfig} />
+          {settingsSection && (
+            <SettingsModal
+              initialSection={settingsSection}
+              onClose={() => setSettingsSection(null)}
+            />
+          )}
           <CanonicalCvSection answers={answers} />
           <ProfileAnswersSection answers={answers} onChange={setAnswers} />
         </Stack>
@@ -592,7 +607,9 @@ interface ProfileDraft {
   salaryFloor: string;
   salaryAskMin: string;
   salaryAskMax: string;
-  /** Carried through unedited so saving a profile cannot reset a hand-set currency. */
+  /** Carried through unedited so saving a profile cannot reset a hand-set
+   * currency. Empty means the user has not configured one — there is no
+   * regional default to fall back to. */
   currency: string;
   workingLanguage: string;
   glassdoorMin: string;
@@ -644,7 +661,7 @@ function profileToDraft(p: JobProfile): ProfileDraft {
     salaryFloor: numberToText(p.salaryFloor),
     salaryAskMin: numberToText(p.salaryAskMin),
     salaryAskMax: numberToText(p.salaryAskMax),
-    currency: p.currency || "EUR",
+    currency: p.currency ?? "",
     workingLanguage: p.workingLanguage ?? "",
     glassdoorMin: numberToText(p.glassdoorMin),
     glassdoorMinReviews: numberToText(p.glassdoorMinReviews),
@@ -667,12 +684,13 @@ function emptyDraft(): ProfileDraft {
     salaryFloor: "85000",
     salaryAskMin: "95000",
     salaryAskMax: "110000",
-    currency: "EUR",
-    workingLanguage: "English",
-    glassdoorMin: "3.5",
-    glassdoorMinReviews: "20",
-    acceptedRoleTypesText: "agentic / AI engineering, data engineering",
-    rejectedRoleTypesText: "generic full-stack, frontend, SRE, Java-heavy backend",
+    // Deliberately blank: no regional default. The user states their own.
+    currency: "",
+    workingLanguage: "",
+    glassdoorMin: "",
+    glassdoorMinReviews: "",
+    acceptedRoleTypesText: "",
+    rejectedRoleTypesText: "",
   };
 }
 
@@ -690,7 +708,7 @@ function draftToProfile(d: ProfileDraft): JobProfile {
     salaryFloor: textToIntOrNull(d.salaryFloor),
     salaryAskMin: textToIntOrNull(d.salaryAskMin),
     salaryAskMax: textToIntOrNull(d.salaryAskMax),
-    currency: d.currency.trim() || "EUR",
+    currency: d.currency.trim() || null,
     workingLanguage: d.workingLanguage.trim() || null,
     glassdoorMin: textToFloatOrNull(d.glassdoorMin),
     glassdoorMinReviews: textToIntOrNull(d.glassdoorMinReviews),
@@ -754,11 +772,15 @@ function validateDrafts(drafts: ProfileDraft[]): string | null {
 function ProfilesSection({
   config,
   onChange,
+  onOpenSettings,
 }: {
   config: AgentConfig;
   onChange: (c: AgentConfig) => void;
+  /** Opens the Settings modal, optionally scrolled to a section. */
+  onOpenSettings: (section: "job-search-policy") => void;
 }) {
   const [drafts, setDrafts] = useState<ProfileDraft[]>(() => config.profiles.map(profileToDraft));
+  // Read-only display of the legacy fallback window; its writer is Settings.
   const [cooldownDays, setCooldownDays] = useState(numberToText(config.cooldownDays));
   const [maxApplicationsPerRun, setMaxApplicationsPerRun] = useState(
     numberToText(config.maxApplicationsPerRun),
@@ -790,9 +812,10 @@ function ProfilesSection({
     setError(null);
     setSaved(false);
     try {
+      // Cooldown windows are NOT saved here: Settings' Job search policy
+      // section is their single writer, so the two can never disagree.
       const fresh = await updateAgentConfig({
         profiles: drafts.map(draftToProfile),
-        cooldownDays: textToIntOrNull(cooldownDays),
         maxApplicationsPerRun: textToIntOrNull(maxApplicationsPerRun),
       });
       onChange(fresh);
@@ -968,12 +991,26 @@ function ProfilesSection({
       </Box>
       <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
         <TextField
-          label="Cooldown days"
+          label="Cooldown (same role / same company)"
           size="small"
-          value={cooldownDays}
-          onChange={(e) => setCooldownDays(e.target.value)}
-          helperText="Days a rejected or applied-to company stays blocked. Blank uses the default (90); 0 disables."
+          value={`${numberToText(config.cooldownDaysSameRole)} / ${numberToText(
+            config.cooldownDaysSameCompany,
+          )}`}
+          slotProps={{ input: { readOnly: true } }}
+          helperText="Blank inherits Cooldown days, then 90; 0 disables. Changed in Settings."
         />
+        {cooldownDays !== "" && (
+          <TextField
+            label="Cooldown days"
+            size="small"
+            value={cooldownDays}
+            slotProps={{ input: { readOnly: true } }}
+            helperText="Legacy fallback window — changed in Settings too."
+          />
+        )}
+        <Button variant="text" onClick={() => onOpenSettings("job-search-policy")}>
+          Edit in Settings
+        </Button>
         <TextField
           label="Max applications per run"
           size="small"

@@ -27,6 +27,17 @@ function cooldownLabel(record: ScreeningRecord, active: boolean): string {
   return record.cooldownExpires ? "Expired" : "No cooldown";
 }
 
+export { cooldownLabel };
+
+/** Human wording for WHY a company is blocked, so the user can tell which
+ * setting governs it: a blocklist entry vs a same-role vs a same-company
+ * cooldown window. Mirrors screening/cooldown.py's CooldownStatus.window. */
+export function cooldownBlockLabel(window: "same_role" | "same_company" | null): string {
+  if (window === "same_role") return "blocked: already applied to this role";
+  if (window === "same_company") return "blocked: recently applied to this company";
+  return "blocked: on the blocklist";
+}
+
 /** One rejected-target row: company/reason, role, verdict, why it failed, its
  * cooldown state, and a delete control to un-block it. */
 function ScreeningRow({

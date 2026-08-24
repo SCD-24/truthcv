@@ -36,7 +36,7 @@ class JobProfile:
     salary_floor: int | None = None
     salary_ask_min: int | None = None
     salary_ask_max: int | None = None
-    currency: str = "EUR"
+    currency: str | None = None
     working_language: str | None = None
     glassdoor_min: float | None = None
     glassdoor_min_reviews: int | None = None
@@ -133,6 +133,11 @@ class AgentConfig:
     profiles: list[JobProfile] = field(default_factory=list)
     target_companies: list[str] = field(default_factory=list)
     cooldown_days: int | None = None
+    # Per-window cooldown overrides. None means "inherit cooldown_days"
+    # (which itself falls back to the env var and then 90), so an existing
+    # data/agent_config.json behaves exactly as before these existed.
+    cooldown_days_same_role: int | None = None
+    cooldown_days_same_company: int | None = None
     max_applications_per_run: int | None = None
 
     @property
@@ -192,9 +197,16 @@ class AgentConfig:
             if _is_string_list(raw["target_companies"]):
                 kwargs["target_companies"] = raw["target_companies"]
 
-        # cooldown_days: int | None
+        # cooldown_days: int | None (legacy single window; still the fallback)
         if "cooldown_days" in raw and isinstance(raw["cooldown_days"], int):
             kwargs["cooldown_days"] = raw["cooldown_days"]
+
+        # cooldown_days_same_role / cooldown_days_same_company: int | None
+        for field_name in ("cooldown_days_same_role", "cooldown_days_same_company"):
+            if field_name in raw:
+                # Non-int values fall back to None rather than raising, so a
+                # hand-edited config never blocks the run.
+                kwargs[field_name] = raw[field_name] if isinstance(raw[field_name], int) else None
 
         # max_applications_per_run: int | None
         if "max_applications_per_run" in raw and isinstance(raw["max_applications_per_run"], int):
@@ -215,6 +227,8 @@ class AgentConfig:
             "profiles": [p.to_dict() for p in self.profiles],
             "target_companies": self.target_companies,
             "cooldown_days": self.cooldown_days,
+            "cooldown_days_same_role": self.cooldown_days_same_role,
+            "cooldown_days_same_company": self.cooldown_days_same_company,
             "max_applications_per_run": self.max_applications_per_run,
         }
 

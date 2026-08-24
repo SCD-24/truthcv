@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-16 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+18 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -144,3 +144,11 @@ Provider connection layer (connections/): a static catalog of provider connectio
 
 **Tech:** Python, httpx, Google OAuth 2.0 (PKCE)
 <!-- generated:end comp:connections -->
+
+<!-- generated:start comp:agent-config -->
+## Agent Config (`agent-config`, BACKEND)
+<!-- generated:end comp:agent-config -->
+
+<!-- generated:start comp:screening-engine -->
+## Screening Engine (`screening-engine`, BACKEND)
+<!-- generated:end comp:screening-engine -->

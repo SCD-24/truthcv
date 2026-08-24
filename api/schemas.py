@@ -211,6 +211,7 @@ class AnswersModel(_Camel):
     github: str = ""
     website: str = ""
     requires_sponsorship: str = ""
+    work_authorisation_note: str = ""
     authorized_non_german_country: str = ""
     languages: str = ""
     highest_relevant_degree: str = ""
@@ -245,6 +246,7 @@ class AnswersUpdate(_Camel):
     github: str | None = None
     website: str | None = None
     requires_sponsorship: str | None = None
+    work_authorisation_note: str | None = None
     authorized_non_german_country: str | None = None
     languages: str | None = None
     highest_relevant_degree: str | None = None
@@ -272,7 +274,9 @@ class JobProfileModel(_Camel):
     salary_floor: int | None = None
     salary_ask_min: int | None = None
     salary_ask_max: int | None = None
-    currency: str = "EUR"
+    # User-chosen currency code; None means the user has not configured one
+    # and no default currency may be assumed.
+    currency: str | None = None
     working_language: str | None = None
     glassdoor_min: float | None = None
     glassdoor_min_reviews: int | None = None
@@ -334,6 +338,8 @@ class AgentConfigModel(_Camel):
     profiles: list[JobProfileModel] = Field(default_factory=list)
     target_companies: list[str] = Field(default_factory=list)
     cooldown_days: int | None = None
+    cooldown_days_same_role: int | None = None
+    cooldown_days_same_company: int | None = None
     max_applications_per_run: int | None = None
     company_boards: list[CompanyBoardModel] = Field(default_factory=list)
 
@@ -355,6 +361,8 @@ class AgentConfigUpdate(_Camel):
     profiles: list[JobProfileModel] | None = None
     target_companies: list[str] | None = None
     cooldown_days: int | None = None
+    cooldown_days_same_role: int | None = None
+    cooldown_days_same_company: int | None = None
     max_applications_per_run: int | None = None
 
     @field_validator("mode")
@@ -411,13 +419,13 @@ class AgentConfigUpdate(_Camel):
             return [s.strip() for s in v if isinstance(s, str) and s.strip()]
         return v
 
-    @field_validator("cooldown_days")
+    @field_validator("cooldown_days", "cooldown_days_same_role", "cooldown_days_same_company")
     @classmethod
     def _validate_cooldown_days(cls, v: int | None) -> int | None:
         if v is None:
             return v
         if v < 0:
-            raise ValueError("cooldownDays must be >= 0")
+            raise ValueError("cooldown days must be >= 0 (0 disables the window)")
         return v
 
     @field_validator("max_applications_per_run")
@@ -695,11 +703,16 @@ class ScreeningCreate(_Camel):
 
 
 class CooldownResult(_Camel):
-    """Whether a company (optionally role) is currently in cooldown."""
+    """Whether a company (optionally role) is currently in cooldown.
+
+    ``window`` names which cooldown window produced the block ('same_role' or
+    'same_company'); None when not in cooldown or blocked via the blocklist.
+    """
 
     in_cooldown: bool
     expires: str | None = None
     blocked: bool = False
+    window: str | None = None
 
 
 class ConnectionStatus(_Camel):

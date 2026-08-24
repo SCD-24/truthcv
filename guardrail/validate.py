@@ -13,13 +13,16 @@ dependency — the same input always yields the same result.
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from truth.store import data_dir
+
 # Connective/function words that carry no factual content. Rephrasing may freely
 # introduce these; they are never treated as claims.
-_STOPWORDS = {
+_STOPWORDS: frozenset[str] = frozenset({
     "a", "an", "and", "as", "at", "by", "for", "from", "in", "into", "of", "on",
     "or", "the", "to", "with", "using", "used", "via", "per", "across", "over",
     "within", "including", "led", "build", "built", "building", "delivered",
@@ -31,9 +34,60 @@ _STOPWORDS = {
     "projects", "experience", "years", "year", "strong", "proven", "skilled",
     "is", "was", "are", "were", "be", "been", "that", "this", "which", "who",
     "our", "their", "his", "her", "its", "it", "s",
-}
+})
 
-_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9\+\.#/-]*", re.IGNORECASE)
+
+# Per-data_dir cache of the loaded stopword set; initialised lazily by
+# _stopwords() so import order never touches the filesystem.
+_stopwords_cache: tuple[str, frozenset[str]] | None = None
+
+
+def _stopwords() -> frozenset[str]:
+    """The effective stopword set: built-ins plus any operator-supplied list.
+
+    Cached per data_dir so the file is read once per process.
+    """
+    global _stopwords_cache
+    key = str(data_dir())
+    if _stopwords_cache is None or _stopwords_cache[0] != key:
+        _stopwords_cache = (key, _load_stopwords())
+    return _stopwords_cache[1]
+
+
+def _load_stopwords() -> frozenset[str]:
+    """Built-in English stopwords merged with an operator-supplied list.
+
+    A CV in another language would otherwise have every connective flagged as
+    an unverifiable claim and blocked at render, so the operator can supply
+    extra stopwords in data/stopwords.txt (one word per line; '#' starts a
+    comment). A missing OR unreadable file means built-ins only — the
+    guardrail degrades to today's exact behaviour rather than failing a run.
+    """
+    words = set(_STOPWORDS)
+    path = data_dir() / "stopwords.txt"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return frozenset(words)
+    except OSError as exc:
+        logging.getLogger(__name__).warning("Could not read %s (%s); using built-in stopwords only", path, exc)
+        return frozenset(words)
+    for line in lines:
+        word = line.strip()
+        if word and not word.startswith("#"):
+            # Tokenize like the guardrail does, then take the whole token(s):
+            # a stopword must compare equal to what _tokenize produces.
+            words.update(tok for tok in _tokenize(word) if tok)
+            if not _tokenize(word):
+                words.add(word.casefold())
+    return frozenset(words)
+
+# Unicode-aware: \w under Python's re matches [a-zA-Z0-9_] plus every Unicode
+# word character (letters with diacritics, non-Latin scripts), so 'Müller' or
+# 'Škoda' tokenize as single tokens instead of shattering at the accented
+# character. This only widens what counts as one token — a token that used to
+# match still matches, so no verdict can flip from blocked to allowed.
+_TOKEN_RE = re.compile(r"\w[\w\+\.#/-]*", re.UNICODE | re.IGNORECASE)
 
 
 @dataclass
@@ -128,7 +182,7 @@ def _untraceable_tokens(text: str, allowed: set[str]) -> list[str]:
     """The content tokens in one draft text that aren't traceable to `allowed`."""
     out: list[str] = []
     for tok in _tokenize(text):
-        if not tok or tok in _STOPWORDS or tok in allowed:
+        if not tok or tok in _stopwords() or tok in allowed:
             continue
         if tok not in out:
             out.append(tok)

@@ -85,7 +85,7 @@ def test_ats_flags_table_and_multicolumn_and_missing_keyword():
     bad = (
         "<html><body>"
         "<div style='column-count:2'><table><tr><td>x</td></tr></table></div>"
-        "<h2>Profile</h2>"
+        "<h2>Interests</h2>"
         "</body></html>"
     )
     warnings = lint(bad, keywords=["Kubernetes"])
@@ -95,6 +95,31 @@ def test_ats_flags_table_and_multicolumn_and_missing_keyword():
     assert "missing-keyword" in codes
     assert "nonstandard-heading" in codes
     assert "missing-contact" in codes
+
+
+def test_ats_accepts_common_non_tech_headings(data_dir):
+    """Publications and similar sections no longer warn as non-standard."""
+    html = (
+        "<html><body>"
+        "<h2>Summary</h2><p>x</p><h2>Experience</h2><p>y</p>"
+        "<h2>Publications</h2><p>z</p><h2>Licences</h2><p>w</p>"
+        "<h2>Certifications</h2><p>a</p><h2>Languages</h2><p>b</p>"
+        "<p>ada@example.com</p>"
+        "</body></html>"
+    )
+    warnings = lint(html)
+    codes = {w["code"] for w in warnings}
+    assert "nonstandard-heading" not in codes
+
+
+def test_ats_honours_operator_supplied_headings(data_dir):
+    """A heading listed on the data volume is treated as standard."""
+    html = "<html><body><h2>Patents</h2><p>x</p></body></html>"
+    assert any(w["code"] == "nonstandard-heading" for w in lint(html))
+    vocab_dir = data_dir / "vocabulary"
+    vocab_dir.mkdir()
+    (vocab_dir / "ats_headings.txt").write_text("Patents\n", encoding="utf-8")
+    assert not any(w["code"] == "nonstandard-heading" for w in lint(html))
 
 
 def test_pdf_smoke_or_skip(data_dir):

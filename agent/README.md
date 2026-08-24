@@ -224,15 +224,16 @@ filesystem route to your data and should not acquire one.
 
 ## What the agent may and may not do
 
-Its allow-list (`daily-apply.sh`) is the nine TruthCV MCP tools, the whole
+Its allow-list (`daily-apply.sh`) is the eleven TruthCV MCP tools, the whole
 `browser` MCP server (granted as `mcp__browser`, not as individually named
 tools — the upstream `@playwright/mcp` tool set is theirs to rename or extend
 on a version bump), and `Read`/`Write`/`WebSearch`/`WebFetch`. It has no
 tool for approving an inference: the approve/deny gate is the product, and the
-agent never stands on both sides of it. Everything the RUNBOOK carried over from
-the Jobs runbook still holds — the six filters, the truthfulness rules, the
-cooldowns, and the rule that an application counts as submitted only when the
-confirmation page says so.
+agent never stands on both sides of it. The RUNBOOK's core rules still hold —
+the truthfulness rules, the cooldowns, and the rule that an application counts
+as submitted only when the confirmation page says so — but its search filters
+are no longer built in: they come entirely from your configured job profiles,
+and a run with zero enabled profiles aborts instead of applying defaults.
 
 ## Verification
 

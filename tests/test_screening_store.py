@@ -143,3 +143,82 @@ def test_cooldown_matches_case_and_whitespace_insensitively(data_dir):
     status = cooldown("ACME CORP", "engineer")
     assert status.in_cooldown is True
     assert status.expires == future
+
+
+# --- Two-window cooldown ----------------------------------------------------
+
+
+def test_windows_independent_of_legacy_field(data_dir, monkeypatch):
+    """Each new window overrides the legacy field independently."""
+    from agentconfig import store as agent_config_store
+
+    monkeypatch.delenv("APPLICATION_COOLDOWN_DAYS", raising=False)
+    cfg = agent_config_store.load()
+    cfg.cooldown_days = 100
+    cfg.cooldown_days_same_role = 5
+    cfg.cooldown_days_same_company = 45
+    agent_config_store.save(cfg)
+
+    app_date = (datetime.now(timezone.utc) - timedelta(days=30))
+    applications.create(
+        {"company": "Acme", "role": "Engineer", "application_date": app_date.date().isoformat()}
+    )
+
+    # Role-matched: same-role window lapsed (5 < 30), same-company still holds
+    # (45 > 30); the later expiry wins and names its window.
+    role_match = cooldown("Acme", "Engineer")
+    assert role_match.in_cooldown is True
+    assert role_match.window == "same_company"
+
+    # A different role at the company: only the same-company window applies.
+    other_role = cooldown("Acme", "Designer")
+    assert other_role.in_cooldown is True
+    assert other_role.window == "same_company"
+    assert other_role.expires == role_match.expires
+
+
+def test_same_role_window_blocks_when_it_is_the_longer_one(data_dir, monkeypatch):
+    """A longer same-role window governs a role-matched lookup's verdict."""
+    from agentconfig import store as agent_config_store
+
+    monkeypatch.delenv("APPLICATION_COOLDOWN_DAYS", raising=False)
+    cfg = agent_config_store.load()
+    cfg.cooldown_days = 10
+    cfg.cooldown_days_same_role = 60
+    cfg.cooldown_days_same_company = None
+    agent_config_store.save(cfg)
+
+    app_date = (datetime.now(timezone.utc) - timedelta(days=30))
+    applications.create(
+        {"company": "Acme", "role": "Engineer", "application_date": app_date.date().isoformat()}
+    )
+
+    expected_expiry = (
+        datetime(app_date.year, app_date.month, app_date.day, tzinfo=timezone.utc)
+        + timedelta(days=60)
+    )
+    role_match = cooldown("Acme", "Engineer")
+    assert role_match.in_cooldown is True
+    assert role_match.window == "same_role"
+    assert datetime.fromisoformat(role_match.expires) == expected_expiry
+
+    # Company-only lookup sees the legacy window, long lapsed.
+    company_only = cooldown("Acme")
+    assert company_only.in_cooldown is False
+    assert company_only.window is None
+
+
+def test_window_none_when_clear_or_blocklisted(data_dir):
+    from agentconfig import store as agent_config_store
+
+    cfg = agent_config_store.load()
+    cfg.blocked_companies = ["BlockCo"]
+    agent_config_store.save(cfg)
+
+    blocked = cooldown("BlockCo")
+    assert blocked.blocked is True
+    assert blocked.window is None
+
+    clear = cooldown("QuietCo")
+    assert clear.in_cooldown is False
+    assert clear.window is None

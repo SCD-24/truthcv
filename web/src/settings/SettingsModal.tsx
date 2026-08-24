@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
@@ -14,6 +14,7 @@ import { getRouting, listConnections } from "../api/client";
 import { AccountsSection } from "./AccountsSection";
 import { DefaultModelSection } from "./DefaultModelSection";
 import { TaskModelsSection } from "./TaskModelsSection";
+import { JobSearchPolicySection } from "./JobSearchPolicySection";
 import type { ConnectionList, Routing } from "../api/types";
 import "../styles/settings.css";
 
@@ -51,7 +52,23 @@ export function SettingsSection({
  * and renders the Accounts section (connect/disconnect providers) and the
  * Default model section (pick and save the default routing).
  */
-export function SettingsModal({ onClose }: { onClose: () => void }) {
+export function SettingsModal({
+  onClose,
+  initialSection,
+}: {
+  onClose: () => void;
+  /** When "job-search-policy", scroll the Job search policy section into view
+   * on open (deep link from the Agents page's cooldown summary). */
+  initialSection?: "job-search-policy";
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (initialSection !== "job-search-policy") return;
+    const el = rootRef.current?.querySelector<HTMLElement>("#job-search-policy-section");
+    el?.scrollIntoView({ block: "center" });
+  }, [initialSection]);
+
   const [connections, setConnections] = useState<ConnectionList | null>(null);
   const [routing, setRouting] = useState<Routing | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,7 +114,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         </IconButton>
       </DialogTitle>
 
-      <DialogContent dividers>
+      <DialogContent dividers ref={rootRef}>
         {loading ? (
           <Typography color="text.secondary" sx={{ py: 2 }}>
             Loading settings…
@@ -132,6 +149,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 onSaved={setRouting}
               />
             )}
+
+            <JobSearchPolicySection />
           </Stack>
         )}
       </DialogContent>

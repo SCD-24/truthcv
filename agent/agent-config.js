@@ -4,6 +4,30 @@
 // Errors print nothing and exit 1 — callers fall back to env defaults.
 const field = process.argv[2];
 const DAY_NUM = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
+// Stand-in/test hook: FAKE_AGENT_CONFIG, when set, is served as the config
+// payload without any HTTP call (used by out-of-container harnesses).
+if (process.env.FAKE_AGENT_CONFIG && field !== "llm_credentials") {
+  const cfg = JSON.parse(process.env.FAKE_AGENT_CONFIG);
+  if (field === "job_config") {
+    process.stdout.write(
+      JSON.stringify({
+        profiles: cfg.profiles || [],
+        targetCompanies: cfg.targetCompanies || [],
+        cooldownDays: cfg.cooldownDays,
+        cooldownDaysSameRole: cfg.cooldownDaysSameRole,
+        cooldownDaysSameCompany: cfg.cooldownDaysSameCompany,
+        maxApplicationsPerRun: cfg.maxApplicationsPerRun,
+        companyBoards: cfg.companyBoards || [],
+      })
+    );
+    process.exit(0);
+  }
+  if (field === "mode") {
+    if (typeof cfg.mode !== "string") process.exit(1);
+    process.stdout.write(cfg.mode);
+    process.exit(0);
+  }
+}
 const base = process.env.TRUTHCV_MCP_URL;
 if (!base || !["enabled", "mode", "run_at", "run_days", "llm_credentials", "job_config"].includes(field)) process.exit(1);
 
@@ -61,6 +85,10 @@ const req = http.get(u, { timeout: 5000 }, (res) => {
           profiles: cfg.profiles || [],
           targetCompanies: cfg.targetCompanies || [],
           cooldownDays: cfg.cooldownDays,
+          // Per-window cooldown overrides; undefined stays absent so the
+          // shell side's `// "not configured"` fallbacks keep working.
+          cooldownDaysSameRole: cfg.cooldownDaysSameRole,
+          cooldownDaysSameCompany: cfg.cooldownDaysSameCompany,
           maxApplicationsPerRun: cfg.maxApplicationsPerRun,
           companyBoards: cfg.companyBoards || [],
         };

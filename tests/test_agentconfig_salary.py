@@ -147,10 +147,14 @@ def test_recommend_salary_never_returns_amount_outside_band(banded_profile, prop
 # --- JobProfile currency round-trip --------------------------------------
 
 
-def test_job_profile_currency_defaults_to_eur():
-    """from_dict without a currency key defaults to EUR."""
+def test_job_profile_currency_defaults_to_none():
+    """from_dict without a currency key defaults to None: no regional default.
+
+    A user in any country states their own currency; the store never
+    substitutes one, and display code renders 'not configured' instead.
+    """
     profile = JobProfile.from_dict({"name": "Test"})
-    assert profile.currency == "EUR"
+    assert profile.currency is None
 
 
 def test_job_profile_currency_round_trips():

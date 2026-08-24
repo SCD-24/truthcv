@@ -186,13 +186,14 @@ fi
 # Field names are camelCase to match the wire format api/schemas.py's
 # AgentConfigModel/JobProfileModel produce (same convention as the
 # targetCompanies/companyBoards/cooldownDays fields already used above).
-# currency is exposed on the wire (api/schemas.py JobProfileModel) and
-# defaults to "EUR"; the jq fallback repeats that default so an older
-# config payload without the field still renders a band.
+# currency is exposed on the wire (api/schemas.py JobProfileModel) and may be
+# null: no regional default exists, so a band without a configured currency
+# renders as "not configured" rather than quoting a currency the user never
+# chose.
 PROFILE_CRITERIA_JQ='
 def fmt_bool: if . == null then "not configured" elif . then "true" else "false" end;
 def fmt_list: if (. // []) | length > 0 then (. // [] | join(", ")) else "not configured" end;
-def fmt_band(min_v; max_v; cur): if (min_v != null and max_v != null) then "\(min_v) - \(max_v) \(cur // "EUR")" else "not configured" end;
+def fmt_band(min_v; max_v; cur): if (min_v != null and max_v != null and cur != null) then "\(min_v) - \(max_v) \(cur)" else "not configured" end;
 .profiles[] |
 "### Profile: \(.name)\n" +
 "  - Employment country: \(.employmentCountry // "not configured")\n" +
@@ -206,15 +207,26 @@ def fmt_band(min_v; max_v; cur): if (min_v != null and max_v != null) then "\(mi
 "  - Rejected role types: \(.rejectedRoleTypes | fmt_list)\n"
 '
 
-# Job profiles: when configured, append search strategies and requirements.
-# Fetch from the agent config endpoint (profiles, target_companies, cooldown_days,
-# maxApplicationsPerRun, companyBoards). If fetch fails or profiles are absent,
-# prompt stays unchanged (§2 default: the six RUNBOOK.md filters apply).
+# Job profiles: the run's search criteria. The agent has no built-in policy:
+# without at least one enabled profile there is nothing to search for, so the
+# run aborts before invoking the LLM instead of silently applying someone
+# else's defaults.
 if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_config 2>/dev/null)"; then
-  # No `|| echo 0` and no stderr suppression on the jq calls in this block: jq is
-  # a checked precondition above, so a jq failure here means malformed config,
-  # not a missing tool - and it must be visible in the run log rather than
-  # quietly collapsing to "no profiles configured".
+  # A malformed payload must not read as "zero profiles configured": that
+  # message sends the operator to add profiles they already have. Probe the
+  # payload's shape first, so a broken config gets its own diagnosis. The
+  # every() guard catches non-object elements, which jq would otherwise skip
+  # silently (or error on, depending on version).
+  if ! jq -e '.profiles // [] | (type == "array") and all(.[]; type == "object" or . == null)' <<<"$JOB_CONFIG" >/dev/null; then
+    abort "Agent config fetched but is malformed (.profiles is missing, not an array, or contains non-object entries) - fix data/agent_config.json or the Agents page before the agent can run"
+  fi
+  ENABLED_PROFILES="$(jq -r '[.profiles // [] | .[] | select((type == "object") and (.enabled == true))] | length' <<<"$JOB_CONFIG")"
+  if [[ "$ENABLED_PROFILES" -eq 0 ]]; then
+    abort "No enabled job profiles configured — set your search criteria on the Agents page before the agent can run (config fetch succeeded; it contained zero enabled profiles)"
+  fi
+  # No stderr suppression on the jq calls in this block: jq is a checked
+  # precondition above, so a jq failure here means malformed config, and it
+  # must be visible in the run log rather than quietly miscounting profiles.
   PROFILES="$(jq -r '.profiles // [] | length' <<<"$JOB_CONFIG")"
   if [[ "$PROFILES" -gt 0 ]]; then
     # Append a block for each enabled profile
@@ -248,11 +260,10 @@ fi
 
 # Per-run application cap: the Agents page's maxApplicationsPerRun (fetched
 # above in JOB_CONFIG) is the source of truth; MAX_APPLICATIONS_PER_RUN is the
-# fallback, used only when the config is unreachable (JOB_CONFIG empty) or
-# does not set the field - the same config-first/env-fallback precedence
-# agent/entrypoint.sh and agent/supervisor.js already use for RUN_AT/RUN_DAYS.
-# This must apply even when zero profiles are configured, so it lives outside
-# the `PROFILES -gt 0` block above rather than inside it.
+# fallback, used only when the config is unreachable (JOB_CONFIG empty — the
+# zero-enabled-profiles case aborted above) or does not set the field - the
+# same config-first/env-fallback precedence agent/entrypoint.sh and
+# agent/supervisor.js already use for RUN_AT/RUN_DAYS.
 CONFIG_CAP=""
 if [[ -n "$JOB_CONFIG" ]]; then
   # No stderr suppression, matching the jq calls above: jq is a checked

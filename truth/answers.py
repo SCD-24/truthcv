@@ -40,6 +40,13 @@ class Answers:
     github: str = ""
     website: str = ""
     requires_sponsorship: str = ""
+    # Neutral, country-agnostic work-authorisation note. Supersedes
+    # authorized_non_german_country (kept for one release; see below).
+    work_authorisation_note: str = ""
+    #: DEPRECATED: Germany-centric legacy key, kept readable for one release so
+    #: an existing data/answers.yaml loses no stored answer. The loader
+    #: migrates its value into work_authorisation_note when the new field is
+    #: unset; new writes should use work_authorisation_note only.
     authorized_non_german_country: str = ""
     languages: str = ""
     highest_relevant_degree: str = ""
@@ -62,6 +69,17 @@ class Answers:
 
         asset_id = d.get("canonical_cv_asset_id")
         defaults = cls()
+        # One-release migration: an answers.yaml written by an older build has
+        # only the Germany-centric key — detected by the new key's ABSENCE,
+        # not by its being blank, so an explicit clear through the API merge
+        # (which always carries every stored key) is never overwritten by the
+        # surviving legacy value.
+        work_note = text("work_authorisation_note", defaults.work_authorisation_note)
+        legacy_auth = text(
+            "authorized_non_german_country", defaults.authorized_non_german_country
+        )
+        if "work_authorisation_note" not in d and legacy_auth.strip():
+            work_note = legacy_auth
         return cls(
             phone=text("phone", defaults.phone),
             work_authorisation=text("work_authorisation", defaults.work_authorisation),
@@ -74,6 +92,7 @@ class Answers:
             github=text("github", defaults.github),
             website=text("website", defaults.website),
             requires_sponsorship=text("requires_sponsorship", defaults.requires_sponsorship),
+            work_authorisation_note=work_note,
             authorized_non_german_country=text(
                 "authorized_non_german_country", defaults.authorized_non_german_country
             ),
@@ -191,16 +210,26 @@ def canonical_cv() -> CanonicalCvAsset | None:
 _LOCAL_CANONICAL_CV = Path(__file__).resolve().parent.parent / "assets" / "canonical_cv.pdf"
 
 
-def seed_canonical_cv(source: str | Path = _LOCAL_CANONICAL_CV) -> Answers:
+def seed_canonical_cv(source: str | Path | None = None) -> Answers:
     """Register a canonical CV PDF as the canonical asset.
 
     Only runs when explicitly invoked (a seed script, an admin action) — never
-    at module import, and never implicitly from load()/save(). `source`
-    defaults to an un-versioned local export under assets/, which is absent in
-    a fresh clone; pass the path explicitly (`python -m truth.answers <path>`)
-    when registering a CV, a newer export, or a test double. An already
-    registered asset on the data volume needs no re-seeding.
+    at module import, and never implicitly from load()/save(). `source` must
+    name a real CV file; when omitted it falls back to an un-versioned local
+    export under assets/ ONLY if that file actually exists on this machine —
+    a fresh install of anyone else's copy has no such bundled asset, so in
+    that case this raises FileNotFoundError naming both what to supply and
+    the expected path, rather than failing later deep inside PDF parsing.
+    Pass the path explicitly (`python -m truth.answers <path>`).
     """
+    if source is None:
+        if not _LOCAL_CANONICAL_CV.is_file():
+            raise FileNotFoundError(
+                "No canonical CV source given and no bundled asset found at "
+                f"{_LOCAL_CANONICAL_CV} — supply one explicitly, e.g. "
+                "`python -m truth.answers /path/to/cv.pdf`"
+            )
+        source = _LOCAL_CANONICAL_CV
     return register_canonical_cv(source)
 
 
@@ -273,6 +302,6 @@ if __name__ == "__main__":  # pragma: no cover
         else:
             print(f"Seeded {applied} answer field(s) from {seed_path}")
     else:
-        source = argv[0] if argv else _LOCAL_CANONICAL_CV
+        source: str | Path = argv[0] if argv else _LOCAL_CANONICAL_CV
         result = seed_canonical_cv(source)
         print(f"Registered canonical CV: {result.canonical_cv_asset_id}")

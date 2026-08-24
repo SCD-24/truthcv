@@ -38,9 +38,14 @@ def format_ask(profile: "JobProfile", amount: int | None) -> str:
     """Format an amount for display as '<currency> <amount with thousands separators>'.
 
     E.g. format_ask(profile, 105000) with profile.currency == "EUR" yields
-    'EUR 105,000'. If amount is None, returns an empty string.
+    'EUR 105,000'. If the profile has no currency configured, returns
+    'not configured' rather than substituting a default currency. If amount
+    is None, returns an empty string.
     """
     if amount is None:
         return ""
+
+    if profile.currency is None:
+        return "not configured"
 
     return f"{profile.currency} {amount:,}"

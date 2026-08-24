@@ -7,9 +7,56 @@ Returns a list of {code, message} — the frontend renders these as atsWarnings.
 
 from __future__ import annotations
 
+import logging
 import re
 
-_STANDARD_HEADINGS = {"summary", "experience", "skills", "education"}
+from truth.store import data_dir
+
+# Headings no ATS reviewer should warn about. The built-in set covers the
+# common sections across academic, medical, legal and trade CVs too — not just
+# tech — and an operator can extend it via data/vocabulary/ats_headings.txt
+# (one heading per line, case-insensitive). Missing/unreadable file means
+# built-ins only.
+_BUILTIN_STANDARD_HEADINGS = {
+    "summary",
+    "profile",
+    "experience",
+    "work experience",
+    "professional experience",
+    "employment history",
+    "skills",
+    "education",
+    "publications",
+    "licences",
+    "licenses",
+    "certifications",
+    "languages",
+    "portfolio",
+    "projects",
+    "awards",
+}
+
+_VOCAB_DIR_NAME = "vocabulary"
+
+
+def _standard_headings() -> frozenset[str]:
+    """Built-in standard headings merged with any operator-supplied extras."""
+    words = set(_BUILTIN_STANDARD_HEADINGS)
+    path = data_dir() / _VOCAB_DIR_NAME / "ats_headings.txt"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return frozenset(words)
+    except OSError as exc:
+        logging.getLogger(__name__).warning(
+            "Could not read %s (%s); using built-in ATS headings only", path, exc
+        )
+        return frozenset(words)
+    for line in lines:
+        heading = line.strip().lower()
+        if heading and not heading.startswith("#"):
+            words.add(heading)
+    return frozenset(words)
 
 
 def _headings(html: str) -> list[str]:
@@ -40,7 +87,7 @@ def lint(html: str, keywords: list[str] | None = None) -> list[dict[str, str]]:
         )
 
     headings = set(_headings(html))
-    nonstandard = headings - _STANDARD_HEADINGS
+    nonstandard = headings - _standard_headings()
     if nonstandard:
         warnings.append(
             {

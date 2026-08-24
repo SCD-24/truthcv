@@ -42,6 +42,8 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     profiles: [],
     targetCompanies: [],
     cooldownDays: null,
+    cooldownDaysSameRole: null,
+    cooldownDaysSameCompany: null,
     maxApplicationsPerRun: null,
     companyBoards: [],
     ...overrides,
@@ -84,7 +86,8 @@ function makeAnswers(): ProfileAnswers {
     linkedin: "",
     github: "",
     website: "",
-    requiresSponsorship: "",
+    workAuthorisationNote: "",
+  requiresSponsorship: "",
     authorizedNonGermanCountry: "",
     languages: "",
     highestRelevantDegree: "",
@@ -167,9 +170,14 @@ describe("AgentsPage profiles section", () => {
 
     await vi.waitFor(() => expect(updateAgentConfig).toHaveBeenCalled());
     const body = vi.mocked(updateAgentConfig).mock.calls[0][0];
+    // cooldownDays is deliberately absent: the cooldown windows' single
+    // writer is Settings' Job search policy section.
     expect(Object.keys(body).sort()).toEqual(
-      ["cooldownDays", "maxApplicationsPerRun", "profiles"].sort(),
+      ["maxApplicationsPerRun", "profiles"].sort(),
     );
+    expect(body).not.toHaveProperty("cooldownDays");
+    expect(body).not.toHaveProperty("cooldownDaysSameRole");
+    expect(body).not.toHaveProperty("cooldownDaysSameCompany");
     expect(body).not.toHaveProperty("runAt");
     expect(body).not.toHaveProperty("runDays");
     expect(body).not.toHaveProperty("blockedCompanies");
@@ -234,12 +242,13 @@ describe("AgentsPage profiles section", () => {
         salaryFloor: 85000,
         salaryAskMin: 95000,
         salaryAskMax: 110000,
-        currency: "EUR",
-        workingLanguage: "English",
-        glassdoorMin: 3.5,
-        glassdoorMinReviews: 20,
-        acceptedRoleTypes: ["agentic / AI engineering", "data engineering"],
-        rejectedRoleTypes: ["generic full-stack", "frontend", "SRE", "Java-heavy backend"],
+        // No regional default: a new profile starts with no currency set.
+        currency: null,
+        workingLanguage: null,
+        glassdoorMin: null,
+        glassdoorMinReviews: null,
+        acceptedRoleTypes: [],
+        rejectedRoleTypes: [],
       },
     ]);
   });
