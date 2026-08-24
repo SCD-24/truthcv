@@ -7,7 +7,9 @@ import {
   generateScreeningLetter,
   getScreeningLetter,
   listApprovedApplications,
+  listDidNotPass,
   listPendingApprovals,
+  listRejectedApprovals,
   saveScreeningLetter,
   setScreeningApproval,
   setScreeningUrl,
@@ -18,6 +20,8 @@ import { ApprovalsPage } from "./ApprovalsPage";
 vi.mock("../api/client", () => ({
   listPendingApprovals: vi.fn(),
   listApprovedApplications: vi.fn(),
+  listRejectedApprovals: vi.fn(),
+  listDidNotPass: vi.fn(),
   setScreeningApproval: vi.fn(),
   bulkSetApproval: vi.fn(),
   setCompanyApproval: vi.fn(),
@@ -32,7 +36,11 @@ afterEach(cleanup);
 // The list endpoint never carries drafts (PendingCard fetches its own), so
 // every test needs a stub; the no-draft case is the common one, and the
 // cover-letter tests below override it before rendering.
-beforeEach(() => vi.mocked(getScreeningLetter).mockResolvedValue(null));
+beforeEach(() => {
+  vi.mocked(getScreeningLetter).mockResolvedValue(null);
+  vi.mocked(listRejectedApprovals).mockResolvedValue([]);
+  vi.mocked(listDidNotPass).mockResolvedValue([]);
+});
 
 function makeRecord(overrides: Partial<ScreeningRecord> = {}): ScreeningRecord {
   return {
@@ -215,5 +223,36 @@ describe("ApprovalsPage cover letter", () => {
     await renderPage([makeRecord()]);
     expect(await screen.findByText(/Posted 2026-08-20/)).toBeTruthy();
     expect(screen.getByText(/Found 2026-08-23/)).toBeTruthy();
+  });
+});
+
+describe("ApprovalsPage reviewable lists", () => {
+  it("lists what the agent rejected on a criterion, apart from what you rejected", async () => {
+    vi.mocked(listDidNotPass).mockResolvedValue([
+      makeRecord({ id: "d1", company: "SumUp", verdict: "rejected", approval: "", failingCriterion: "remote" }),
+    ]);
+    vi.mocked(listRejectedApprovals).mockResolvedValue([
+      makeRecord({ id: "r1", company: "Pleo", approval: "rejected" }),
+    ]);
+    await renderPage([]);
+    expect(await screen.findByRole("heading", { name: "Did not pass" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Rejected" })).toBeTruthy();
+    expect(screen.getByText("SumUp")).toBeTruthy();
+    expect(screen.getByText("Pleo")).toBeTruthy();
+  });
+
+  it("moving one back queues it and takes it out of the list it came from", async () => {
+    vi.mocked(listRejectedApprovals).mockResolvedValue([
+      makeRecord({ id: "r1", company: "Pleo", approval: "rejected" }),
+    ]);
+    vi.mocked(setScreeningApproval).mockResolvedValue(
+      makeRecord({ id: "r1", company: "Pleo", approval: "pending" }),
+    );
+    await renderPage([]);
+    fireEvent.click(await screen.findByRole("button", { name: "Move to approvals" }));
+    await waitFor(() => expect(setScreeningApproval).toHaveBeenCalledWith("r1", "pending"));
+    await waitFor(() =>
+      expect(screen.queryAllByRole("button", { name: "Move to approvals" }).length).toBe(0),
+    );
   });
 });

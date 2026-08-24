@@ -295,10 +295,26 @@ export function listApprovedApplications(): Promise<ScreeningRecord[]> {
   return request("/api/screenings?approval=approved");
 }
 
+/** Postings you rejected. Kept listed so a decision can be reversed. */
+export function listRejectedApprovals(): Promise<ScreeningRecord[]> {
+  return request("/api/screenings?approval=rejected");
+}
+
+/** Postings the agent rejected on a criterion — never queued, and reviewable
+ * so a filter you disagree with does not silently lose a role. Filtered
+ * client-side: an agent-criteria rejection has an empty `approval`, but so
+ * does any other untouched record (`approval: str = ""` is the schema
+ * default), so `?approval=` would also return records that were never
+ * screened as rejected at all. */
+export async function listDidNotPass(): Promise<ScreeningRecord[]> {
+  const all = await listScreenings();
+  return all.filter((s) => s.verdict === "rejected" && !s.approval);
+}
+
 /** Record the operator's decision on one screening. */
 export function setScreeningApproval(
   id: string,
-  approval: "approved" | "rejected",
+  approval: "approved" | "rejected" | "pending",
 ): Promise<ScreeningRecord> {
   return request("/api/screenings/" + encodeURIComponent(id), {
     method: "PATCH",

@@ -19,7 +19,9 @@ import {
   generateScreeningLetter,
   getScreeningLetter,
   listApprovedApplications,
+  listDidNotPass,
   listPendingApprovals,
+  listRejectedApprovals,
   saveScreeningLetter,
   setCompanyApproval,
   setScreeningApproval,
@@ -328,11 +330,54 @@ function ApprovedRow({
   );
 }
 
+/** A rejected or agent-filtered posting, reviewable and reversible: shows
+ * why it was set aside and offers the one way back into the queue. */
+function ReviewRow({
+  record,
+  busy,
+  onMoveToApprovals,
+}: {
+  record: ScreeningRecord;
+  busy: boolean;
+  onMoveToApprovals: (id: string) => void;
+}) {
+  return (
+    <Paper variant="outlined" sx={{ p: 2 }}>
+      <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="subtitle1">{record.company}</Typography>
+          <Typography variant="body2" sx={{ color: "text.secondary" }}>
+            {record.role}
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ mt: 0.5, alignItems: "center" }}>
+            {record.failingCriterion ? (
+              <Chip size="small" label={record.failingCriterion} />
+            ) : null}
+            <Typography variant="body2" sx={{ color: "text.secondary" }}>
+              {record.reason}
+            </Typography>
+          </Stack>
+        </Box>
+        <Button
+          variant="outlined"
+          size="small"
+          disabled={busy}
+          onClick={() => onMoveToApprovals(record.id)}
+        >
+          Move to approvals
+        </Button>
+      </Stack>
+    </Paper>
+  );
+}
+
 /** The operator's approval queue: postings the agent deferred, and the ones
  * already approved but not yet applied to. */
 export function ApprovalsPage({ onBack }: { onBack: () => void }) {
   const [pending, setPending] = useState<ScreeningRecord[]>([]);
   const [approved, setApproved] = useState<ScreeningRecord[]>([]);
+  const [rejected, setRejected] = useState<ScreeningRecord[]>([]);
+  const [didNotPass, setDidNotPass] = useState<ScreeningRecord[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -340,11 +385,18 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     let live = true;
-    Promise.all([listPendingApprovals(), listApprovedApplications()])
-      .then(([p, a]) => {
+    Promise.all([
+      listPendingApprovals(),
+      listApprovedApplications(),
+      listRejectedApprovals(),
+      listDidNotPass(),
+    ])
+      .then(([p, a, r, d]) => {
         if (!live) return;
         setPending(p);
         setApproved(a);
+        setRejected(r);
+        setDidNotPass(d);
       })
       .catch((e) => live && setError(String(e)))
       .finally(() => live && setLoading(false));
@@ -419,6 +471,21 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
     }
   }
 
+  async function moveToApprovals(id: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await setScreeningApproval(id, "pending");
+      setRejected((rows) => rows.filter((r) => r.id !== id));
+      setDidNotPass((rows) => rows.filter((r) => r.id !== id));
+      setPending((rows) => [updated, ...rows]);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Box>
       <Stack direction="row" spacing={1} sx={{ mb: 2, alignItems: "center" }}>
@@ -442,7 +509,10 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
 
       {loading ? (
         <CircularProgress />
-      ) : pending.length === 0 && approved.length === 0 ? (
+      ) : pending.length === 0 &&
+        approved.length === 0 &&
+        rejected.length === 0 &&
+        didNotPass.length === 0 ? (
         <Typography variant="body1">Nothing waiting.</Typography>
       ) : (
         <Stack spacing={2}>
@@ -499,6 +569,26 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
               <Typography variant="subtitle1">Approved, not yet applied</Typography>
               {approved.map((r) => (
                 <ApprovedRow key={r.id} record={r} busy={busy} onSaveUrl={saveUrl} />
+              ))}
+            </>
+          ) : null}
+
+          {didNotPass.length > 0 ? (
+            <>
+              <Divider />
+              <Typography variant="subtitle1">Did not pass</Typography>
+              {didNotPass.map((r) => (
+                <ReviewRow key={r.id} record={r} busy={busy} onMoveToApprovals={moveToApprovals} />
+              ))}
+            </>
+          ) : null}
+
+          {rejected.length > 0 ? (
+            <>
+              <Divider />
+              <Typography variant="subtitle1">Rejected</Typography>
+              {rejected.map((r) => (
+                <ReviewRow key={r.id} record={r} busy={busy} onMoveToApprovals={moveToApprovals} />
               ))}
             </>
           ) : null}
