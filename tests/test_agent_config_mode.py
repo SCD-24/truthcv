@@ -34,9 +34,15 @@ def test_explicit_mode_wins_over_a_stale_enabled():
 
 
 def test_unknown_mode_falls_back_to_full():
-    """A malformed config must not silently disable the agent."""
+    """A malformed config must not silently disable the agent.
+
+    A present-but-invalid mode forces the default; it never defers to enabled.
+    """
     assert AgentConfig.from_dict({"mode": "sideways"}).mode == "full"
     assert AgentConfig.from_dict({"mode": 3}).mode == "full"
+    # Invalid mode alongside enabled: mode presence wins, enabled is ignored
+    assert AgentConfig.from_dict({"mode": "sideways", "enabled": False}).mode == "full"
+    assert AgentConfig.from_dict({"mode": "sideways", "enabled": True}).mode == "full"
 
 
 def test_to_dict_carries_mode_and_derived_enabled():

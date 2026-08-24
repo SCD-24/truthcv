@@ -153,11 +153,13 @@ class AgentConfig:
 
         # mode: str. Migrated from the pre-mode `enabled` boolean when absent,
         # so a config already on the volume keeps the behaviour it has: an
-        # enabled agent was a full-auto agent. An explicit mode wins over a
-        # stale enabled, and an unrecognised one falls back to the default
-        # rather than disabling the agent by accident.
-        if "mode" in raw and raw["mode"] in cls.MODES:
-            kwargs["mode"] = raw["mode"]
+        # enabled agent was a full-auto agent. If a mode key is present—whether
+        # valid or stale—it takes precedence and an unrecognised one falls back
+        # to the default rather than deferring to enabled, which would silently
+        # disable the agent if mode is corrupt and enabled is false.
+        if "mode" in raw:
+            if raw["mode"] in cls.MODES:
+                kwargs["mode"] = raw["mode"]
         elif "enabled" in raw and isinstance(raw["enabled"], bool):
             kwargs["mode"] = "full" if raw["enabled"] else "off"
 
