@@ -370,6 +370,7 @@ def test_check_cooldown_agrees_with_the_http_route(data_dir):
     tools_ledger.record_screening(
         company="Acme Corp",
         url="https://acme.example/jobs/1",
+        role="Senior Engineer",
         verdict="rejected",
         cooldown_expires=future,
     )
@@ -395,10 +396,55 @@ def test_record_screening_rejects_a_blank_url_and_persists_nothing(data_dir):
 
     with pytest.raises(ValueError):
         tools_ledger.record_screening(
-            company="Acme Corp", url="", verdict="rejected"
+            company="Acme Corp", url="", role="Senior Engineer", verdict="rejected"
         )
 
     assert screening_store.load_all() == []
+
+
+def test_record_screening_rejects_a_blank_role_and_persists_nothing(data_dir):
+    """A job title is mandatory: record_screening with a blank role must
+    raise and write no screening, so the operator never sees an unreadable
+    verdict."""
+    from screening import store as screening_store
+
+    with pytest.raises(ValueError):
+        tools_ledger.record_screening(
+            company="Acme Corp",
+            url="https://acme.example/jobs/1",
+            role="   ",
+            verdict="rejected",
+        )
+
+    assert screening_store.load_all() == []
+
+
+def test_record_screening_rejects_board_noise_role_and_persists_nothing(data_dir):
+    """A placeholder like 'Apply now' is not a job title: record_screening
+    must raise and write no screening rather than queue an unreadable verdict."""
+    from screening import store as screening_store
+
+    with pytest.raises(ValueError):
+        tools_ledger.record_screening(
+            company="Acme Corp",
+            url="https://acme.example/jobs/1",
+            role="Apply now",
+            verdict="rejected",
+        )
+
+    assert screening_store.load_all() == []
+
+
+def test_record_screening_stores_role_normalized(data_dir):
+    """A role with messy whitespace is normalized before it is stored, so the
+    approval queue always shows a clean title."""
+    s = tools_ledger.record_screening(
+        company="Acme Corp",
+        url="https://acme.example/jobs/1",
+        role="Senior  Backend\nEngineer",
+        verdict="rejected",
+    )
+    assert s["role"] == "Senior Backend Engineer"
 
 
 def test_record_screening_schema_marks_url_required():
@@ -408,6 +454,15 @@ def test_record_screening_schema_marks_url_required():
 
     schema = _input_schema(tools_ledger.record_screening)
     assert "url" in schema["required"]
+
+
+def test_record_screening_schema_marks_role_required():
+    """The tool schema the agent reads must advertise role as required, so a
+    caller knows the job title cannot be omitted."""
+    from agenttools.mcp_app import _input_schema
+
+    schema = _input_schema(tools_ledger.record_screening)
+    assert "role" in schema["required"]
 
 
 def test_generate_cover_letter_refuses_blocked_company(data_dir):

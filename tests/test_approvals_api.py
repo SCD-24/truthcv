@@ -101,6 +101,55 @@ def test_patch_empty_body_422(client):
     assert client.patch(f"/api/screenings/{s.id}", json={}).status_code == 422
 
 
+def test_patch_sets_role_only(client):
+    s = _deferred()
+    body = client.patch(
+        f"/api/screenings/{s.id}", json={"role": "Staff Engineer"}
+    ).json()
+    assert body["role"] == "Staff Engineer"
+    reloaded = store.get(s.id)
+    assert reloaded.role == "Staff Engineer"
+    assert reloaded.approval == "pending"
+
+
+def test_patch_role_persists_and_is_visible_on_list(client):
+    s = _deferred()
+    client.patch(f"/api/screenings/{s.id}", json={"role": "Staff Engineer"})
+    rows = client.get("/api/screenings").json()
+    assert [r["role"] for r in rows if r["id"] == s.id] == ["Staff Engineer"]
+
+
+@pytest.mark.parametrize("bad_role", ["   ", "Apply now", "x" * 200])
+def test_patch_invalid_role_422_and_unchanged(client, bad_role):
+    s = _deferred()
+    r = client.patch(f"/api/screenings/{s.id}", json={"role": bad_role})
+    assert r.status_code == 422, r.text
+    assert store.get(s.id).role == "Staff AI Engineer"
+
+
+def test_patch_role_unknown_id_404(client):
+    assert (
+        client.patch("/api/screenings/nope", json={"role": "Staff Engineer"}).status_code
+        == 404
+    )
+
+
+def test_patch_role_and_approval_together(client):
+    import coverletter.store as letters
+
+    s = _deferred()
+    letters.save(s.id, letters.CoverLetterDraft(text="Dear team,"))
+    body = client.patch(
+        f"/api/screenings/{s.id}",
+        json={"role": "Staff Engineer", "approval": "approved"},
+    ).json()
+    assert body["role"] == "Staff Engineer"
+    assert body["approval"] == "approved"
+    reloaded = store.get(s.id)
+    assert reloaded.role == "Staff Engineer"
+    assert reloaded.approval == "approved"
+
+
 def test_patch_schemeless_url_422(client):
     s = _deferred()
     r = client.patch(f"/api/screenings/{s.id}", json={"url": "acme.example/jobs/1"})

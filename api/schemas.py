@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 
 from agentconfig.store import AgentConfig
+from screening.role import normalize_role_title, validate_role_title
 from screening.url import validate_posting_url
 
 _RUN_AT_RE = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
@@ -650,11 +651,17 @@ class ApprovalUpdate(_Camel):
     ``posting_text`` is patchable because records created before the agent
     captured it carry none, and the operator cannot draft a cover letter
     without it.
+
+    ``role`` is patchable because a screening recorded with a garbled or
+    blank title is otherwise only deletable, not correctable. The operator's
+    correction is validated by ``screening.role.validate_role_title`` — the
+    same rule the agent's own ``record_screening`` writes are held to.
     """
 
     approval: str | None = None
     url: str | None = None
     posting_text: str | None = None
+    role: str | None = None
 
     @field_validator("url")
     @classmethod
@@ -662,6 +669,13 @@ class ApprovalUpdate(_Camel):
         if v is None:
             return v
         return validate_posting_url(v)
+
+    @field_validator("role")
+    @classmethod
+    def _validate_role(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return validate_role_title(v)
 
 
 class CoverLetterDraftModel(_Camel):
@@ -734,6 +748,11 @@ class ScreeningCreate(_Camel):
     @classmethod
     def _validate_url(cls, v: str) -> str:
         return validate_posting_url(v)
+
+    @field_validator("role")
+    @classmethod
+    def _normalize_role(cls, v: str) -> str:
+        return normalize_role_title(v)
 
 
 class CooldownResult(_Camel):

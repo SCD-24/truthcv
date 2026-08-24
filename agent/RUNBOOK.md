@@ -308,6 +308,23 @@ claim" call anywhere in `generate_cover_letter`, `record_application`,
 `record_screening`, `check_cooldown`, `get_canonical_cv`, or
 `get_profile_answers`. This is deliberate, not an oversight.
 
+### `record_screening` — the `role` argument is mandatory
+
+`role` must be the posting's job title **as posted** — nothing else. Not a
+sentence: no location, no seniority band pulled from elsewhere, no company
+name, no employment type, no URL, no fragment of the posting body.
+
+Never substitute a placeholder. `"Apply now"`, `"Remote"`, `"N/A"`,
+`"Unknown"`, `"See posting"` and an empty string are all rejected by the
+tool. If the board's markup makes the title genuinely unreadable, do **not**
+invent one and do **not** record the screening with a placeholder: open the
+posting on the employer's own site (§5, which already prefers this) and take
+the title from there.
+
+The tool **raises** on an unusable `role` and persists nothing — exactly as
+it already does for a missing `url`. Fix the value and call it again; a
+raised error is not a reason to skip recording the verdict.
+
 When `generate_cover_letter` returns `blocked: true`, it means the letter
 contains at least one factual claim its guardrail could not ground in the
 truth store. The response also carries `blocked_claims` (the specific claim

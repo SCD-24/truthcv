@@ -191,12 +191,22 @@ def bulk_set_approval(body: BulkApprovalUpdate) -> BulkApprovalResult:
 @router.patch("/screenings/{screening_id}", response_model=ScreeningModel)
 def set_screening_approval(screening_id: str, body: ApprovalUpdate) -> ScreeningModel:
     """The operator's approval decision and/or posting URL for one screening."""
-    if body.approval is None and body.url is None and body.posting_text is None:
+    if (
+        body.approval is None
+        and body.url is None
+        and body.posting_text is None
+        and body.role is None
+    ):
         raise HTTPException(
-            status_code=422, detail="Provide approval, url or postingText."
+            status_code=422, detail="Provide approval, role, url or postingText."
         )
 
     screening = None
+    if body.role is not None:
+        screening = screening_store.update(screening_id, {"role": body.role})
+        if screening is None:
+            raise HTTPException(status_code=404, detail="Screening not found.")
+
     if body.url is not None:
         screening = screening_store.update(screening_id, {"url": body.url})
         if screening is None:

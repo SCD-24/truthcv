@@ -4,7 +4,7 @@ import { deleteScreening, getCooldown, listScreenings } from "../api/client";
 import type { CooldownStatus, ScreeningRecord } from "../api/types";
 import { isCooldownActive } from "../settings/cooldown";
 import { lastAgentActivity } from "../settings/agentActivity";
-import { cooldownBlockLabel } from "./ScreeningsPage";
+import { cooldownBlockLabel, roleUnchanged } from "./ScreeningsPage";
 
 /** Build a fetch Response stub with only the members request<T>() reads
  * (ok, status, json()) — enough to drive the client without a real DOM/Fetch
@@ -155,6 +155,22 @@ describe("screening list", () => {
     expect(init?.method).toBe("DELETE");
     expect(result).toBeUndefined();
   });
+
+/** Pins the inline role editor's no-op rule: an unchanged commit must not
+ * fire a request, so the comparison it gates on is exact string equality. */
+describe("roleUnchanged", () => {
+  it("is true when the draft matches the stored role exactly", () => {
+    expect(roleUnchanged("Engineer", "Engineer")).toBe(true);
+  });
+
+  it("is false when the draft differs from the stored role", () => {
+    expect(roleUnchanged("Senior Engineer", "Engineer")).toBe(false);
+  });
+
+  it("is false for a whitespace-only difference (server normalizes, not this check)", () => {
+    expect(roleUnchanged("Engineer ", "Engineer")).toBe(false);
+  });
+});
 
 /** Pins the human wording for a cooldown block: the window field decides
  * which message the user sees, so they know which setting to change. */

@@ -21,10 +21,12 @@ their application history is this tool surface. You have exactly eleven tools:
 - `record_application` — records a submitted application and its evidence.
 - `record_screening` — records a rejected or deferred posting. A deferred
   one enters the operator's approval queue.
-  `url` is MANDATORY: pass the posting's own URL exactly as you opened it, and
-  the call is rejected without it — the operator opens that URL to review the
-  posting, and on a later run you apply through it, so a record with no URL is
-  dead weight.
+  `role` and `url` are both MANDATORY: `role` must be the posting's job title
+  exactly as posted — never a placeholder like "Apply now" or "Remote", and
+  never blank — and `url` must be the posting's own URL exactly as you opened
+  it. The call is rejected without a usable value for either — the operator
+  screens on the job title and opens that URL to review the posting, and on a
+  later run you apply through it, so a record missing either is dead weight.
   Always pass `posting_text` (the posting as you read it) and, when the board
   states one, `posted_date`. The operator drafts the cover letter from that
   stored text, days later, on a page you never see — and several of these
