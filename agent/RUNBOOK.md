@@ -103,6 +103,10 @@ A single profile passing all its criteria drives an application
 (single-profile-passes rule); each profile waives criteria independently.
 Record which profile drove each application in the screening report.
 
+The profile's `keywords`, `locations` and `preferredSources` are not
+screening criteria — they drive discovery instead; see §5's Discovery
+subsection.
+
 **Verify entity and remote policy on the employer's own posting.** Never
 trust a job board's metadata over the company's own page — boards get remote/
 hybrid flags wrong.
@@ -177,6 +181,15 @@ deliberately does not duplicate its values.
 ---
 
 ## 5. Applying
+
+### Discovery
+
+Your run prompt may carry a list of composed search queries, built
+deterministically from each enabled profile's `keywords`, `locations` and
+`preferredSources`. Work them as entry points into discovery. They are a
+starting point, not a boundary — free-form search remains permitted
+alongside them. A composed query never changes *where* you apply, which is
+still the employer's own site, per item 1 below.
 
 1. Find the role on the **employer's own site** (Ashby / Greenhouse / Personio /
    Lever). Apply there, not through an aggregator.

@@ -907,11 +907,12 @@ def put_profile_answers(body: AnswersUpdate) -> AnswersModel:
 
 @router.get("/agent/config", response_model=AgentConfigModel)
 def get_agent_config() -> AgentConfigModel:
-    """Fetch agent config with resolved company boards.
+    """Fetch agent config with resolved company boards and composed search queries.
     
     Prunes board entries for companies no longer on the target watchlist.
     """
     from companyboards import store as board_store
+    from agentconfig.dorks import compose_queries
     
     cfg = agent_config_store.load()
     data = cfg.to_dict()
@@ -926,6 +927,9 @@ def get_agent_config() -> AgentConfigModel:
         for board in boards.values()
         if board.company.strip().casefold() in {name.strip().casefold() for name in cfg.target_companies}
     ]
+
+    # Populate search_queries in response
+    data["search_queries"] = compose_queries(cfg.profiles)
     
     return AgentConfigModel.model_validate(data)
 

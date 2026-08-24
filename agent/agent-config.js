@@ -18,6 +18,7 @@ if (process.env.FAKE_AGENT_CONFIG && field !== "llm_credentials") {
         cooldownDaysSameCompany: cfg.cooldownDaysSameCompany,
         maxApplicationsPerRun: cfg.maxApplicationsPerRun,
         companyBoards: cfg.companyBoards || [],
+        searchQueries: cfg.searchQueries || [],
       })
     );
     process.exit(0);
@@ -91,6 +92,7 @@ const req = http.get(u, { timeout: 5000 }, (res) => {
           cooldownDaysSameCompany: cfg.cooldownDaysSameCompany,
           maxApplicationsPerRun: cfg.maxApplicationsPerRun,
           companyBoards: cfg.companyBoards || [],
+          searchQueries: cfg.searchQueries || [],
         };
         process.stdout.write(JSON.stringify(payload));
       }

@@ -325,6 +325,15 @@ class CompanyBoardModel(_Camel):
     resolved_at: str = ""
 
 
+class SearchQueryModel(_Camel):
+    """Composed search query (response-only)."""
+
+    profile: str
+    source: str
+    query: str
+    url: str
+
+
 class AgentConfigModel(_Camel):
     """GET /api/agent/config response: enabled flag, blocklist, schedule, job profiles, and resolved boards."""
 
@@ -343,6 +352,7 @@ class AgentConfigModel(_Camel):
     cooldown_days_same_company: int | None = None
     max_applications_per_run: int | None = None
     company_boards: list[CompanyBoardModel] = Field(default_factory=list)
+    search_queries: list[SearchQueryModel] = Field(default_factory=list)
 
 
 class AgentConfigUpdate(_Camel):
