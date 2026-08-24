@@ -293,6 +293,11 @@ def save_screening_letter(
     """
     if screening_store.get(screening_id) is None:
         raise HTTPException(status_code=404, detail="Screening not found.")
+    if not body.text.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="An empty letter cannot be saved — blanking is not an edit; regenerate instead.",
+        )
     existing = letter_store.load(screening_id)
     draft = letter_store.CoverLetterDraft(
         text=body.text,

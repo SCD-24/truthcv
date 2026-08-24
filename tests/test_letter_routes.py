@@ -93,6 +93,24 @@ def test_save_404_on_unknown_screening(client):
     assert client.put("/api/screenings/nope/letter", json={"text": "x"}).status_code == 404
 
 
+def test_save_empty_text_422(client):
+    """Blanking is not an edit; the operator's only path to no-draft is never
+    writing one, or letting regenerate replace it."""
+    s = _queued()
+    client.put(f"/api/screenings/{s.id}/letter", json={"text": "Mine."})
+    r = client.put(f"/api/screenings/{s.id}/letter", json={"text": ""})
+    assert r.status_code == 422
+    assert letters.load(s.id).text == "Mine."
+
+
+def test_save_whitespace_only_text_422(client):
+    s = _queued()
+    client.put(f"/api/screenings/{s.id}/letter", json={"text": "Mine."})
+    r = client.put(f"/api/screenings/{s.id}/letter", json={"text": "   "})
+    assert r.status_code == 422
+    assert letters.load(s.id).text == "Mine."
+
+
 def test_regenerate_refuses_over_an_operator_draft(client, stub_provider):
     s = _queued()
     client.put(f"/api/screenings/{s.id}/letter", json={"text": "Mine."})
