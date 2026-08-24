@@ -13,7 +13,7 @@ def test_defaults_when_missing(data_dir):
 
 def test_round_trip(data_dir):
     cfg = store.load()
-    cfg.enabled = False
+    cfg.mode = "off"
     cfg.blocked_companies = ["Acme GmbH"]
     cfg.run_at = ["07:30"]
     cfg.run_days = ["sat", "sun"]
