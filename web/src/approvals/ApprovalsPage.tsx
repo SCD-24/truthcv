@@ -209,32 +209,92 @@ function CoverLetterSection({
   );
 }
 
-/** Shown in place of the link when a record has no URL — postings imported
- * from the historical log carry none, and the agent cannot apply without one. */
-function UrlEntry({
+/** The posting URL, in both states it can be in: empty (postings imported
+ * from the historical log carry none, and the agent cannot apply without
+ * one) or already set, in which case it shows as a link with an Edit URL
+ * button that reveals the field prefilled with the current value. The field
+ * stays unmounted until Edit is clicked. */
+function PostingUrl({
+  url,
   busy,
   onSave,
 }: {
+  url: string;
   busy: boolean;
   onSave: (url: string) => void;
 }) {
-  const [url, setUrl] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(url);
+
+  if (!url) {
+    return (
+      <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: "center" }}>
+        <TextField
+          label="Posting URL"
+          size="small"
+          placeholder="https://..."
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        <Button
+          variant="outlined"
+          size="small"
+          disabled={busy || !draft.trim()}
+          onClick={() => onSave(draft)}
+        >
+          Save URL
+        </Button>
+      </Stack>
+    );
+  }
+
+  if (!editing) {
+    return (
+      <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+        <Link href={url} target="_blank" rel="noreferrer" variant="body2">
+          {url}
+        </Link>
+        <Button
+          size="small"
+          onClick={() => {
+            setDraft(url);
+            setEditing(true);
+          }}
+        >
+          Edit URL
+        </Button>
+      </Stack>
+    );
+  }
+
   return (
     <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: "center" }}>
       <TextField
         label="Posting URL"
         size="small"
         placeholder="https://..."
-        value={url}
-        onChange={(e) => setUrl(e.target.value)}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
       />
       <Button
         variant="outlined"
         size="small"
-        disabled={busy || !url.trim()}
-        onClick={() => onSave(url)}
+        disabled={busy || !draft.trim()}
+        onClick={() => {
+          onSave(draft);
+          setEditing(false);
+        }}
       >
         Save URL
+      </Button>
+      <Button
+        size="small"
+        onClick={() => {
+          setDraft(url);
+          setEditing(false);
+        }}
+      >
+        Cancel
       </Button>
     </Stack>
   );
@@ -273,13 +333,11 @@ function PendingCard({
           <Typography variant="body2" sx={{ color: "text.secondary" }}>
             {record.role}
           </Typography>
-          {record.url ? (
-            <Link href={record.url} target="_blank" rel="noreferrer" variant="body2">
-              {record.url}
-            </Link>
-          ) : (
-            <UrlEntry busy={busy} onSave={(url) => onSaveUrl(record.id, url)} />
-          )}
+          <PostingUrl
+            url={record.url}
+            busy={busy}
+            onSave={(url) => onSaveUrl(record.id, url)}
+          />
           <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: "center" }}>
             {record.failingCriterion ? (
               <Chip size="small" label={record.failingCriterion} />
@@ -322,36 +380,48 @@ function ApprovedRow({
   record,
   busy,
   onSaveUrl,
+  onMoveToFound,
 }: {
   record: ScreeningRecord;
   busy: boolean;
   onSaveUrl: (id: string, url: string) => void;
+  onMoveToFound: (id: string) => void;
 }) {
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
-      <Typography variant="subtitle2">
-        {record.company} — {record.role}
-      </Typography>
-      {record.url ? (
-        <Link href={record.url} target="_blank" rel="noreferrer" variant="body2">
-          {record.url}
-        </Link>
-      ) : (
-        <>
-          <Alert severity="warning" sx={{ mt: 1 }}>
-            No URL — this posting cannot be applied to on the next run.
-          </Alert>
-          <UrlEntry busy={busy} onSave={(url) => onSaveUrl(record.id, url)} />
-        </>
-      )}
-      <Typography variant="body2" sx={{ color: "text.secondary" }}>
-        {record.applyAttempts} attempts
-      </Typography>
-      {record.applyError ? (
-        <Alert severity="warning" sx={{ mt: 1 }}>
-          {record.applyError}
-        </Alert>
-      ) : null}
+      <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start" }}>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="subtitle2">
+            {record.company} — {record.role}
+          </Typography>
+          {!record.url ? (
+            <Alert severity="warning" sx={{ mt: 1 }}>
+              No URL — this posting cannot be applied to on the next run.
+            </Alert>
+          ) : null}
+          <PostingUrl
+            url={record.url}
+            busy={busy}
+            onSave={(url) => onSaveUrl(record.id, url)}
+          />
+          <Typography variant="body2" sx={{ color: "text.secondary" }}>
+            {record.applyAttempts} attempts
+          </Typography>
+          {record.applyError ? (
+            <Alert severity="warning" sx={{ mt: 1 }}>
+              {record.applyError}
+            </Alert>
+          ) : null}
+        </Box>
+        <Button
+          variant="outlined"
+          size="small"
+          disabled={busy}
+          onClick={() => onMoveToFound(record.id)}
+        >
+          Move back to Found
+        </Button>
+      </Stack>
     </Paper>
   );
 }
@@ -364,11 +434,13 @@ function ReviewRow({
   record,
   busy,
   onMoveToApprovals,
+  onSaveUrl,
   rejectedLabel,
 }: {
   record: ScreeningRecord;
   busy: boolean;
   onMoveToApprovals: (id: string) => void;
+  onSaveUrl: (id: string, url: string) => void;
   rejectedLabel?: string;
 }) {
   const active = isCooldownActive(record.cooldownExpires);
@@ -380,6 +452,11 @@ function ReviewRow({
           <Typography variant="body2" sx={{ color: "text.secondary" }}>
             {record.role}
           </Typography>
+          <PostingUrl
+            url={record.url}
+            busy={busy}
+            onSave={(url) => onSaveUrl(record.id, url)}
+          />
           {active && record.failingCriterion === "cooldown" ? (
             <Chip
               size="small"
@@ -567,6 +644,22 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
       const updated = await setScreeningUrl(id, url);
       setPending((rows) => rows.map((r) => (r.id === id ? updated : r)));
       setApproved((rows) => rows.map((r) => (r.id === id ? updated : r)));
+      setRejected((rows) => rows.map((r) => (r.id === id ? updated : r)));
+      setDidNotPass((rows) => rows.map((r) => (r.id === id ? updated : r)));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function moveToFound(id: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await setScreeningApproval(id, "pending");
+      setApproved((rows) => rows.filter((r) => r.id !== id));
+      setPending((rows) => [updated, ...rows]);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -682,7 +775,13 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
                   Approved and waiting for the next scheduled run.
                 </Typography>
                 {approved.map((r) => (
-                  <ApprovedRow key={r.id} record={r} busy={busy} onSaveUrl={saveUrl} />
+                  <ApprovedRow
+                    key={r.id}
+                    record={r}
+                    busy={busy}
+                    onSaveUrl={saveUrl}
+                    onMoveToFound={moveToFound}
+                  />
                 ))}
               </Stack>
             )}
@@ -703,6 +802,7 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
                     record={r}
                     busy={busy}
                     onMoveToApprovals={moveToApprovals}
+                    onSaveUrl={saveUrl}
                     rejectedLabel={
                       agentRejected.has(r.id) ? "Rejected by agent" : "Rejected by you"
                     }

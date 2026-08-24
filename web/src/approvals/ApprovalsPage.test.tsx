@@ -193,6 +193,61 @@ describe("ApprovalsPage", () => {
     expect(screen.queryByLabelText(/posting url/i)).toBeNull();
   });
 
+  it("editing an existing url on a queued record prefills the field and saves the new value", async () => {
+    vi.mocked(setScreeningUrl).mockResolvedValue(
+      makeRecord({
+        id: "a1",
+        approval: "approved",
+        url: "https://x.example/updated",
+      }),
+    );
+    await renderPage([], [makeRecord({ id: "a1", approval: "approved" })]);
+    clickTab(/queued/i);
+    fireEvent.click(await screen.findByRole("button", { name: /edit url/i }));
+    const field = screen.getByLabelText(/posting url/i) as HTMLInputElement;
+    expect(field.value).toBe("https://grafana.com/jobs/1");
+    fireEvent.change(field, { target: { value: "https://x.example/updated" } });
+    fireEvent.click(screen.getByRole("button", { name: /save url/i }));
+    await waitFor(() =>
+      expect(setScreeningUrl).toHaveBeenCalledWith("a1", "https://x.example/updated"),
+    );
+    expect(await screen.findByText("https://x.example/updated")).toBeTruthy();
+  });
+
+  it("cancelling an edit discards the draft and restores the original link", async () => {
+    await renderPage([], [makeRecord({ id: "a1", approval: "approved" })]);
+    vi.mocked(setScreeningUrl).mockClear();
+    clickTab(/queued/i);
+    fireEvent.click(await screen.findByRole("button", { name: /edit url/i }));
+    fireEvent.change(screen.getByLabelText(/posting url/i), {
+      target: { value: "https://discard.example" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    expect(screen.queryByLabelText(/posting url/i)).toBeNull();
+    expect(await screen.findByText("https://grafana.com/jobs/1")).toBeTruthy();
+    expect(setScreeningUrl).not.toHaveBeenCalled();
+  });
+
+  it("a rejected record renders its url and can be edited", async () => {
+    vi.mocked(setScreeningUrl).mockResolvedValue(
+      makeRecord({ id: "r1", approval: "rejected", url: "https://x.example/rejected" }),
+    );
+    await renderPage([], [], {
+      rejected: [makeRecord({ id: "r1", company: "Pleo", approval: "rejected" })],
+    });
+    clickTab(/rejected/i);
+    expect(await screen.findByText("https://grafana.com/jobs/1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /edit url/i }));
+    fireEvent.change(screen.getByLabelText(/posting url/i), {
+      target: { value: "https://x.example/rejected" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save url/i }));
+    await waitFor(() =>
+      expect(setScreeningUrl).toHaveBeenCalledWith("r1", "https://x.example/rejected"),
+    );
+    expect(await screen.findByText("https://x.example/rejected")).toBeTruthy();
+  });
+
   it("saving a url calls through and renders the link in place of the field", async () => {
     vi.mocked(setScreeningUrl).mockResolvedValue(
       makeRecord({ url: "https://x.example/job" }),
@@ -353,6 +408,25 @@ describe("ApprovalsPage reviewable lists", () => {
     // The row joined the Found queue without a refetch.
     clickTab(/found/i);
     expect(await screen.findByText("Pleo")).toBeTruthy();
+  });
+
+  it("moving a queued record back to Found unqueues it and updates both tab counts", async () => {
+    vi.mocked(setScreeningApproval).mockResolvedValue(
+      makeRecord({ id: "s1", approval: "pending" }),
+    );
+    await renderPage([], [makeRecord({ id: "s1", approval: "approved" })]);
+    expect(await screen.findByRole("tab", { name: "Found (0)" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Queued (1)" })).toBeTruthy();
+    clickTab(/queued/i);
+    fireEvent.click(await screen.findByRole("button", { name: /move back to found/i }));
+    await waitFor(() => expect(setScreeningApproval).toHaveBeenCalledWith("s1", "pending"));
+    await waitFor(() =>
+      expect(screen.queryAllByRole("button", { name: /move back to found/i }).length).toBe(0),
+    );
+    expect(await screen.findByRole("tab", { name: "Found (1)" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Queued (0)" })).toBeTruthy();
+    clickTab(/found/i);
+    expect(await screen.findByText("Grafana Labs")).toBeTruthy();
   });
 });
 

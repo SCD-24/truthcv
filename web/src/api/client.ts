@@ -329,8 +329,8 @@ export function setScreeningApproval(
   });
 }
 
-/** Supply the URL a historical import left blank; the agent cannot apply
- * without one. */
+/** Set or correct a posting's URL — used both to supply the URL a historical
+ * import left blank and to edit a URL that already has a value. */
 export function setScreeningUrl(id: string, url: string): Promise<ScreeningRecord> {
   return request("/api/screenings/" + encodeURIComponent(id), {
     method: "PATCH",
