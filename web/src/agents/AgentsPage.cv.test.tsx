@@ -29,6 +29,7 @@ vi.mock("../api/client", () => ({
 
 function makeConfig(): AgentConfig {
   return {
+    mode: "full",
     enabled: true,
     blockedCompanies: [],
     runAt: ["09:00"],

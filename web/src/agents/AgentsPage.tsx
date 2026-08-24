@@ -7,8 +7,8 @@ import CardContent from "@mui/material/CardContent";
 import Button from "@mui/material/Button";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import Alert from "@mui/material/Alert";
-import Switch from "@mui/material/Switch";
 import FormControlLabel from "@mui/material/FormControlLabel";
+import Slider from "@mui/material/Slider";
 import Checkbox from "@mui/material/Checkbox";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
@@ -176,7 +176,7 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
         </Stack>
       ) : config ? (
         <Stack spacing={3}>
-          <EnabledSection
+          <ModeSection
             config={config}
             onChange={(updater) => setConfig((cur) => (cur ? updater(cur) : cur))}
           />
@@ -340,15 +340,24 @@ function RunNowSection({ agentEnabled }: { agentEnabled: boolean }) {
   );
 }
 
-/** Agent enabled/disabled toggle. Optimistic — flips immediately, reverts and
+const MODES = ["off", "semi", "full"] as const;
+type Mode = (typeof MODES)[number];
+
+const MODE_HELP: Record<Mode, string> = {
+  off: "Scheduled runs wake, log that the agent is off, and exit. Nothing is submitted.",
+  semi: "The agent finds and screens roles, then waits. You draft the cover letter and approve; approved roles are applied to on the next scheduled run.",
+  full: "The agent finds, screens, writes the letter and applies on its own. Roles it cannot decide alone still wait for you.",
+};
+
+/** Agent autonomy slider. Optimistic — moves immediately, reverts and
  * surfaces an error if the PUT fails.
  *
  * `onChange` takes an updater over the *current* config rather than a
  * snapshot, so the optimistic set and its revert only ever touch the
- * `enabled` field against whatever the latest state is — a save from
+ * `mode` field against whatever the latest state is — a save from
  * another section (e.g. Schedule) that lands while this PUT is in flight
  * is never clobbered by a stale full-config revert. */
-function EnabledSection({
+function ModeSection({
   config,
   onChange,
 }: {
@@ -357,29 +366,39 @@ function EnabledSection({
 }) {
   const [error, setError] = useState<string | null>(null);
 
-  async function handleToggle(enabled: boolean) {
+  async function handleMode(mode: Mode) {
+    const previous = config.mode;
     setError(null);
-    onChange((prev) => ({ ...prev, enabled }));
+    onChange((prev) => ({ ...prev, mode }));
     try {
-      const fresh = await updateAgentConfig({ enabled });
-      onChange((prev) => ({ ...prev, enabled: fresh.enabled }));
+      const fresh = await updateAgentConfig({ mode });
+      onChange((prev) => ({ ...prev, mode: fresh.mode, enabled: fresh.enabled }));
     } catch (e) {
-      onChange((prev) => ({ ...prev, enabled: !enabled }));
+      onChange((prev) => ({ ...prev, mode: previous }));
       setError(e instanceof Error ? e.message : "Couldn't update the agent.");
     }
   }
 
+  const index = Math.max(0, MODES.indexOf(config.mode));
+
   return (
     <Section title="Agent">
-      <FormControlLabel
-        control={
-          <Switch checked={config.enabled} onChange={(e) => handleToggle(e.target.checked)} />
-        }
-        label="Agent enabled"
+      <Slider
+        value={index}
+        min={0}
+        max={2}
+        step={null}
+        marks={[
+          { value: 0, label: "Off" },
+          { value: 1, label: "Semi-auto" },
+          { value: 2, label: "Full auto" },
+        ]}
+        onChange={(_e, v) => handleMode(MODES[v as number])}
+        sx={{ maxWidth: 360, ml: 1 }}
+        aria-label="Agent autonomy"
       />
       <Typography variant="body2" color="text.secondary">
-        When off, scheduled runs wake, log that the agent is disabled, and
-        exit. Nothing is submitted until re-enabled.
+        {MODE_HELP[config.mode]}
       </Typography>
       {error && <Alert severity="error">{error}</Alert>}
     </Section>

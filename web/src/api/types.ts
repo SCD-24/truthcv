@@ -377,6 +377,10 @@ export interface AgentRunResult {
 
 /** Configuration for the unattended job application agent. */
 export interface AgentConfig {
+  /** Autonomy: "off" runs nothing, "semi" queues what passes for approval,
+   * "full" applies on its own. `enabled` is derived from this server-side and
+   * is read-only. */
+  mode: "off" | "semi" | "full";
   enabled: boolean;
   blockedCompanies: string[];
   runAt: string[];
@@ -389,8 +393,22 @@ export interface AgentConfig {
 }
 
 /** A partial patch of agent configuration; the PUT route merges only the
- * keys you send. */
-export type AgentConfigUpdate = Partial<AgentConfig>;
+ * keys you send. Limited to what PUT /api/agent/config actually accepts
+ * (api/schemas.py AgentConfigUpdate) — `enabled` is derived server-side and
+ * `companyBoards` is resolved server-side, so both 422 if sent. */
+export type AgentConfigUpdate = Partial<
+  Pick<
+    AgentConfig,
+    | "mode"
+    | "blockedCompanies"
+    | "runAt"
+    | "runDays"
+    | "profiles"
+    | "targetCompanies"
+    | "cooldownDays"
+    | "maxApplicationsPerRun"
+  >
+>;
 
 /** Provider identifier for connection status and routing. */
 export type CardKey = "claude" | "codex" | "openrouter" | "ollama";
