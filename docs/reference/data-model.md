@@ -52,3 +52,19 @@ Projected from `schema` widgets on the architecture canvas.
 | `application_date` | string | - | User-set date the application was submitted (ISO yyyy-mm-dd); distinct from the auto created_at/updated_at timestamps. |
 | `notes` | string | - | Free-text notes the user attaches to the application record. |
 <!-- generated:end comp:application-tracker -->
+
+<!-- generated:start comp:connections -->
+## Connections (`connections`)
+
+### gmail connection record (secretstore "gmail".oauth)
+
+| Field | Type | Flags | Notes |
+|---|---|---|---|
+| `accessToken` | string | - | Current Gmail access token; blanked when reconnect is required. |
+| `refreshToken` | string | - | Offline refresh token; carried over when Google omits it on refresh. |
+| `expiresAt` | float (epoch seconds) | - | Refreshed lazily once within 300s of expiry. |
+| `scope` | string | - | Defaults to https://www.googleapis.com/auth/gmail.readonly. |
+| `connectedAt` | float (epoch seconds) | - | Preserved across refreshes. |
+| `email` | string | - | Account address read from the Gmail profile endpoint at login. |
+| `reauthRequired` | bool | - | Set by mark_reconnect_required when refresh is rejected. |
+<!-- generated:end comp:connections -->

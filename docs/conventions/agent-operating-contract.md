@@ -39,9 +39,11 @@ Use these exact names and ids when discussing the architecture.
 | Name | Id | Type |
 |---|---|---|
 | API | `api` | backend |
+| Application Agent | `application-agent` | backend |
 | Application Tracker | `application-tracker` | backend |
-| Agent Browser | `browser-runtime` | custom |
+| Connections | `connections` | backend |
 | Cover Letter Engine | `cover-letter-engine` | backend |
+| Gmail / Google OAuth API | `gmail-api` | custom |
 | Guardrail Validator | `guardrail-validator` | backend |
 | LLM Provider Layer | `llm-provider-layer` | backend |
 | LLM Provider Service | `llm-provider-service` | custom |
@@ -57,5 +59,5 @@ Use these exact names and ids when discussing the architecture.
 <!-- generated:start cap:system-boundary -->
 ## System Boundary
 
-The declared system consists of 14 component(s) and 27 connection(s) — see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
+The declared system consists of 16 component(s) and 31 connection(s) — see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
 <!-- generated:end cap:system-boundary -->

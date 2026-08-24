@@ -1,0 +1,1126 @@
+{
+  "setId": "51eb4c97-e499-463c-a274-b3632b8d7143",
+  "workspaceId": "cb0fc39e-c5fb-44a4-8815-070c02f84c47",
+  "name": "agent-job-profiles",
+  "draft": false,
+  "forestId": null,
+  "status": "unbuilt",
+  "plans": [
+    {
+      "planId": "p-41e5f926",
+      "componentId": "agent-config-store",
+      "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
+      "ref": "/home/glenn/Documents/truthcv",
+      "name": "job-profiles-config-store",
+      "feature": "agent-job-profiles",
+      "tasks": [
+        {
+          "id": "t-1",
+          "title": "Add JobProfile dataclass and new global fields to AgentConfig",
+          "description": "In agentconfig/store.py add a `JobProfile` dataclass with: `name: str = \"\"`, `enabled: bool = True`, search group (`keywords: list[str]`, `locations: list[str]`, `preferred_sources: list[str]`), and requirement fields ALL optional/nullable per spec §5.2 items 4-7 — `remote_model: str | None`, `employment_country: str | None`, `eor_allowed: bool | None`, `require_entity_verification: bool = True`, `salary_floor: int | None`, `salary_ask_min: int | None`, `salary_ask_max: int | None`, `working_language: str | None`, `glassdoor_min: float | None`, `glassdoor_min_reviews: int | None`, `accepted_role_types: list[str]`, `rejected_role_types: list[str]`. Give it `from_dict`/`to_dict` in the SAME defensive style the file already uses (per-key isinstance checks falling back to the default; reuse `_is_string_list`). Then extend `AgentConfig` with `profiles: list[JobProfile] = field(default_factory=list)`, `target_companies: list[str] = field(default_factory=list)`, `cooldown_days: int | None = None`, `max_applications_per_run: int | None = None`. CRITICAL CORRECTION to the spec: `AgentConfig.to_dict()` is a hand-written 4-key dict literal and `from_dict` whitelists field-by-field — this store does NOT preserve unknown keys, so every new field must be added explicitly to BOTH methods. Docstrings required; functions <=25 lines, max nesting 3.",
+          "complexity": "medium",
+          "status": "pending",
+          "wave": 1,
+          "touches": [
+            {
+              "file": "agentconfig/store.py",
+              "symbol": "class AgentConfig:"
+            },
+            {
+              "file": "tests/test_agent_config_store.py"
+            }
+          ],
+          "doneWhen": "`pytest tests/test_agent_config_store.py` passes, including new cases for: a full round-trip through save()/load() preserving profiles and the three new globals; defaults when the JSON is absent; an empty `profiles` list; a profile JSON entry with a wrong-typed field falling back to that field's default; and an unknown top-level key being ignored without raising."
+        },
+        {
+          "id": "t-2",
+          "title": "Blast-radius self-review",
+          "description": "Run the blast-radius-review skill over this plan's finished diff, apply any fixes it finds, and record the risk areas it names with record_risks.",
+          "complexity": "low",
+          "status": "pending",
+          "wave": 2,
+          "touches": [],
+          "doneWhen": "blast-radius-review has run over the finished diff, any fixes it found are applied, and record_risks has been called with the risk areas it named.",
+          "synthetic": "blast-radius-review"
+        }
+      ],
+      "status": "planned",
+      "attention": null,
+      "forestId": null,
+      "provisional": {
+        "name": "Agent Config Store",
+        "type": "backend",
+        "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
+        "ref": "/home/glenn/Documents/truthcv",
+        "group": "truthcv-container-single-docker-image"
+      },
+      "provisionalConnections": [
+        {
+          "from": {
+            "componentId": "agent-config-store",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "to": {
+            "componentId": "truth-data-volume",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "protocol": "file I/O"
+        }
+      ],
+      "removals": null,
+      "wave": 1,
+      "brief": {
+        "goal": "Make the unattended application agent's job search fully user-configurable via multiple named job profiles plus global limits, delivered through the existing /api/agent/config channel and rendered into the agent's run prompt.",
+        "outOfScope": "Renaming `authorized_non_german_country` in truth/answers.py and its mirrors. The apply-channel rule and ATS name list stay as prose in RUNBOOK.md. Truthfulness/verification procedure, report format, schedule mechanics and the cover-letter guardrail are untouched. The six screening verdict keys on `Screening` are NOT changed or extended. Widening `ApplicationModel`/`ApplicationCreate`/`ApplicationUpdate` in api/schemas.py to expose the new `profile` field (or the already-missing role/ats/capture_method/gaps_disclosed) over the wire is explicitly NOT done here. No job-board APIs or scrapers are added — discovery stays browser navigation only.",
+        "verify": "pytest && cd web && npm run typecheck && npm test",
+        "assumptions": [
+          "`profiles` replaces wholesale on PUT /api/agent/config; sibling top-level fields keep merging partially. This is forced by the existing `exclude_none=True` in put_agent_config, which already makes nulling a field impossible.",
+          "Resolved company-board URLs ride the existing GET /api/agent/config response rather than a sibling endpoint, so agent/agent-config.js keeps making exactly one config fetch.",
+          "The agent container still mounts no data volume and installs no browser; all new config reaches it over HTTP only.",
+          "A run with no configured profiles behaves exactly as today — the baked RUNBOOK.md defaults act as a single implicit profile."
+        ],
+        "impact": [
+          {
+            "file": "api/schemas.py",
+            "symbol": "class ApplicationModel(_Camel):",
+            "why": "Already omits role/ats/capture_method/gaps_disclosed, so the new `profile` field on the Application dataclass will be silently dropped at the wire boundary and never reach the web UI. Pre-existing gap, deliberately not widened here."
+          },
+          {
+            "file": "api/routes.py",
+            "symbol": "def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:",
+            "why": "Its `merged.update(body.model_dump(exclude_unset=True, exclude_none=True, by_alias=False))` merge is what makes wholesale profile replacement safe; T2 must prove a schedule-only PUT does not erase profiles."
+          },
+          {
+            "file": "screening/cooldown.py",
+            "symbol": "def cooldown(",
+            "why": "Reads through application_cooldown_days(); T5 changes that function's precedence so every cooldown consumer shifts behaviour."
+          },
+          {
+            "file": "mcp/tools_ledger.py",
+            "symbol": "check_cooldown",
+            "why": "The agent's cooldown MCP tool reads through screening/cooldown.py, so T5's config-driven duration changes what the agent is told without any change here."
+          },
+          {
+            "file": "agent/prompt.md",
+            "why": "Instructs the model to follow RUNBOOK.md exactly. T3 appends configured filter text to the prompt, so prompt.md's framing must not contradict the rendered block."
+          },
+          {
+            "file": "docker-compose.yml",
+            "symbol": "MAX_APPLICATIONS_PER_RUN",
+            "why": "The env var stays as the fallback when max_applications_per_run is unset; T3 must keep the empty-means-no-cap default working."
+          },
+          {
+            "file": "web/src/agents/AgentsPage.model.test.tsx",
+            "symbol": "getAgentConfig",
+            "why": "Its makeConfig() factory builds an AgentConfig literal; adding required fields to the AgentConfig TS interface breaks this file's typecheck."
+          },
+          {
+            "file": "web/src/agents/schedule.ts",
+            "symbol": "AgentConfig",
+            "why": "Shares the AgentConfig type; a non-optional new field on that interface reaches this module."
+          },
+          {
+            "file": "tests/test_cooldown_blocklist.py",
+            "why": "Exercises cooldown() against agent config; T5's precedence change must leave it green."
+          },
+          {
+            "file": "tests/test_agent_mcp.py",
+            "why": "Covers the MCP tool surface; T4 registers a new tool, which this file's tool-list expectations may assert against."
+          },
+          {
+            "file": "Dockerfile",
+            "symbol": "COPY agentconfig/",
+            "why": "A new top-level store package created by T4 must get its own COPY line or the app container will fail to import it at startup."
+          }
+        ]
+      },
+      "groundedAt": "2026-08-18T08:42:07.338Z",
+      "createdAt": "2026-08-18T08:42:07.338Z"
+    },
+    {
+      "planId": "p-5d178b86",
+      "componentId": "api",
+      "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
+      "ref": "/home/glenn/Documents/truthcv",
+      "name": "job-profiles-api",
+      "feature": "agent-job-profiles",
+      "tasks": [
+        {
+          "id": "t-1",
+          "title": "Extend AgentConfigModel/AgentConfigUpdate with profiles and global fields",
+          "description": "In api/schemas.py, add a `JobProfileModel(_Camel)` mirroring T1's `JobProfile`, and extend `AgentConfigModel` (line ~259) and `AgentConfigUpdate` (line ~270) with `profiles`, `target_companies`, `cooldown_days`, `max_applications_per_run` — optional on the Update model, defaulted on the response model. Add @field_validator methods in the same style as the existing `_strip_and_drop_empties` / `_validate_run_at` / `_validate_run_days`: comma-split + trim + drop-empties for EVERY multi-item field (keywords, locations, preferred_sources, accepted_role_types, rejected_role_types, target_companies) accepting either a list or a single comma-delimited string; salary values > 0 with floor <= ask_min <= ask_max when all present; glassdoor_min within 0-5; cooldown_days >= 0; max_applications_per_run >= 1; profile names non-empty and unique after trim. camelCase crosses the wire automatically via the `_Camel` base.",
+          "complexity": "high",
+          "status": "pending",
+          "wave": 1,
+          "touches": [
+            {
+              "file": "api/schemas.py",
+              "symbol": "class AgentConfigUpdate(_Camel):"
+            },
+            {
+              "file": "tests/test_agent_config_api.py"
+            }
+          ],
+          "doneWhen": "`pytest tests/test_agent_config_api.py` passes with a new reject-case test for each validator listed above."
+        },
+        {
+          "id": "t-2",
+          "title": "Confirm and pin PUT merge semantics for profiles",
+          "description": "Verify `put_agent_config` in api/routes.py (line ~709) needs no change: it does `merged = agent_config_store.load().to_dict()` then `merged.update(body.model_dump(exclude_unset=True, exclude_none=True, by_alias=False))`. Because `exclude_none=True` is set, an omitted or null `profiles` never reaches `merged`, and a supplied `profiles` replaces the stored list wholesale — which is exactly the decided semantic. Change the route ONLY if a real defect is found; otherwise leave it untouched and add the tests that pin the behaviour down. Add a short comment above the merge naming the wholesale-replacement semantic so a future reader does not 'fix' it into a deep merge.",
+          "complexity": "medium",
+          "status": "pending",
+          "wave": 2,
+          "touches": [
+            {
+              "file": "api/routes.py",
+              "symbol": "def put_agent_config("
+            },
+            {
+              "file": "tests/test_agent_config_api.py"
+            }
+          ],
+          "doneWhen": "`pytest tests/test_agent_config_api.py` passes with two new tests: (a) PUT with a full `profiles` list replaces the stored list wholesale rather than appending or deep-merging; (b) a PUT carrying only `runAt`/`runDays` leaves previously stored `profiles`, `targetCompanies`, `cooldownDays` and `maxApplicationsPerRun` intact."
+        },
+        {
+          "id": "t-3",
+          "title": "Blast-radius self-review",
+          "description": "Run the blast-radius-review skill over this plan's finished diff, apply any fixes it finds, and record the risk areas it names with record_risks.",
+          "complexity": "low",
+          "status": "pending",
+          "wave": 3,
+          "touches": [],
+          "doneWhen": "blast-radius-review has run over the finished diff, any fixes it found are applied, and record_risks has been called with the risk areas it named.",
+          "synthetic": "blast-radius-review"
+        }
+      ],
+      "status": "planned",
+      "attention": null,
+      "forestId": null,
+      "provisional": null,
+      "provisionalConnections": [
+        {
+          "from": {
+            "componentId": "api",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "to": {
+            "componentId": "agent-config-store",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "protocol": "in-process"
+        },
+        {
+          "from": {
+            "componentId": "api",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "to": {
+            "componentId": "mcp-tool-surface",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "protocol": "in-process"
+        },
+        {
+          "from": {
+            "componentId": "api",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "to": {
+            "componentId": "screening-engine",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "protocol": "in-process"
+        }
+      ],
+      "removals": null,
+      "wave": 2,
+      "brief": {
+        "goal": "Make the unattended application agent's job search fully user-configurable via multiple named job profiles plus global limits, delivered through the existing /api/agent/config channel and rendered into the agent's run prompt.",
+        "outOfScope": "Renaming `authorized_non_german_country` in truth/answers.py and its mirrors. The apply-channel rule and ATS name list stay as prose in RUNBOOK.md. Truthfulness/verification procedure, report format, schedule mechanics and the cover-letter guardrail are untouched. The six screening verdict keys on `Screening` are NOT changed or extended. Widening `ApplicationModel`/`ApplicationCreate`/`ApplicationUpdate` in api/schemas.py to expose the new `profile` field (or the already-missing role/ats/capture_method/gaps_disclosed) over the wire is explicitly NOT done here. No job-board APIs or scrapers are added — discovery stays browser navigation only.",
+        "verify": "pytest && cd web && npm run typecheck && npm test",
+        "assumptions": [
+          "`profiles` replaces wholesale on PUT /api/agent/config; sibling top-level fields keep merging partially. This is forced by the existing `exclude_none=True` in put_agent_config, which already makes nulling a field impossible.",
+          "Resolved company-board URLs ride the existing GET /api/agent/config response rather than a sibling endpoint, so agent/agent-config.js keeps making exactly one config fetch.",
+          "The agent container still mounts no data volume and installs no browser; all new config reaches it over HTTP only.",
+          "A run with no configured profiles behaves exactly as today — the baked RUNBOOK.md defaults act as a single implicit profile."
+        ],
+        "impact": [
+          {
+            "file": "api/schemas.py",
+            "symbol": "class ApplicationModel(_Camel):",
+            "why": "Already omits role/ats/capture_method/gaps_disclosed, so the new `profile` field on the Application dataclass will be silently dropped at the wire boundary and never reach the web UI. Pre-existing gap, deliberately not widened here."
+          },
+          {
+            "file": "api/routes.py",
+            "symbol": "def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:",
+            "why": "Its `merged.update(body.model_dump(exclude_unset=True, exclude_none=True, by_alias=False))` merge is what makes wholesale profile replacement safe; T2 must prove a schedule-only PUT does not erase profiles."
+          },
+          {
+            "file": "screening/cooldown.py",
+            "symbol": "def cooldown(",
+            "why": "Reads through application_cooldown_days(); T5 changes that function's precedence so every cooldown consumer shifts behaviour."
+          },
+          {
+            "file": "mcp/tools_ledger.py",
+            "symbol": "check_cooldown",
+            "why": "The agent's cooldown MCP tool reads through screening/cooldown.py, so T5's config-driven duration changes what the agent is told without any change here."
+          },
+          {
+            "file": "agent/prompt.md",
+            "why": "Instructs the model to follow RUNBOOK.md exactly. T3 appends configured filter text to the prompt, so prompt.md's framing must not contradict the rendered block."
+          },
+          {
+            "file": "docker-compose.yml",
+            "symbol": "MAX_APPLICATIONS_PER_RUN",
+            "why": "The env var stays as the fallback when max_applications_per_run is unset; T3 must keep the empty-means-no-cap default working."
+          },
+          {
+            "file": "web/src/agents/AgentsPage.model.test.tsx",
+            "symbol": "getAgentConfig",
+            "why": "Its makeConfig() factory builds an AgentConfig literal; adding required fields to the AgentConfig TS interface breaks this file's typecheck."
+          },
+          {
+            "file": "web/src/agents/schedule.ts",
+            "symbol": "AgentConfig",
+            "why": "Shares the AgentConfig type; a non-optional new field on that interface reaches this module."
+          },
+          {
+            "file": "tests/test_cooldown_blocklist.py",
+            "why": "Exercises cooldown() against agent config; T5's precedence change must leave it green."
+          },
+          {
+            "file": "tests/test_agent_mcp.py",
+            "why": "Covers the MCP tool surface; T4 registers a new tool, which this file's tool-list expectations may assert against."
+          },
+          {
+            "file": "Dockerfile",
+            "symbol": "COPY agentconfig/",
+            "why": "A new top-level store package created by T4 must get its own COPY line or the app container will fail to import it at startup."
+          }
+        ]
+      },
+      "groundedAt": "2026-08-18T08:42:07.344Z",
+      "createdAt": "2026-08-18T08:42:07.344Z"
+    },
+    {
+      "planId": "p-9ff26f29",
+      "componentId": "application-agent",
+      "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
+      "ref": "/home/glenn/Documents/truthcv",
+      "name": "job-profiles-prompt-render",
+      "feature": "agent-job-profiles",
+      "tasks": [
+        {
+          "id": "t-1",
+          "title": "Teach agent-config.js to fetch the profiles payload",
+          "description": "agent/agent-config.js is a CLI, NOT a module — it has zero exports, prints to stdout and signals failure with exit codes. Its allowlist is an inline array literal on line 8: `if (!base || ![\"enabled\", \"run_at\", \"run_days\", \"llm_credentials\"].includes(field)) process.exit(1);`. Add a fifth field, `job_config`, to that literal and a branch that fetches the same `/api/agent/config` URL and writes the profiles + globals (profiles, targetCompanies, cooldownDays, maxApplicationsPerRun, blockedCompanies, and any resolved company boards) to stdout as a single JSON line. Every existing branch (`enabled` scalar, `run_at` comma-join, `run_days` day-number join, `llm_credentials` three-line output) must keep its exact current output format and exit codes — those are consumed by daily-apply.sh and entrypoint.sh. Keep the 5000ms timeout and the exit-1-on-any-error contract.",
+          "complexity": "medium",
+          "status": "pending",
+          "wave": 1,
+          "touches": [
+            {
+              "file": "agent/agent-config.js",
+              "snippet": "llm_credentials"
+            }
+          ],
+          "doneWhen": "`node agent/agent-config.js job_config` against a stub HTTP server returns valid JSON on stdout with exit 0, and returns exit 1 printing nothing when the endpoint 404s, times out, or TRUTHCV_MCP_URL is unset; `node agent/agent-config.js enabled|run_at|run_days` output is byte-identical to before the change."
+        },
+        {
+          "id": "t-2",
+          "title": "Render profiles and globals into the run prompt",
+          "description": "CRITICAL CORRECTION to the spec: agent/RUNBOOK.md is NEVER templated into the prompt — daily-apply.sh only existence-checks it at line 34 (`[[ -r \"$RUNBOOK\" ]] || abort ...`) and the model reads it itself because agent/prompt.md tells it to. The ONLY prompt injection point is line 82, `PROMPT=\"$(cat \"$PROMPT_FILE\")\"...`, followed by the MAX_APPLICATIONS_PER_RUN cap block at lines 88-90. So: fetch `job_config` via agent-config.js, and when it yields enabled profiles, append a rendered block to $PROMPT. Per enabled profile render (a) a search-strategy block — concrete search URLs composed from keywords x locations x preferred_sources, stating the deterministic order boards -> watchlist -> WebSearch backfill — and (b) a requirements block listing ONLY the criteria that are set, each carrying waiver semantics ('if this information cannot be found, treat as waived and record it as waived'), with the entity fail-closed prose included only when require_entity_verification is true. Then render global lines: the per-run cap (config value overriding MAX_APPLICATIONS_PER_RUN env, which stays the fallback when the config field is unset), the cooldown number, and the watchlist with resolved careers URLs plus resolve-instructions for unresolved names. Finish with the any-single-enabled-profile-passes rule and an instruction to record which profile drove each application. Fetch failure OR an empty/absent profiles list must leave the prompt byte-identical to today's. ALSO in this task (folded in to avoid two plans writing this file concurrently): add `mcp__truthcv__record_company_board` to the `--allowedTools` list in this same script, so the tool registered by the MCP plan is visible to the agent.",
+          "complexity": "high",
+          "status": "pending",
+          "wave": 2,
+          "touches": [
+            {
+              "file": "agent/daily-apply.sh",
+              "snippet": "PROMPT_FILE"
+            }
+          ],
+          "doneWhen": "A new shell-level fixture test proves three cases: (a) configured values appear verbatim in the composed prompt; (b) a profile with blank criteria emits no line for them; (c) fetch failure or empty profiles produces a prompt byte-identical to the pre-change output. `bash -n agent/daily-apply.sh` is clean and the script's allowedTools list contains `mcp__truthcv__record_company_board`."
+        },
+        {
+          "id": "t-3",
+          "title": "Create the agent prompt-render test harness",
+          "description": "CORRECTION to the spec: there is NO existing test harness of any kind for agent/daily-apply.sh, agent/entrypoint.sh or agent/agent-config.js — none exists to extend, so create one. Add agent/test-prompt-render.sh: a self-contained bash script that stubs the agent-config.js call and PROMPT_FILE, drives the prompt-composition path, and asserts the three cases named in the previous task. It must not require Docker, network, the claude CLI, or the interceptor socket. Keep it runnable standalone with `bash agent/test-prompt-render.sh` and exiting non-zero on failure. If daily-apply.sh does not already expose a seam for stubbing the config fetch, add the smallest one that works (an overridable variable holding the config-fetch command), and say so in the report.",
+          "complexity": "medium",
+          "status": "pending",
+          "wave": 3,
+          "touches": [
+            {
+              "file": "agent/test-prompt-render.sh",
+              "kind": "new"
+            }
+          ],
+          "doneWhen": "`bash agent/test-prompt-render.sh` exits 0 on the current tree and exits non-zero if the profile-render block is removed from daily-apply.sh."
+        },
+        {
+          "id": "t-4",
+          "title": "Mark RUNBOOK §2 filters as defaults-when-unconfigured",
+          "description": "In agent/RUNBOOK.md, edit the section headed `## 2. Hard filters — all six must pass` (line 29) to state that these six filters are the DEFAULTS that apply only when no job profiles are configured, and that a configured profile's rendered requirements block in the run prompt supersedes them. Keep the existing German anecdotes and prose in the file as-is (spec §5.2.15 keeps them here; they are dropped only from the RENDERED block). Do not change the truthfulness/verification procedure, the apply-channel rule, the ATS name list, or the report format.",
+          "complexity": "low",
+          "status": "pending",
+          "wave": 3,
+          "touches": [
+            {
+              "file": "agent/RUNBOOK.md",
+              "snippet": "## 2. Hard filters"
+            }
+          ],
+          "doneWhen": "agent/RUNBOOK.md §2 explicitly names itself as the unconfigured default and points at the rendered profile block, with no other section's wording altered (`git diff agent/RUNBOOK.md` touches only §2)."
+        },
+        {
+          "id": "t-5",
+          "title": "Blast-radius self-review",
+          "description": "Run the blast-radius-review skill over this plan's finished diff, apply any fixes it finds, and record the risk areas it names with record_risks.",
+          "complexity": "low",
+          "status": "pending",
+          "wave": 4,
+          "touches": [],
+          "doneWhen": "blast-radius-review has run over the finished diff, any fixes it found are applied, and record_risks has been called with the risk areas it named.",
+          "synthetic": "blast-radius-review"
+        }
+      ],
+      "status": "planned",
+      "attention": null,
+      "forestId": null,
+      "provisional": {
+        "name": "Application Agent",
+        "type": "custom",
+        "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
+        "ref": "/home/glenn/Documents/truthcv",
+        "group": null
+      },
+      "provisionalConnections": [
+        {
+          "from": {
+            "componentId": "application-agent",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "to": {
+            "componentId": "api",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "protocol": "HTTP/REST"
+        },
+        {
+          "from": {
+            "componentId": "application-agent",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "to": {
+            "componentId": "mcp-tool-surface",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "protocol": "HTTP/REST"
+        }
+      ],
+      "removals": null,
+      "wave": 3,
+      "brief": {
+        "goal": "Make the unattended application agent's job search fully user-configurable via multiple named job profiles plus global limits, delivered through the existing /api/agent/config channel and rendered into the agent's run prompt.",
+        "outOfScope": "Renaming `authorized_non_german_country` in truth/answers.py and its mirrors. The apply-channel rule and ATS name list stay as prose in RUNBOOK.md. Truthfulness/verification procedure, report format, schedule mechanics and the cover-letter guardrail are untouched. The six screening verdict keys on `Screening` are NOT changed or extended. Widening `ApplicationModel`/`ApplicationCreate`/`ApplicationUpdate` in api/schemas.py to expose the new `profile` field (or the already-missing role/ats/capture_method/gaps_disclosed) over the wire is explicitly NOT done here. No job-board APIs or scrapers are added — discovery stays browser navigation only.",
+        "verify": "pytest && cd web && npm run typecheck && npm test",
+        "assumptions": [
+          "`profiles` replaces wholesale on PUT /api/agent/config; sibling top-level fields keep merging partially. This is forced by the existing `exclude_none=True` in put_agent_config, which already makes nulling a field impossible.",
+          "Resolved company-board URLs ride the existing GET /api/agent/config response rather than a sibling endpoint, so agent/agent-config.js keeps making exactly one config fetch.",
+          "The agent container still mounts no data volume and installs no browser; all new config reaches it over HTTP only.",
+          "A run with no configured profiles behaves exactly as today — the baked RUNBOOK.md defaults act as a single implicit profile."
+        ],
+        "impact": [
+          {
+            "file": "api/schemas.py",
+            "symbol": "class ApplicationModel(_Camel):",
+            "why": "Already omits role/ats/capture_method/gaps_disclosed, so the new `profile` field on the Application dataclass will be silently dropped at the wire boundary and never reach the web UI. Pre-existing gap, deliberately not widened here."
+          },
+          {
+            "file": "api/routes.py",
+            "symbol": "def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:",
+            "why": "Its `merged.update(body.model_dump(exclude_unset=True, exclude_none=True, by_alias=False))` merge is what makes wholesale profile replacement safe; T2 must prove a schedule-only PUT does not erase profiles."
+          },
+          {
+            "file": "screening/cooldown.py",
+            "symbol": "def cooldown(",
+            "why": "Reads through application_cooldown_days(); T5 changes that function's precedence so every cooldown consumer shifts behaviour."
+          },
+          {
+            "file": "mcp/tools_ledger.py",
+            "symbol": "check_cooldown",
+            "why": "The agent's cooldown MCP tool reads through screening/cooldown.py, so T5's config-driven duration changes what the agent is told without any change here."
+          },
+          {
+            "file": "agent/prompt.md",
+            "why": "Instructs the model to follow RUNBOOK.md exactly. T3 appends configured filter text to the prompt, so prompt.md's framing must not contradict the rendered block."
+          },
+          {
+            "file": "docker-compose.yml",
+            "symbol": "MAX_APPLICATIONS_PER_RUN",
+            "why": "The env var stays as the fallback when max_applications_per_run is unset; T3 must keep the empty-means-no-cap default working."
+          },
+          {
+            "file": "web/src/agents/AgentsPage.model.test.tsx",
+            "symbol": "getAgentConfig",
+            "why": "Its makeConfig() factory builds an AgentConfig literal; adding required fields to the AgentConfig TS interface breaks this file's typecheck."
+          },
+          {
+            "file": "web/src/agents/schedule.ts",
+            "symbol": "AgentConfig",
+            "why": "Shares the AgentConfig type; a non-optional new field on that interface reaches this module."
+          },
+          {
+            "file": "tests/test_cooldown_blocklist.py",
+            "why": "Exercises cooldown() against agent config; T5's precedence change must leave it green."
+          },
+          {
+            "file": "tests/test_agent_mcp.py",
+            "why": "Covers the MCP tool surface; T4 registers a new tool, which this file's tool-list expectations may assert against."
+          },
+          {
+            "file": "Dockerfile",
+            "symbol": "COPY agentconfig/",
+            "why": "A new top-level store package created by T4 must get its own COPY line or the app container will fail to import it at startup."
+          }
+        ]
+      },
+      "groundedAt": "2026-08-18T08:42:07.350Z",
+      "createdAt": "2026-08-18T08:42:07.350Z"
+    },
+    {
+      "planId": "p-f2f66ba3",
+      "componentId": "mcp-tool-surface",
+      "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
+      "ref": "/home/glenn/Documents/truthcv",
+      "name": "company-board-resolution",
+      "feature": "agent-job-profiles",
+      "tasks": [
+        {
+          "id": "t-1",
+          "title": "Create the company-board resolution store",
+          "description": "Create companyboards/store.py (plus an empty companyboards/__init__.py) following agentconfig/store.py's pattern exactly: a `board_path()` returning `data_dir() / \"company_boards.json\"`, a `CompanyBoard` dataclass (`company: str`, `careers_url: str`, `ats: str = \"\"`, `status: str = \"ok\"`, `resolved_at: str = \"\"`), defensive per-key `from_dict`/`to_dict`, `load()` returning an empty mapping on missing/corrupt/non-dict file, and an atomic `save()` using the tmp-file + `replace()` idiom already in agentconfig/store.py. Normalize company names with the SAME `strip().casefold()` rule agentconfig.store.is_blocked and screening/cooldown._matches already use — reuse it, do not duplicate a third variant. Add `record(name, careers_url, ats, status)` (insert or overwrite), `mark_dead(name)`, and `prune(target_companies)` which drops entries whose company is not in the supplied watchlist. Add the matching `COPY companyboards/ ./companyboards/` line to Dockerfile beside the existing agentconfig COPY, or the app container will fail to import it at startup.",
+          "complexity": "medium",
+          "status": "pending",
+          "wave": 1,
+          "touches": [
+            {
+              "file": "companyboards/store.py",
+              "kind": "new"
+            },
+            {
+              "file": "companyboards/__init__.py",
+              "kind": "new"
+            },
+            {
+              "file": "tests/test_company_boards_store.py",
+              "kind": "new"
+            },
+            {
+              "file": "Dockerfile",
+              "snippet": "agentconfig"
+            }
+          ],
+          "doneWhen": "`pytest tests/test_company_boards_store.py` passes with cases for record, overwrite of an existing entry, dead-marking, prune against a watchlist, and load() returning empty on a corrupt file; and `grep companyboards Dockerfile` shows the COPY line."
+        },
+        {
+          "id": "t-2",
+          "title": "Register the record_company_board MCP tool",
+          "description": "Add mcp/tools_boards.py exposing `record_company_board(company, careers_url, ats=\"\", status=\"ok\")` delegating to companyboards.store, returning a plain dict result like the existing tools in mcp/tools_ledger.py. Register it in mcp/server.py alongside the existing calls — the registry is a module-level `TOOLS` dict with a `register(name, fn)` helper and a block of `register(...)` calls at the bottom. Do NOT add any tool that can approve an inference (mcp/server.py's module docstring states that guarantee explicitly). NOTE: the corresponding `--allowedTools` entry in agent/daily-apply.sh is added by the application-agent plan's prompt-render task — do not edit that file here, it would collide.",
+          "complexity": "medium",
+          "status": "pending",
+          "wave": 2,
+          "touches": [
+            {
+              "file": "mcp/tools_boards.py",
+              "kind": "new"
+            },
+            {
+              "file": "mcp/server.py",
+              "snippet": "register("
+            },
+            {
+              "file": "tests/test_agent_mcp.py"
+            }
+          ],
+          "doneWhen": "`pytest tests/test_agent_mcp.py` passes and the tool listing endpoint includes `record_company_board` with its parameter names; the tool round-trips a record through companyboards.store."
+        },
+        {
+          "id": "t-3",
+          "title": "Serve resolved boards on the existing agent-config fetch",
+          "description": "Resolve the spec §7 T3/T4 seam by keeping resolved boards on the ONE fetch agent-config.js already makes: extend the `GET /api/agent/config` response so it carries the resolved company boards for the configured `target_companies`. Add a `company_boards` field to `AgentConfigModel` in api/schemas.py (response-only — do NOT add it to `AgentConfigUpdate`; boards are written by the MCP tool, never by the Agents page) and populate it in `get_agent_config` in api/routes.py, which currently just model_validates the stored config dict. Also prune board entries whose company has been removed from `target_companies`, per spec §5.2.10.",
+          "complexity": "medium",
+          "status": "pending",
+          "wave": 3,
+          "touches": [
+            {
+              "file": "api/routes.py",
+              "symbol": "def get_agent_config("
+            },
+            {
+              "file": "api/schemas.py",
+              "symbol": "class AgentConfigModel(_Camel):"
+            },
+            {
+              "file": "tests/test_agent_config_api.py"
+            }
+          ],
+          "doneWhen": "`pytest tests/test_agent_config_api.py` passes with a test asserting GET /api/agent/config returns resolved boards for watchlisted companies, omits entries for companies no longer on the watchlist, and that PUTting a config body containing `companyBoards` does not write it."
+        },
+        {
+          "id": "t-4",
+          "title": "Blast-radius self-review",
+          "description": "Run the blast-radius-review skill over this plan's finished diff, apply any fixes it finds, and record the risk areas it names with record_risks.",
+          "complexity": "low",
+          "status": "pending",
+          "wave": 4,
+          "touches": [],
+          "doneWhen": "blast-radius-review has run over the finished diff, any fixes it found are applied, and record_risks has been called with the risk areas it named.",
+          "synthetic": "blast-radius-review"
+        }
+      ],
+      "status": "planned",
+      "attention": null,
+      "forestId": null,
+      "provisional": {
+        "name": "MCP Tool Surface",
+        "type": "backend",
+        "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
+        "ref": "/home/glenn/Documents/truthcv",
+        "group": "truthcv-container-single-docker-image"
+      },
+      "provisionalConnections": [
+        {
+          "from": {
+            "componentId": "mcp-tool-surface",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "to": {
+            "componentId": "application-tracker",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "protocol": "in-process"
+        },
+        {
+          "from": {
+            "componentId": "mcp-tool-surface",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "to": {
+            "componentId": "screening-engine",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "protocol": "in-process"
+        },
+        {
+          "from": {
+            "componentId": "mcp-tool-surface",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "to": {
+            "componentId": "agent-config-store",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "protocol": "in-process"
+        }
+      ],
+      "removals": null,
+      "wave": 3,
+      "brief": {
+        "goal": "Make the unattended application agent's job search fully user-configurable via multiple named job profiles plus global limits, delivered through the existing /api/agent/config channel and rendered into the agent's run prompt.",
+        "outOfScope": "Renaming `authorized_non_german_country` in truth/answers.py and its mirrors. The apply-channel rule and ATS name list stay as prose in RUNBOOK.md. Truthfulness/verification procedure, report format, schedule mechanics and the cover-letter guardrail are untouched. The six screening verdict keys on `Screening` are NOT changed or extended. Widening `ApplicationModel`/`ApplicationCreate`/`ApplicationUpdate` in api/schemas.py to expose the new `profile` field (or the already-missing role/ats/capture_method/gaps_disclosed) over the wire is explicitly NOT done here. No job-board APIs or scrapers are added — discovery stays browser navigation only.",
+        "verify": "pytest && cd web && npm run typecheck && npm test",
+        "assumptions": [
+          "`profiles` replaces wholesale on PUT /api/agent/config; sibling top-level fields keep merging partially. This is forced by the existing `exclude_none=True` in put_agent_config, which already makes nulling a field impossible.",
+          "Resolved company-board URLs ride the existing GET /api/agent/config response rather than a sibling endpoint, so agent/agent-config.js keeps making exactly one config fetch.",
+          "The agent container still mounts no data volume and installs no browser; all new config reaches it over HTTP only.",
+          "A run with no configured profiles behaves exactly as today — the baked RUNBOOK.md defaults act as a single implicit profile."
+        ],
+        "impact": [
+          {
+            "file": "api/schemas.py",
+            "symbol": "class ApplicationModel(_Camel):",
+            "why": "Already omits role/ats/capture_method/gaps_disclosed, so the new `profile` field on the Application dataclass will be silently dropped at the wire boundary and never reach the web UI. Pre-existing gap, deliberately not widened here."
+          },
+          {
+            "file": "api/routes.py",
+            "symbol": "def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:",
+            "why": "Its `merged.update(body.model_dump(exclude_unset=True, exclude_none=True, by_alias=False))` merge is what makes wholesale profile replacement safe; T2 must prove a schedule-only PUT does not erase profiles."
+          },
+          {
+            "file": "screening/cooldown.py",
+            "symbol": "def cooldown(",
+            "why": "Reads through application_cooldown_days(); T5 changes that function's precedence so every cooldown consumer shifts behaviour."
+          },
+          {
+            "file": "mcp/tools_ledger.py",
+            "symbol": "check_cooldown",
+            "why": "The agent's cooldown MCP tool reads through screening/cooldown.py, so T5's config-driven duration changes what the agent is told without any change here."
+          },
+          {
+            "file": "agent/prompt.md",
+            "why": "Instructs the model to follow RUNBOOK.md exactly. T3 appends configured filter text to the prompt, so prompt.md's framing must not contradict the rendered block."
+          },
+          {
+            "file": "docker-compose.yml",
+            "symbol": "MAX_APPLICATIONS_PER_RUN",
+            "why": "The env var stays as the fallback when max_applications_per_run is unset; T3 must keep the empty-means-no-cap default working."
+          },
+          {
+            "file": "web/src/agents/AgentsPage.model.test.tsx",
+            "symbol": "getAgentConfig",
+            "why": "Its makeConfig() factory builds an AgentConfig literal; adding required fields to the AgentConfig TS interface breaks this file's typecheck."
+          },
+          {
+            "file": "web/src/agents/schedule.ts",
+            "symbol": "AgentConfig",
+            "why": "Shares the AgentConfig type; a non-optional new field on that interface reaches this module."
+          },
+          {
+            "file": "tests/test_cooldown_blocklist.py",
+            "why": "Exercises cooldown() against agent config; T5's precedence change must leave it green."
+          },
+          {
+            "file": "tests/test_agent_mcp.py",
+            "why": "Covers the MCP tool surface; T4 registers a new tool, which this file's tool-list expectations may assert against."
+          },
+          {
+            "file": "Dockerfile",
+            "symbol": "COPY agentconfig/",
+            "why": "A new top-level store package created by T4 must get its own COPY line or the app container will fail to import it at startup."
+          }
+        ]
+      },
+      "groundedAt": "2026-08-18T08:42:07.356Z",
+      "createdAt": "2026-08-18T08:42:07.356Z"
+    },
+    {
+      "planId": "p-c20decaf",
+      "componentId": "screening-engine",
+      "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
+      "ref": "/home/glenn/Documents/truthcv",
+      "name": "cooldown-from-config",
+      "feature": "agent-job-profiles",
+      "tasks": [
+        {
+          "id": "t-1",
+          "title": "Read cooldown duration from agent config first",
+          "description": "In screening/cooldown.py change `application_cooldown_days()` to a three-level precedence: agent config `cooldown_days` (when set and >= 0) -> the `APPLICATION_COOLDOWN_DAYS` env var -> the hardcoded 90. The module ALREADY imports what is needed (`from agentconfig.store import load as agent_config_load`), so no new plumbing is required — just call it and fall through. Keep the existing env-parse behaviour intact: blank/whitespace and non-integer values still fall back to 90. Keep the function <=25 lines and its docstring updated to name the new precedence.",
+          "complexity": "low",
+          "status": "pending",
+          "wave": 1,
+          "touches": [
+            {
+              "file": "screening/cooldown.py",
+              "symbol": "def application_cooldown_days("
+            },
+            {
+              "file": "tests/test_cooldown_blocklist.py"
+            }
+          ],
+          "doneWhen": "`pytest tests/test_cooldown_blocklist.py` and the full `pytest` run are green, with three new tests covering each precedence level (config set; config unset + env set; both unset -> 90), and the existing cooldown tests unmodified."
+        },
+        {
+          "id": "t-2",
+          "title": "Blast-radius self-review",
+          "description": "Run the blast-radius-review skill over this plan's finished diff, apply any fixes it finds, and record the risk areas it names with record_risks.",
+          "complexity": "low",
+          "status": "pending",
+          "wave": 2,
+          "touches": [],
+          "doneWhen": "blast-radius-review has run over the finished diff, any fixes it found are applied, and record_risks has been called with the risk areas it named.",
+          "synthetic": "blast-radius-review"
+        }
+      ],
+      "status": "planned",
+      "attention": null,
+      "forestId": null,
+      "provisional": {
+        "name": "Screening Engine",
+        "type": "backend",
+        "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
+        "ref": "/home/glenn/Documents/truthcv",
+        "group": "truthcv-container-single-docker-image"
+      },
+      "provisionalConnections": [
+        {
+          "from": {
+            "componentId": "screening-engine",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "to": {
+            "componentId": "agent-config-store",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "protocol": "in-process"
+        },
+        {
+          "from": {
+            "componentId": "screening-engine",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "to": {
+            "componentId": "application-tracker",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "protocol": "in-process"
+        },
+        {
+          "from": {
+            "componentId": "screening-engine",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "to": {
+            "componentId": "truth-data-volume",
+            "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae"
+          },
+          "protocol": "file I/O"
+        }
+      ],
+      "removals": null,
+      "wave": 3,
+      "brief": {
+        "goal": "Make the unattended application agent's job search fully user-configurable via multiple named job profiles plus global limits, delivered through the existing /api/agent/config channel and rendered into the agent's run prompt.",
+        "outOfScope": "Renaming `authorized_non_german_country` in truth/answers.py and its mirrors. The apply-channel rule and ATS name list stay as prose in RUNBOOK.md. Truthfulness/verification procedure, report format, schedule mechanics and the cover-letter guardrail are untouched. The six screening verdict keys on `Screening` are NOT changed or extended. Widening `ApplicationModel`/`ApplicationCreate`/`ApplicationUpdate` in api/schemas.py to expose the new `profile` field (or the already-missing role/ats/capture_method/gaps_disclosed) over the wire is explicitly NOT done here. No job-board APIs or scrapers are added — discovery stays browser navigation only.",
+        "verify": "pytest && cd web && npm run typecheck && npm test",
+        "assumptions": [
+          "`profiles` replaces wholesale on PUT /api/agent/config; sibling top-level fields keep merging partially. This is forced by the existing `exclude_none=True` in put_agent_config, which already makes nulling a field impossible.",
+          "Resolved company-board URLs ride the existing GET /api/agent/config response rather than a sibling endpoint, so agent/agent-config.js keeps making exactly one config fetch.",
+          "The agent container still mounts no data volume and installs no browser; all new config reaches it over HTTP only.",
+          "A run with no configured profiles behaves exactly as today — the baked RUNBOOK.md defaults act as a single implicit profile."
+        ],
+        "impact": [
+          {
+            "file": "api/schemas.py",
+            "symbol": "class ApplicationModel(_Camel):",
+            "why": "Already omits role/ats/capture_method/gaps_disclosed, so the new `profile` field on the Application dataclass will be silently dropped at the wire boundary and never reach the web UI. Pre-existing gap, deliberately not widened here."
+          },
+          {
+            "file": "api/routes.py",
+            "symbol": "def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:",
+            "why": "Its `merged.update(body.model_dump(exclude_unset=True, exclude_none=True, by_alias=False))` merge is what makes wholesale profile replacement safe; T2 must prove a schedule-only PUT does not erase profiles."
+          },
+          {
+            "file": "screening/cooldown.py",
+            "symbol": "def cooldown(",
+            "why": "Reads through application_cooldown_days(); T5 changes that function's precedence so every cooldown consumer shifts behaviour."
+          },
+          {
+            "file": "mcp/tools_ledger.py",
+            "symbol": "check_cooldown",
+            "why": "The agent's cooldown MCP tool reads through screening/cooldown.py, so T5's config-driven duration changes what the agent is told without any change here."
+          },
+          {
+            "file": "agent/prompt.md",
+            "why": "Instructs the model to follow RUNBOOK.md exactly. T3 appends configured filter text to the prompt, so prompt.md's framing must not contradict the rendered block."
+          },
+          {
+            "file": "docker-compose.yml",
+            "symbol": "MAX_APPLICATIONS_PER_RUN",
+            "why": "The env var stays as the fallback when max_applications_per_run is unset; T3 must keep the empty-means-no-cap default working."
+          },
+          {
+            "file": "web/src/agents/AgentsPage.model.test.tsx",
+            "symbol": "getAgentConfig",
+            "why": "Its makeConfig() factory builds an AgentConfig literal; adding required fields to the AgentConfig TS interface breaks this file's typecheck."
+          },
+          {
+            "file": "web/src/agents/schedule.ts",
+            "symbol": "AgentConfig",
+            "why": "Shares the AgentConfig type; a non-optional new field on that interface reaches this module."
+          },
+          {
+            "file": "tests/test_cooldown_blocklist.py",
+            "why": "Exercises cooldown() against agent config; T5's precedence change must leave it green."
+          },
+          {
+            "file": "tests/test_agent_mcp.py",
+            "why": "Covers the MCP tool surface; T4 registers a new tool, which this file's tool-list expectations may assert against."
+          },
+          {
+            "file": "Dockerfile",
+            "symbol": "COPY agentconfig/",
+            "why": "A new top-level store package created by T4 must get its own COPY line or the app container will fail to import it at startup."
+          }
+        ]
+      },
+      "groundedAt": "2026-08-18T08:42:07.362Z",
+      "createdAt": "2026-08-18T08:42:07.362Z"
+    },
+    {
+      "planId": "p-5f5248a1",
+      "componentId": "application-tracker",
+      "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
+      "ref": "/home/glenn/Documents/truthcv",
+      "name": "ledger-profile-attribution",
+      "feature": "agent-job-profiles",
+      "tasks": [
+        {
+          "id": "t-1",
+          "title": "Add an optional profile field to the application record",
+          "description": "Add `profile: str = \"\"` to the `Application` dataclass in applications/model.py and to its `EDITABLE` tuple. NOTE: `from_dict` already uses a generic passthrough (`known = {f for f in cls.__dataclass_fields__ if f not in cls._NESTED}`), and `to_dict` mirrors it, so the field is automatically tolerant of old records with no `profile` key — do NOT add a bespoke branch. Do NOT change the `Screening` dataclass or its six verdict keys. Do NOT widen ApplicationModel/ApplicationCreate/ApplicationUpdate in api/schemas.py — that wire model is already stale (it omits role/ats/capture_method/gaps_disclosed) and widening it is out of scope for this plan.",
+          "complexity": "low",
+          "status": "pending",
+          "wave": 1,
+          "touches": [
+            {
+              "file": "applications/model.py",
+              "symbol": "class Application:"
+            },
+            {
+              "file": "tests/test_applications_model.py"
+            }
+          ],
+          "doneWhen": "`pytest tests/test_applications_model.py` passes with two new round-trip tests: a record carrying `profile` survives to_dict/from_dict, and a legacy record with no `profile` key loads with `profile == \"\"`."
+        },
+        {
+          "id": "t-2",
+          "title": "Render the driving profile in the application log",
+          "description": "In applications/log_render.py, render the new `profile` field where the application entry is rendered by `def render_log(applications: list[Application]) -> str:` (line ~188). Omit the line entirely when `profile` is blank so existing records render byte-identically to today. Follow the file's existing rendering idiom for optional fields — read the surrounding rows before editing. Screening verdict rendering (including the Glassdoor 'waived' state) is unchanged.",
+          "complexity": "low",
+          "status": "pending",
+          "wave": 2,
+          "touches": [
+            {
+              "file": "applications/log_render.py",
+              "symbol": "def render_log("
+            },
+            {
+              "file": "tests/test_log_render.py"
+            }
+          ],
+          "doneWhen": "`pytest tests/test_log_render.py` passes with a new test asserting the profile name appears for a record that has one, and that a record without a profile renders exactly as it did before the change."
+        },
+        {
+          "id": "t-3",
+          "title": "Blast-radius self-review",
+          "description": "Run the blast-radius-review skill over this plan's finished diff, apply any fixes it finds, and record the risk areas it names with record_risks.",
+          "complexity": "low",
+          "status": "pending",
+          "wave": 3,
+          "touches": [],
+          "doneWhen": "blast-radius-review has run over the finished diff, any fixes it found are applied, and record_risks has been called with the risk areas it named.",
+          "synthetic": "blast-radius-review"
+        }
+      ],
+      "status": "planned",
+      "attention": null,
+      "forestId": null,
+      "provisional": null,
+      "provisionalConnections": null,
+      "removals": null,
+      "wave": 3,
+      "brief": {
+        "goal": "Make the unattended application agent's job search fully user-configurable via multiple named job profiles plus global limits, delivered through the existing /api/agent/config channel and rendered into the agent's run prompt.",
+        "outOfScope": "Renaming `authorized_non_german_country` in truth/answers.py and its mirrors. The apply-channel rule and ATS name list stay as prose in RUNBOOK.md. Truthfulness/verification procedure, report format, schedule mechanics and the cover-letter guardrail are untouched. The six screening verdict keys on `Screening` are NOT changed or extended. Widening `ApplicationModel`/`ApplicationCreate`/`ApplicationUpdate` in api/schemas.py to expose the new `profile` field (or the already-missing role/ats/capture_method/gaps_disclosed) over the wire is explicitly NOT done here. No job-board APIs or scrapers are added — discovery stays browser navigation only.",
+        "verify": "pytest && cd web && npm run typecheck && npm test",
+        "assumptions": [
+          "`profiles` replaces wholesale on PUT /api/agent/config; sibling top-level fields keep merging partially. This is forced by the existing `exclude_none=True` in put_agent_config, which already makes nulling a field impossible.",
+          "Resolved company-board URLs ride the existing GET /api/agent/config response rather than a sibling endpoint, so agent/agent-config.js keeps making exactly one config fetch.",
+          "The agent container still mounts no data volume and installs no browser; all new config reaches it over HTTP only.",
+          "A run with no configured profiles behaves exactly as today — the baked RUNBOOK.md defaults act as a single implicit profile."
+        ],
+        "impact": [
+          {
+            "file": "api/schemas.py",
+            "symbol": "class ApplicationModel(_Camel):",
+            "why": "Already omits role/ats/capture_method/gaps_disclosed, so the new `profile` field on the Application dataclass will be silently dropped at the wire boundary and never reach the web UI. Pre-existing gap, deliberately not widened here."
+          },
+          {
+            "file": "api/routes.py",
+            "symbol": "def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:",
+            "why": "Its `merged.update(body.model_dump(exclude_unset=True, exclude_none=True, by_alias=False))` merge is what makes wholesale profile replacement safe; T2 must prove a schedule-only PUT does not erase profiles."
+          },
+          {
+            "file": "screening/cooldown.py",
+            "symbol": "def cooldown(",
+            "why": "Reads through application_cooldown_days(); T5 changes that function's precedence so every cooldown consumer shifts behaviour."
+          },
+          {
+            "file": "mcp/tools_ledger.py",
+            "symbol": "check_cooldown",
+            "why": "The agent's cooldown MCP tool reads through screening/cooldown.py, so T5's config-driven duration changes what the agent is told without any change here."
+          },
+          {
+            "file": "agent/prompt.md",
+            "why": "Instructs the model to follow RUNBOOK.md exactly. T3 appends configured filter text to the prompt, so prompt.md's framing must not contradict the rendered block."
+          },
+          {
+            "file": "docker-compose.yml",
+            "symbol": "MAX_APPLICATIONS_PER_RUN",
+            "why": "The env var stays as the fallback when max_applications_per_run is unset; T3 must keep the empty-means-no-cap default working."
+          },
+          {
+            "file": "web/src/agents/AgentsPage.model.test.tsx",
+            "symbol": "getAgentConfig",
+            "why": "Its makeConfig() factory builds an AgentConfig literal; adding required fields to the AgentConfig TS interface breaks this file's typecheck."
+          },
+          {
+            "file": "web/src/agents/schedule.ts",
+            "symbol": "AgentConfig",
+            "why": "Shares the AgentConfig type; a non-optional new field on that interface reaches this module."
+          },
+          {
+            "file": "tests/test_cooldown_blocklist.py",
+            "why": "Exercises cooldown() against agent config; T5's precedence change must leave it green."
+          },
+          {
+            "file": "tests/test_agent_mcp.py",
+            "why": "Covers the MCP tool surface; T4 registers a new tool, which this file's tool-list expectations may assert against."
+          },
+          {
+            "file": "Dockerfile",
+            "symbol": "COPY agentconfig/",
+            "why": "A new top-level store package created by T4 must get its own COPY line or the app container will fail to import it at startup."
+          }
+        ]
+      },
+      "groundedAt": "2026-08-18T08:42:07.370Z",
+      "createdAt": "2026-08-18T08:42:07.370Z"
+    },
+    {
+      "planId": "p-4b09e827",
+      "componentId": "web-ui",
+      "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
+      "ref": "/home/glenn/Documents/truthcv",
+      "name": "job-profiles-ui",
+      "feature": "agent-job-profiles",
+      "tasks": [
+        {
+          "id": "t-1",
+          "title": "Extend the AgentConfig client types and functions",
+          "description": "In web/src/api/types.ts extend `export interface AgentConfig` (line ~306) with `profiles: JobProfile[]`, `targetCompanies: string[]`, `cooldownDays: number | null`, `maxApplicationsPerRun: number | null` and a read-only `companyBoards`, and add the `JobProfile` interface mirroring the backend model in camelCase. `AgentConfigUpdate` is `Partial<AgentConfig>` so it follows automatically. web/src/api/client.ts's `getAgentConfig` and `updateAgentConfig` need no signature change — verify that and leave them alone unless something is genuinely broken. WARNING: web/src/agents/AgentsPage.model.test.tsx has a `makeConfig()` factory building an AgentConfig literal, and web/src/agents/schedule.ts also consumes this type — both must still typecheck.",
+          "complexity": "medium",
+          "status": "pending",
+          "wave": 1,
+          "touches": [
+            {
+              "file": "web/src/api/types.ts",
+              "snippet": "export interface AgentConfig {"
+            },
+            {
+              "file": "web/src/agents/AgentsPage.model.test.tsx",
+              "snippet": "makeConfig"
+            }
+          ],
+          "doneWhen": "`cd web && npm run typecheck` is clean and `npm test` is green with no changes to existing test assertions beyond extending makeConfig's literal."
+        },
+        {
+          "id": "t-2",
+          "title": "Add the ProfilesSection and global limit fields to the Agents page",
+          "description": "In web/src/agents/AgentsPage.tsx add a `ProfilesSection` rendering profile cards with add / duplicate / remove; duplicate pre-fills from the source profile and is the primary creation path; a brand-new profile is pre-filled with the spec §5.3 defaults (fully remote; employment country Germany, EOR disallowed, entity verification required; salary floor 85000, ask 95000-110000; working language English; Glassdoor 3.5 waived under 20 reviews; accepted 'agentic / AI engineering, data engineering'; rejected 'generic full-stack, frontend, SRE, Java-heavy backend'). Every multi-item field is a single text input the user types comma-separated values into, joined with ', ' on load. Use an EXPLICIT Save button following the ScheduleSection pattern (`const fresh = await updateAgentConfig({ runAt, runDays });`) — NOT the blocklist section's save-on-change, because these edits are consequential. Add watchlist rows: company name, read-only resolved URL, a clear-resolution control, and an optional manual URL override. Add the entity-verification checkbox with helper text stating the trade-off per spec §5.2.7 (checked = today's fail-closed behaviour, unchecked = waives on absence). Place `cooldownDays` and `maxApplicationsPerRun` following the page's existing section pattern — your call whether that is a new small section or appended to an existing one. Use the MUI components the page already uses. New test files MUST carry the line-1 `// @vitest-environment jsdom` pragma, as AgentsPage.model.test.tsx does — the vitest default environment in vite.config.ts is `node`.",
+          "complexity": "high",
+          "status": "pending",
+          "wave": 2,
+          "touches": [
+            {
+              "file": "web/src/agents/AgentsPage.tsx",
+              "snippet": "updateAgentConfig"
+            },
+            {
+              "file": "web/src/agents/AgentsPage.profiles.test.tsx",
+              "kind": "new"
+            }
+          ],
+          "doneWhen": "`cd web && npm run typecheck && npm test` are both green with new tests covering: comma-delimited round-trip (typing 'a, b' stores ['a','b'] and renders back as 'a, b'), a blank requirement field displaying as criterion-off, and saving the profiles section not clobbering the schedule or blocklist sections."
+        },
+        {
+          "id": "t-3",
+          "title": "Blast-radius self-review",
+          "description": "Run the blast-radius-review skill over this plan's finished diff, apply any fixes it finds, and record the risk areas it names with record_risks.",
+          "complexity": "low",
+          "status": "pending",
+          "wave": 3,
+          "touches": [],
+          "doneWhen": "blast-radius-review has run over the finished diff, any fixes it found are applied, and record_risks has been called with the risk areas it named.",
+          "synthetic": "blast-radius-review"
+        }
+      ],
+      "status": "planned",
+      "attention": null,
+      "forestId": null,
+      "provisional": null,
+      "provisionalConnections": null,
+      "removals": null,
+      "wave": 4,
+      "brief": {
+        "goal": "Make the unattended application agent's job search fully user-configurable via multiple named job profiles plus global limits, delivered through the existing /api/agent/config channel and rendered into the agent's run prompt.",
+        "outOfScope": "Renaming `authorized_non_german_country` in truth/answers.py and its mirrors. The apply-channel rule and ATS name list stay as prose in RUNBOOK.md. Truthfulness/verification procedure, report format, schedule mechanics and the cover-letter guardrail are untouched. The six screening verdict keys on `Screening` are NOT changed or extended. Widening `ApplicationModel`/`ApplicationCreate`/`ApplicationUpdate` in api/schemas.py to expose the new `profile` field (or the already-missing role/ats/capture_method/gaps_disclosed) over the wire is explicitly NOT done here. No job-board APIs or scrapers are added — discovery stays browser navigation only.",
+        "verify": "pytest && cd web && npm run typecheck && npm test",
+        "assumptions": [
+          "`profiles` replaces wholesale on PUT /api/agent/config; sibling top-level fields keep merging partially. This is forced by the existing `exclude_none=True` in put_agent_config, which already makes nulling a field impossible.",
+          "Resolved company-board URLs ride the existing GET /api/agent/config response rather than a sibling endpoint, so agent/agent-config.js keeps making exactly one config fetch.",
+          "The agent container still mounts no data volume and installs no browser; all new config reaches it over HTTP only.",
+          "A run with no configured profiles behaves exactly as today — the baked RUNBOOK.md defaults act as a single implicit profile."
+        ],
+        "impact": [
+          {
+            "file": "api/schemas.py",
+            "symbol": "class ApplicationModel(_Camel):",
+            "why": "Already omits role/ats/capture_method/gaps_disclosed, so the new `profile` field on the Application dataclass will be silently dropped at the wire boundary and never reach the web UI. Pre-existing gap, deliberately not widened here."
+          },
+          {
+            "file": "api/routes.py",
+            "symbol": "def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:",
+            "why": "Its `merged.update(body.model_dump(exclude_unset=True, exclude_none=True, by_alias=False))` merge is what makes wholesale profile replacement safe; T2 must prove a schedule-only PUT does not erase profiles."
+          },
+          {
+            "file": "screening/cooldown.py",
+            "symbol": "def cooldown(",
+            "why": "Reads through application_cooldown_days(); T5 changes that function's precedence so every cooldown consumer shifts behaviour."
+          },
+          {
+            "file": "mcp/tools_ledger.py",
+            "symbol": "check_cooldown",
+            "why": "The agent's cooldown MCP tool reads through screening/cooldown.py, so T5's config-driven duration changes what the agent is told without any change here."
+          },
+          {
+            "file": "agent/prompt.md",
+            "why": "Instructs the model to follow RUNBOOK.md exactly. T3 appends configured filter text to the prompt, so prompt.md's framing must not contradict the rendered block."
+          },
+          {
+            "file": "docker-compose.yml",
+            "symbol": "MAX_APPLICATIONS_PER_RUN",
+            "why": "The env var stays as the fallback when max_applications_per_run is unset; T3 must keep the empty-means-no-cap default working."
+          },
+          {
+            "file": "web/src/agents/AgentsPage.model.test.tsx",
+            "symbol": "getAgentConfig",
+            "why": "Its makeConfig() factory builds an AgentConfig literal; adding required fields to the AgentConfig TS interface breaks this file's typecheck."
+          },
+          {
+            "file": "web/src/agents/schedule.ts",
+            "symbol": "AgentConfig",
+            "why": "Shares the AgentConfig type; a non-optional new field on that interface reaches this module."
+          },
+          {
+            "file": "tests/test_cooldown_blocklist.py",
+            "why": "Exercises cooldown() against agent config; T5's precedence change must leave it green."
+          },
+          {
+            "file": "tests/test_agent_mcp.py",
+            "why": "Covers the MCP tool surface; T4 registers a new tool, which this file's tool-list expectations may assert against."
+          },
+          {
+            "file": "Dockerfile",
+            "symbol": "COPY agentconfig/",
+            "why": "A new top-level store package created by T4 must get its own COPY line or the app container will fail to import it at startup."
+          }
+        ]
+      },
+      "groundedAt": "2026-08-18T08:42:07.378Z",
+      "createdAt": "2026-08-18T08:42:07.378Z"
+    }
+  ],
+  "createdAt": "2026-08-18T08:11:28.511Z",
+  "updatedAt": "2026-08-18T09:15:39.296Z",
+  "spend": {
+    "inputTokens": 6461156,
+    "outputTokens": 120187,
+    "cacheRead": 6015901,
+    "cacheCreation": 443979,
+    "turns": 92,
+    "updatedAt": "2026-08-18T09:15:39.296Z"
+  },
+  "planPhase": null,
+  "readyAt": "2026-08-18T08:42:07.337Z",
+  "intent": "Make the unattended job-application agent's search fully user-configurable: instead of filters and search terms being baked into the agent's image as prose, you define one or more named job profiles on the Agents page — each with its own keywords, boards, and requirements — plus global limits (cooldown, per-run cap, company watchlist), and the agent applies to anything that passes any single enabled profile."
+}

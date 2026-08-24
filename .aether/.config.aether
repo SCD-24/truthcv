@@ -147,6 +147,16 @@
                   "desc": "Download a rendered artifact (CV/cover-letter PDF or DOCX) by filename.",
                   "method": "GET",
                   "path": "/api/download/{name}"
+                },
+                {
+                  "desc": "Return the canonical ATS screening answers stored in truth.answers.",
+                  "method": "GET",
+                  "path": "/api/profile/answers"
+                },
+                {
+                  "desc": "Partially update the canonical ATS screening answers in truth.answers; returns the merged answers.",
+                  "method": "PUT",
+                  "path": "/api/profile/answers"
                 }
               ]
             },
@@ -368,6 +378,82 @@
             "w": 350,
             "x": 160,
             "y": 160
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "Streamable-HTTP JSON-RPC MCP tool surface (agenttools/mcp_app.py) used by the Application Agent container; in-network only.",
+                  "method": "POST",
+                  "path": "/mcp"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1787568233479-12",
+            "title": "Agent tool surface (MCP)",
+            "type": "endpoints",
+            "w": 440,
+            "x": 190,
+            "y": 190
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "Every screening record, most recent first; optional ?approval= narrows to the queue.",
+                  "method": "GET",
+                  "path": "/api/screenings"
+                },
+                {
+                  "desc": "Create a screening record from client-supplied fields.",
+                  "method": "POST",
+                  "path": "/api/screenings"
+                },
+                {
+                  "desc": "Apply one approval decision to many screenings; reports per-id outcomes.",
+                  "method": "PATCH",
+                  "path": "/api/screenings/approvals"
+                },
+                {
+                  "desc": "Set one screening's approval decision and/or posting URL (approval requires a drafted letter).",
+                  "method": "PATCH",
+                  "path": "/api/screenings/{screening_id}"
+                },
+                {
+                  "desc": "Delete a screening record.",
+                  "method": "DELETE",
+                  "path": "/api/screenings/{screening_id}"
+                },
+                {
+                  "desc": "The screening's current cover-letter draft.",
+                  "method": "GET",
+                  "path": "/api/screenings/{screening_id}/letter"
+                },
+                {
+                  "desc": "Draft the letter for one screening, guardrailed; 422 when blocked.",
+                  "method": "POST",
+                  "path": "/api/screenings/{screening_id}/letter"
+                },
+                {
+                  "desc": "Save the operator's own letter text verbatim and unvalidated (source=operator).",
+                  "method": "PUT",
+                  "path": "/api/screenings/{screening_id}/letter"
+                },
+                {
+                  "desc": "Whether a company (optionally narrowed by role) is currently in cooldown.",
+                  "method": "GET",
+                  "path": "/api/cooldown"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1787568321185-13",
+            "title": "Screening routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 220,
+            "y": 220
           }
         ]
       },
@@ -1058,6 +1144,289 @@
       "id": "application-tracker",
       "name": "Application Tracker",
       "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Unattended job-application agent running as its OWN container (agent/Dockerfile, the `agent` compose service), separate from the app image so a crash there can never take the wizard down. entrypoint.sh preflights credentials and the selected browser driver, then execs supervisor.js, an always-on scheduler plus token-guarded control server that invokes agent/daily-apply.sh — which drives the headless `claude` CLI (@anthropic-ai/claude-code) against agent/prompt.md, agent/RUNBOOK.md and the MCP servers in agent/mcp.json. Schedule, enablement, job profiles and LLM credentials are fetched from the app's /api/agent/* config API (agent/agent-config.js); RUN_AT/RUN_DAYS env are only the fallback. The image is deliberately browserless: pages are rendered by the sibling `browser` service over HTTP MCP (default) or by the operator's host Chrome via the opt-in `interceptor` driver."
+            },
+            "h": 180,
+            "id": "widget-1787566001330-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Docker (separate image)",
+                "Node 22",
+                "Bash",
+                "claude CLI (@anthropic-ai/claude-code)",
+                "MCP",
+                "jq"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1787566002714-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "Trigger a run immediately, fire-and-forget. Requires X-Agent-Token matching AGENT_API_TOKEN.",
+                  "method": "POST",
+                  "path": "/run"
+                },
+                {
+                  "desc": "{running, lastStartedAt, lastFinishedAt, lastExitCode}. Requires X-Agent-Token.",
+                  "method": "GET",
+                  "path": "/status"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1787566004099-2",
+            "title": "Control server (supervisor.js)",
+            "type": "endpoints",
+            "w": 440,
+            "x": 90,
+            "y": 90
+          },
+          {
+            "data": {
+              "vars": [
+                {
+                  "desc": "App MCP endpoint; also the base for the /api/agent/* config and credential calls.",
+                  "example": "http://app:8000/mcp",
+                  "key": "TRUTHCV_MCP_URL"
+                },
+                {
+                  "desc": "Shared secret guarding the control server and forwarded as X-Agent-Token when fetching LLM credentials.",
+                  "example": "<shared secret>",
+                  "key": "AGENT_API_TOKEN"
+                },
+                {
+                  "desc": "Optional; when unset, credentials are fetched from the app at run time.",
+                  "example": "sk-ant-...",
+                  "key": "ANTHROPIC_API_KEY"
+                },
+                {
+                  "desc": "'browser' (default, sibling Chromium/@playwright/mcp service) or 'interceptor' (host Chrome, opt-in overlay).",
+                  "example": "browser",
+                  "key": "AGENT_BROWSER_DRIVER"
+                },
+                {
+                  "desc": "HTTP MCP endpoint of the browser service.",
+                  "example": "http://browser:8931/mcp",
+                  "key": "BROWSER_MCP_URL"
+                },
+                {
+                  "desc": "Bind-mounted host interceptor binary, used only under the interceptor driver.",
+                  "example": "/opt/interceptor/bin/interceptor",
+                  "key": "INTERCEPTOR_BIN"
+                },
+                {
+                  "desc": "Fallback schedule slots (HH:MM, container TZ) when the app config API is unreachable.",
+                  "example": "09:00,15:00",
+                  "key": "RUN_AT"
+                },
+                {
+                  "desc": "Fallback allowed weekdays (1=Mon..7=Sun).",
+                  "example": "1,2,3,4,5",
+                  "key": "RUN_DAYS"
+                },
+                {
+                  "desc": "Run once immediately and exit with the run's status.",
+                  "example": "1",
+                  "key": "RUN_ONCE"
+                },
+                {
+                  "desc": "Port the control server listens on (default 9099).",
+                  "example": "9099",
+                  "key": "AGENT_CONTROL_PORT"
+                },
+                {
+                  "desc": "Container timezone the schedule is interpreted in.",
+                  "example": "Europe/London",
+                  "key": "TZ"
+                }
+              ]
+            },
+            "h": 200,
+            "id": "widget-1787566005511-3",
+            "title": "Configuration & Environment",
+            "type": "config",
+            "w": 350,
+            "x": 120,
+            "y": 120
+          }
+        ]
+      },
+      "id": "application-agent",
+      "name": "Application Agent",
+      "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "External Google service used for the Gmail connection: the OAuth 2.0 browser flow (accounts.google.com authorize, oauth2.googleapis.com/token for the PKCE code exchange and refresh-token renewal) and the Gmail REST API (gmail.googleapis.com/gmail/v1/users/me/profile) read to identify the connected mailbox. Reached over HTTPS with httpx from connections/auth/gmail.py; tokens are persisted via the Secret Store."
+            },
+            "h": 180,
+            "id": "widget-1787568269048-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Google OAuth 2.0 (PKCE, offline access)",
+                "Gmail REST API v1",
+                "httpx"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1787568272749-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          }
+        ]
+      },
+      "id": "gmail-api",
+      "name": "Gmail / Google OAuth API",
+      "type": "custom"
+    },
+    {
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Provider connection layer (connections/): a static catalog of provider connection cards (catalog.py — claude, codex, openrouter, ollama) plus per-vendor auth flows under connections/auth/. connections/auth/gmail.py owns the Gmail OAuth flow end to end: start_login builds the Google authorize URL (PKCE S256, offline access, gmail.readonly scope), complete_login exchanges the code, reads the account's email from the Gmail profile API and stores the token record; get_valid_access_token refreshes lazily behind a lock with a 300s expiry skew; mark_reconnect_required blanks the tokens and flags reauthRequired when access is revoked. Credentials are never held here — every record is persisted through secretstore.get_connection/set_connection."
+            },
+            "h": 180,
+            "id": "widget-1787568456174-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Python",
+                "httpx",
+                "Google OAuth 2.0 (PKCE)"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1787568457598-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          },
+          {
+            "data": {
+              "vars": [
+                {
+                  "desc": "Google OAuth client id; Gmail login/refresh fails with AuthError when unset.",
+                  "example": "1234567890-abc.apps.googleusercontent.com",
+                  "key": "GOOGLE_OAUTH_CLIENT_ID"
+                },
+                {
+                  "desc": "Google OAuth client secret used for the code exchange and refresh calls.",
+                  "example": "GOCSPX-…",
+                  "key": "GOOGLE_OAUTH_CLIENT_SECRET"
+                }
+              ]
+            },
+            "h": 200,
+            "id": "widget-1787568459083-2",
+            "title": "Configuration & Environment",
+            "type": "config",
+            "w": 350,
+            "x": 90,
+            "y": 90
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "-",
+                  "name": "accessToken",
+                  "notes": "Current Gmail access token; blanked when reconnect is required.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "refreshToken",
+                  "notes": "Offline refresh token; carried over when Google omits it on refresh.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "expiresAt",
+                  "notes": "Refreshed lazily once within 300s of expiry.",
+                  "type": "float (epoch seconds)"
+                },
+                {
+                  "flags": "-",
+                  "name": "scope",
+                  "notes": "Defaults to https://www.googleapis.com/auth/gmail.readonly.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "connectedAt",
+                  "notes": "Preserved across refreshes.",
+                  "type": "float (epoch seconds)"
+                },
+                {
+                  "flags": "-",
+                  "name": "email",
+                  "notes": "Account address read from the Gmail profile endpoint at login.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "reauthRequired",
+                  "notes": "Set by mark_reconnect_required when refresh is rejected.",
+                  "type": "bool"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1787568460579-3",
+            "title": "gmail connection record (secretstore \"gmail\".oauth)",
+            "type": "schema",
+            "w": 440,
+            "x": 120,
+            "y": 120
+          }
+        ]
+      },
+      "id": "connections",
+      "name": "Connections",
+      "type": "backend"
     }
   ],
   "connections": [
@@ -1190,6 +1559,31 @@
       "from": "application-tracker",
       "protocol": "in-process",
       "to": "renderer"
+    },
+    {
+      "from": "api",
+      "protocol": "HTTPS",
+      "to": "gmail-api"
+    },
+    {
+      "from": "application-agent",
+      "protocol": "HTTP/MCP (streamable HTTP JSON-RPC)",
+      "to": "api"
+    },
+    {
+      "from": "api",
+      "protocol": "in-process",
+      "to": "connections"
+    },
+    {
+      "from": "connections",
+      "protocol": "in-process",
+      "to": "secret-store"
+    },
+    {
+      "from": "connections",
+      "protocol": "HTTPS",
+      "to": "gmail-api"
     }
   ],
   "definitions": [
@@ -1285,14 +1679,11 @@
         "web-ui",
         "api",
         "truth-store",
-        "tailor-engine",
         "guardrail-validator",
         "renderer",
         "llm-provider-layer",
-        "truth-data-volume",
         "cover-letter-engine",
         "prompt-store",
-        "secret-store",
         "application-tracker"
       ],
       "name": "TruthCV Container (single Docker image)",
@@ -1306,56 +1697,68 @@
   "systemIntent": "TruthCV is a self-hostable, single-user web application that generates ATS-passing, truthful CVs tailored to a specific job posting. Every fact originates exclusively from a per-user \"truth file\" (truth.yaml) derived from the user's LinkedIn profile; the app may reword and reorder those facts freely, but any new claim must be explicitly confirmed by the user before it can enter a CV — enforced mechanically by a deterministic guardrail that diffs every factual token against the truth file. It is bring-your-own-API-key, Docker-deployable (docker compose up → localhost:8080), needs no database or accounts, and renders both PDF and DOCX from one ATS-safe source.",
   "topologyLayout": {
     "api": {
-      "x": 351.0953206239168,
-      "y": 194.99133448873482
+      "x": 436,
+      "y": 212
+    },
+    "application-agent": {
+      "x": 100,
+      "y": 632
     },
     "application-tracker": {
-      "x": 76.80069324090118,
-      "y": 306.2287694974003
+      "x": 732,
+      "y": 140
+    },
+    "connections": {
+      "x": 1324,
+      "y": 704
     },
     "cover-letter-engine": {
-      "x": 691.9341421143848,
-      "y": 60.82842287694976
+      "x": 732,
+      "y": 284
+    },
+    "gmail-api": {
+      "x": 1620,
+      "y": 560
     },
     "guardrail-validator": {
-      "x": 343.48668049098853,
-      "y": 56.55041192144961
+      "x": 1028,
+      "y": 284
     },
     "llm-provider-layer": {
-      "x": 1185.5563258232237,
-      "y": 47.58058925476604
+      "x": 1620,
+      "y": 140
     },
     "llm-provider-service": {
-      "x": 1238.7208455063942,
-      "y": -124.90707415327128
+      "x": 692,
+      "y": 560
     },
     "prompt-store": {
-      "x": 951.1715771230506,
-      "y": 168.1421143847486
+      "x": 1620,
+      "y": 284
     },
     "renderer": {
-      "x": 1306.901213171577,
-      "y": 333.2305025996535
+      "x": 1028,
+      "y": 140
     },
     "secret-store": {
-      "x": 1498.880415944541,
-      "y": 78.81802426343154
+      "x": 692,
+      "y": 704
     },
     "tailor-engine": {
-      "x": 580.8561525129983,
-      "y": 321.001733102253
+      "x": 396,
+      "y": 632
     },
     "truth-data-volume": {
-      "x": 1489.1611785095324,
-      "y": 202.12478336221835
+      "x": 988,
+      "y": 632
     },
     "truth-store": {
-      "x": 940.509532062392,
-      "y": 329.5077989601387
+      "x": 1324,
+      "y": 212
     },
     "web-ui": {
-      "x": 48.9809358752166,
-      "y": 87.98960138648184
+      "x": 140,
+      "y": 212
     }
   },
   "version": "1.0.0"

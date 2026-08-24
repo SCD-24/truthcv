@@ -25,11 +25,22 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **POST** | `/api/cover-letter` | Generate a guardrail-truthful cover letter (tone, length). Returns {blocked, unverifiable, pdfUrl, docxUrl}; blocked if any factual claim fails truth validation. |
 | **GET** | `/api/profile` | Saved-profile status ({hasProfile}) so the wizard can offer "use saved profile" and skip re-upload. |
 | **GET** | `/api/download/{name}` | Download a rendered artifact (CV/cover-letter PDF or DOCX) by filename. |
-| **POST** | `/mcp` | MCP streamable-HTTP JSON-RPC 2.0 endpoint (initialize, notifications/initialized, tools/list, tools/call). This is the surface the agent container's claude CLI registers as mcp__truthcv__*; the plain-REST /mcp/tools routes are retained for external inspection. |
+| **GET** | `/api/profile/answers` | Return the canonical ATS screening answers stored in truth.answers. |
+| **PUT** | `/api/profile/answers` | Partially update the canonical ATS screening answers in truth.answers; returns the merged answers. |
 | **GET** | `/api/settings` | Provider settings status (encryptionAvailable, activeProvider, model, *KeySet booleans, ollamaHost). Never returns raw secrets. |
 | **POST** | `/api/settings` | Save provider selection + API key/model/host; encrypts to ./data/secrets.enc via ENCRYPTION_KEY. Empty apiKey leaves the stored key unchanged. |
 | **POST** | `/api/settings/test` | Test connection: a tiny live provider call with saved/submitted credentials. Returns {ok, detail}. |
 | **POST** | `/api/models` | List available models for a provider (live model-list lookup). |
+| **POST** | `/mcp` | Streamable-HTTP JSON-RPC MCP tool surface (agenttools/mcp_app.py) used by the Application Agent container; in-network only. |
+| **GET** | `/api/screenings` | Every screening record, most recent first; optional ?approval= narrows to the queue. |
+| **POST** | `/api/screenings` | Create a screening record from client-supplied fields. |
+| **PATCH** | `/api/screenings/approvals` | Apply one approval decision to many screenings; reports per-id outcomes. |
+| **PATCH** | `/api/screenings/{screening_id}` | Set one screening's approval decision and/or posting URL (approval requires a drafted letter). |
+| **DELETE** | `/api/screenings/{screening_id}` | Delete a screening record. |
+| **GET** | `/api/screenings/{screening_id}/letter` | The screening's current cover-letter draft. |
+| **POST** | `/api/screenings/{screening_id}/letter` | Draft the letter for one screening, guardrailed; 422 when blocked. |
+| **PUT** | `/api/screenings/{screening_id}/letter` | Save the operator's own letter text verbatim and unvalidated (source=operator). |
+| **GET** | `/api/cooldown` | Whether a company (optionally narrowed by role) is currently in cooldown. |
 <!-- generated:end comp:api -->
 
 ## Provider connections API
@@ -51,3 +62,12 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 |---|---|---|
 | **GET** | `/api/routing` | Get current model routing (tasks, agent, default); each has {connection, model}. |
 | **PUT** | `/api/routing` | Update routing (merge only sent fields onto stored state); all connections must exist. A field explicitly sent as `null` clears it — `default`/`agent` sent as null removes that route, and a `tasks` entry sent as null removes that task's route. An absent field is left untouched. |
+
+<!-- generated:start comp:application-agent -->
+## Application Agent (`application-agent`)
+
+| Method | Path | Description |
+|---|---|---|
+| **POST** | `/run` | Trigger a run immediately, fire-and-forget. Requires X-Agent-Token matching AGENT_API_TOKEN. |
+| **GET** | `/status` | {running, lastStartedAt, lastFinishedAt, lastExitCode}. Requires X-Agent-Token. |
+<!-- generated:end comp:application-agent -->

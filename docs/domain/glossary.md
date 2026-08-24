@@ -85,7 +85,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:end cap:definitions -->
 
 <!-- generated:start comp:cover-letter-engine -->
-- **Cover Letter Engine** (`cover-letter-engine`) — backend component. Guardrailed cover-letter generation (coverletter/). build_letter() asks the LLM (via the provider layer) for a cover letter as tagged paragraphs, each declaring the factual claims it makes. It draws on the whole candidate record: the Truth Store's experiences, education and skills, the Profile header edited at Review (name, location, contact links and summary), and the profile answers kept on the Agents page (current role, years of experience, languages, work authorisation and the rest), which the API loads and passes in. All of those are allowed claim sources for the generation only, never written back to truth. Every claim is validated by the Guardrail Validator; if any claim is unverifiable the letter is BLOCKED (returns {blocked: true, unverifiable, text: ""}). Otherwise the paragraph text is joined and handed to the Renderer for HTML/PDF/DOCX output. Serves /api/cover-letter together with render/.
+- **Cover Letter Engine** (`cover-letter-engine`) — backend component. Guardrailed cover-letter generation (coverletter/). build_letter() asks the LLM (via the provider layer) for a cover letter as tagged paragraphs, each declaring the factual claims it makes. Every claim is validated by the Guardrail Validator against the Truth Store; if any claim is unverifiable the letter is BLOCKED (returns {blocked: true, unverifiable, text: ""}). Otherwise the paragraph text is joined and handed to the Renderer for HTML/PDF/DOCX output. Serves /api/cover-letter together with render/.
 <!-- generated:end comp:cover-letter-engine -->
 
 <!-- generated:start comp:prompt-store -->
@@ -100,6 +100,14 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 - **Application Tracker** (`application-tracker`) — backend component. Owns the user's job-application records (applications/) persisted as applications.json on the Truth Data Volume. Each Application tracks a submission (Company, Website, Application URL, Submitted, Submission Type, Reached Out, To Who, Response Received, Method) and OWNS its generated documents: an editable CV and cover letter saved per-application (so old outputs are retained and traceable to the application they went out with). Applications may exist WITHOUT a job posting (General/portal submissions). CRUD helpers use atomic writes mirroring truth/store.py; re-renders edited document content via the Renderer.
 <!-- generated:end comp:application-tracker -->
 
-<!-- generated:start comp:browser-runtime -->
-- **Agent Browser** (`browser-runtime`) — custom component.
-<!-- generated:end comp:browser-runtime -->
+<!-- generated:start comp:application-agent -->
+- **Application Agent** (`application-agent`) — backend component. Unattended job-application agent running as its OWN container (agent/Dockerfile, the `agent` compose service), separate from the app image so a crash there can never take the wizard down. entrypoint.sh preflights credentials and the selected browser driver, then execs supervisor.js, an always-on scheduler plus token-guarded control server that invokes agent/daily-apply.sh — which drives the headless `claude` CLI (@anthropic-ai/claude-code) against agent/prompt.md, agent/RUNBOOK.md and the MCP servers in agent/mcp.json. Schedule, enablement, job profiles and LLM credentials are fetched from the app's /api/agent/* config API (agent/agent-config.js); RUN_AT/RUN_DAYS env are only the fallback. The image is deliberately browserless: pages are rendered by the sibling `browser` service over HTTP MCP (default) or by the operator's host Chrome via the opt-in `interceptor` driver.
+<!-- generated:end comp:application-agent -->
+
+<!-- generated:start comp:gmail-api -->
+- **Gmail / Google OAuth API** (`gmail-api`) — custom component. External Google service used for the Gmail connection: the OAuth 2.0 browser flow (accounts.google.com authorize, oauth2.googleapis.com/token for the PKCE code exchange and refresh-token renewal) and the Gmail REST API (gmail.googleapis.com/gmail/v1/users/me/profile) read to identify the connected mailbox. Reached over HTTPS with httpx from connections/auth/gmail.py; tokens are persisted via the Secret Store.
+<!-- generated:end comp:gmail-api -->
+
+<!-- generated:start comp:connections -->
+- **Connections** (`connections`) — backend component. Provider connection layer (connections/): a static catalog of provider connection cards (catalog.py — claude, codex, openrouter, ollama) plus per-vendor auth flows under connections/auth/. connections/auth/gmail.py owns the Gmail OAuth flow end to end: start_login builds the Google authorize URL (PKCE S256, offline access, gmail.readonly scope), complete_login exchanges the code, reads the account's email from the Gmail profile API and stores the token record; get_valid_access_token refreshes lazily behind a lock with a 300s expiry skew; mark_reconnect_required blanks the tokens and flags reauthRequired when access is revoked. Credentials are never held here — every record is persisted through secretstore.get_connection/set_connection.
+<!-- generated:end comp:connections -->
