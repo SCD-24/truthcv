@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   bulkSetApproval,
   generateScreeningLetter,
+  getScreeningLetter,
   saveScreeningLetter,
   setCompanyApproval,
   setScreeningApproval,
@@ -23,6 +24,19 @@ function stubFetch(payload: unknown) {
     headers: { get: () => "application/json" },
     json: async () => payload,
     text: async () => JSON.stringify(payload),
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function stubFetchError(status: number, detail: string) {
+  const body = { detail };
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: false,
+    status,
+    headers: { get: () => "application/json" },
+    json: async () => body,
+    text: async () => JSON.stringify(body),
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
@@ -89,5 +103,23 @@ describe("approval writers", () => {
     expect(url).toBe("/api/screenings/s1/letter");
     expect(init.method).toBe("PUT");
     expect(JSON.parse(init.body)).toEqual({ text: "Mine." });
+  });
+});
+
+// getScreeningLetter tells "no draft yet" apart from a real failure by
+// matching the server's exact 404 detail string (see the comment at its
+// call site in client.ts) — request() throws a plain Error with no status
+// attached, so the string is all it has to go on. These pin that match so
+// a wording change on either end fails loudly instead of turning every
+// letter panel into an error state.
+describe("getScreeningLetter — 404 detail matching", () => {
+  it("resolves to null when the 404 detail is exactly the no-draft-yet message", async () => {
+    stubFetchError(404, "No cover letter drafted yet.");
+    await expect(getScreeningLetter("s1")).resolves.toBeNull();
+  });
+
+  it("rejects on a non-404 failure instead of treating it as no draft", async () => {
+    stubFetchError(500, "Database unavailable.");
+    await expect(getScreeningLetter("s1")).rejects.toThrow("Database unavailable.");
   });
 });

@@ -210,7 +210,15 @@ describe("ApprovalsPage cover letter", () => {
     expect(await screen.findByText(/not checked/)).toBeTruthy();
   });
 
-  it("shows the blocked claim's text when generation is refused by the guardrail", async () => {
+  // This module mocks ../api/client wholesale, so generateScreeningLetter
+  // here rejects with an already-composed Error — the mock stands in for
+  // whatever message errorDetailToMessage would have produced, it doesn't
+  // go through errorDetailToMessage. So this only proves the page renders
+  // an error it's handed verbatim, not that the guardrail-block message is
+  // composed correctly; that composition is pinned in errorDetail.test.ts
+  // ("object detail (guardrail block)"), which exercises errorDetailToMessage
+  // directly and unmocked.
+  it("renders the generation error message verbatim in the alert", async () => {
     vi.mocked(getScreeningLetter).mockResolvedValue(null);
     vi.mocked(generateScreeningLetter).mockRejectedValue(
       new Error(
