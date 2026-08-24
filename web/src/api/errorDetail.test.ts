@@ -36,6 +36,43 @@ describe("errorDetailToMessage — array detail", () => {
   });
 });
 
+describe("errorDetailToMessage — object detail (guardrail block)", () => {
+  it("renders the message plus each blocked claim's text", () => {
+    const body = {
+      detail: {
+        message: "The letter was blocked by the truthfulness guardrail.",
+        blockedReason: "unverifiable",
+        blockedClaims: [
+          { scope_id: "para-1", text: "Led a team of 50 engineers.", tokens: ["50"] },
+        ],
+      },
+    };
+    expect(errorDetailToMessage(body)).toBe(
+      "The letter was blocked by the truthfulness guardrail. Blocked: Led a team of 50 engineers.",
+    );
+  });
+
+  it("joins multiple blocked claims with '; '", () => {
+    const body = {
+      detail: {
+        message: "Blocked.",
+        blockedClaims: [{ text: "Claim one." }, { text: "Claim two." }],
+      },
+    };
+    expect(errorDetailToMessage(body)).toBe("Blocked. Blocked: Claim one.; Claim two.");
+  });
+
+  it("renders just the message when there are no blocked claims", () => {
+    expect(errorDetailToMessage({ detail: { message: "Something went wrong." } })).toBe(
+      "Something went wrong.",
+    );
+  });
+
+  it("returns an empty string when the object has neither message nor blocked claims", () => {
+    expect(errorDetailToMessage({ detail: { blockedReason: "unverifiable" } })).toBe("");
+  });
+});
+
 describe("errorDetailToMessage — unparseable bodies", () => {
   it("returns an empty string for null", () => {
     expect(errorDetailToMessage(null)).toBe("");

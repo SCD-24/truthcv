@@ -210,6 +210,18 @@ describe("ApprovalsPage cover letter", () => {
     expect(await screen.findByText(/not checked/)).toBeTruthy();
   });
 
+  it("shows the blocked claim's text when generation is refused by the guardrail", async () => {
+    vi.mocked(getScreeningLetter).mockResolvedValue(null);
+    vi.mocked(generateScreeningLetter).mockRejectedValue(
+      new Error(
+        "The letter was blocked by the truthfulness guardrail. Blocked: Led a team of 50 engineers.",
+      ),
+    );
+    await renderPage([makeRecord()]);
+    fireEvent.click(await screen.findByRole("button", { name: /Generate cover letter/ }));
+    expect(await screen.findByText(/Led a team of 50 engineers\./)).toBeTruthy();
+  });
+
   it("says why Generate is unavailable when no posting text was captured", async () => {
     vi.mocked(getScreeningLetter).mockResolvedValue(null);
     await renderPage([makeRecord({ postingText: "" })]);
