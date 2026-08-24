@@ -98,6 +98,66 @@ def test_update_unknown_returns_404(client):
     assert client.put("/api/applications/nope", json={"company": "X"}).status_code == 404
 
 
+def test_create_round_trips_role_ats_capture_method_gaps_and_profile(client):
+    """`ApplicationModel` once declared only thirteen of the eighteen EDITABLE
+    fields, so Pydantic's default extra="ignore" silently dropped these five
+    from every response. Guard the full set end to end: set on create, present
+    on the create response, and present again on a subsequent list/GET.
+    """
+    r = client.post(
+        "/api/applications",
+        json={
+            "company": "Nagarro",
+            "role": "Staff Engineer",
+            "ats": "Greenhouse",
+            "captureMethod": "extension",
+            "gapsDisclosed": ["employment-gap-2021"],
+            "profile": "backend",
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    app_id = body["id"]
+    assert body["role"] == "Staff Engineer"
+    assert body["ats"] == "Greenhouse"
+    assert body["captureMethod"] == "extension"
+    assert body["gapsDisclosed"] == ["employment-gap-2021"]
+    assert body["profile"] == "backend"
+
+    listed = client.get("/api/applications").json()
+    saved = next(a for a in listed if a["id"] == app_id)
+    assert saved["role"] == "Staff Engineer"
+    assert saved["ats"] == "Greenhouse"
+    assert saved["captureMethod"] == "extension"
+    assert saved["gapsDisclosed"] == ["employment-gap-2021"]
+    assert saved["profile"] == "backend"
+
+
+def test_update_patches_role_ats_capture_method_gaps_and_profile(client):
+    """Same class of bug, one hop earlier: `ApplicationUpdate` must declare
+    these fields or a PATCH-style client update silently loses them.
+    """
+    app_id = client.post("/api/applications", json={"company": "Acme"}).json()["id"]
+
+    r = client.put(
+        f"/api/applications/{app_id}",
+        json={
+            "role": "Data Engineer",
+            "ats": "Lever",
+            "captureMethod": "manual",
+            "gapsDisclosed": ["career-break-2022"],
+            "profile": "data",
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["role"] == "Data Engineer"
+    assert body["ats"] == "Lever"
+    assert body["captureMethod"] == "manual"
+    assert body["gapsDisclosed"] == ["career-break-2022"]
+    assert body["profile"] == "data"
+
+
 # --- Edited-document guardrail -------------------------------------------------
 
 def test_manual_cv_edit_is_trusted_and_saved(client):

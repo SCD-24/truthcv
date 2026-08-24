@@ -515,6 +515,11 @@ class ApplicationModel(_Camel):
     application_date: str = ""
     status: str = ""
     notes: str = ""
+    role: str = ""
+    ats: str = ""
+    capture_method: str = ""
+    gaps_disclosed: list[str] = Field(default_factory=list)
+    profile: str = ""
     cv_document: ApplicationDocument | None = None
     cover_letter_document: ApplicationDocument | None = None
     created_at: str = ""
@@ -538,6 +543,11 @@ class ApplicationCreate(_Camel):
     application_date: str = ""
     status: str = ""
     notes: str = ""
+    role: str = ""
+    ats: str = ""
+    capture_method: str = ""
+    gaps_disclosed: list[str] = Field(default_factory=list)
+    profile: str = ""
 
 
 class ApplicationUpdate(_Camel):
@@ -556,6 +566,11 @@ class ApplicationUpdate(_Camel):
     application_date: str | None = None
     status: str | None = None
     notes: str | None = None
+    role: str | None = None
+    ats: str | None = None
+    capture_method: str | None = None
+    gaps_disclosed: list[str] | None = None
+    profile: str | None = None
 
 
 class SaveCvRequest(_Camel):
