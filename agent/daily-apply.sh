@@ -243,6 +243,18 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     if [[ -n "$BOARDS" ]]; then
       PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$BOARDS"$'\n'
     fi
+
+    # Add composed search queries (deterministic entry points, not a boundary
+    # on discovery): built from each enabled profile's keywords, locations
+    # and preferred sources. The agent may open them with WebSearch or the
+    # browser as it prefers; free-form WebSearch remains available alongside
+    # them.
+    QUERIES="$(jq -r '.searchQueries[]? | "  - [\(.profile)] \(.source): \(.query)\n    \(.url)"' <<<"$JOB_CONFIG")"
+    if [[ -n "$QUERIES" ]]; then
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Composed search queries (deterministic entry points from keywords/locations/preferred sources; use WebSearch or the browser, free-form search still applies too):"$'\n'
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$QUERIES"$'\n'
+    fi
+
     PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Cooldown days (stale company filter): $(jq -r '.cooldownDays // "not configured"' <<<"$JOB_CONFIG")"$'\n'
 
     # Render each profile's full criteria: name, employment country, remote

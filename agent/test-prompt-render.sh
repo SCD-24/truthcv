@@ -6,6 +6,9 @@
 # Also asserts the per-run application cap: config's maxApplicationsPerRun
 # wins over MAX_APPLICATIONS_PER_RUN when present, and the cap line is
 # omitted entirely when neither source supplies one.
+# Also asserts the composed search-queries block: present with both query
+# strings and URLs when job_config carries searchQueries, and absent
+# (byte-identical prompt) when searchQueries is omitted.
 
 set -euo pipefail
 
@@ -200,6 +203,48 @@ if [[ "$MODE_SEMI" == *"FULL AUTO"* ]] || [[ "$MODE_FULL" == *"SEMI-AUTO"* ]]; t
   exit 1
 fi
 echo "PASS: SEMI-AUTO and FULL AUTO never both appear"
+
+# --- Composed search-queries block ------------------------------------------
+# Mirrors daily-apply.sh's QUERIES rendering verbatim (see "Add composed
+# search queries" there), so a divergence between this simulation and the
+# real script is a bug in one of the two, not just here.
+
+# Case 10: searchQueries present renders both query strings and URLs.
+echo "Testing: composed search queries render into prompt..."
+QUERIES_CONFIG='{"profiles":[{"name":"Senior Python"}],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":null,"companyBoards":[],"searchQueries":[{"profile":"Senior Python","source":"jobs.ashbyhq.com","query":"site:jobs.ashbyhq.com \"platform engineer\"","url":"https://www.google.com/search?q=site%3Ajobs.ashbyhq.com+%22platform+engineer%22&tbs=qdr:w"},{"profile":"Senior Python","source":"job-boards.greenhouse.io","query":"site:job-boards.greenhouse.io \"platform engineer\"","url":"https://www.google.com/search?q=site%3Ajob-boards.greenhouse.io+%22platform+engineer%22&tbs=qdr:w"}]}'
+QUERIES="$(jq -r '.searchQueries[]? | "  - [\(.profile)] \(.source): \(.query)\n    \(.url)"' <<<"$QUERIES_CONFIG")"
+if [[ -z "$QUERIES" ]]; then
+  echo "FAIL: expected a rendered queries block, got none"
+  exit 1
+fi
+if [[ "$QUERIES" != *'site:jobs.ashbyhq.com "platform engineer"'* ]] || [[ "$QUERIES" != *'site:job-boards.greenhouse.io "platform engineer"'* ]]; then
+  echo "FAIL: expected both composed query strings in rendered block"
+  exit 1
+fi
+if [[ "$QUERIES" != *"https://www.google.com/search?q=site%3Ajobs.ashbyhq.com"* ]] || [[ "$QUERIES" != *"https://www.google.com/search?q=site%3Ajob-boards.greenhouse.io"* ]]; then
+  echo "FAIL: expected both composed query URLs in rendered block"
+  exit 1
+fi
+echo "PASS: composed search queries render into prompt"
+
+# Case 11: searchQueries omitted leaves the prompt byte-identical to baseline.
+echo "Testing: omitted search queries leaves prompt unchanged..."
+PROMPT_FILE4="$TEST_DIR/prompt4.txt"
+BASELINE4="$TEST_DIR/baseline4.txt"
+echo "## Original RUNBOOK filters" > "$PROMPT_FILE4"
+echo "Apply to at most 5 role(s) this run." >> "$PROMPT_FILE4"
+cp "$PROMPT_FILE4" "$BASELINE4"
+
+NO_QUERIES_CONFIG='{"profiles":[],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":null,"companyBoards":[]}'
+QUERIES_NONE="$(jq -r '.searchQueries[]? | "  - [\(.profile)] \(.source): \(.query)\n    \(.url)"' <<<"$NO_QUERIES_CONFIG")"
+if [[ -n "$QUERIES_NONE" ]]; then
+  echo "$QUERIES_NONE" >> "$PROMPT_FILE4"
+fi
+if ! diff -q "$BASELINE4" "$PROMPT_FILE4" >/dev/null 2>&1; then
+  echo "FAIL: omitted searchQueries changed the prompt"
+  exit 1
+fi
+echo "PASS: omitted search queries leaves prompt unchanged"
 
 echo ""
 echo "All tests passed!"

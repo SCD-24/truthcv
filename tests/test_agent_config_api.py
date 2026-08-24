@@ -29,8 +29,65 @@ def test_get_returns_defaults(client, data_dir):
         "maxApplicationsPerRun": None,
         "companyBoards": [],
         "mode": "full",
+        "searchQueries": [],
     }
     assert r.json() == expected
+
+
+def test_search_queries_populated_after_put_of_enabled_profile(client, data_dir):
+    """searchQueries is empty with no profiles, non-empty after an enabled,
+    keyword-bearing profile is PUT — and the PUT itself is not rejected by
+    AgentConfigUpdate's extra='forbid' (search_queries is response-only)."""
+    assert client.get("/api/agent/config").json()["searchQueries"] == []
+
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "profiles": [
+                {
+                    "name": "Senior Python",
+                    "enabled": True,
+                    "keywords": ["platform engineer"],
+                    "locations": ["Berlin"],
+                    "preferredSources": ["ashby"],
+                }
+            ]
+        },
+    )
+    assert r.status_code == 200
+
+    got = client.get("/api/agent/config").json()
+    assert got["searchQueries"] != []
+    assert got["searchQueries"][0]["query"].startswith("site:jobs.ashbyhq.com")
+
+
+def test_profile_search_fields_round_trip_through_put_and_get(client, data_dir):
+    """keywords, locations and preferredSources survive a PUT then GET round-trip
+    on the wire, under their camelCase aliases."""
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "profiles": [
+                {
+                    "name": "Senior Python",
+                    "enabled": True,
+                    "keywords": ["Python", "FastAPI"],
+                    "locations": ["Berlin", "Remote"],
+                    "preferredSources": ["ashby", "greenhouse.example.com"],
+                }
+            ]
+        },
+    )
+    assert r.status_code == 200
+    profile = r.json()["profiles"][0]
+    assert profile["keywords"] == ["Python", "FastAPI"]
+    assert profile["locations"] == ["Berlin", "Remote"]
+    assert profile["preferredSources"] == ["ashby", "greenhouse.example.com"]
+
+    got_profile = client.get("/api/agent/config").json()["profiles"][0]
+    assert got_profile["keywords"] == ["Python", "FastAPI"]
+    assert got_profile["locations"] == ["Berlin", "Remote"]
+    assert got_profile["preferredSources"] == ["ashby", "greenhouse.example.com"]
 
 
 def test_put_merges_partial(client, data_dir):
