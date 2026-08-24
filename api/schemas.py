@@ -596,6 +596,8 @@ class ScreeningModel(_Camel):
     reason: str = ""
     cooldown_expires: str = ""
     source: str = ""
+    posting_text: str = ""
+    posted_date: str = ""
     approval: str = ""
     apply_attempts: int = 0
     apply_error: str = ""
@@ -689,6 +691,8 @@ class ScreeningCreate(_Camel):
     reason: str = ""
     cooldown_expires: str = ""
     source: str = ""
+    posting_text: str = ""
+    posted_date: str = ""
 
 
 class CooldownResult(_Camel):
