@@ -381,18 +381,6 @@ export function bulkSetApproval(
   });
 }
 
-/** Company-level trust: clears deferral blockers, never skips role screening. */
-export function setCompanyApproval(
-  company: string,
-  approved: boolean,
-): Promise<{ company: string; approved: boolean }> {
-  return request("/api/company-boards/" + encodeURIComponent(company), {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ approved }),
-  });
-}
-
 /** Whether `company` (optionally narrowed by `role`) is currently in cooldown. */
 export function getCooldown(company: string, role?: string): Promise<CooldownStatus> {
   const params = new URLSearchParams({ company });

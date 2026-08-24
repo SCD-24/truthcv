@@ -12,7 +12,6 @@ import {
   generateScreeningLetter,
   getScreeningLetter,
   saveScreeningLetter,
-  setCompanyApproval,
   setScreeningApproval,
   setScreeningUrl,
 } from "./client";
@@ -74,16 +73,6 @@ describe("approval writers", () => {
     expect(init.method).toBe("PATCH");
     expect(init.headers["Content-Type"]).toBe("application/json");
     expect(JSON.parse(init.body)).toEqual({ url: "https://x.example/job" });
-  });
-
-  it("setCompanyApproval PATCHes JSON with the JSON content type", async () => {
-    const fetchMock = stubFetch({ company: "n8n", approved: true });
-    await setCompanyApproval("n8n", true);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/api/company-boards/n8n");
-    expect(init.method).toBe("PATCH");
-    expect(init.headers["Content-Type"]).toBe("application/json");
-    expect(JSON.parse(init.body)).toEqual({ approved: true });
   });
 
   it("generateScreeningLetter POSTs JSON with the JSON content type", async () => {

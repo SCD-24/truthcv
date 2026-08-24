@@ -50,7 +50,6 @@ from providers import (
     reset_provider,
 )
 from providers.base import supports_effort_levels
-from companyboards import store as companyboards_store
 from screening import store as screening_store
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
@@ -63,8 +62,6 @@ from .schemas import (
     ApprovalUpdate,
     BulkApprovalResult,
     BulkApprovalUpdate,
-    CompanyApprovalUpdate,
-    CompanyBoardModel,
     CoverLetterDraftModel,
     LetterGenerateRequest,
     LetterSaveRequest,
@@ -305,25 +302,6 @@ def save_screening_letter(
         source="operator",
     )
     return _draft_model(letter_store.save(screening_id, draft))
-
-
-@router.patch("/company-boards/{company}", response_model=CompanyBoardModel)
-def set_company_approval(company: str, body: CompanyApprovalUpdate) -> CompanyBoardModel:
-    """Grant or revoke company-level trust.
-
-    Weaker than approving a posting: it clears the blockers that caused a
-    deferral, and never skips per-role screening. Recording the decision does
-    not require a resolved careers board — most queued companies were screened
-    from a posting URL and have none.
-    """
-    entry = companyboards_store.set_approved(company, body.approved)
-    return CompanyBoardModel(
-        company=entry.company,
-        careers_url=entry.careers_url,
-        ats=entry.ats,
-        status=entry.status,
-        approved=entry.approved,
-    )
 
 
 @router.delete("/screenings/{screening_id}", status_code=204)
