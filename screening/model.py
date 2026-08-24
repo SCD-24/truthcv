@@ -11,6 +11,28 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 VERDICT_VALUES = ("rejected", "passed", "deferred")
+
+
+def validate_verdict(verdict: str) -> str:
+    """Return the verdict lowercased, or raise ``ValueError`` if not a known one.
+
+    ``store.create`` routes a record into the operator's approval queue by
+    comparing this value against ``"deferred"``/``"passed"``, so an unrecognised
+    or empty verdict does not fail loudly — it silently produces a record the
+    operator never sees. Checked at the agent's boundary rather than in the
+    store, which stays lenient for the legacy importer.
+    """
+    cleaned = verdict.strip().casefold() if isinstance(verdict, str) else ""
+    if not cleaned:
+        raise ValueError(
+            "A verdict is required — without one the screening never reaches "
+            f"the operator's approval queue. Use one of: {', '.join(VERDICT_VALUES)}."
+        )
+    if cleaned not in VERDICT_VALUES:
+        raise ValueError(
+            f"Unknown verdict {verdict!r}. Use one of: {', '.join(VERDICT_VALUES)}."
+        )
+    return cleaned
 APPROVAL_VALUES = ("", "pending", "approved", "rejected", "applied")
 SOURCE_VALUES = ("agent", "imported", "manual")
 

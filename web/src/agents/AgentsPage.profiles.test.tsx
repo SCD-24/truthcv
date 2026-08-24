@@ -45,6 +45,7 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     cooldownDaysSameRole: null,
     cooldownDaysSameCompany: null,
     maxApplicationsPerRun: null,
+    maxPostingAgeDays: null,
     companyBoards: [],
     ...overrides,
   };
@@ -173,7 +174,7 @@ describe("AgentsPage profiles section", () => {
     // cooldownDays is deliberately absent: the cooldown windows' single
     // writer is Settings' Job search policy section.
     expect(Object.keys(body).sort()).toEqual(
-      ["maxApplicationsPerRun", "profiles"].sort(),
+      ["maxApplicationsPerRun", "maxPostingAgeDays", "profiles"].sort(),
     );
     expect(body).not.toHaveProperty("cooldownDays");
     expect(body).not.toHaveProperty("cooldownDaysSameRole");

@@ -392,14 +392,27 @@ export interface CompanyBoard {
 /** Running/idle status returned by the agent supervisor control server. */
 export interface AgentStatus {
   running: boolean;
+  /** True between a cancel request and the run's exit — the run is stopping,
+   * not still working. */
+  cancelling: boolean;
   lastStartedAt: string | null;
   lastFinishedAt: string | null;
   lastExitCode: number | null;
+  /** The last run ended because it was cancelled. Its non-zero exit code is
+   * expected, so it must not be reported as a failure. */
+  lastCancelled: boolean;
 }
 
 /** Result of triggering a run via POST /api/agent/run. */
 export interface AgentRunResult {
   started: boolean;
+  running: boolean;
+}
+
+/** Result of stopping a run via POST /api/agent/cancel. `cancelled` is false
+ * when there was nothing to cancel or a cancel was already under way. */
+export interface AgentCancelResult {
+  cancelled: boolean;
   running: boolean;
 }
 
@@ -420,6 +433,10 @@ export interface AgentConfig {
   cooldownDaysSameRole: number | null;
   cooldownDaysSameCompany: number | null;
   maxApplicationsPerRun: number | null;
+  /** Discovery freshness window in days: only consider postings published
+   * within this many days. null leaves it unset (the historical past-week
+   * search filter); 0 disables the window entirely. */
+  maxPostingAgeDays: number | null;
   readonly companyBoards: CompanyBoard[];
 }
 
@@ -440,6 +457,7 @@ export type AgentConfigUpdate = Partial<
     | "cooldownDaysSameRole"
     | "cooldownDaysSameCompany"
     | "maxApplicationsPerRun"
+    | "maxPostingAgeDays"
   >
 >;
 

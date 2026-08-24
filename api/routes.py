@@ -10,6 +10,7 @@ from __future__ import annotations
 import hmac
 import json
 import os
+from datetime import date
 import urllib.error
 import urllib.request
 
@@ -62,9 +63,12 @@ from .schemas import (
     ApprovalUpdate,
     BulkApprovalResult,
     BulkApprovalUpdate,
+    BulkDelete,
+    BulkDeleteResult,
     CoverLetterDraftModel,
     LetterGenerateRequest,
     LetterSaveRequest,
+    AgentCancelResult,
     AgentConfigUpdate,
     AgentLlmCredentials,
     AgentRunResult,
@@ -186,6 +190,63 @@ def bulk_set_approval(body: BulkApprovalUpdate) -> BulkApprovalResult:
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     return BulkApprovalResult(results=results)
+
+
+@router.post("/screenings/{screening_id}/applied", response_model=ApplicationModel, status_code=201)
+def mark_screening_applied(screening_id: str) -> ApplicationModel:
+    """Record that the operator applied to this posting by hand.
+
+    Creates the Applications row from what the screening already knows and
+    retires the queue item, so a manual application is tracked the same way an
+    agent-submitted one is. `submitted` is true and `capture_method` says the
+    operator did it, which is the only thing distinguishing the two afterwards.
+
+    409 rather than a second row when the screening has already been applied:
+    a double click must not create a duplicate application.
+    """
+    screening = screening_store.get(screening_id)
+    if screening is None:
+        raise HTTPException(status_code=404, detail="Screening not found.")
+    if screening.approval == "applied":
+        raise HTTPException(
+            status_code=409, detail="This screening has already been applied to."
+        )
+
+    app = app_store.create(
+        {
+            "company": screening.company,
+            "role": screening.role,
+            "application_url": screening.url,
+            "posting": screening.posting_text,
+            "submission_type": "Posting" if screening.url else "General",
+            "submitted": True,
+            "status": "Applied",
+            "application_date": date.today().isoformat(),
+            "capture_method": "manual",
+        }
+    )
+    screening_store.mark_applied(screening_id)
+    return _application_model(app)
+
+
+# Declared BEFORE /screenings/{screening_id} for the same reason as the route
+# above: otherwise "bulk-delete" binds as an id and this is unreachable.
+@router.post("/screenings/bulk-delete", response_model=BulkDeleteResult)
+def bulk_delete_screenings(body: BulkDelete) -> BulkDeleteResult:
+    """Delete many screenings in one write.
+
+    A POST rather than a DELETE because the id list is a body, and DELETE with
+    a body is not reliably carried by proxies. Ids that were already gone come
+    back in `missing` rather than failing the call: the common cause is two
+    tabs deleting the same row, and that is not an error worth losing the rest
+    of the batch over.
+    """
+    deleted = screening_store.delete_many(body.ids)
+    removed = set(deleted)
+    return BulkDeleteResult(
+        deleted=deleted,
+        missing=[i for i in body.ids if i not in removed],
+    )
 
 
 @router.patch("/screenings/{screening_id}", response_model=ScreeningModel)
@@ -938,8 +999,10 @@ def get_agent_config() -> AgentConfigModel:
         if board.company.strip().casefold() in {name.strip().casefold() for name in cfg.target_companies}
     ]
 
-    # Populate search_queries in response
-    data["search_queries"] = compose_queries(cfg.profiles)
+    # Populate search_queries in response. The freshness window is applied to
+    # the composed URLs here rather than stored on them, so changing the
+    # setting takes effect on the next fetch with no stored state to migrate.
+    data["search_queries"] = compose_queries(cfg.profiles, cfg.max_posting_age_days)
     
     return AgentConfigModel.model_validate(data)
 
@@ -1048,9 +1111,11 @@ def get_agent_status() -> AgentStatus:
     data = _forward_to_supervisor("/status", method="GET")
     return AgentStatus(
         running=data.get("running", False),
+        cancelling=data.get("cancelling", False),
         last_started_at=data.get("lastStartedAt"),
         last_finished_at=data.get("lastFinishedAt"),
         last_exit_code=data.get("lastExitCode"),
+        last_cancelled=data.get("lastCancelled", False),
     )
 
 
@@ -1065,6 +1130,22 @@ def post_agent_run() -> AgentRunResult:
     data = _forward_to_supervisor("/run", method="POST")
     return AgentRunResult(
         started=data.get("started", False),
+        running=data.get("running", False),
+    )
+
+
+@router.post("/agent/cancel", response_model=AgentCancelResult)
+def post_agent_cancel() -> AgentCancelResult:
+    """Stop the run in progress via the supervisor control server.
+
+    Fire-and-forget, like the trigger: the supervisor signals the run's process
+    group and answers immediately, so the run may still be tearing down when
+    this returns. Poll GET /api/agent/status for the transition to idle.
+    Returns 503 when the agent container is unreachable.
+    """
+    data = _forward_to_supervisor("/cancel", method="POST")
+    return AgentCancelResult(
+        cancelled=data.get("cancelled", False),
         running=data.get("running", False),
     )
 
@@ -1133,6 +1214,10 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
             denied_texts=denied_texts,
             paragraphs=paragraphs,
             answers=answers,
+            # The operator's name from the Agents page signs the letter. Their
+            # truth-store profile name is the fallback, so a letter is never
+            # left unsigned just because that field has not been filled in.
+            sign_off_name=answers.name or load().profile.name,
         )
     except ProviderError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e

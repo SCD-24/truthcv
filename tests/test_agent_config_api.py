@@ -27,6 +27,7 @@ def test_get_returns_defaults(client, data_dir):
         "cooldownDaysSameRole": None,
         "cooldownDaysSameCompany": None,
         "maxApplicationsPerRun": None,
+        "maxPostingAgeDays": None,
         "companyBoards": [],
         "mode": "full",
         "searchQueries": [],
@@ -513,3 +514,59 @@ def test_put_ignores_enabled(client, data_dir):
     r = client.put("/api/agent/config", json={"enabled": False})
     assert r.status_code == 422
     assert client.get("/api/agent/config").json()["mode"] == "semi"
+
+
+# ---------------------------------------------------------------------------
+# maxPostingAgeDays — the discovery freshness window
+# ---------------------------------------------------------------------------
+
+class TestMaxPostingAgeDays:
+    def test_round_trips_through_put_and_get(self, client, data_dir):
+        r = client.put("/api/agent/config", json={"maxPostingAgeDays": 14})
+        assert r.status_code == 200
+        assert r.json()["maxPostingAgeDays"] == 14
+        assert client.get("/api/agent/config").json()["maxPostingAgeDays"] == 14
+
+    def test_zero_is_accepted_and_means_no_window(self, client, data_dir):
+        """0 is a real choice here, not a missing value — it disables the window."""
+        r = client.put("/api/agent/config", json={"maxPostingAgeDays": 0})
+        assert r.status_code == 200
+        assert r.json()["maxPostingAgeDays"] == 0
+
+    def test_null_does_not_clear_the_window(self, client, data_dir):
+        """This route merges with exclude_none, so null reads as "not sent" for
+        every field on it. Pinned here because the UI sends null for a blank
+        box: the way to stop filtering on age is 0, not blank."""
+        client.put("/api/agent/config", json={"maxPostingAgeDays": 30})
+        r = client.put("/api/agent/config", json={"maxPostingAgeDays": None})
+        assert r.status_code == 200
+        assert r.json()["maxPostingAgeDays"] == 30
+
+    def test_negative_is_rejected(self, client, data_dir):
+        assert client.put("/api/agent/config", json={"maxPostingAgeDays": -1}).status_code == 422
+
+    def test_absurd_value_is_rejected(self, client, data_dir):
+        """A typo'd 3650 must not read as a deliberate ten-year window."""
+        assert client.put("/api/agent/config", json={"maxPostingAgeDays": 3650}).status_code == 422
+
+    def test_defaults_to_null_when_never_configured(self, client, data_dir):
+        assert client.get("/api/agent/config").json()["maxPostingAgeDays"] is None
+
+    def test_window_reaches_the_composed_search_urls(self, client, data_dir):
+        """The setting is only useful if it lands on the URLs the agent opens."""
+        client.put(
+            "/api/agent/config",
+            json={
+                "maxPostingAgeDays": 3,
+                "profiles": [{"name": "p", "enabled": True, "keywords": ["backend"]}],
+            },
+        )
+        queries = client.get("/api/agent/config").json()["searchQueries"]
+        assert queries
+        assert all("tbs=qdr:d3" in q["url"] for q in queries)
+
+    def test_omitting_the_field_leaves_a_stored_window_untouched(self, client, data_dir):
+        """PUT merges: an unrelated edit must not clear the window."""
+        client.put("/api/agent/config", json={"maxPostingAgeDays": 21})
+        client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
+        assert client.get("/api/agent/config").json()["maxPostingAgeDays"] == 21

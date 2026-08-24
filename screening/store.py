@@ -102,6 +102,25 @@ def delete(screening_id: str) -> bool:
     return True
 
 
+def delete_many(screening_ids: list[str]) -> list[str]:
+    """Remove several screenings in one read-modify-write; returns the ids removed.
+
+    Not a loop over ``delete``: that reloads and rewrites the whole file per id,
+    which is quadratic over a selection and leaves the list half-deleted if the
+    process dies midway. One write also means a concurrent agent run can only
+    observe the selection as wholly present or wholly gone.
+    """
+    wanted = set(screening_ids)
+    if not wanted:
+        return []
+    screenings = load_all()
+    removed = [s.id for s in screenings if s.id in wanted]
+    if not removed:
+        return []
+    _write_all([s for s in screenings if s.id not in wanted])
+    return removed
+
+
 def set_approval(screening_id: str, approval: str) -> Screening | None:
     """Set a screening's approval state — the operator's decision, never the agent's.
 

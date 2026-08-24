@@ -40,6 +40,7 @@ function makeConfig(): AgentConfig {
     cooldownDaysSameRole: null,
     cooldownDaysSameCompany: null,
     maxApplicationsPerRun: null,
+    maxPostingAgeDays: null,
     companyBoards: [],
   };
 }

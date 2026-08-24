@@ -42,6 +42,7 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     cooldownDaysSameRole: null,
     cooldownDaysSameCompany: null,
     maxApplicationsPerRun: null,
+    maxPostingAgeDays: null,
     companyBoards: [],
     ...overrides,
   };
@@ -88,9 +89,11 @@ function makeRouting(overrides: Partial<Routing> = {}): Routing {
 function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
   return {
     running: false,
+    cancelling: false,
     lastStartedAt: null,
     lastFinishedAt: null,
     lastExitCode: null,
+    lastCancelled: false,
     ...overrides,
   };
 }

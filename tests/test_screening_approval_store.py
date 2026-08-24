@@ -88,3 +88,67 @@ def test_mark_applied(data_dir):
     s = store.create({"company": "Grafana", "verdict": "deferred"})
     store.set_approval(s.id, "approved")
     assert store.mark_applied(s.id).approval == "applied"
+
+
+# ---------------------------------------------------------------------------
+# delete_many
+# ---------------------------------------------------------------------------
+
+class TestDeleteMany:
+    """One write for a whole selection, rather than a loop over delete()."""
+
+    def _three(self):
+        from screening import store
+
+        return [
+            store.create({"company": f"Co{i}", "role": "Engineer", "url": f"https://e.com/{i}"})
+            for i in range(3)
+        ]
+
+    def test_removes_every_named_id(self, data_dir):
+        from screening import store
+
+        a, b, c = self._three()
+        removed = store.delete_many([a.id, c.id])
+        assert sorted(removed) == sorted([a.id, c.id])
+        assert [s.id for s in store.load_all()] == [b.id]
+
+    def test_returns_only_ids_that_existed(self, data_dir):
+        from screening import store
+
+        a, _, _ = self._three()
+        assert store.delete_many([a.id, "never-existed"]) == [a.id]
+
+    def test_empty_list_is_a_no_op(self, data_dir):
+        from screening import store
+
+        self._three()
+        assert store.delete_many([]) == []
+        assert len(store.load_all()) == 3
+
+    def test_all_unknown_ids_writes_nothing(self, data_dir):
+        """No write at all when nothing matches — not a rewrite of the same list."""
+        from screening import store
+
+        self._three()
+        before = store.screenings_path().read_text(encoding="utf-8")
+        assert store.delete_many(["nope", "also-nope"]) == []
+        assert store.screenings_path().read_text(encoding="utf-8") == before
+
+    def test_duplicate_ids_delete_once(self, data_dir):
+        from screening import store
+
+        a, b, _ = self._three()
+        assert store.delete_many([a.id, a.id]) == [a.id]
+        assert b.id in [s.id for s in store.load_all()]
+
+    def test_survivors_keep_their_fields(self, data_dir):
+        """The rewrite must not flatten the records it keeps."""
+        from screening import store
+
+        a, b, _ = self._three()
+        store.delete_many([a.id])
+        kept = store.get(b.id)
+        assert kept is not None
+        assert kept.company == "Co1"
+        assert kept.url == "https://e.com/1"

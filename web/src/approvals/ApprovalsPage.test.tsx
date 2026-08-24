@@ -3,9 +3,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
+  bulkDeleteScreenings,
   bulkSetApproval,
+  deleteScreening,
   generateScreeningLetter,
   getScreeningLetter,
+  markScreeningApplied,
   listAppliedScreenings,
   listApprovedApplications,
   listDidNotPass,
@@ -17,7 +20,7 @@ import {
   setScreeningUrl,
 } from "../api/client";
 import type { ScreeningRecord } from "../api/types";
-import { ApprovalsPage } from "./ApprovalsPage";
+import { ApprovalsPage, byDateDesc, orderingDate } from "./ApprovalsPage";
 
 vi.mock("../api/client", () => ({
   listPendingApprovals: vi.fn(),
@@ -27,10 +30,13 @@ vi.mock("../api/client", () => ({
   listAppliedScreenings: vi.fn(),
   setScreeningApproval: vi.fn(),
   bulkSetApproval: vi.fn(),
+  bulkDeleteScreenings: vi.fn(),
+  deleteScreening: vi.fn(),
   setScreeningUrl: vi.fn(),
   setScreeningPostingText: vi.fn(),
   getScreeningLetter: vi.fn(),
   generateScreeningLetter: vi.fn(),
+  markScreeningApplied: vi.fn(),
   saveScreeningLetter: vi.fn(),
 }));
 
@@ -447,5 +453,201 @@ describe("ApprovalsPage applied tab", () => {
     expect(screen.queryByRole("button", { name: /^reject$/i })).toBeNull();
     expect(screen.queryAllByRole("button", { name: "Move to approvals" }).length).toBe(0);
     expect(screen.queryByRole("button", { name: /save url/i })).toBeNull();
+  });
+});
+
+describe("deleting rejected postings", () => {
+  const rejectedPair = {
+    didNotPass: [
+      makeRecord({ id: "d1", company: "SumUp", verdict: "rejected", approval: "" }),
+    ],
+    rejected: [makeRecord({ id: "r1", company: "Pleo", approval: "rejected" })],
+  };
+
+  it("deletes one row and drops it from the tab", async () => {
+    vi.mocked(deleteScreening).mockResolvedValue(undefined);
+    await renderPage([], [], rejectedPair);
+    clickTab(/rejected \(2\)/i);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Delete SumUp/ }));
+
+    await waitFor(() => expect(deleteScreening).toHaveBeenCalledWith("d1"));
+    await waitFor(() => expect(screen.queryByText("SumUp")).toBeNull());
+    expect(screen.getByText("Pleo")).toBeTruthy();
+  });
+
+  it("bulk delete asks for confirmation before removing anything", async () => {
+    await renderPage([], [], rejectedPair);
+    clickTab(/rejected \(2\)/i);
+
+    fireEvent.click(await screen.findByLabelText("Select all rejected"));
+    fireEvent.click(screen.getByRole("button", { name: /Delete selected \(2\)/ }));
+
+    // The dialog is open, but nothing has been deleted yet.
+    expect(screen.getByText(/Delete 2 rejected postings\?/)).toBeTruthy();
+    expect(vi.mocked(bulkDeleteScreenings)).not.toHaveBeenCalled();
+  });
+
+  it("cancelling the dialog deletes nothing", async () => {
+    await renderPage([], [], rejectedPair);
+    clickTab(/rejected \(2\)/i);
+    fireEvent.click(await screen.findByLabelText("Select all rejected"));
+    fireEvent.click(screen.getByRole("button", { name: /Delete selected \(2\)/ }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(vi.mocked(bulkDeleteScreenings)).not.toHaveBeenCalled();
+    expect(screen.getByText("SumUp")).toBeTruthy();
+  });
+
+  it("confirming deletes the selection and clears the rows", async () => {
+    vi.mocked(bulkDeleteScreenings).mockResolvedValue({
+      deleted: ["d1", "r1"],
+      missing: [],
+    });
+    await renderPage([], [], rejectedPair);
+    clickTab(/rejected \(2\)/i);
+    fireEvent.click(await screen.findByLabelText("Select all rejected"));
+    fireEvent.click(screen.getByRole("button", { name: /Delete selected \(2\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() =>
+      expect(bulkDeleteScreenings).toHaveBeenCalledWith(["d1", "r1"]),
+    );
+    await waitFor(() => expect(screen.queryByText("SumUp")).toBeNull());
+    expect(screen.queryByText("Pleo")).toBeNull();
+  });
+
+  it("an already-deleted id still leaves the tab", async () => {
+    // Another tab removed it first: it must not linger as a row that is gone.
+    vi.mocked(bulkDeleteScreenings).mockResolvedValue({
+      deleted: ["d1"],
+      missing: ["r1"],
+    });
+    await renderPage([], [], rejectedPair);
+    clickTab(/rejected \(2\)/i);
+    fireEvent.click(await screen.findByLabelText("Select all rejected"));
+    fireEvent.click(screen.getByRole("button", { name: /Delete selected \(2\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(screen.queryByText("Pleo")).toBeNull());
+    expect(screen.queryByText("SumUp")).toBeNull();
+  });
+
+  it("the delete button is disabled until something is selected", async () => {
+    await renderPage([], [], rejectedPair);
+    clickTab(/rejected \(2\)/i);
+
+    const button = (await screen.findByRole("button", {
+      name: /Delete selected \(0\)/,
+    })) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
+
+  it("the Rejected selection is separate from the Found selection", async () => {
+    // Sharing one selection would delete rows ticked for a different action.
+    await renderPage([makeRecord({ id: "p1", company: "Camunda" })], [], rejectedPair);
+
+    fireEvent.click(screen.getByLabelText("Select Camunda"));
+    clickTab(/rejected \(2\)/i);
+
+    const button = (await screen.findByRole("button", {
+      name: /Delete selected \(0\)/,
+    })) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
+});
+
+describe("Found ordering", () => {
+  it("orders by the posting's own date, newest first", () => {
+    const rows = [
+      makeRecord({ id: "old", postedDate: "2026-04-09" }),
+      makeRecord({ id: "new", postedDate: "2026-07-16" }),
+      makeRecord({ id: "mid", postedDate: "2026-05-27" }),
+    ];
+    expect(byDateDesc(rows).map((r) => r.id)).toEqual(["new", "mid", "old"]);
+  });
+
+  it("falls back to screenedDate, then createdAt, when no posted date exists", () => {
+    expect(orderingDate(makeRecord({ postedDate: "2026-07-01", screenedDate: "2026-08-01" })))
+      .toBe("2026-07-01");
+    expect(orderingDate(makeRecord({ postedDate: "", screenedDate: "2026-08-01" })))
+      .toBe("2026-08-01");
+    expect(
+      orderingDate(
+        makeRecord({ postedDate: "", screenedDate: "", createdAt: "2026-08-24T18:00:00Z" }),
+      ),
+    ).toBe("2026-08-24T18:00:00Z");
+  });
+
+  it("does not mutate the array it is given", () => {
+    const rows = [
+      makeRecord({ id: "a", postedDate: "2026-04-09" }),
+      makeRecord({ id: "b", postedDate: "2026-07-16" }),
+    ];
+    byDateDesc(rows);
+    expect(rows.map((r) => r.id)).toEqual(["a", "b"]);
+  });
+
+  it("puts a record with no date at all last", () => {
+    const rows = [
+      makeRecord({ id: "none", postedDate: "", screenedDate: "", createdAt: "" }),
+      makeRecord({ id: "dated", postedDate: "2026-04-09" }),
+    ];
+    expect(byDateDesc(rows).map((r) => r.id)).toEqual(["dated", "none"]);
+  });
+
+  it("renders the Found tab newest first", async () => {
+    await renderPage([
+      makeRecord({ id: "old", company: "OldCo", postedDate: "2026-04-09" }),
+      makeRecord({ id: "new", company: "NewCo", postedDate: "2026-07-16" }),
+    ]);
+    const text = document.body.textContent ?? "";
+    expect(text.indexOf("NewCo")).toBeLessThan(text.indexOf("OldCo"));
+  });
+});
+
+describe("applying by hand from the Found tab", () => {
+  it("creates the application and drops the row from Found", async () => {
+    vi.mocked(markScreeningApplied).mockResolvedValue({ id: "app1" } as never);
+    await renderPage([
+      makeRecord({ id: "p1", company: "Camunda" }),
+      makeRecord({ id: "p2", company: "Pleo" }),
+    ]);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "I applied" })[0]);
+
+    await waitFor(() => expect(markScreeningApplied).toHaveBeenCalledWith("p1"));
+    await waitFor(() => expect(screen.queryByText("Camunda")).toBeNull());
+    expect(screen.getByText("Pleo")).toBeTruthy();
+  });
+
+  it("confirms where the posting went", async () => {
+    vi.mocked(markScreeningApplied).mockResolvedValue({ id: "app1" } as never);
+    await renderPage([makeRecord({ id: "p1", company: "Camunda" })]);
+
+    fireEvent.click(screen.getByRole("button", { name: "I applied" }));
+
+    expect(await screen.findByText("Added to the Applications page.")).toBeTruthy();
+  });
+
+  it("is available without a cover-letter draft, unlike Approve", async () => {
+    // The operator already applied; the draft gate does not apply to them.
+    await renderPage([makeRecord({ id: "p1", company: "Camunda" })]);
+
+    const applied = screen.getByRole("button", { name: "I applied" }) as HTMLButtonElement;
+    const approve = screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement;
+    expect(applied.disabled).toBe(false);
+    expect(approve.disabled).toBe(true);
+  });
+
+  it("keeps the row and surfaces the error when the call fails", async () => {
+    vi.mocked(markScreeningApplied).mockRejectedValue(new Error("already applied"));
+    await renderPage([makeRecord({ id: "p1", company: "Camunda" })]);
+
+    fireEvent.click(screen.getByRole("button", { name: "I applied" }));
+
+    await waitFor(() => expect(screen.getByText(/already applied/)).toBeTruthy());
+    expect(screen.getByText("Camunda")).toBeTruthy();
   });
 });

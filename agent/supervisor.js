@@ -4,7 +4,9 @@
 //
 // HTTP surface (all require X-Agent-Token header matching AGENT_API_TOKEN):
 //   POST /run    — trigger a run immediately; fire-and-forget
-//   GET  /status — return {running, lastStartedAt, lastFinishedAt, lastExitCode}
+//   POST /cancel — stop the run in progress; fire-and-forget
+//   GET  /status — return {running, cancelling, lastStartedAt, lastFinishedAt,
+//                          lastExitCode, lastCancelled}
 //
 // Scheduler: re-fetches schedule from agent-config.js every <=300 s, falls
 // back to RUN_AT/RUN_DAYS env. Mirrors entrypoint.sh seconds_until_next_slot.
@@ -30,13 +32,26 @@ const RUN_DAYS_DEFAULT = (process.env.RUN_DAYS || "1,2,3,4,5").trim();
 // ---------------------------------------------------------------------------
 // Running state
 // ---------------------------------------------------------------------------
-/** @type {{ running: boolean, lastStartedAt: string|null, lastFinishedAt: string|null, lastExitCode: number|null }} */
+/** @type {{ running: boolean, cancelling: boolean, lastStartedAt: string|null, lastFinishedAt: string|null, lastExitCode: number|null, lastCancelled: boolean }} */
 const runState = {
   running: false,
+  cancelling: false,
   lastStartedAt: null,
   lastFinishedAt: null,
   lastExitCode: null,
+  lastCancelled: false,
 };
+
+/** The daily-apply child of the run in progress, or null when idle. */
+let currentChild = null;
+
+/** SIGKILL escalation timer for a cancel in progress, so it can be cleared. */
+let killTimer = null;
+
+// How long a cancelled run gets to exit on SIGTERM before SIGKILL. The claude
+// CLI has MCP servers and a headful browser session to tear down, so this is
+// generous; the escalation exists for a wedged run, not a slow one.
+const CANCEL_GRACE_MS = parseInt(process.env.AGENT_CANCEL_GRACE_MS || "10000", 10);
 
 // ---------------------------------------------------------------------------
 // Schedule state
@@ -84,29 +99,90 @@ function doRun() {
 
   log(`=== run ${stamp} starting ===`);
   runState.running = true;
+  runState.cancelling = false;
+  runState.lastCancelled = false;
   runState.lastStartedAt = new Date().toISOString();
 
+  // detached: the run is a tree — daily-apply.sh, the claude CLI it execs, and
+  // the MCP servers claude spawns. Its own process group is what makes cancel
+  // able to reach all of them with one signal; signalling the shell alone would
+  // orphan claude, which is the process actually holding the browser session.
   const child = spawn(DAILY_APPLY, [], {
     stdio: "inherit",
     env: { ...process.env },
+    detached: true,
   });
+  currentChild = child;
 
-  child.on("close", (code) => {
-    const rc = code ?? 1;
-    log(`=== run ${stamp} finished rc=${rc} ===`);
+  /** Common teardown for both exit paths: never leave state mid-cancel. */
+  function settle(rc) {
+    if (killTimer !== null) {
+      clearTimeout(killTimer);
+      killTimer = null;
+    }
+    currentChild = null;
     runState.running = false;
+    runState.lastCancelled = runState.cancelling;
+    runState.cancelling = false;
     runState.lastFinishedAt = new Date().toISOString();
     runState.lastExitCode = rc;
+  }
+
+  // Shell convention for a signalled process: 128 + signal number. Node gives
+  // the name, not the number, and only the two this supervisor ever sends can
+  // appear here — anything else falls back to 1 rather than inventing a code.
+  const SIGNAL_EXIT_CODES = { SIGTERM: 143, SIGKILL: 137 };
+
+  child.on("close", (code, signal) => {
+    const rc = code ?? (signal ? (SIGNAL_EXIT_CODES[signal] ?? 1) : 1);
+    const how = runState.cancelling ? "cancelled" : "finished";
+    log(`=== run ${stamp} ${how} rc=${rc}${signal ? ` signal=${signal}` : ""} ===`);
+    settle(rc);
   });
 
   child.on("error", (err) => {
     log(`=== run ${stamp} spawn error: ${err.message} ===`);
-    runState.running = false;
-    runState.lastFinishedAt = new Date().toISOString();
-    runState.lastExitCode = 1;
+    settle(1);
   });
 
   return child;
+}
+
+/**
+ * Stop the run in progress by signalling its whole process group.
+ *
+ * Returns false when nothing is running or a cancel is already under way, so
+ * a double click on the operator's Cancel button is a no-op rather than a
+ * second SIGKILL escalation racing the first.
+ */
+function cancelRun() {
+  if (!runState.running || currentChild === null || runState.cancelling) {
+    return false;
+  }
+  const pid = currentChild.pid;
+  runState.cancelling = true;
+  log(`cancel requested — SIGTERM to process group ${pid}`);
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch (err) {
+    // ESRCH: the run exited between the status check and the signal. The close
+    // handler settles state either way, so this is not an error path.
+    log(`cancel: SIGTERM failed (${err.code || err.message})`);
+  }
+
+  killTimer = setTimeout(() => {
+    killTimer = null;
+    if (!runState.running || currentChild === null) return;
+    log(`cancel: still running after ${CANCEL_GRACE_MS}ms — SIGKILL`);
+    try {
+      process.kill(-currentChild.pid, "SIGKILL");
+    } catch (err) {
+      log(`cancel: SIGKILL failed (${err.code || err.message})`);
+    }
+  }, CANCEL_GRACE_MS);
+  killTimer.unref();
+
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +329,11 @@ const server = http.createServer((req, res) => {
     }
     doRun();
     return jsonReply(res, 200, { started: true, running: true });
+  }
+
+  if (req.method === "POST" && req.url === "/cancel") {
+    const cancelled = cancelRun();
+    return jsonReply(res, 200, { cancelled, running: runState.running });
   }
 
   jsonReply(res, 404, { detail: "Not found" });

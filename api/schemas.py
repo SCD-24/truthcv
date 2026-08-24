@@ -352,6 +352,7 @@ class AgentConfigModel(_Camel):
     cooldown_days_same_role: int | None = None
     cooldown_days_same_company: int | None = None
     max_applications_per_run: int | None = None
+    max_posting_age_days: int | None = None
     company_boards: list[CompanyBoardModel] = Field(default_factory=list)
     search_queries: list[SearchQueryModel] = Field(default_factory=list)
 
@@ -376,6 +377,7 @@ class AgentConfigUpdate(_Camel):
     cooldown_days_same_role: int | None = None
     cooldown_days_same_company: int | None = None
     max_applications_per_run: int | None = None
+    max_posting_age_days: int | None = None
 
     @field_validator("mode")
     @classmethod
@@ -447,6 +449,22 @@ class AgentConfigUpdate(_Camel):
             return v
         if v < 1:
             raise ValueError("maxApplicationsPerRun must be >= 1")
+        return v
+
+    @field_validator("max_posting_age_days")
+    @classmethod
+    def _validate_max_posting_age_days(cls, v: int | None) -> int | None:
+        """0 is meaningful here — it disables the window — so only negatives fail.
+
+        The upper bound stops a typo ("3650") from reading as a deliberate
+        choice to consider year-old postings.
+        """
+        if v is None:
+            return v
+        if v < 0:
+            raise ValueError("maxPostingAgeDays must be >= 0 (0 disables the window)")
+        if v > 365:
+            raise ValueError("maxPostingAgeDays must be <= 365")
         return v
 
     @field_validator("profiles")
@@ -723,6 +741,19 @@ class BulkApprovalResult(_Camel):
     results: list[dict] = []
 
 
+class BulkDelete(_Camel):
+    """POST /screenings/bulk-delete: remove many screenings in one call."""
+
+    ids: list[str] = []
+
+
+class BulkDeleteResult(_Camel):
+    """Which ids were actually removed, so an already-gone id is visible."""
+
+    deleted: list[str] = []
+    missing: list[str] = []
+
+
 class ScreeningCreate(_Camel):
     """Client-supplied fields for a new screening record.
 
@@ -840,15 +871,35 @@ class AgentStatus(_Camel):
     """GET /api/agent/status — forwarded from the supervisor.js control server."""
 
     running: bool
+    # True between a cancel request and the run's exit. The operator's Cancel
+    # button needs to distinguish "stopping" from "running", or a run that is
+    # slow to tear down reads as a cancel that did nothing.
+    cancelling: bool = False
     last_started_at: str | None = None
     last_finished_at: str | None = None
     last_exit_code: int | None = None
+    # Whether the last run ended because it was cancelled rather than on its
+    # own. Its non-zero exit code is expected in that case, so the UI must not
+    # report it as a failure.
+    last_cancelled: bool = False
 
 
 class AgentRunResult(_Camel):
     """POST /api/agent/run — forwarded from the supervisor.js control server."""
 
     started: bool
+    running: bool
+
+
+class AgentCancelResult(_Camel):
+    """POST /api/agent/cancel — forwarded from the supervisor.js control server.
+
+    ``cancelled`` is False when there was nothing to cancel, or when a cancel
+    was already under way; it is not an error, and ``running`` reports what the
+    supervisor still had in progress at the moment it answered.
+    """
+
+    cancelled: bool
     running: bool
 
 

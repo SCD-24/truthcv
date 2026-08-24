@@ -152,3 +152,123 @@ class TestPostAgentRun:
 
         assert r.status_code == 200
         assert captured_headers.get("X-agent-token") == "run-token-xyz"
+
+
+# ---------------------------------------------------------------------------
+# POST /api/agent/cancel
+# ---------------------------------------------------------------------------
+
+class TestPostAgentCancel:
+    def test_happy_path_cancelled_true(self, client, data_dir, monkeypatch):
+        """A run in progress is signalled: {cancelled:true, running:true}.
+
+        `running` stays true because the cancel is fire-and-forget — the run is
+        signalled, not yet reaped.
+        """
+        upstream = {"cancelled": True, "running": True}
+        monkeypatch.setenv("AGENT_API_TOKEN", "test-token-abc")
+        with patch("urllib.request.urlopen", return_value=_make_urlopen_response(upstream)):
+            r = client.post("/api/agent/cancel")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["cancelled"] is True
+        assert body["running"] is True
+
+    def test_nothing_running_returns_cancelled_false(self, client, data_dir, monkeypatch):
+        """Cancelling when idle is a no-op, not an error."""
+        upstream = {"cancelled": False, "running": False}
+        monkeypatch.setenv("AGENT_API_TOKEN", "test-token-abc")
+        with patch("urllib.request.urlopen", return_value=_make_urlopen_response(upstream)):
+            r = client.post("/api/agent/cancel")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["cancelled"] is False
+        assert body["running"] is False
+
+    def test_upstream_down_returns_503(self, client, data_dir, monkeypatch):
+        """Connection refused -> 503 with friendly detail."""
+        monkeypatch.setenv("AGENT_API_TOKEN", "test-token-abc")
+        with patch("urllib.request.urlopen", side_effect=_make_url_error()):
+            r = client.post("/api/agent/cancel")
+        assert r.status_code == 503
+        assert r.json()["detail"] == "Agent service unreachable"
+
+    def test_x_agent_token_forwarded_on_cancel(self, client, data_dir, monkeypatch):
+        """X-Agent-Token header carries AGENT_API_TOKEN when cancelling."""
+        monkeypatch.setenv("AGENT_API_TOKEN", "cancel-token-xyz")
+        upstream = {"cancelled": True, "running": True}
+
+        captured_headers = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured_headers.update(dict(req.headers))
+            return _make_urlopen_response(upstream)
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            r = client.post("/api/agent/cancel")
+
+        assert r.status_code == 200
+        assert captured_headers.get("X-agent-token") == "cancel-token-xyz"
+
+    def test_supervisor_path_is_cancel(self, client, data_dir, monkeypatch):
+        """The route forwards to the supervisor's /cancel, not /run."""
+        monkeypatch.setenv("AGENT_API_TOKEN", "test-token-abc")
+        upstream = {"cancelled": True, "running": True}
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            captured["method"] = req.get_method()
+            return _make_urlopen_response(upstream)
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            client.post("/api/agent/cancel")
+
+        assert captured["url"].endswith("/cancel")
+        assert captured["method"] == "POST"
+
+
+class TestAgentStatusCancelFields:
+    def test_cancelling_and_last_cancelled_forwarded(self, client, data_dir, monkeypatch):
+        """A stopping run reports cancelling; a cancelled one reports lastCancelled."""
+        upstream = {
+            "running": True,
+            "cancelling": True,
+            "lastStartedAt": "2024-01-15T10:00:00.000Z",
+            "lastFinishedAt": None,
+            "lastExitCode": None,
+            "lastCancelled": False,
+        }
+        monkeypatch.setenv("AGENT_API_TOKEN", "test-token-abc")
+        with patch("urllib.request.urlopen", return_value=_make_urlopen_response(upstream)):
+            r = client.get("/api/agent/status")
+        assert r.json()["cancelling"] is True
+
+        upstream = {
+            "running": False,
+            "cancelling": False,
+            "lastStartedAt": "2024-01-15T10:00:00.000Z",
+            "lastFinishedAt": "2024-01-15T10:04:00.000Z",
+            "lastExitCode": 143,
+            "lastCancelled": True,
+        }
+        with patch("urllib.request.urlopen", return_value=_make_urlopen_response(upstream)):
+            r = client.get("/api/agent/status")
+        body = r.json()
+        assert body["lastCancelled"] is True
+        assert body["lastExitCode"] == 143
+
+    def test_missing_cancel_fields_default_false(self, client, data_dir, monkeypatch):
+        """An older supervisor that sends neither field must not break status."""
+        upstream = {
+            "running": False,
+            "lastStartedAt": None,
+            "lastFinishedAt": None,
+            "lastExitCode": None,
+        }
+        monkeypatch.setenv("AGENT_API_TOKEN", "test-token-abc")
+        with patch("urllib.request.urlopen", return_value=_make_urlopen_response(upstream)):
+            r = client.get("/api/agent/status")
+        body = r.json()
+        assert body["cancelling"] is False
+        assert body["lastCancelled"] is False

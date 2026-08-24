@@ -6,6 +6,11 @@ import Checkbox from "@mui/material/Checkbox";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Collapse from "@mui/material/Collapse";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogContentText from "@mui/material/DialogContentText";
+import DialogTitle from "@mui/material/DialogTitle";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Link from "@mui/material/Link";
 import Paper from "@mui/material/Paper";
@@ -18,9 +23,12 @@ import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import { isCooldownActive } from "../settings/cooldown";
 import { cooldownBlockLabel } from "../screenings/ScreeningsPage";
 import {
+  bulkDeleteScreenings,
   bulkSetApproval,
+  deleteScreening,
   generateScreeningLetter,
   getScreeningLetter,
+  markScreeningApplied,
   listAppliedScreenings,
   listApprovedApplications,
   listDidNotPass,
@@ -309,6 +317,7 @@ function PendingCard({
   onToggle,
   onDecide,
   onSaveUrl,
+  onMarkApplied,
 }: {
   record: ScreeningRecord;
   checked: boolean;
@@ -316,6 +325,7 @@ function PendingCard({
   onToggle: (id: string) => void;
   onDecide: (id: string, approval: "approved" | "rejected") => void;
   onSaveUrl: (id: string, url: string) => void;
+  onMarkApplied: (id: string) => void;
 }) {
   // The server enforces this at approval time too (PATCH 409s with no draft
   // stored) — this only makes the reason visible before the click.
@@ -366,6 +376,18 @@ function PendingCard({
             onClick={() => onDecide(record.id, "rejected")}
           >
             Reject
+          </Button>
+          {/* The manual escape hatch: the operator applied themselves, so the
+              posting becomes an Applications row without the agent ever
+              submitting it. No cover-letter gate — they already applied. */}
+          <Button
+            variant="text"
+            size="small"
+            disabled={busy}
+            onClick={() => onMarkApplied(record.id)}
+            title="I applied to this myself — track it on the Applications page"
+          >
+            I applied
           </Button>
         </Stack>
       </Stack>
@@ -426,6 +448,46 @@ function ApprovedRow({
   );
 }
 
+/** The date a row is ordered by, newest first.
+
+ * `postedDate` is the posting's own publication date and the one that matters
+ * for "newest", but many boards publish none — so it falls back to when the
+ * agent screened it, then to when the record was written. Without the
+ * fallbacks every dateless posting would clump at one end regardless of how
+ * recently it was found.
+ */
+export function orderingDate(record: ScreeningRecord): string {
+  return record.postedDate || record.screenedDate || record.createdAt || "";
+}
+
+/** Newest first. Does not mutate the array it is given. */
+export function byDateDesc(records: ScreeningRecord[]): ScreeningRecord[] {
+  return [...records].sort((a, b) => {
+    const da = orderingDate(a);
+    const db = orderingDate(b);
+    if (da === db) return 0;
+    // ISO-8601 dates sort correctly as strings; a blank sorts last, which is
+    // only reachable when a record carries no date of any kind.
+    if (!da) return 1;
+    if (!db) return -1;
+    return da < db ? 1 : -1;
+  });
+}
+
+/** Chip styling that lets a long label wrap instead of forcing the row wide.
+ * MUI fixes a Chip's height and sets `white-space: nowrap` on its label, so a
+ * multi-hundred-character value overflows the viewport unless both are undone. */
+const WRAPPING_CHIP = {
+  maxWidth: "100%",
+  height: "auto",
+  "& .MuiChip-label": {
+    whiteSpace: "normal",
+    overflowWrap: "anywhere",
+    py: 0.5,
+    display: "block",
+  },
+} as const;
+
 /** A rejected or agent-filtered posting, reviewable and reversible: shows
  * why it was set aside and offers the one way back into the queue. When
  * ``rejectedLabel`` is set the row carries a provenance stamp saying who
@@ -433,23 +495,41 @@ function ApprovedRow({
 function ReviewRow({
   record,
   busy,
+  checked,
+  onToggle,
   onMoveToApprovals,
   onSaveUrl,
+  onDelete,
   rejectedLabel,
 }: {
   record: ScreeningRecord;
   busy: boolean;
+  checked: boolean;
+  onToggle: (id: string) => void;
   onMoveToApprovals: (id: string) => void;
   onSaveUrl: (id: string, url: string) => void;
+  onDelete: (id: string) => void;
   rejectedLabel?: string;
 }) {
   const active = isCooldownActive(record.cooldownExpires);
   return (
-    <Paper variant="outlined" sx={{ p: 2 }}>
-      <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+    <Paper variant="outlined" sx={{ p: 2, overflow: "hidden" }}>
+      <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start" }}>
+        <Checkbox
+          checked={checked}
+          onChange={() => onToggle(record.id)}
+          disabled={busy}
+          sx={{ mt: -1, ml: -1 }}
+          slotProps={{ input: { "aria-label": `Select ${record.company} ${record.role}` } }}
+        />
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="subtitle1">{record.company}</Typography>
-          <Typography variant="body2" sx={{ color: "text.secondary" }}>
+          <Typography variant="subtitle1" sx={{ overflowWrap: "anywhere" }}>
+            {record.company}
+          </Typography>
+          <Typography
+            variant="body2"
+            sx={{ color: "text.secondary", overflowWrap: "anywhere" }}
+          >
             {record.role}
           </Typography>
           <PostingUrl
@@ -466,24 +546,51 @@ function ReviewRow({
               sx={{ mt: 0.5 }}
             />
           ) : null}
-          <Stack direction="row" spacing={1} sx={{ mt: 0.5, alignItems: "center" }}>
-            {rejectedLabel ? <Chip size="small" label={rejectedLabel} /> : null}
-            {record.failingCriterion ? (
-              <Chip size="small" label={record.failingCriterion} />
+          {/* A failing criterion is free text the agent writes and runs to
+              several hundred characters. A Chip never wraps its label, so an
+              unwrapped one pushed the whole page sideways; these let it break
+              and grow instead. */}
+          <Stack
+            direction="row"
+            spacing={1}
+            sx={{ mt: 0.5, alignItems: "flex-start", flexWrap: "wrap", rowGap: 1 }}
+          >
+            {rejectedLabel ? (
+              <Chip size="small" label={rejectedLabel} sx={{ flexShrink: 0 }} />
             ) : null}
-            <Typography variant="body2" sx={{ color: "text.secondary" }}>
-              {record.reason}
-            </Typography>
+            {record.failingCriterion ? (
+              <Chip size="small" label={record.failingCriterion} sx={WRAPPING_CHIP} />
+            ) : null}
+            {record.reason ? (
+              <Typography
+                variant="body2"
+                sx={{ color: "text.secondary", minWidth: 0, overflowWrap: "anywhere" }}
+              >
+                {record.reason}
+              </Typography>
+            ) : null}
           </Stack>
         </Box>
-        <Button
-          variant="outlined"
-          size="small"
-          disabled={busy}
-          onClick={() => onMoveToApprovals(record.id)}
-        >
-          Move to approvals
-        </Button>
+        <Stack spacing={1} sx={{ flexShrink: 0 }}>
+          <Button
+            variant="outlined"
+            size="small"
+            disabled={busy}
+            onClick={() => onMoveToApprovals(record.id)}
+          >
+            Move to approvals
+          </Button>
+          <Button
+            variant="text"
+            size="small"
+            color="error"
+            disabled={busy}
+            onClick={() => onDelete(record.id)}
+            aria-label={`Delete ${record.company} ${record.role}`}
+          >
+            Delete
+          </Button>
+        </Stack>
       </Stack>
     </Paper>
   );
@@ -544,6 +651,9 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
   const [didNotPass, setDidNotPass] = useState<ScreeningRecord[]>([]);
   const [applied, setApplied] = useState<ScreeningRecord[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
+  const [rejectedSelected, setRejectedSelected] = useState<string[]>([]);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [appliedNotice, setAppliedNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -593,6 +703,56 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
   const toggleAll = () =>
     setSelected((s) => (s.length === pending.length ? [] : pending.map((r) => r.id)));
 
+  // The Rejected tab keeps its own selection. Sharing `selected` with Found
+  // would carry a selection across a tab switch and delete rows the operator
+  // ticked for a different action entirely.
+  const toggleRejected = (id: string) =>
+    setRejectedSelected((s) =>
+      s.includes(id) ? s.filter((x) => x !== id) : [...s, id],
+    );
+
+  const toggleAllRejected = () =>
+    setRejectedSelected((s) =>
+      s.length === rejectedRows.length ? [] : rejectedRows.map((r) => r.id),
+    );
+
+  /** Drop ids from whichever rejected list held them, plus the selection. */
+  function forgetRejected(ids: string[]) {
+    const gone = new Set(ids);
+    setRejected((rows) => rows.filter((r) => !gone.has(r.id)));
+    setDidNotPass((rows) => rows.filter((r) => !gone.has(r.id)));
+    setRejectedSelected((s) => s.filter((x) => !gone.has(x)));
+  }
+
+  async function deleteOne(id: string) {
+    setBusy(true);
+    setError("");
+    try {
+      await deleteScreening(id);
+      forgetRejected([id]);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteSelectedRejected() {
+    setBusy(true);
+    setError("");
+    try {
+      const { deleted, missing } = await bulkDeleteScreenings(rejectedSelected);
+      // A missing id is one another tab already removed: drop it from the list
+      // too, or it lingers as a row that no longer exists anywhere.
+      forgetRejected([...deleted, ...missing]);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+      setConfirmDelete(false);
+    }
+  }
+
   async function decide(id: string, approval: "approved" | "rejected") {
     setBusy(true);
     setError("");
@@ -630,6 +790,24 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
       else setRejected((rows) => [...moved, ...rows]);
       setSelected([]);
       if (failed.size) setError(`${failed.size} could not be updated.`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** The operator applied by hand: create the Applications row, retire the
+   * queue item. The row leaves Found because it is no longer a decision the
+   * operator owes the agent — it is a tracked application now. */
+  async function markApplied(id: string) {
+    setBusy(true);
+    setError("");
+    try {
+      await markScreeningApplied(id);
+      setPending((rows) => rows.filter((r) => r.id !== id));
+      setSelected((sel) => sel.filter((x) => x !== id));
+      setAppliedNotice("Added to the Applications page.");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -719,6 +897,18 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
           </Tabs>
 
           <QueuePanel value={tab} index={0}>
+            {/* Outside the empty-check: applying the last row empties the list,
+                which is exactly when the operator most needs telling where it
+                went. */}
+            {appliedNotice ? (
+              <Alert
+                severity="success"
+                sx={{ mb: 2 }}
+                onClose={() => setAppliedNotice("")}
+              >
+                {appliedNotice}
+              </Alert>
+            ) : null}
             {pending.length === 0 ? (
               <Typography variant="body1">Nothing waiting.</Typography>
             ) : (
@@ -751,7 +941,7 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
                     Reject selected
                   </Button>
                 </Stack>
-                {pending.map((r) => (
+                {byDateDesc(pending).map((r) => (
                   <PendingCard
                     key={r.id}
                     record={r}
@@ -760,6 +950,7 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
                     onToggle={toggle}
                     onDecide={decide}
                     onSaveUrl={saveUrl}
+                    onMarkApplied={markApplied}
                   />
                 ))}
               </Stack>
@@ -794,15 +985,47 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
               <Stack spacing={2}>
                 <Typography variant="body2" sx={{ color: "text.secondary" }}>
                   Postings set aside by the agent's criteria or by you. You can send
-                  either kind back to the queue.
+                  either kind back to the queue, or delete them for good.
                 </Typography>
+                <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={
+                          rejectedSelected.length === rejectedRows.length &&
+                          rejectedRows.length > 0
+                        }
+                        indeterminate={
+                          rejectedSelected.length > 0 &&
+                          rejectedSelected.length < rejectedRows.length
+                        }
+                        onChange={toggleAllRejected}
+                        disabled={busy}
+                        slotProps={{ input: { "aria-label": "Select all rejected" } }}
+                      />
+                    }
+                    label={`Select all (${rejectedRows.length})`}
+                  />
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    color="error"
+                    disabled={busy || rejectedSelected.length === 0}
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    Delete selected ({rejectedSelected.length})
+                  </Button>
+                </Stack>
                 {rejectedRows.map((r) => (
                   <ReviewRow
                     key={r.id}
                     record={r}
                     busy={busy}
+                    checked={rejectedSelected.includes(r.id)}
+                    onToggle={toggleRejected}
                     onMoveToApprovals={moveToApprovals}
                     onSaveUrl={saveUrl}
+                    onDelete={deleteOne}
                     rejectedLabel={
                       agentRejected.has(r.id) ? "Rejected by agent" : "Rejected by you"
                     }
@@ -810,6 +1033,29 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
                 ))}
               </Stack>
             )}
+            {/* Deletion is the one action on this page with no way back —
+                Move to approvals is reversible, this is not. */}
+            <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)}>
+              <DialogTitle>
+                Delete {rejectedSelected.length} rejected{" "}
+                {rejectedSelected.length === 1 ? "posting" : "postings"}?
+              </DialogTitle>
+              <DialogContent>
+                <DialogContentText>
+                  This removes the screening records for good, including the stored
+                  posting text. Their companies also stop being in cooldown, so a
+                  future run may find and screen these postings again.
+                </DialogContentText>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setConfirmDelete(false)} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button color="error" onClick={deleteSelectedRejected} disabled={busy}>
+                  Delete
+                </Button>
+              </DialogActions>
+            </Dialog>
           </QueuePanel>
 
           <QueuePanel value={tab} index={3}>

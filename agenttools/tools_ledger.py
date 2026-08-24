@@ -21,7 +21,9 @@ from applications.store import save_screening as _save_screening
 import applications.store as _apps_store
 import coverletter.store as _letter_store
 import screening.store as _screening_store
+from screening.company import validate_company_name as _validate_company_name
 from screening.cooldown import cooldown as _cooldown
+from screening.model import validate_verdict as _validate_verdict
 from screening.role import validate_role_title as _validate_role_title
 from screening.store import create as create_screening
 from screening.url import validate_posting_url as _validate_posting_url
@@ -104,6 +106,13 @@ def record_application(**fields) -> dict:
 def record_screening(
     url: str,
     role: str,
+    company: str,
+    verdict: str,
+    failing_criterion: str = "",
+    reason: str = "",
+    cooldown_expires: str = "",
+    source: str = "",
+    screened_date: str = "",
     posting_text: str = "",
     posted_date: str = "",
     **fields,
@@ -125,15 +134,45 @@ def record_screening(
     a value that looks like a URL or a posting body rather than a title; its
     ``ValueError`` is likewise left to propagate, so a call with no usable
     role title persists nothing.
+
+    ``company`` is mandatory for the same reason: cooldown matching, the
+    blocked-company list and the approval queue all key on the employer, so a
+    blank one makes the record unusable for every one of them. It is validated
+    by ``screening.company.validate_company_name``, which rejects placeholders
+    ("Unknown", "Confidential", an empty string) and pasted URLs.
+
+    ``verdict`` is mandatory and must be one of ``VERDICT_VALUES``. This is the
+    one field whose absence fails silently rather than loudly:
+    ``screening.store.create`` routes a record into the operator's queue by
+    comparing the verdict against "deferred"/"passed", so a blank or misspelled
+    one produces a stored record the operator never sees.
+
+    Every field above is named explicitly rather than left to ``**fields``,
+    because the MCP inputSchema is derived from this signature: a field absent
+    from it is invisible to the agent reading the schema, and one model will
+    pass it from the RUNBOOK's instructions while another will not. Unnamed,
+    ``company`` and ``verdict`` were left blank on 36 consecutive records and
+    none of them reached the approval queue. The optional fields are written
+    only when non-empty, so an omitted one never overwrites a stored value.
     """
     validated_url = _validate_posting_url(url)
     validated_role = _validate_role_title(role)
     fields["url"] = validated_url
     fields["role"] = validated_role
-    if posting_text:
-        fields["posting_text"] = posting_text
-    if posted_date:
-        fields["posted_date"] = posted_date
+    fields["company"] = _validate_company_name(company)
+    fields["verdict"] = _validate_verdict(verdict)
+    named = {
+        "failing_criterion": failing_criterion,
+        "reason": reason,
+        "cooldown_expires": cooldown_expires,
+        "source": source,
+        "screened_date": screened_date,
+        "posting_text": posting_text,
+        "posted_date": posted_date,
+    }
+    for name, value in named.items():
+        if value:
+            fields[name] = value
     screening = create_screening(fields)
     return screening.to_dict()
 
