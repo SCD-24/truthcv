@@ -27,6 +27,32 @@ from truth.answers import canonical_cv as _canonical_cv
 from truth.answers import load as _load_answers
 
 
+def _backfill_from_screening(fields: dict, screening_id: str) -> dict:
+    """Fill identity fields the caller left absent or empty from the screening.
+
+    An application recorded against an approved queue item should carry that
+    item's company, role, URL and posting so the Applications row is populated
+    without the agent having to repeat them. Caller-supplied non-empty values
+    always win; an unknown ``screening_id`` changes nothing (the caller's
+    fields stand, exactly as before this backfill existed).
+    """
+    if not screening_id:
+        return fields
+    s = _screening_store.get(screening_id)
+    if s is None:
+        return fields
+    inherited = {
+        "company": s.company,
+        "role": s.role,
+        "application_url": s.url,
+        "posting": s.posting_text,
+    }
+    for key, value in inherited.items():
+        if not fields.get(key):
+            fields[key] = value
+    return fields
+
+
 def record_application(**fields) -> dict:
     """Persist one tracked application with its full evidence trail.
 
@@ -52,7 +78,7 @@ def record_application(**fields) -> dict:
     screening = fields.pop("screening", None)
     attachments = fields.pop("attachments", None)
 
-    app = create_application(fields)
+    app = create_application(_backfill_from_screening(fields, screening_id))
 
     if fields_submitted is not None:
         values = [FieldSubmitted.from_dict(f) for f in fields_submitted]

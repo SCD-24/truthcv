@@ -284,6 +284,82 @@ def test_record_application_persists_the_whole_evidence_trail(data_dir):
     assert (attachment.kind, attachment.path) == ("cv", "cv_abc123.pdf")
 
 
+def _approve_screening(company: str, role: str, url: str) -> str:
+    """Create an approved screening and return its id."""
+    s = tools_ledger.record_screening(
+        company=company,
+        role=role,
+        url=url,
+        posting_text=f"{role} at {company}. Remote.",
+        verdict="deferred",
+        source="agent",
+    )
+    from screening import store as screening_store
+
+    screening_store.set_approval(s["id"], "approved")
+    return s["id"]
+
+
+def test_record_application_backfills_identity_from_the_screening(data_dir):
+    """An application recorded against a queue item inherits that item's
+    company, role, URL and posting — so the Applications row is populated
+    without the agent repeating them — and the screening retires to
+    approval='applied' as before."""
+    screening_id = _approve_screening(
+        "Acme Corp", "Senior Engineer", "https://acme.example/job/1"
+    )
+
+    created = tools_ledger.record_application(
+        screening_id=screening_id,
+        applied_date="2026-02-01",
+    )
+
+    reloaded = next(a for a in load_applications() if a.id == created["id"])
+    assert reloaded.company == "Acme Corp"
+    assert reloaded.role == "Senior Engineer"
+    assert reloaded.application_url == "https://acme.example/job/1"
+    assert reloaded.posting == "Senior Engineer at Acme Corp. Remote."
+
+    from screening.store import get as get_screening
+
+    assert get_screening(screening_id).approval == "applied"
+
+
+def test_record_application_caller_values_beat_the_screening(data_dir):
+    """Caller-supplied non-empty identity values always win over the
+    screening's — the backfill fills gaps only, never overrides."""
+    screening_id = _approve_screening(
+        "Acme Corp", "Senior Engineer", "https://acme.example/job/1"
+    )
+
+    created = tools_ledger.record_application(
+        screening_id=screening_id,
+        company="Acme Corporation Ltd",
+        application_url="https://acme.example/applied/42",
+        applied_date="2026-02-01",
+    )
+
+    reloaded = next(a for a in load_applications() if a.id == created["id"])
+    assert reloaded.company == "Acme Corporation Ltd"
+    assert reloaded.application_url == "https://acme.example/applied/42"
+    # Not supplied by the caller, so still inherited.
+    assert reloaded.role == "Senior Engineer"
+
+
+def test_record_application_with_unknown_screening_id_still_creates(data_dir):
+    """An unknown screening_id must not raise — the application is created
+    from what was passed, exactly as when no screening_id is given."""
+    created = tools_ledger.record_application(
+        screening_id="no-such-screening",
+        company="Solo Co",
+        applied_date="2026-02-01",
+    )
+
+    reloaded = next(a for a in load_applications() if a.id == created["id"])
+    assert reloaded.company == "Solo Co"
+    assert not reloaded.application_url
+
+
 def test_check_cooldown_agrees_with_the_http_route(data_dir):
     """check_cooldown delegates to the same screening.cooldown.cooldown as
     GET /api/cooldown, so the two surfaces must never disagree — proven here

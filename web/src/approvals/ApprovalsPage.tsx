@@ -6,11 +6,12 @@ import Checkbox from "@mui/material/Checkbox";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Collapse from "@mui/material/Collapse";
-import Divider from "@mui/material/Divider";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Link from "@mui/material/Link";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
+import Tab from "@mui/material/Tab";
+import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
@@ -18,6 +19,7 @@ import {
   bulkSetApproval,
   generateScreeningLetter,
   getScreeningLetter,
+  listAppliedScreenings,
   listApprovedApplications,
   listDidNotPass,
   listPendingApprovals,
@@ -147,28 +149,26 @@ function CoverLetterSection({
             </Button>
             <Typography variant="caption" sx={{ color: "text.secondary" }}>
               {draft.source === "generated"
-                ? "As generated — checked against your CV"
-                : "Edited by you — saved as written, not checked"}
+                ? "As generated — checked against your truth file before sending."
+                : "Your words — not checked against the truth file."}
             </Typography>
           </Stack>
         </Stack>
       ) : (
-        <Box sx={{ mt: 1 }}>
-          <Button
-            variant="outlined"
-            size="small"
-            disabled={busy || !record.postingText}
-            onClick={generate}
-          >
-            Generate cover letter
-          </Button>
-          {!record.postingText ? (
-            <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }}>
-              No posting text was captured for this screening — there is nothing to draft from.
-            </Typography>
-          ) : null}
-        </Box>
+        <Button
+          variant="outlined"
+          size="small"
+          disabled={busy || !record.postingText}
+          onClick={generate}
+        >
+          Generate cover letter
+        </Button>
       )}
+      {!draft && !record.postingText ? (
+        <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }}>
+          No posting text was captured for this screening — there is nothing to draft from.
+        </Typography>
+      ) : null}
     </Box>
   );
 }
@@ -331,15 +331,19 @@ function ApprovedRow({
 }
 
 /** A rejected or agent-filtered posting, reviewable and reversible: shows
- * why it was set aside and offers the one way back into the queue. */
+ * why it was set aside and offers the one way back into the queue. When
+ * ``rejectedLabel`` is set the row carries a provenance stamp saying who
+ * rejected it — the agent's filter or the operator's own decision. */
 function ReviewRow({
   record,
   busy,
   onMoveToApprovals,
+  rejectedLabel,
 }: {
   record: ScreeningRecord;
   busy: boolean;
   onMoveToApprovals: (id: string) => void;
+  rejectedLabel?: string;
 }) {
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
@@ -350,6 +354,7 @@ function ReviewRow({
             {record.role}
           </Typography>
           <Stack direction="row" spacing={1} sx={{ mt: 0.5, alignItems: "center" }}>
+            {rejectedLabel ? <Chip size="small" label={rejectedLabel} /> : null}
             {record.failingCriterion ? (
               <Chip size="small" label={record.failingCriterion} />
             ) : null}
@@ -371,17 +376,65 @@ function ReviewRow({
   );
 }
 
-/** The operator's approval queue: postings the agent deferred, and the ones
- * already approved but not yet applied to. */
+/** An applied queue item, settled into an application. Read-only here: its
+ * record lives on the Applications page, not in this queue. */
+function AppliedRow({ record }: { record: ScreeningRecord }) {
+  return (
+    <Paper variant="outlined" sx={{ p: 2 }}>
+      <Typography variant="subtitle2">
+        {record.company} — {record.role}
+      </Typography>
+      {record.url ? (
+        <Link href={record.url} target="_blank" rel="noreferrer" variant="body2">
+          {record.url}
+        </Link>
+      ) : null}
+      {record.screenedDate ? (
+        <Typography variant="body2" sx={{ color: "text.secondary" }}>
+          Screened {record.screenedDate}
+        </Typography>
+      ) : null}
+    </Paper>
+  );
+}
+
+/** One tab body. Inactive panels unmount rather than hide, so a hidden tab's
+ * PendingCards never mount — otherwise each would fetch a cover-letter draft
+ * the operator cannot see. */
+function QueuePanel({
+  value,
+  index,
+  children,
+}: {
+  value: number;
+  index: number;
+  children: React.ReactNode;
+}) {
+  if (value !== index) return null;
+  return (
+    <Box role="tabpanel" sx={{ mt: 2 }}>
+      {children}
+    </Box>
+  );
+}
+
+/** The operator's approval queue, as four tabs: what the agent found and
+ * deferred (Found), what is approved and waiting to be applied (Queued),
+ * what was set aside and why (Rejected), and what has already settled into
+ * tracked applications (Applied, read-only). Counts live in the labels so
+ * each queue's size is visible without switching to it; decisions move rows
+ * between the in-memory lists so the counts stay right without a refetch. */
 export function ApprovalsPage({ onBack }: { onBack: () => void }) {
   const [pending, setPending] = useState<ScreeningRecord[]>([]);
   const [approved, setApproved] = useState<ScreeningRecord[]>([]);
   const [rejected, setRejected] = useState<ScreeningRecord[]>([]);
   const [didNotPass, setDidNotPass] = useState<ScreeningRecord[]>([]);
+  const [applied, setApplied] = useState<ScreeningRecord[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [tab, setTab] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -390,13 +443,15 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
       listApprovedApplications(),
       listRejectedApprovals(),
       listDidNotPass(),
+      listAppliedScreenings(),
     ])
-      .then(([p, a, r, d]) => {
+      .then(([p, a, r, d, ap]) => {
         if (!live) return;
         setPending(p);
         setApproved(a);
         setRejected(r);
         setDidNotPass(d);
+        setApplied(ap);
       })
       .catch((e) => live && setError(String(e)))
       .finally(() => live && setLoading(false));
@@ -404,6 +459,20 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
       live = false;
     };
   }, []);
+
+  // The Rejected tab merges two sources: the agent's criterion rejections
+  // (never queued, empty approval) and the operator's own rejections.
+  // De-duplicated by id — the populations are disjoint in practice, but a
+  // record must never show twice if that ever changes. didNotPass wins the
+  // tie, labelling an overlap as agent-rejected.
+  const rejectedRows: ScreeningRecord[] = [];
+  const seenIds = new Set<string>();
+  for (const r of [...didNotPass, ...rejected]) {
+    if (seenIds.has(r.id)) continue;
+    seenIds.add(r.id);
+    rejectedRows.push(r);
+  }
+  const agentRejected = new Set(didNotPass.map((r) => r.id));
 
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
@@ -415,9 +484,13 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
     setBusy(true);
     setError("");
     try {
-      await setScreeningApproval(id, approval);
+      const updated = await setScreeningApproval(id, approval);
       setPending((rows) => rows.filter((r) => r.id !== id));
       setSelected((s) => s.filter((x) => x !== id));
+      // Move the row to the queue it just joined so the tab counts stay
+      // correct without a refetch.
+      if (approval === "approved") setApproved((rows) => [updated, ...rows]);
+      else setRejected((rows) => [updated, ...rows]);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -432,10 +505,16 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
       const { results } = await bulkSetApproval(selected, approval);
       const failed = new Set(results.filter((r) => !r.ok).map((r) => r.id));
       // Only clear the rows that actually changed: a partial failure must stay
-      // visible rather than disappearing as if it had been decided.
+      // visible rather than disappearing as if it had been decided. The rest
+      // move to the queue they joined so counts stay right without a refetch.
+      const moved = pending
+        .filter((r) => selected.includes(r.id) && !failed.has(r.id))
+        .map((r) => ({ ...r, approval }));
       setPending((rows) =>
         rows.filter((r) => !selected.includes(r.id) || failed.has(r.id)),
       );
+      if (approval === "approved") setApproved((rows) => [...moved, ...rows]);
+      else setRejected((rows) => [...moved, ...rows]);
       setSelected([]);
       if (failed.size) setError(`${failed.size} could not be updated.`);
     } catch (e) {
@@ -509,90 +588,122 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
 
       {loading ? (
         <CircularProgress />
-      ) : pending.length === 0 &&
-        approved.length === 0 &&
-        rejected.length === 0 &&
-        didNotPass.length === 0 ? (
-        <Typography variant="body1">Nothing waiting.</Typography>
       ) : (
-        <Stack spacing={2}>
-          {pending.length > 0 ? (
-            <>
-              <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={selected.length === pending.length && pending.length > 0}
-                      onChange={toggleAll}
-                      slotProps={{ input: { "aria-label": "Select all" } }}
-                    />
-                  }
-                  label="Select all"
-                />
-                <Button
-                  variant="contained"
-                  size="small"
-                  disabled={busy || selected.length === 0}
-                  onClick={() => decideSelected("approved")}
-                >
-                  Approve selected
-                </Button>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  disabled={busy || selected.length === 0}
-                  onClick={() => decideSelected("rejected")}
-                >
-                  Reject selected
-                </Button>
+        <>
+          <Tabs
+            value={tab}
+            onChange={(_, v: number) => setTab(v)}
+            aria-label="Approval queues"
+          >
+            <Tab label={`Found (${pending.length})`} />
+            <Tab label={`Queued (${approved.length})`} />
+            <Tab label={`Rejected (${rejectedRows.length})`} />
+            <Tab label={`Applied (${applied.length})`} />
+          </Tabs>
+
+          <QueuePanel value={tab} index={0}>
+            {pending.length === 0 ? (
+              <Typography variant="body1">Nothing waiting.</Typography>
+            ) : (
+              <Stack spacing={2}>
+                <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={selected.length === pending.length && pending.length > 0}
+                        onChange={toggleAll}
+                        slotProps={{ input: { "aria-label": "Select all" } }}
+                      />
+                    }
+                    label="Select all"
+                  />
+                  <Button
+                    variant="contained"
+                    size="small"
+                    disabled={busy || selected.length === 0}
+                    onClick={() => decideSelected("approved")}
+                  >
+                    Approve selected
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={busy || selected.length === 0}
+                    onClick={() => decideSelected("rejected")}
+                  >
+                    Reject selected
+                  </Button>
+                </Stack>
+                {pending.map((r) => (
+                  <PendingCard
+                    key={r.id}
+                    record={r}
+                    checked={selected.includes(r.id)}
+                    busy={busy}
+                    onToggle={toggle}
+                    onDecide={decide}
+                    onApproveCompany={approveCompany}
+                    onSaveUrl={saveUrl}
+                  />
+                ))}
               </Stack>
-              {pending.map((r) => (
-                <PendingCard
-                  key={r.id}
-                  record={r}
-                  checked={selected.includes(r.id)}
-                  busy={busy}
-                  onToggle={toggle}
-                  onDecide={decide}
-                  onApproveCompany={approveCompany}
-                  onSaveUrl={saveUrl}
-                />
-              ))}
-            </>
-          ) : (
-            <Typography variant="body1">Nothing waiting.</Typography>
-          )}
+            )}
+          </QueuePanel>
 
-          {approved.length > 0 ? (
-            <>
-              <Divider />
-              <Typography variant="subtitle1">Approved, not yet applied</Typography>
-              {approved.map((r) => (
-                <ApprovedRow key={r.id} record={r} busy={busy} onSaveUrl={saveUrl} />
-              ))}
-            </>
-          ) : null}
+          <QueuePanel value={tab} index={1}>
+            {approved.length === 0 ? (
+              <Typography variant="body1">Nothing queued.</Typography>
+            ) : (
+              <Stack spacing={2}>
+                <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                  Approved and waiting for the next scheduled run.
+                </Typography>
+                {approved.map((r) => (
+                  <ApprovedRow key={r.id} record={r} busy={busy} onSaveUrl={saveUrl} />
+                ))}
+              </Stack>
+            )}
+          </QueuePanel>
 
-          {didNotPass.length > 0 ? (
-            <>
-              <Divider />
-              <Typography variant="subtitle1">Did not pass</Typography>
-              {didNotPass.map((r) => (
-                <ReviewRow key={r.id} record={r} busy={busy} onMoveToApprovals={moveToApprovals} />
-              ))}
-            </>
-          ) : null}
+          <QueuePanel value={tab} index={2}>
+            {rejectedRows.length === 0 ? (
+              <Typography variant="body1">Nothing rejected.</Typography>
+            ) : (
+              <Stack spacing={2}>
+                <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                  Postings set aside by the agent's criteria or by you. You can send
+                  either kind back to the queue.
+                </Typography>
+                {rejectedRows.map((r) => (
+                  <ReviewRow
+                    key={r.id}
+                    record={r}
+                    busy={busy}
+                    onMoveToApprovals={moveToApprovals}
+                    rejectedLabel={
+                      agentRejected.has(r.id) ? "Rejected by agent" : "Rejected by you"
+                    }
+                  />
+                ))}
+              </Stack>
+            )}
+          </QueuePanel>
 
-          {rejected.length > 0 ? (
-            <>
-              <Divider />
-              <Typography variant="subtitle1">Rejected</Typography>
-              {rejected.map((r) => (
-                <ReviewRow key={r.id} record={r} busy={busy} onMoveToApprovals={moveToApprovals} />
-              ))}
-            </>
-          ) : null}
-        </Stack>
+          <QueuePanel value={tab} index={3}>
+            {applied.length === 0 ? (
+              <Typography variant="body1">Nothing applied yet.</Typography>
+            ) : (
+              <Stack spacing={2}>
+                <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                  These have been applied to — manage them on the Applications page.
+                </Typography>
+                {applied.map((r) => (
+                  <AppliedRow key={r.id} record={r} />
+                ))}
+              </Stack>
+            )}
+          </QueuePanel>
+        </>
       )}
     </Box>
   );
