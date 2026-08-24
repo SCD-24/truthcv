@@ -616,6 +616,38 @@ class ApprovalUpdate(_Camel):
     url: str | None = None
 
 
+class CoverLetterDraftModel(_Camel):
+    """A screening's current cover letter draft.
+
+    `source` says whether the guardrail vouches for this text: "generated" is
+    exactly what generate_cover_letter produced and validated, "operator" is
+    text a human wrote, which is saved verbatim and never validated.
+    """
+
+    text: str = ""
+    paragraphs: list[dict] = Field(default_factory=list)
+    source: str = "generated"
+    updated_at: str = ""
+
+
+class LetterGenerateRequest(_Camel):
+    """POST /screenings/{id}/letter: draft from the stored posting text.
+
+    `force` is the operator's explicit "discard my edits and redraft"; without
+    it, regenerating over text a human wrote is refused.
+    """
+
+    force: bool = False
+    tone: str = "Professional"
+    length: str = "Standard"
+
+
+class LetterSaveRequest(_Camel):
+    """PUT /screenings/{id}/letter: the operator's own text, saved verbatim."""
+
+    text: str
+
+
 class BulkApprovalUpdate(_Camel):
     """PATCH /screenings/approvals: one decision across many screenings."""
 

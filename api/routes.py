@@ -55,6 +55,9 @@ from screening import store as screening_store
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
 
+import coverletter.store as letter_store
+from agenttools.tools_letter import generate_cover_letter as _generate_letter
+
 from .schemas import (
     AgentConfigModel,
     ApprovalUpdate,
@@ -62,6 +65,9 @@ from .schemas import (
     BulkApprovalUpdate,
     CompanyApprovalUpdate,
     CompanyBoardModel,
+    CoverLetterDraftModel,
+    LetterGenerateRequest,
+    LetterSaveRequest,
     AgentConfigUpdate,
     AgentLlmCredentials,
     AgentRunResult,
@@ -185,6 +191,88 @@ def set_screening_approval(screening_id: str, body: ApprovalUpdate) -> Screening
             raise HTTPException(status_code=404, detail="Screening not found.")
 
     return _screening_model(screening)
+
+
+def _draft_model(draft: letter_store.CoverLetterDraft) -> CoverLetterDraftModel:
+    return CoverLetterDraftModel.model_validate(draft.to_dict())
+
+
+@router.get("/screenings/{screening_id}/letter", response_model=CoverLetterDraftModel)
+def get_screening_letter(screening_id: str) -> CoverLetterDraftModel:
+    """The screening's current draft."""
+    draft = letter_store.load(screening_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="No cover letter drafted yet.")
+    return _draft_model(draft)
+
+
+@router.post("/screenings/{screening_id}/letter", response_model=CoverLetterDraftModel)
+def generate_screening_letter(
+    screening_id: str, body: LetterGenerateRequest
+) -> CoverLetterDraftModel:
+    """Draft the letter for one screening, on the operator's request.
+
+    Guardrailed exactly as the agent's own generation is — this is the same
+    function the agent calls. A blocked generation writes nothing and reports
+    the claims that blocked it, so the operator can fix the truth document
+    rather than discovering the block at approval time.
+    """
+    screening = screening_store.get(screening_id)
+    if screening is None:
+        raise HTTPException(status_code=404, detail="Screening not found.")
+    if not screening.posting_text.strip():
+        raise HTTPException(
+            status_code=409,
+            detail="No posting text stored for this screening, so there is nothing to draft from.",
+        )
+    existing = letter_store.load(screening_id)
+    if existing is not None and existing.source == "operator" and not body.force:
+        raise HTTPException(
+            status_code=409,
+            detail="This letter was edited by you. Redrafting would discard those edits.",
+        )
+    result = _generate_letter(
+        posting=screening.posting_text,
+        tone=body.tone,
+        length=body.length,
+        company=screening.company or None,
+    )
+    if result["blocked"]:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "The letter was blocked by the truthfulness guardrail.",
+                "blockedReason": result.get("blocked_reason", ""),
+                "blockedClaims": result["blocked_claims"],
+            },
+        )
+    draft = letter_store.CoverLetterDraft(
+        text=result["text"], paragraphs=result["paragraphs"], source="generated"
+    )
+    return _draft_model(letter_store.save(screening_id, draft))
+
+
+@router.put("/screenings/{screening_id}/letter", response_model=CoverLetterDraftModel)
+def save_screening_letter(
+    screening_id: str, body: LetterSaveRequest
+) -> CoverLetterDraftModel:
+    """Save the operator's own text, verbatim and unvalidated.
+
+    The one path in the system where text reaches an employer without passing
+    guardrail/validate.py, and deliberately so: the guardrail exists to stop the
+    AGENT asserting facts it cannot ground in the operator's truth document. The
+    operator is the source of that document. `source` records that a human wrote
+    this, and the agent applies with it unchanged.
+    """
+    if screening_store.get(screening_id) is None:
+        raise HTTPException(status_code=404, detail="Screening not found.")
+    existing = letter_store.load(screening_id)
+    draft = letter_store.CoverLetterDraft(
+        text=body.text,
+        paragraphs=existing.paragraphs if existing else [],
+        source="operator",
+    )
+    return _draft_model(letter_store.save(screening_id, draft))
 
 
 @router.patch("/company-boards/{company}", response_model=CompanyBoardModel)
