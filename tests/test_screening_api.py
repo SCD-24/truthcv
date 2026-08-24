@@ -129,6 +129,57 @@ def test_delete_already_deleted_screening_returns_404(client):
     assert r.json() == {"detail": "Screening not found."}
 
 
+# --- POST /api/screenings/deletions (bulk delete) --------------------------------
+
+def test_bulk_delete_removes_several_screenings(client):
+    a = client.post(
+        "/api/screenings",
+        json={"company": "Acme", "url": "https://acme.example/jobs/1", "verdict": "rejected"},
+    ).json()
+    b = client.post(
+        "/api/screenings",
+        json={"company": "Beta", "url": "https://acme.example/jobs/2", "verdict": "rejected"},
+    ).json()
+
+    r = client.post("/api/screenings/deletions", json={"ids": [a["id"], b["id"]]})
+    assert r.status_code == 200, r.text
+    results = r.json()["results"]
+    assert {(x["id"], x["ok"]) for x in results} == {(a["id"], True), (b["id"], True)}
+
+    remaining = {s["id"] for s in client.get("/api/screenings").json()}
+    assert a["id"] not in remaining
+    assert b["id"] not in remaining
+
+
+def test_bulk_delete_empty_ids_returns_empty_results(client):
+    r = client.post("/api/screenings/deletions", json={"ids": []})
+    assert r.status_code == 200
+    assert r.json() == {"results": []}
+
+
+def test_bulk_delete_mixed_known_and_unknown_ids(client):
+    a = client.post(
+        "/api/screenings",
+        json={"company": "Acme", "url": "https://acme.example/jobs/1", "verdict": "rejected"},
+    ).json()
+
+    r = client.post(
+        "/api/screenings/deletions", json={"ids": [a["id"], "does-not-exist"]}
+    )
+    assert r.status_code == 200
+    results = {x["id"]: x["ok"] for x in r.json()["results"]}
+    assert results == {a["id"]: True, "does-not-exist": False}
+
+
+def test_bulk_delete_route_resolves_not_bound_as_screening_id(client):
+    # A POST to /screenings/deletions must hit bulk_delete_screenings, not be
+    # swallowed by /screenings/{screening_id} routes (which wouldn't match
+    # POST anyway, but this pins the route ordering/contract regardless).
+    r = client.post("/api/screenings/deletions", json={"ids": []})
+    assert r.status_code == 200
+    assert "results" in r.json()
+
+
 # --- url is mandatory on create -------------------------------------------------
 
 def test_create_screening_without_url_is_rejected(client):

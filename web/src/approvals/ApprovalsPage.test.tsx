@@ -3,7 +3,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
+  bulkDeleteScreenings,
   bulkSetApproval,
+  deleteScreening,
   generateScreeningLetter,
   getScreeningLetter,
   listAppliedScreenings,
@@ -27,6 +29,8 @@ vi.mock("../api/client", () => ({
   listAppliedScreenings: vi.fn(),
   setScreeningApproval: vi.fn(),
   bulkSetApproval: vi.fn(),
+  deleteScreening: vi.fn(),
+  bulkDeleteScreenings: vi.fn(),
   setScreeningUrl: vi.fn(),
   setScreeningPostingText: vi.fn(),
   getScreeningLetter: vi.fn(),
@@ -447,5 +451,100 @@ describe("ApprovalsPage applied tab", () => {
     expect(screen.queryByRole("button", { name: /^reject$/i })).toBeNull();
     expect(screen.queryAllByRole("button", { name: "Move to approvals" }).length).toBe(0);
     expect(screen.queryByRole("button", { name: /save url/i })).toBeNull();
+  });
+});
+
+describe("ApprovalsPage rejected tab delete", () => {
+  it("deletes one rejected row after confirming", async () => {
+    vi.mocked(deleteScreening).mockResolvedValue(undefined);
+    await renderPage([], [], {
+      rejected: [makeRecord({ id: "r1", company: "Pleo", approval: "rejected" })],
+    });
+    clickTab(/rejected/i);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Delete rejected posting for Pleo" }),
+    );
+    expect(deleteScreening).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(deleteScreening).toHaveBeenCalledWith("r1"));
+    await waitFor(() => expect(screen.queryByText("Pleo")).toBeNull());
+  });
+
+  it("requires confirming the dialog before any delete request fires", async () => {
+    await renderPage([], [], {
+      rejected: [makeRecord({ id: "r1", company: "Pleo", approval: "rejected" })],
+    });
+    clickTab(/rejected/i);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Delete rejected posting for Pleo" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    expect(deleteScreening).not.toHaveBeenCalled();
+    expect(bulkDeleteScreenings).not.toHaveBeenCalled();
+    expect(screen.getByText("Pleo")).toBeTruthy();
+  });
+
+  it("select-all then Delete selected calls bulk delete for every rejected row", async () => {
+    vi.mocked(bulkDeleteScreenings).mockResolvedValue({
+      results: [
+        { id: "r1", ok: true },
+        { id: "r2", ok: true },
+      ],
+    });
+    await renderPage([], [], {
+      rejected: [
+        makeRecord({ id: "r1", company: "Pleo", approval: "rejected" }),
+        makeRecord({ id: "r2", company: "SumUp", approval: "rejected" }),
+      ],
+    });
+    clickTab(/rejected/i);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select all rejected" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete selected" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(bulkDeleteScreenings).toHaveBeenCalledWith(expect.arrayContaining(["r1", "r2"])),
+    );
+    await waitFor(() => expect(screen.queryByText("Pleo")).toBeNull());
+    expect(screen.queryByText("SumUp")).toBeNull();
+  });
+
+  it("a partial bulk-delete failure leaves the failed row visible with an error message", async () => {
+    vi.mocked(bulkDeleteScreenings).mockResolvedValue({
+      results: [
+        { id: "r1", ok: true },
+        { id: "r2", ok: false },
+      ],
+    });
+    await renderPage([], [], {
+      rejected: [
+        makeRecord({ id: "r1", company: "Pleo", approval: "rejected" }),
+        makeRecord({ id: "r2", company: "SumUp", approval: "rejected" }),
+      ],
+    });
+    clickTab(/rejected/i);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select all rejected" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete selected" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByText("Pleo")).toBeNull());
+    expect(await screen.findByText("SumUp")).toBeTruthy();
+    expect(await screen.findByText("1 could not be deleted.")).toBeTruthy();
+  });
+
+  it("selecting rows on the Rejected tab does not change the Found tab's selection", async () => {
+    await renderPage([makeRecord({ id: "s1", company: "Found Co" })], [], {
+      rejected: [makeRecord({ id: "r1", company: "Rejected Co", approval: "rejected" })],
+    });
+    const foundCheckbox = await screen.findByRole("checkbox", { name: "Select Found Co" });
+    fireEvent.click(foundCheckbox);
+    expect(foundCheckbox).toBeChecked();
+
+    clickTab(/rejected/i);
+    const rejectedCheckbox = await screen.findByRole("checkbox", { name: "Select Rejected Co" });
+    fireEvent.click(rejectedCheckbox);
+    expect(rejectedCheckbox).toBeChecked();
+
+    clickTab(/found/i);
+    const foundCheckboxAgain = await screen.findByRole("checkbox", { name: "Select Found Co" });
+    expect(foundCheckboxAgain).toBeChecked();
   });
 });

@@ -6,7 +6,13 @@ import Checkbox from "@mui/material/Checkbox";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Collapse from "@mui/material/Collapse";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogContentText from "@mui/material/DialogContentText";
+import DialogTitle from "@mui/material/DialogTitle";
 import FormControlLabel from "@mui/material/FormControlLabel";
+import IconButton from "@mui/material/IconButton";
 import Link from "@mui/material/Link";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
@@ -15,10 +21,13 @@ import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import { isCooldownActive } from "../settings/cooldown";
 import { cooldownBlockLabel } from "../screenings/ScreeningsPage";
 import {
+  bulkDeleteScreenings,
   bulkSetApproval,
+  deleteScreening,
   generateScreeningLetter,
   getScreeningLetter,
   listAppliedScreenings,
@@ -433,20 +442,31 @@ function ApprovedRow({
 function ReviewRow({
   record,
   busy,
+  checked,
+  onToggle,
   onMoveToApprovals,
   onSaveUrl,
+  onDelete,
   rejectedLabel,
 }: {
   record: ScreeningRecord;
   busy: boolean;
+  checked: boolean;
+  onToggle: (id: string) => void;
   onMoveToApprovals: (id: string) => void;
   onSaveUrl: (id: string, url: string) => void;
+  onDelete: (id: string) => void;
   rejectedLabel?: string;
 }) {
   const active = isCooldownActive(record.cooldownExpires);
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
       <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+        <Checkbox
+          checked={checked}
+          onChange={() => onToggle(record.id)}
+          slotProps={{ input: { "aria-label": `Select ${record.company}` } }}
+        />
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="subtitle1">{record.company}</Typography>
           <Typography variant="body2" sx={{ color: "text.secondary" }}>
@@ -484,6 +504,13 @@ function ReviewRow({
         >
           Move to approvals
         </Button>
+        <IconButton
+          aria-label={`Delete rejected posting for ${record.company}`}
+          disabled={busy}
+          onClick={() => onDelete(record.id)}
+        >
+          <DeleteOutlineIcon />
+        </IconButton>
       </Stack>
     </Paper>
   );
@@ -544,6 +571,11 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
   const [didNotPass, setDidNotPass] = useState<ScreeningRecord[]>([]);
   const [applied, setApplied] = useState<ScreeningRecord[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
+  // Separate selection for the Rejected tab: it must never share state with
+  // `selected`, which drives the Found tab's approve/reject bar.
+  const [selectedRejected, setSelectedRejected] = useState<string[]>([]);
+  // The ids pending confirmation in the delete dialog; null when it's closed.
+  const [deleteTarget, setDeleteTarget] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -593,6 +625,14 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
   const toggleAll = () =>
     setSelected((s) => (s.length === pending.length ? [] : pending.map((r) => r.id)));
 
+  const toggleRejected = (id: string) =>
+    setSelectedRejected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+
+  const toggleAllRejected = () =>
+    setSelectedRejected((s) =>
+      s.length === rejectedRows.length ? [] : rejectedRows.map((r) => r.id),
+    );
+
   async function decide(id: string, approval: "approved" | "rejected") {
     setBusy(true);
     setError("");
@@ -634,6 +674,48 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
       setError(String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  function requestDeleteSingle(id: string) {
+    setDeleteTarget([id]);
+  }
+
+  function requestDeleteSelected() {
+    setDeleteTarget(selectedRejected);
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    const ids = deleteTarget;
+    setBusy(true);
+    setError("");
+    try {
+      let succeeded: Set<string>;
+      if (ids.length === 1) {
+        try {
+          await deleteScreening(ids[0]);
+          succeeded = new Set(ids);
+        } catch {
+          succeeded = new Set();
+        }
+      } else {
+        const { results } = await bulkDeleteScreenings(ids);
+        succeeded = new Set(results.filter((r) => r.ok).map((r) => r.id));
+      }
+      const failed = ids.filter((id) => !succeeded.has(id));
+      // Remove succeeded ids from both source lists — the Rejected tab merges
+      // agent-filtered and operator-rejected populations, and a deleted
+      // record could be in either.
+      setRejected((rows) => rows.filter((r) => !succeeded.has(r.id)));
+      setDidNotPass((rows) => rows.filter((r) => !succeeded.has(r.id)));
+      setSelectedRejected([]);
+      if (failed.length) setError(`${failed.length} could not be deleted.`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+      setDeleteTarget(null);
     }
   }
 
@@ -794,15 +876,43 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
               <Stack spacing={2}>
                 <Typography variant="body2" sx={{ color: "text.secondary" }}>
                   Postings set aside by the agent's criteria or by you. You can send
-                  either kind back to the queue.
+                  either kind back to the queue, or delete them for good.
                 </Typography>
+                <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={
+                          selectedRejected.length === rejectedRows.length &&
+                          rejectedRows.length > 0
+                        }
+                        onChange={toggleAllRejected}
+                        disabled={busy}
+                        slotProps={{ input: { "aria-label": "Select all rejected" } }}
+                      />
+                    }
+                    label="Select all"
+                  />
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    size="small"
+                    disabled={busy || selectedRejected.length === 0}
+                    onClick={requestDeleteSelected}
+                  >
+                    Delete selected
+                  </Button>
+                </Stack>
                 {rejectedRows.map((r) => (
                   <ReviewRow
                     key={r.id}
                     record={r}
                     busy={busy}
+                    checked={selectedRejected.includes(r.id)}
+                    onToggle={toggleRejected}
                     onMoveToApprovals={moveToApprovals}
                     onSaveUrl={saveUrl}
+                    onDelete={requestDeleteSingle}
                     rejectedLabel={
                       agentRejected.has(r.id) ? "Rejected by agent" : "Rejected by you"
                     }
@@ -828,6 +938,26 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
           </QueuePanel>
         </>
       )}
+
+      <Dialog open={deleteTarget !== null} onClose={() => !busy && setDeleteTarget(null)}>
+        <DialogTitle>
+          Delete {deleteTarget && deleteTarget.length > 1 ? "these postings" : "this posting"}?
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Deleting {deleteTarget && deleteTarget.length > 1 ? "ends each target's" : "ends this target's"}{" "}
+            cooldown and un-blocks it for re-screening. This cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteTarget(null)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={confirmDelete} color="error" disabled={busy}>
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

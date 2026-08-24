@@ -400,6 +400,19 @@ export function bulkSetApproval(
   });
 }
 
+/** Delete many screening records at once; the result reports each id separately.
+ * Deleting a screening ends its cooldown contribution and un-blocks that target
+ * for re-screening, same as the single-record delete. */
+export function bulkDeleteScreenings(
+  ids: string[],
+): Promise<{ results: { id: string; ok: boolean }[] }> {
+  return request("/api/screenings/deletions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+}
+
 /** Whether `company` (optionally narrowed by `role`) is currently in cooldown. */
 export function getCooldown(company: string, role?: string): Promise<CooldownStatus> {
   const params = new URLSearchParams({ company });

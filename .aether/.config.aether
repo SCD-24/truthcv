@@ -157,6 +157,11 @@
                   "desc": "Partially update the canonical ATS screening answers in truth.answers; returns the merged answers.",
                   "method": "PUT",
                   "path": "/api/profile/answers"
+                },
+                {
+                  "desc": "Delete many screenings in one call; reports per-id outcomes. Operator-only — not an agent route and not an MCP tool.",
+                  "method": "POST",
+                  "path": "/api/screenings/deletions"
                 }
               ]
             },

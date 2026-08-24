@@ -27,6 +27,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **GET** | `/api/download/{name}` | Download a rendered artifact (CV/cover-letter PDF or DOCX) by filename. |
 | **GET** | `/api/profile/answers` | Return the canonical ATS screening answers stored in truth.answers. |
 | **PUT** | `/api/profile/answers` | Partially update the canonical ATS screening answers in truth.answers; returns the merged answers. |
+| **POST** | `/api/screenings/deletions` | Delete many screenings in one call; reports per-id outcomes. Operator-only — not an agent route and not an MCP tool. |
 | **GET** | `/api/settings` | Provider settings status (encryptionAvailable, activeProvider, model, *KeySet booleans, ollamaHost). Never returns raw secrets. |
 | **POST** | `/api/settings` | Save provider selection + API key/model/host; encrypts to ./data/secrets.enc via ENCRYPTION_KEY. Empty apiKey leaves the stored key unchanged. |
 | **POST** | `/api/settings/test` | Test connection: a tiny live provider call with saved/submitted credentials. Returns {ok, detail}. |
