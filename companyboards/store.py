@@ -15,10 +15,6 @@ class CompanyBoard:
     ats: str = ""
     status: str = "ok"
     resolved_at: str = ""
-    # Operator-granted, company-level trust. Clears deferral blockers for any
-    # role here; never bypasses per-role screening. record_company_board takes
-    # no such argument, so the agent cannot set it.
-    approved: bool = False
 
     @classmethod
     def from_dict(cls, raw: dict) -> "CompanyBoard":
@@ -45,10 +41,6 @@ class CompanyBoard:
         if "resolved_at" in raw and isinstance(raw["resolved_at"], str):
             kwargs["resolved_at"] = raw["resolved_at"]
 
-        # approved: bool
-        if "approved" in raw and isinstance(raw["approved"], bool):
-            kwargs["approved"] = raw["approved"]
-
         return cls(**kwargs)
 
     def to_dict(self) -> dict:
@@ -59,7 +51,6 @@ class CompanyBoard:
             "ats": self.ats,
             "status": self.status,
             "resolved_at": self.resolved_at,
-            "approved": self.approved,
         }
 
 
@@ -112,7 +103,7 @@ def record(company: str, careers_url: str, ats: str = "", status: str = "ok") ->
 
     Merges onto any existing entry rather than replacing it. The agent
     re-records boards every run, and rebuilding from these arguments alone would
-    silently drop the operator's `approved` flag (and the resolution stamp).
+    silently drop the resolution stamp of the previous discovery.
     """
     boards = load()
     normalized = _normalize_company(company)
@@ -123,33 +114,8 @@ def record(company: str, careers_url: str, ats: str = "", status: str = "ok") ->
         ats=ats,
         status=status,
         resolved_at=existing.resolved_at if existing else "",
-        approved=existing.approved if existing else False,
     )
     save(boards)
-
-
-def set_approved(company: str, approved: bool) -> CompanyBoard:
-    """Grant or revoke company-level approval.
-
-    Creates the entry when the company has no board yet. Trust is an operator
-    decision about a company, not a fact about a discovered careers page: most
-    companies in the approvals queue were screened from a posting URL and never
-    had a board resolved, and refusing to record the decision for them made the
-    Approvals page's company button fail outright. A board created this way
-    carries no careers_url and is marked "unresolved" until discovery fills it
-    in via record().
-
-    Returns the entry so callers need not re-normalise the name to read it back.
-    """
-    boards = load()
-    normalized = _normalize_company(company)
-    entry = boards.get(normalized)
-    if entry is None:
-        entry = CompanyBoard(company=company.strip(), careers_url="", status="unresolved")
-        boards[normalized] = entry
-    entry.approved = approved
-    save(boards)
-    return entry
 
 
 def mark_dead(company: str) -> None:
@@ -166,8 +132,7 @@ def prune(target_companies: list[str]) -> None:
 
     An empty watchlist prunes nothing: it means "no watchlist configured", not
     "drop every board", and reading it the other way emptied the whole store on
-    every GET of the agent config. Operator-approved entries are kept
-    regardless — a discovery-driven sweep must not delete a human decision.
+    every GET of the agent config.
     """
     if not target_companies:
         return
@@ -175,7 +140,7 @@ def prune(target_companies: list[str]) -> None:
     normalized_targets = {_normalize_company(name) for name in target_companies}
 
     # Filter to only keep boards for companies still on the watchlist
-    pruned = {k: v for k, v in boards.items() if k in normalized_targets or v.approved}
+    pruned = {k: v for k, v in boards.items() if k in normalized_targets}
 
     if len(pruned) != len(boards):
         save(pruned)

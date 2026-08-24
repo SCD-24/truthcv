@@ -678,22 +678,6 @@ class BulkApprovalResult(_Camel):
     results: list[dict] = []
 
 
-class CompanyApprovalUpdate(_Camel):
-    """PATCH /company-boards/{company}: company-level trust."""
-
-    approved: bool
-
-
-class CompanyBoardModel(_Camel):
-    """A company's resolved careers board and the operator's trust in it."""
-
-    company: str = ""
-    careers_url: str = ""
-    ats: str = ""
-    status: str = ""
-    approved: bool = False
-
-
 class ScreeningCreate(_Camel):
     """Client-supplied fields for a new screening record."""
 

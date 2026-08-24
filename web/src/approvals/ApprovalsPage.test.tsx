@@ -26,7 +26,6 @@ vi.mock("../api/client", () => ({
   listAppliedScreenings: vi.fn(),
   setScreeningApproval: vi.fn(),
   bulkSetApproval: vi.fn(),
-  setCompanyApproval: vi.fn(),
   setScreeningUrl: vi.fn(),
   getScreeningLetter: vi.fn(),
   generateScreeningLetter: vi.fn(),
@@ -316,6 +315,9 @@ describe("ApprovalsPage reviewable lists", () => {
   });
 
   it("moving one back queues it and takes it out of the Rejected tab", async () => {
+    vi.mocked(setScreeningApproval).mockResolvedValue(
+      makeRecord({ id: "r1", company: "Pleo", approval: "pending" }),
+    );
     await renderPage([], [], {
       rejected: [makeRecord({ id: "r1", company: "Pleo", approval: "rejected" })],
     });
@@ -340,8 +342,9 @@ describe("ApprovalsPage applied tab", () => {
       ],
     });
     clickTab(/applied/i);
-    expect(await screen.findByText("Wolt")).toBeTruthy();
-    expect(screen.getByText("Spotify")).toBeTruthy();
+    // AppliedRow prints "company — role" in one node, so match on a substring.
+    expect(await screen.findByText(/Wolt/)).toBeTruthy();
+    expect(screen.getByText(/Spotify/)).toBeTruthy();
     expect(screen.getByText(/applications page/i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^approve$/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /^reject$/i })).toBeNull();

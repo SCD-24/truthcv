@@ -25,7 +25,6 @@ import {
   listPendingApprovals,
   listRejectedApprovals,
   saveScreeningLetter,
-  setCompanyApproval,
   setScreeningApproval,
   setScreeningUrl,
 } from "../api/client";
@@ -212,7 +211,6 @@ function PendingCard({
   busy,
   onToggle,
   onDecide,
-  onApproveCompany,
   onSaveUrl,
 }: {
   record: ScreeningRecord;
@@ -220,7 +218,6 @@ function PendingCard({
   busy: boolean;
   onToggle: (id: string) => void;
   onDecide: (id: string, approval: "approved" | "rejected") => void;
-  onApproveCompany: (company: string) => void;
   onSaveUrl: (id: string, url: string) => void;
 }) {
   // The server enforces this at approval time too (PATCH 409s with no draft
@@ -274,14 +271,6 @@ function PendingCard({
             onClick={() => onDecide(record.id, "rejected")}
           >
             Reject
-          </Button>
-          <Button
-            size="small"
-            disabled={busy || !record.company}
-            onClick={() => onApproveCompany(record.company)}
-            title="Clears deferral blockers for any role here. Roles are still screened."
-          >
-            Approve company
           </Button>
         </Stack>
       </Stack>
@@ -538,18 +527,6 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
     }
   }
 
-  async function approveCompany(company: string) {
-    setBusy(true);
-    setError("");
-    try {
-      await setCompanyApproval(company, true);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function moveToApprovals(id: string) {
     setBusy(true);
     setError("");
@@ -642,7 +619,6 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
                     busy={busy}
                     onToggle={toggle}
                     onDecide={decide}
-                    onApproveCompany={approveCompany}
                     onSaveUrl={saveUrl}
                   />
                 ))}
