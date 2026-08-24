@@ -79,6 +79,10 @@ def test_unknown_mode_falls_back_to_full():
     """A malformed config must not silently disable the agent."""
     assert AgentConfig.from_dict({"mode": "sideways"}).mode == "full"
     assert AgentConfig.from_dict({"mode": 3}).mode == "full"
+    # The combined case is the one that matters: an invalid mode must resolve
+    # to the default rather than deferring to a stale `enabled`.
+    assert AgentConfig.from_dict({"mode": "sideways", "enabled": False}).mode == "full"
+    assert AgentConfig.from_dict({"mode": "sideways", "enabled": True}).mode == "full"
 
 
 def test_to_dict_carries_mode_and_derived_enabled():
@@ -130,8 +134,12 @@ In `from_dict`, replace the `enabled` block with:
         # enabled agent was a full-auto agent. An explicit mode wins over a
         # stale enabled, and an unrecognised one falls back to the default
         # rather than disabling the agent by accident.
-        if "mode" in raw and raw["mode"] in cls.MODES:
-            kwargs["mode"] = raw["mode"]
+        if "mode" in raw:
+            # Present but unrecognised resolves to the default and must NOT
+            # fall through to `enabled`: a corrupt or hand-edited mode sitting
+            # beside a stale `enabled: false` would otherwise disable the agent
+            # silently, which is the one outcome this fallback exists to stop.
+            kwargs["mode"] = raw["mode"] if raw["mode"] in cls.MODES else "full"
         elif "enabled" in raw and isinstance(raw["enabled"], bool):
             kwargs["mode"] = "full" if raw["enabled"] else "off"
 ```
