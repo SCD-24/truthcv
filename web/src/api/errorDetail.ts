@@ -35,13 +35,25 @@ function formatValidationItem(item: ValidationErrorItem): string {
   return segment ? `${segment}: ${msg}` : msg;
 }
 
+/** A blocked-claim entry as the letter routes send it (guardrail/validate.py
+ * BlockedClaim, asdict'd — snake_case keys except `text`, which is spelled
+ * the same either way, so it's the only field read here). */
+interface BlockedClaimItem {
+  text?: unknown;
+}
+
 /**
  * Converts a parsed error response body into a display string.
  *
  * - A string `detail` (the common FastAPI HTTPException shape) passes through.
  * - An array `detail` (FastAPI's RequestValidationError shape) is mapped to
  *   "field: message" entries and joined with "; ".
- * - Anything else (missing detail, unparseable body, empty array) yields "".
+ * - An object `detail` (e.g. the letter routes' guardrail-block shape:
+ *   {message, blockedReason, blockedClaims}) renders `message`, plus each
+ *   blocked claim's `text` appended so the operator sees exactly what
+ *   tripped the guardrail rather than a generic failure.
+ * - Anything else (missing detail, unparseable body, empty array, an object
+ *   with neither field) yields "".
  */
 export function errorDetailToMessage(body: unknown): string {
   if (!body || typeof body !== "object") return "";
@@ -52,6 +64,17 @@ export function errorDetailToMessage(body: unknown): string {
       .filter((item): item is ValidationErrorItem => !!item && typeof item === "object")
       .map(formatValidationItem)
       .join("; ");
+  }
+  if (detail && typeof detail === "object") {
+    const obj = detail as { message?: unknown; blockedClaims?: unknown };
+    const message = typeof obj.message === "string" ? obj.message : "";
+    const claims = Array.isArray(obj.blockedClaims) ? obj.blockedClaims : [];
+    const claimTexts = claims
+      .filter((c): c is BlockedClaimItem => !!c && typeof c === "object")
+      .map((c) => (typeof c.text === "string" ? c.text : ""))
+      .filter((text) => text !== "");
+    if (!message && claimTexts.length === 0) return "";
+    return claimTexts.length ? `${message} Blocked: ${claimTexts.join("; ")}` : message;
   }
   return "";
 }

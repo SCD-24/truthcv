@@ -11,6 +11,8 @@ import re
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 
+from agentconfig.store import AgentConfig
+
 _RUN_AT_RE = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 _RUN_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 
@@ -321,6 +323,8 @@ class CompanyBoardModel(_Camel):
 class AgentConfigModel(_Camel):
     """GET /api/agent/config response: enabled flag, blocklist, schedule, job profiles, and resolved boards."""
 
+    mode: str = "full"
+    # Derived server-side from mode; present so existing readers need no change.
     enabled: bool = True
     blocked_companies: list[str] = Field(default_factory=list)
     run_at: list[str] = Field(default_factory=lambda: ["09:00", "15:00"])
@@ -342,7 +346,9 @@ class AgentConfigUpdate(_Camel):
     the fields the client actually sent.
     """
 
-    enabled: bool | None = None
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, alias_generator=to_camel)
+
+    mode: str | None = None
     blocked_companies: list[str] | None = None
     run_at: list[str] | None = None
     run_days: list[str] | None = None
@@ -350,6 +356,15 @@ class AgentConfigUpdate(_Camel):
     target_companies: list[str] | None = None
     cooldown_days: int | None = None
     max_applications_per_run: int | None = None
+
+    @field_validator("mode")
+    @classmethod
+    def _known_mode(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in AgentConfig.MODES:
+            raise ValueError(f"Unknown mode '{v}'. Expected one of {', '.join(AgentConfig.MODES)}.")
+        return v
 
     @field_validator("blocked_companies")
     @classmethod
@@ -500,6 +515,11 @@ class ApplicationModel(_Camel):
     application_date: str = ""
     status: str = ""
     notes: str = ""
+    role: str = ""
+    ats: str = ""
+    capture_method: str = ""
+    gaps_disclosed: list[str] = Field(default_factory=list)
+    profile: str = ""
     cv_document: ApplicationDocument | None = None
     cover_letter_document: ApplicationDocument | None = None
     created_at: str = ""
@@ -523,6 +543,11 @@ class ApplicationCreate(_Camel):
     application_date: str = ""
     status: str = ""
     notes: str = ""
+    role: str = ""
+    ats: str = ""
+    capture_method: str = ""
+    gaps_disclosed: list[str] = Field(default_factory=list)
+    profile: str = ""
 
 
 class ApplicationUpdate(_Camel):
@@ -541,6 +566,11 @@ class ApplicationUpdate(_Camel):
     application_date: str | None = None
     status: str | None = None
     notes: str | None = None
+    role: str | None = None
+    ats: str | None = None
+    capture_method: str | None = None
+    gaps_disclosed: list[str] | None = None
+    profile: str | None = None
 
 
 class SaveCvRequest(_Camel):
@@ -581,6 +611,8 @@ class ScreeningModel(_Camel):
     reason: str = ""
     cooldown_expires: str = ""
     source: str = ""
+    posting_text: str = ""
+    posted_date: str = ""
     approval: str = ""
     apply_attempts: int = 0
     apply_error: str = ""
@@ -589,9 +621,48 @@ class ScreeningModel(_Camel):
 
 
 class ApprovalUpdate(_Camel):
-    """PATCH /screenings/{id}: the operator's approval decision."""
+    """PATCH /screenings/{id}: the operator's approval decision and/or the
+    posting URL.
 
-    approval: str
+    ``url`` is patchable here because an imported screening can carry no URL
+    (a prose migration had none to capture), and the agent cannot apply to a
+    posting it has nothing to open.
+    """
+
+    approval: str | None = None
+    url: str | None = None
+
+
+class CoverLetterDraftModel(_Camel):
+    """A screening's current cover letter draft.
+
+    `source` says whether the guardrail vouches for this text: "generated" is
+    exactly what generate_cover_letter produced and validated, "operator" is
+    text a human wrote, which is saved verbatim and never validated.
+    """
+
+    text: str = ""
+    paragraphs: list[dict] = Field(default_factory=list)
+    source: str = "generated"
+    updated_at: str = ""
+
+
+class LetterGenerateRequest(_Camel):
+    """POST /screenings/{id}/letter: draft from the stored posting text.
+
+    `force` is the operator's explicit "discard my edits and redraft"; without
+    it, regenerating over text a human wrote is refused.
+    """
+
+    force: bool = False
+    tone: str = "Professional"
+    length: str = "Standard"
+
+
+class LetterSaveRequest(_Camel):
+    """PUT /screenings/{id}/letter: the operator's own text, saved verbatim."""
+
+    text: str
 
 
 class BulkApprovalUpdate(_Camel):
@@ -635,6 +706,8 @@ class ScreeningCreate(_Camel):
     reason: str = ""
     cooldown_expires: str = ""
     source: str = ""
+    posting_text: str = ""
+    posted_date: str = ""
 
 
 class CooldownResult(_Camel):

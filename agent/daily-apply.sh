@@ -128,31 +128,53 @@ esac
 
 log "preconditions OK"
 
-# --- Agent enable gate --------------------------------------------------------
-# The Agents page can switch the agent off; the flag lives in the app service's
-# agent config (GET /api/agent/config). Unreachable config fails CLOSED: if the
-# app is down, the MCP tools this run depends on are down too, and "did not
-# run" is the safe failure for an unattended submitter.
-ENABLED="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" enabled)" || ENABLED=""
-if [[ "$ENABLED" == "false" ]]; then
-  log "agent disabled in config - skipping run"
+# --- Agent mode gate ----------------------------------------------------------
+# The Agents page sets the agent's autonomy mode; the flag lives in the app
+# service's agent config (GET /api/agent/config). Unreachable config fails
+# CLOSED: if the app is down, the MCP tools this run depends on are down too,
+# and "did not run" is the safe failure for an unattended submitter that
+# applies to real jobs under a real person's name.
+#
+#   off  - exit before the model is invoked at all
+#   semi - discover and screen, queue what passes for the operator, apply only
+#          to what the operator already approved
+#   full - discover, screen and apply, the pre-mode behaviour
+AGENT_MODE="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" mode)" || AGENT_MODE=""
+if [[ "$AGENT_MODE" == "off" ]]; then
+  log "agent mode is off - skipping run"
   exit 0
-elif [[ "$ENABLED" != "true" ]]; then
-  abort "agent config unreachable - skipping run (fail closed)"
+elif [[ "$AGENT_MODE" != "semi" && "$AGENT_MODE" != "full" ]]; then
+  abort "agent config unreachable or mode unrecognised ('$AGENT_MODE') - skipping run (fail closed)"
 fi
+log "agent mode: $AGENT_MODE"
 
 # --- Run ---------------------------------------------------------------------
 
 # agent/prompt.md carries the operating instructions (it references
-# agent/RUNBOOK.md and names the nine tools); this script only adds the date.
+# agent/RUNBOOK.md and names the eleven tools); this script only adds the date.
 PROMPT="$(cat "$PROMPT_FILE")"$'\n\n'"Today is $(date +%Y-%m-%d)."
 
-# MAX_APPLICATIONS_PER_RUN empty/unset means no cap (agent/RUNBOOK.md §1,
-# "there is no daily quota"; docker-compose.yml defaults it to empty for that
-# reason). Only append a limit line when it is actually a positive integer,
-# so the common empty case adds nothing to the prompt.
-if [[ "${MAX_APPLICATIONS_PER_RUN:-}" =~ ^[1-9][0-9]*$ ]]; then
-  PROMPT="$PROMPT"$'\n\n'"Apply to at most $MAX_APPLICATIONS_PER_RUN role(s) this run."
+# The mode changes what the agent does with a posting that passes every
+# criterion, so it is rendered into the prompt rather than left implicit. The
+# queueing itself is enforced server-side in screening.store.create - this text
+# tells the agent what to expect, it is not what makes it true.
+if [[ "$AGENT_MODE" == "semi" ]]; then
+  PROMPT="$PROMPT"$'\n\n'"## Autonomy mode: SEMI-AUTO
+
+Do NOT apply to a posting you find this run, however well it scores, and do not
+write a cover letter for it. For a posting that passes every criterion, call
+record_screening with verdict \"passed\", the full posting text in posting_text,
+and the employer's publication date in posted_date when the board states one.
+It enters the operator's approval queue; they draft the letter and decide.
+
+Phase 0 is unchanged: postings the operator already approved ARE applied to,
+using the cover_letter text that arrives with each item, verbatim."
+else
+  PROMPT="$PROMPT"$'\n\n'"## Autonomy mode: FULL AUTO
+
+A posting that passes every criterion is applied to this run, as described in
+agent/RUNBOOK.md. Record the full posting text in posting_text and the
+employer's publication date in posted_date on every record_screening call."
 fi
 
 # jq program rendering one criteria block per configured profile: name,
@@ -222,6 +244,35 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
 
     PROMPT="$PROMPT"$'\n\n'"$PROFILE_BLOCK"
   fi
+fi
+
+# Per-run application cap: the Agents page's maxApplicationsPerRun (fetched
+# above in JOB_CONFIG) is the source of truth; MAX_APPLICATIONS_PER_RUN is the
+# fallback, used only when the config is unreachable (JOB_CONFIG empty) or
+# does not set the field - the same config-first/env-fallback precedence
+# agent/entrypoint.sh and agent/supervisor.js already use for RUN_AT/RUN_DAYS.
+# This must apply even when zero profiles are configured, so it lives outside
+# the `PROFILES -gt 0` block above rather than inside it.
+CONFIG_CAP=""
+if [[ -n "$JOB_CONFIG" ]]; then
+  # No stderr suppression, matching the jq calls above: jq is a checked
+  # precondition, so a jq failure here means malformed config and must be
+  # visible in the run log. `.maxApplicationsPerRun` renders as the literal
+  # string "null" when the field is JSON null, which the regex below rejects
+  # same as any other non-positive-integer value.
+  CONFIG_CAP="$(jq -r '.maxApplicationsPerRun' <<<"$JOB_CONFIG")"
+fi
+if [[ "$CONFIG_CAP" =~ ^[1-9][0-9]*$ ]]; then
+  APPLY_CAP="$CONFIG_CAP"
+else
+  APPLY_CAP="${MAX_APPLICATIONS_PER_RUN:-}"
+fi
+# Empty/unset (from either source) means no cap (agent/RUNBOOK.md §1, "there
+# is no daily quota"; docker-compose.yml defaults the env var to empty for
+# that reason). Only append a limit line when the resolved value is actually
+# a positive integer, so the common no-cap case adds nothing to the prompt.
+if [[ "$APPLY_CAP" =~ ^[1-9][0-9]*$ ]]; then
+  PROMPT="$PROMPT"$'\n\n'"Apply to at most $APPLY_CAP role(s) this run."
 fi
 
 # Fetch routed LLM credentials from the app (Stage 2). Fallback: the
@@ -299,8 +350,10 @@ if [[ "$AGENT_BROWSER_DRIVER" == "interceptor" ]]; then
 else
   # The containerised browser is granted as the whole server, `mcp__browser`,
   # rather than as an enumerated tool list. Every truthcv grant below is a single
-  # named tool, and the asymmetry is deliberate: the truthcv tools are OUR nine,
-  # fixed by agenttools/server.py and changing only when we change it, so naming
+  # named tool, and the asymmetry is deliberate: the truthcv tools are OUR eleven,
+  # fixed by agenttools/mcp_app.py (the JSON-RPC surface this agent dials -
+  # agenttools/server.py is the separate REST surface and registers only 9) and
+  # changing only when we change it, so naming
   # them keeps the blast radius of a new tool at zero until it is granted on
   # purpose. The browser server is upstream @playwright/mcp (browser/Dockerfile),
   # whose tool set - browser_navigate, browser_click, browser_type,
@@ -336,6 +389,8 @@ log "invoking claude... (browser driver: $AGENT_BROWSER_DRIVER)"
     "mcp__truthcv__record_company_board" \
     "mcp__truthcv__get_job_profiles" \
     "mcp__truthcv__recommend_salary" \
+    "mcp__truthcv__get_approved_applications" \
+    "mcp__truthcv__report_apply_failure" \
     "${BROWSER_TOOLS[@]}" \
   --dangerously-skip-permissions \
   </dev/null >>"$RUN_LOG" 2>&1

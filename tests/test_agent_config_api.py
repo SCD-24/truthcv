@@ -26,14 +26,15 @@ def test_get_returns_defaults(client, data_dir):
         "cooldownDays": None,
         "maxApplicationsPerRun": None,
         "companyBoards": [],
+        "mode": "full",
     }
     assert r.json() == expected
 
 
 def test_put_merges_partial(client, data_dir):
-    r = client.put("/api/agent/config", json={"enabled": False})
+    r = client.put("/api/agent/config", json={"mode": "off"})
     assert r.status_code == 200
-    assert r.json()["enabled"] is False
+    assert r.json()["mode"] == "off"
     assert r.json()["runAt"] == ["09:00", "15:00"]  # untouched
 
 
@@ -62,18 +63,18 @@ def test_put_dedups_run_days_preserving_order(client, data_dir):
 def test_put_explicit_nulls_do_not_reset_fields(client, data_dir):
     r = client.put(
         "/api/agent/config",
-        json={"enabled": False, "blockedCompanies": ["Acme"]},
+        json={"mode": "off", "blockedCompanies": ["Acme"]},
     )
     assert r.status_code == 200
-    assert r.json()["enabled"] is False
+    assert r.json()["mode"] == "off"
     assert r.json()["blockedCompanies"] == ["Acme"]
 
     r = client.put(
         "/api/agent/config",
-        json={"enabled": None, "blockedCompanies": None},
+        json={"mode": None, "blockedCompanies": None},
     )
     assert r.status_code == 200
-    assert r.json()["enabled"] is False
+    assert r.json()["mode"] == "off"
     assert r.json()["blockedCompanies"] == ["Acme"]
 
 
@@ -293,16 +294,24 @@ def test_get_omits_boards_for_removed_target_companies(client, data_dir):
     assert len(r.json()["companyBoards"]) == 0
 
 
-def test_put_does_not_accept_company_boards_field(client, data_dir):
-    """PUT /api/agent/config rejects companyBoards in request (response-only)."""
+def test_put_rejects_unknown_fields_including_company_boards(client, data_dir):
+    """PUT /api/agent/config rejects any undeclared field, companyBoards included.
+
+    AgentConfigUpdate sets extra="forbid" (needed to reject writes to the
+    derived `enabled` field), so this 422s for the same reason it would for
+    any field nobody has ever heard of — that part of the coverage is generic,
+    not companyBoards-specific. What IS specific to companyBoards is the
+    second assertion below: it is a server-resolved, read-only field, so it
+    must never land in the stored config even if the reject-unknown-fields
+    behavior above were ever loosened.
+    """
     from agentconfig import store as agent_config_store
-    
+
     r = client.put(
         "/api/agent/config",
         json={"companyBoards": [{"company": "Fake", "careersUrl": "fake.com"}]},
     )
-    # Field should be silently ignored (not in AgentConfigUpdate schema)
-    assert r.status_code == 200
+    assert r.status_code == 422
     # companyBoards should not be in the stored config
     assert "company_boards" not in agent_config_store.load().to_dict()
 
@@ -382,3 +391,35 @@ def test_put_target_companies_and_globals_merge_separately(client, data_dir):
     assert r.json()["targetCompanies"] == ["Google", "Apple"]
     assert r.json()["cooldownDays"] == 14
     assert r.json()["maxApplicationsPerRun"] == 5
+
+
+def test_get_returns_mode_and_derived_enabled(client, data_dir):
+    r = client.get("/api/agent/config")
+    assert r.status_code == 200
+    assert r.json()["mode"] == "full"
+    assert r.json()["enabled"] is True
+
+
+def test_put_sets_mode(client, data_dir):
+    r = client.put("/api/agent/config", json={"mode": "semi"})
+    assert r.status_code == 200
+    assert r.json()["mode"] == "semi"
+    assert r.json()["enabled"] is True
+    assert client.get("/api/agent/config").json()["mode"] == "semi"
+
+
+def test_put_off_derives_enabled_false(client, data_dir):
+    assert client.put("/api/agent/config", json={"mode": "off"}).json()["enabled"] is False
+
+
+def test_put_rejects_an_unknown_mode(client, data_dir):
+    assert client.put("/api/agent/config", json={"mode": "sideways"}).status_code == 422
+
+
+def test_put_ignores_enabled(client, data_dir):
+    """`enabled` is derived. Accepting a write to it would give one piece of
+    state two writers."""
+    client.put("/api/agent/config", json={"mode": "semi"})
+    r = client.put("/api/agent/config", json={"enabled": False})
+    assert r.status_code == 422
+    assert client.get("/api/agent/config").json()["mode"] == "semi"

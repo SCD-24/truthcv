@@ -55,6 +55,9 @@ from screening import store as screening_store
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
 
+import coverletter.store as letter_store
+from agenttools.tools_letter import generate_cover_letter as _generate_letter
+
 from .schemas import (
     AgentConfigModel,
     ApprovalUpdate,
@@ -62,6 +65,9 @@ from .schemas import (
     BulkApprovalUpdate,
     CompanyApprovalUpdate,
     CompanyBoardModel,
+    CoverLetterDraftModel,
+    LetterGenerateRequest,
+    LetterSaveRequest,
     AgentConfigUpdate,
     AgentLlmCredentials,
     AgentRunResult,
@@ -145,6 +151,17 @@ def create_screening(body: ScreeningCreate) -> ScreeningModel:
     return _screening_model(screening)
 
 
+def _has_draft(screening_id: str) -> bool:
+    """Whether a letter exists to apply with.
+
+    Approval licenses the agent to submit on the operator's behalf using the
+    stored text verbatim. Approving with no text queues an application with
+    nothing to send, so the check lives here rather than only in the UI.
+    """
+    draft = letter_store.load(screening_id)
+    return draft is not None and bool(draft.text.strip())
+
+
 # Declared BEFORE /screenings/{screening_id}: otherwise the router binds
 # "approvals" as an id and this route is unreachable.
 @router.patch("/screenings/approvals", response_model=BulkApprovalResult)
@@ -152,13 +169,18 @@ def bulk_set_approval(body: BulkApprovalUpdate) -> BulkApprovalResult:
     """Apply one approval decision to many screenings.
 
     Reports per-id outcomes rather than failing wholesale, so a partial failure
-    is visible instead of silently dropping some ids.
+    is visible instead of silently dropping some ids. A draftless id is
+    reported the same way rather than approved out from under the gate below.
     """
     try:
-        results = [
-            {"id": sid, "ok": screening_store.set_approval(sid, body.approval) is not None}
-            for sid in body.ids
-        ]
+        results = []
+        for sid in body.ids:
+            if body.approval == "approved" and not _has_draft(sid):
+                results.append({"id": sid, "ok": False})
+                continue
+            results.append(
+                {"id": sid, "ok": screening_store.set_approval(sid, body.approval) is not None}
+            )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     return BulkApprovalResult(results=results)
@@ -166,14 +188,123 @@ def bulk_set_approval(body: BulkApprovalUpdate) -> BulkApprovalResult:
 
 @router.patch("/screenings/{screening_id}", response_model=ScreeningModel)
 def set_screening_approval(screening_id: str, body: ApprovalUpdate) -> ScreeningModel:
-    """The operator's approval decision for one screening."""
-    try:
-        screening = screening_store.set_approval(screening_id, body.approval)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
+    """The operator's approval decision and/or posting URL for one screening."""
+    if body.approval is None and body.url is None:
+        raise HTTPException(status_code=422, detail="Provide approval or url.")
+
+    screening = None
+    if body.url is not None:
+        screening = screening_store.update(screening_id, {"url": body.url})
+        if screening is None:
+            raise HTTPException(status_code=404, detail="Screening not found.")
+
+    if body.approval is not None:
+        # Existence wins over the draft gate: an unknown id is 404 regardless
+        # of approval value, matching the url-only branch above.
+        if (
+            body.approval == "approved"
+            and screening_store.get(screening_id) is not None
+            and not _has_draft(screening_id)
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Draft a cover letter before approving — the agent applies with it verbatim.",
+            )
+        try:
+            screening = screening_store.set_approval(screening_id, body.approval)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+        if screening is None:
+            raise HTTPException(status_code=404, detail="Screening not found.")
+
+    return _screening_model(screening)
+
+
+def _draft_model(draft: letter_store.CoverLetterDraft) -> CoverLetterDraftModel:
+    return CoverLetterDraftModel.model_validate(draft.to_dict())
+
+
+@router.get("/screenings/{screening_id}/letter", response_model=CoverLetterDraftModel)
+def get_screening_letter(screening_id: str) -> CoverLetterDraftModel:
+    """The screening's current draft."""
+    draft = letter_store.load(screening_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="No cover letter drafted yet.")
+    return _draft_model(draft)
+
+
+@router.post("/screenings/{screening_id}/letter", response_model=CoverLetterDraftModel)
+def generate_screening_letter(
+    screening_id: str, body: LetterGenerateRequest
+) -> CoverLetterDraftModel:
+    """Draft the letter for one screening, on the operator's request.
+
+    Guardrailed exactly as the agent's own generation is — this is the same
+    function the agent calls. A blocked generation writes nothing and reports
+    the claims that blocked it, so the operator can fix the truth document
+    rather than discovering the block at approval time.
+    """
+    screening = screening_store.get(screening_id)
     if screening is None:
         raise HTTPException(status_code=404, detail="Screening not found.")
-    return _screening_model(screening)
+    if not screening.posting_text.strip():
+        raise HTTPException(
+            status_code=409,
+            detail="No posting text stored for this screening, so there is nothing to draft from.",
+        )
+    existing = letter_store.load(screening_id)
+    if existing is not None and existing.source == "operator" and not body.force:
+        raise HTTPException(
+            status_code=409,
+            detail="This letter was edited by you. Redrafting would discard those edits.",
+        )
+    result = _generate_letter(
+        posting=screening.posting_text,
+        tone=body.tone,
+        length=body.length,
+        company=screening.company or None,
+    )
+    if result["blocked"]:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "The letter was blocked by the truthfulness guardrail.",
+                "blockedReason": result.get("blocked_reason", ""),
+                "blockedClaims": result["blocked_claims"],
+            },
+        )
+    draft = letter_store.CoverLetterDraft(
+        text=result["text"], paragraphs=result["paragraphs"], source="generated"
+    )
+    return _draft_model(letter_store.save(screening_id, draft))
+
+
+@router.put("/screenings/{screening_id}/letter", response_model=CoverLetterDraftModel)
+def save_screening_letter(
+    screening_id: str, body: LetterSaveRequest
+) -> CoverLetterDraftModel:
+    """Save the operator's own text, verbatim and unvalidated.
+
+    The one path in the system where text reaches an employer without passing
+    guardrail/validate.py, and deliberately so: the guardrail exists to stop the
+    AGENT asserting facts it cannot ground in the operator's truth document. The
+    operator is the source of that document. `source` records that a human wrote
+    this, and the agent applies with it unchanged.
+    """
+    if screening_store.get(screening_id) is None:
+        raise HTTPException(status_code=404, detail="Screening not found.")
+    if not body.text.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="An empty letter cannot be saved — blanking is not an edit; regenerate instead.",
+        )
+    existing = letter_store.load(screening_id)
+    draft = letter_store.CoverLetterDraft(
+        text=body.text,
+        paragraphs=existing.paragraphs if existing else [],
+        source="operator",
+    )
+    return _draft_model(letter_store.save(screening_id, draft))
 
 
 @router.patch("/company-boards/{company}", response_model=CompanyBoardModel)
@@ -181,11 +312,11 @@ def set_company_approval(company: str, body: CompanyApprovalUpdate) -> CompanyBo
     """Grant or revoke company-level trust.
 
     Weaker than approving a posting: it clears the blockers that caused a
-    deferral, and never skips per-role screening.
+    deferral, and never skips per-role screening. Recording the decision does
+    not require a resolved careers board — most queued companies were screened
+    from a posting URL and have none.
     """
     entry = companyboards_store.set_approved(company, body.approved)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="Company board not found.")
     return CompanyBoardModel(
         company=entry.company,
         careers_url=entry.careers_url,

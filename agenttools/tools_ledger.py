@@ -19,6 +19,7 @@ from applications.store import save_confirmation as _save_confirmation
 from applications.store import save_fields_submitted as _save_fields_submitted
 from applications.store import save_screening as _save_screening
 import applications.store as _apps_store
+import coverletter.store as _letter_store
 import screening.store as _screening_store
 from screening.cooldown import cooldown as _cooldown
 from screening.store import create as create_screening
@@ -152,7 +153,7 @@ def recommend_salary(profile_name: str, proposed: int | None = None) -> dict:
 def get_approved_applications() -> list[dict]:
     """Postings the operator approved and this run should apply to.
 
-    Two guards live here rather than in the prompt, because a wrong judgement by
+    Three guards live here rather than in the prompt, because a wrong judgement by
     the model would be costly and silent:
 
     - An item whose URL already appears in the applications ledger is dropped.
@@ -161,6 +162,15 @@ def get_approved_applications() -> list[dict]:
     - An item whose company is in cooldown comes back with ``blocked_reason``
       set instead of being hidden, so the run report can say why it did not go
       out rather than the posting silently vanishing.
+    - An item with no URL (many imported records predate URL capture) comes
+      back with ``blocked_reason`` set to "no_url" rather than hidden, since
+      the agent has nothing to open and would otherwise flail trying to apply.
+    - The operator's stored letter travels with the item. The agent applies with
+      that text verbatim and does not regenerate: regenerating would discard the
+      operator's edit, which is the whole point of semi-auto. Approval only
+      checks the draft exists at approval time, not afterward, so an item whose
+      draft was since blanked or deleted comes back with ``blocked_reason`` set
+      to "no_letter" rather than reaching the agent with nothing to send.
     """
     applied_urls = {
         a.application_url for a in _apps_store.load_all() if a.application_url
@@ -171,7 +181,16 @@ def get_approved_applications() -> list[dict]:
             continue
         if s.url and s.url in applied_urls:
             continue
+        draft = _letter_store.load(s.id)
         status = _cooldown(s.company, s.role or None)
+        if status.blocked:
+            blocked_reason = "cooldown"
+        elif not s.url.strip():
+            blocked_reason = "no_url"
+        elif draft is None or not draft.text.strip():
+            blocked_reason = "no_letter"
+        else:
+            blocked_reason = ""
         items.append(
             {
                 "screening_id": s.id,
@@ -179,7 +198,9 @@ def get_approved_applications() -> list[dict]:
                 "role": s.role,
                 "url": s.url,
                 "attempts": s.apply_attempts,
-                "blocked_reason": "cooldown" if status.blocked else "",
+                "blocked_reason": blocked_reason,
+                "cover_letter": draft.text if draft else "",
+                "letter_source": draft.source if draft else "",
             }
         )
     return items

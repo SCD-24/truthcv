@@ -19,6 +19,7 @@ import type {
   ApplicationUpdate,
   SaveDocumentResult,
   ScreeningRecord,
+  CoverLetterDraft,
   CooldownStatus,
   AgentConfig,
   AgentConfigUpdate,
@@ -294,15 +295,77 @@ export function listApprovedApplications(): Promise<ScreeningRecord[]> {
   return request("/api/screenings?approval=approved");
 }
 
+/** Postings you rejected. Kept listed so a decision can be reversed. */
+export function listRejectedApprovals(): Promise<ScreeningRecord[]> {
+  return request("/api/screenings?approval=rejected");
+}
+
+/** Postings the agent rejected on a criterion — never queued, and reviewable
+ * so a filter you disagree with does not silently lose a role. Filtered
+ * client-side: an agent-criteria rejection has an empty `approval`, but so
+ * does any other untouched record (`approval: str = ""` is the schema
+ * default), so `?approval=` would also return records that were never
+ * screened as rejected at all. */
+export async function listDidNotPass(): Promise<ScreeningRecord[]> {
+  const all = await listScreenings();
+  return all.filter((s) => s.verdict === "rejected" && !s.approval);
+}
+
 /** Record the operator's decision on one screening. */
 export function setScreeningApproval(
   id: string,
-  approval: "approved" | "rejected",
+  approval: "approved" | "rejected" | "pending",
 ): Promise<ScreeningRecord> {
   return request("/api/screenings/" + encodeURIComponent(id), {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ approval }),
+  });
+}
+
+/** Supply the URL a historical import left blank; the agent cannot apply
+ * without one. */
+export function setScreeningUrl(id: string, url: string): Promise<ScreeningRecord> {
+  return request("/api/screenings/" + encodeURIComponent(id), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+}
+
+/** The stored draft, or null when none has been generated yet.
+ *
+ * `request`'s errors are plain `Error`s carrying only a message (see its
+ * definition above) — no status code survives the throw. The 404 route
+ * (api/routes.py get_screening_letter) always sends the same detail string,
+ * so that string is what distinguishes "no draft yet" from a real failure. */
+export async function getScreeningLetter(id: string): Promise<CoverLetterDraft | null> {
+  try {
+    return await request<CoverLetterDraft>(
+      "/api/screenings/" + encodeURIComponent(id) + "/letter",
+    );
+  } catch (e) {
+    if (e instanceof Error && e.message === "No cover letter drafted yet.") return null;
+    throw e;
+  }
+}
+
+/** Draft the letter from the stored posting text. `force` discards an edit of
+ * yours; without it the server refuses to overwrite your own words. */
+export function generateScreeningLetter(id: string, force = false): Promise<CoverLetterDraft> {
+  return request("/api/screenings/" + encodeURIComponent(id) + "/letter", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ force }),
+  });
+}
+
+/** Save your own text. It is stored verbatim and never validated. */
+export function saveScreeningLetter(id: string, text: string): Promise<CoverLetterDraft> {
+  return request("/api/screenings/" + encodeURIComponent(id) + "/letter", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
   });
 }
 

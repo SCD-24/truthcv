@@ -69,6 +69,33 @@ def test_create_list_delete_screening(client):
     assert all(s["id"] != screening_id for s in r.json())
 
 
+def test_create_list_screening_carries_posting_text_and_posted_date(client):
+    # Regression test: ScreeningModel omitted posting_text/posted_date, so
+    # Pydantic's extra="ignore" silently dropped both from the response even
+    # though Screening.EDITABLE stores them.
+    r = client.post(
+        "/api/screenings",
+        json={
+            "company": "Acme",
+            "role": "Engineer",
+            "verdict": "passed",
+            "postingText": "We are hiring an Engineer.",
+            "postedDate": "2026-07-01",
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["postingText"] == "We are hiring an Engineer."
+    assert body["postedDate"] == "2026-07-01"
+    screening_id = body["id"]
+
+    r = client.get("/api/screenings")
+    assert r.status_code == 200
+    listed = next(s for s in r.json() if s["id"] == screening_id)
+    assert listed["postingText"] == "We are hiring an Engineer."
+    assert listed["postedDate"] == "2026-07-01"
+
+
 def test_list_screenings_most_recent_first(client):
     first = client.post("/api/screenings", json={"company": "First", "verdict": "passed"}).json()
     second = client.post("/api/screenings", json={"company": "Second", "verdict": "passed"}).json()

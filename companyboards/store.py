@@ -128,19 +128,28 @@ def record(company: str, careers_url: str, ats: str = "", status: str = "ok") ->
     save(boards)
 
 
-def set_approved(company: str, approved: bool) -> CompanyBoard | None:
+def set_approved(company: str, approved: bool) -> CompanyBoard:
     """Grant or revoke company-level approval.
 
-    Returns the updated entry so callers need not re-normalise the name to read
-    it back; None when the company has no board.
+    Creates the entry when the company has no board yet. Trust is an operator
+    decision about a company, not a fact about a discovered careers page: most
+    companies in the approvals queue were screened from a posting URL and never
+    had a board resolved, and refusing to record the decision for them made the
+    Approvals page's company button fail outright. A board created this way
+    carries no careers_url and is marked "unresolved" until discovery fills it
+    in via record().
+
+    Returns the entry so callers need not re-normalise the name to read it back.
     """
     boards = load()
     normalized = _normalize_company(company)
-    if normalized not in boards:
-        return None
-    boards[normalized].approved = approved
+    entry = boards.get(normalized)
+    if entry is None:
+        entry = CompanyBoard(company=company.strip(), careers_url="", status="unresolved")
+        boards[normalized] = entry
+    entry.approved = approved
     save(boards)
-    return boards[normalized]
+    return entry
 
 
 def mark_dead(company: str) -> None:
@@ -153,12 +162,20 @@ def mark_dead(company: str) -> None:
 
 
 def prune(target_companies: list[str]) -> None:
-    """Remove board entries whose company is not in the target watchlist."""
+    """Remove board entries whose company is not in the target watchlist.
+
+    An empty watchlist prunes nothing: it means "no watchlist configured", not
+    "drop every board", and reading it the other way emptied the whole store on
+    every GET of the agent config. Operator-approved entries are kept
+    regardless — a discovery-driven sweep must not delete a human decision.
+    """
+    if not target_companies:
+        return
     boards = load()
     normalized_targets = {_normalize_company(name) for name in target_companies}
 
     # Filter to only keep boards for companies still on the watchlist
-    pruned = {k: v for k, v in boards.items() if k in normalized_targets}
+    pruned = {k: v for k, v in boards.items() if k in normalized_targets or v.approved}
 
     if len(pruned) != len(boards):
         save(pruned)

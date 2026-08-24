@@ -31,6 +31,7 @@ vi.mock("../api/client", () => ({
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
+    mode: "full",
     enabled: true,
     blockedCompanies: [],
     runAt: ["09:00"],
@@ -187,7 +188,7 @@ describe("AgentsPage model section", () => {
 
     render(<AgentsPage onBack={vi.fn()} />);
 
-    expect(await screen.findByLabelText("Agent enabled")).toBeTruthy();
+    expect(await screen.findByRole("slider", { name: "Agent autonomy" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Schedule" })).toBeTruthy();
     expect(await screen.findByText("routing unavailable")).toBeTruthy();
     expect(screen.queryByLabelText(/connection/i)).toBeNull();
