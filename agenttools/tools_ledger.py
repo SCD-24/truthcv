@@ -152,7 +152,7 @@ def recommend_salary(profile_name: str, proposed: int | None = None) -> dict:
 def get_approved_applications() -> list[dict]:
     """Postings the operator approved and this run should apply to.
 
-    Two guards live here rather than in the prompt, because a wrong judgement by
+    Three guards live here rather than in the prompt, because a wrong judgement by
     the model would be costly and silent:
 
     - An item whose URL already appears in the applications ledger is dropped.
@@ -161,6 +161,9 @@ def get_approved_applications() -> list[dict]:
     - An item whose company is in cooldown comes back with ``blocked_reason``
       set instead of being hidden, so the run report can say why it did not go
       out rather than the posting silently vanishing.
+    - An item with no URL (many imported records predate URL capture) comes
+      back with ``blocked_reason`` set to "no_url" rather than hidden, since
+      the agent has nothing to open and would otherwise flail trying to apply.
     """
     applied_urls = {
         a.application_url for a in _apps_store.load_all() if a.application_url
@@ -172,6 +175,12 @@ def get_approved_applications() -> list[dict]:
         if s.url and s.url in applied_urls:
             continue
         status = _cooldown(s.company, s.role or None)
+        if status.blocked:
+            blocked_reason = "cooldown"
+        elif not s.url.strip():
+            blocked_reason = "no_url"
+        else:
+            blocked_reason = ""
         items.append(
             {
                 "screening_id": s.id,
@@ -179,7 +188,7 @@ def get_approved_applications() -> list[dict]:
                 "role": s.role,
                 "url": s.url,
                 "attempts": s.apply_attempts,
-                "blocked_reason": "cooldown" if status.blocked else "",
+                "blocked_reason": blocked_reason,
             }
         )
     return items

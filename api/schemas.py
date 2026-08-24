@@ -589,9 +589,16 @@ class ScreeningModel(_Camel):
 
 
 class ApprovalUpdate(_Camel):
-    """PATCH /screenings/{id}: the operator's approval decision."""
+    """PATCH /screenings/{id}: the operator's approval decision and/or the
+    posting URL.
 
-    approval: str
+    ``url`` is patchable here because an imported screening can carry no URL
+    (a prose migration had none to capture), and the agent cannot apply to a
+    posting it has nothing to open.
+    """
+
+    approval: str | None = None
+    url: str | None = None
 
 
 class BulkApprovalUpdate(_Camel):

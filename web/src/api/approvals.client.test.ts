@@ -11,6 +11,7 @@ import {
   bulkSetApproval,
   setCompanyApproval,
   setScreeningApproval,
+  setScreeningUrl,
 } from "./client";
 
 function stubFetch(payload: unknown) {
@@ -47,6 +48,16 @@ describe("approval writers", () => {
     expect(init.method).toBe("PATCH");
     expect(init.headers["Content-Type"]).toBe("application/json");
     expect(JSON.parse(init.body)).toEqual({ ids: ["a", "b"], approval: "approved" });
+  });
+
+  it("setScreeningUrl PATCHes JSON with the JSON content type", async () => {
+    const fetchMock = stubFetch({ id: "s1", url: "https://x.example/job" });
+    await setScreeningUrl("s1", "https://x.example/job");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/screenings/s1");
+    expect(init.method).toBe("PATCH");
+    expect(init.headers["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(init.body)).toEqual({ url: "https://x.example/job" });
   });
 
   it("setCompanyApproval PATCHes JSON with the JSON content type", async () => {

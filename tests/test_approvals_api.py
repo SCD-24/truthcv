@@ -56,6 +56,38 @@ def test_patch_bad_value_422(client):
     assert client.patch(f"/api/screenings/{s.id}", json={"approval": "sure"}).status_code == 422
 
 
+def test_patch_sets_url_only(client):
+    s = _deferred()
+    body = client.patch(f"/api/screenings/{s.id}", json={"url": "https://x.com/1"}).json()
+    assert body["url"] == "https://x.com/1"
+    assert body["approval"] == "pending"
+    reloaded = store.get(s.id)
+    assert reloaded.url == "https://x.com/1"
+    assert reloaded.approval == "pending"
+
+
+def test_patch_sets_url_and_approval(client):
+    s = _deferred()
+    body = client.patch(
+        f"/api/screenings/{s.id}",
+        json={"url": "https://x.com/1", "approval": "approved"},
+    ).json()
+    assert body["url"] == "https://x.com/1"
+    assert body["approval"] == "approved"
+    reloaded = store.get(s.id)
+    assert reloaded.url == "https://x.com/1"
+    assert reloaded.approval == "approved"
+
+
+def test_patch_empty_body_422(client):
+    s = _deferred()
+    assert client.patch(f"/api/screenings/{s.id}", json={}).status_code == 422
+
+
+def test_patch_url_unknown_id_404(client):
+    assert client.patch("/api/screenings/nope", json={"url": "https://x.com/1"}).status_code == 404
+
+
 def test_bulk_patch_reports_per_id(client):
     a, b = _deferred("Grafana Labs"), _deferred("n8n")
     body = client.patch(
@@ -84,8 +116,13 @@ def test_company_approval(client):
     assert boards.load()["grafana labs"].approved is True
 
 
-def test_company_approval_unknown_404(client):
-    assert client.patch("/api/company-boards/Nobody", json={"approved": True}).status_code == 404
+def test_company_approval_without_a_resolved_board(client):
+    """The queue is full of companies screened from a posting URL, which have no
+    board entry; approving one records the trust rather than 404ing."""
+    resp = client.patch("/api/company-boards/Nobody", json={"approved": True})
+    assert resp.status_code == 200
+    assert resp.json()["approved"] is True
+    assert boards.load()["nobody"].approved is True
 
 
 def test_no_agent_route_writes_approval(client):

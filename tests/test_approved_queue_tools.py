@@ -57,3 +57,17 @@ def test_report_apply_failure_counts_and_keeps_approval(data_dir):
 
 def test_report_apply_failure_unknown_id(data_dir):
     assert report_apply_failure("nope", "x")["ok"] is False
+
+
+def test_no_url_flagged_blocked_reason(data_dir):
+    """Imported records with no URL give the agent nothing to open; they must
+    come back flagged instead of silently handed to the agent to flail on."""
+    _approved(url="")
+    items = get_approved_applications()
+    assert [i["blocked_reason"] for i in items] == ["no_url"]
+
+
+def test_url_present_no_cooldown_blocked_reason_empty(data_dir):
+    _approved(url="https://grafana.com/jobs/1")
+    items = get_approved_applications()
+    assert [i["blocked_reason"] for i in items] == [""]

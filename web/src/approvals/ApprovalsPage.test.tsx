@@ -7,6 +7,7 @@ import {
   listApprovedApplications,
   listPendingApprovals,
   setScreeningApproval,
+  setScreeningUrl,
 } from "../api/client";
 import type { ScreeningRecord } from "../api/types";
 import { ApprovalsPage } from "./ApprovalsPage";
@@ -17,6 +18,7 @@ vi.mock("../api/client", () => ({
   setScreeningApproval: vi.fn(),
   bulkSetApproval: vi.fn(),
   setCompanyApproval: vi.fn(),
+  setScreeningUrl: vi.fn(),
 }));
 
 afterEach(cleanup);
@@ -92,5 +94,38 @@ describe("ApprovalsPage", () => {
     );
     expect(await screen.findByText(/form 404/)).toBeTruthy();
     expect(screen.getByText(/3 attempts/i)).toBeTruthy();
+  });
+
+  it("renders a URL entry field for a pending record with no url", async () => {
+    await renderPage([makeRecord({ url: "" })]);
+    expect(await screen.findByLabelText(/posting url/i)).toBeTruthy();
+  });
+
+  it("does not render a URL entry field for a record that already has a url", async () => {
+    await renderPage([makeRecord()]);
+    await screen.findByText("Grafana Labs");
+    expect(screen.queryByLabelText(/posting url/i)).toBeNull();
+  });
+
+  it("saving a url calls through and renders the link in place of the field", async () => {
+    vi.mocked(setScreeningUrl).mockResolvedValue(
+      makeRecord({ url: "https://x.example/job" }),
+    );
+    await renderPage([makeRecord({ url: "" })]);
+    fireEvent.change(await screen.findByLabelText(/posting url/i), {
+      target: { value: "https://x.example/job" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save url/i }));
+    await waitFor(() =>
+      expect(setScreeningUrl).toHaveBeenCalledWith("s1", "https://x.example/job"),
+    );
+    expect(await screen.findByText("https://x.example/job")).toBeTruthy();
+    expect(screen.queryByLabelText(/posting url/i)).toBeNull();
+  });
+
+  it("shows a warning and URL field for an approved record with no url", async () => {
+    await renderPage([], [makeRecord({ approval: "approved", url: "" })]);
+    expect(await screen.findByLabelText(/posting url/i)).toBeTruthy();
+    expect(screen.getByText(/cannot be applied to on the next run/i)).toBeTruthy();
   });
 });

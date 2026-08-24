@@ -10,6 +10,7 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import Link from "@mui/material/Link";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
+import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import {
@@ -18,8 +19,40 @@ import {
   listPendingApprovals,
   setCompanyApproval,
   setScreeningApproval,
+  setScreeningUrl,
 } from "../api/client";
 import type { ScreeningRecord } from "../api/types";
+
+/** Shown in place of the link when a record has no URL — postings imported
+ * from the historical log carry none, and the agent cannot apply without one. */
+function UrlEntry({
+  busy,
+  onSave,
+}: {
+  busy: boolean;
+  onSave: (url: string) => void;
+}) {
+  const [url, setUrl] = useState("");
+  return (
+    <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: "center" }}>
+      <TextField
+        label="Posting URL"
+        size="small"
+        placeholder="https://..."
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+      />
+      <Button
+        variant="outlined"
+        size="small"
+        disabled={busy || !url.trim()}
+        onClick={() => onSave(url)}
+      >
+        Save URL
+      </Button>
+    </Stack>
+  );
+}
 
 /** One posting waiting on the operator: what the agent found, why it stopped,
  * and the two decisions available. */
@@ -30,6 +63,7 @@ function PendingCard({
   onToggle,
   onDecide,
   onApproveCompany,
+  onSaveUrl,
 }: {
   record: ScreeningRecord;
   checked: boolean;
@@ -37,6 +71,7 @@ function PendingCard({
   onToggle: (id: string) => void;
   onDecide: (id: string, approval: "approved" | "rejected") => void;
   onApproveCompany: (company: string) => void;
+  onSaveUrl: (id: string, url: string) => void;
 }) {
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
@@ -55,7 +90,9 @@ function PendingCard({
             <Link href={record.url} target="_blank" rel="noreferrer" variant="body2">
               {record.url}
             </Link>
-          ) : null}
+          ) : (
+            <UrlEntry busy={busy} onSave={(url) => onSaveUrl(record.id, url)} />
+          )}
           <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: "center" }}>
             {record.failingCriterion ? (
               <Chip size="small" label={record.failingCriterion} />
@@ -97,12 +134,32 @@ function PendingCard({
 /** An approved item that has not been applied to yet. Its attempt count and
  * last error are the only signal that a posting is failing every run, which is
  * the manual drain for the retry-forever policy. */
-function ApprovedRow({ record }: { record: ScreeningRecord }) {
+function ApprovedRow({
+  record,
+  busy,
+  onSaveUrl,
+}: {
+  record: ScreeningRecord;
+  busy: boolean;
+  onSaveUrl: (id: string, url: string) => void;
+}) {
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
       <Typography variant="subtitle2">
         {record.company} — {record.role}
       </Typography>
+      {record.url ? (
+        <Link href={record.url} target="_blank" rel="noreferrer" variant="body2">
+          {record.url}
+        </Link>
+      ) : (
+        <>
+          <Alert severity="warning" sx={{ mt: 1 }}>
+            No URL — this posting cannot be applied to on the next run.
+          </Alert>
+          <UrlEntry busy={busy} onSave={(url) => onSaveUrl(record.id, url)} />
+        </>
+      )}
       <Typography variant="body2" sx={{ color: "text.secondary" }}>
         {record.applyAttempts} attempts
       </Typography>
@@ -173,6 +230,20 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
       );
       setSelected([]);
       if (failed.size) setError(`${failed.size} could not be updated.`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveUrl(id: string, url: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await setScreeningUrl(id, url);
+      setPending((rows) => rows.map((r) => (r.id === id ? updated : r)));
+      setApproved((rows) => rows.map((r) => (r.id === id ? updated : r)));
     } catch (e) {
       setError(String(e));
     } finally {
@@ -258,6 +329,7 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
                   onToggle={toggle}
                   onDecide={decide}
                   onApproveCompany={approveCompany}
+                  onSaveUrl={saveUrl}
                 />
               ))}
             </>
@@ -270,7 +342,7 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
               <Divider />
               <Typography variant="subtitle1">Approved, not yet applied</Typography>
               {approved.map((r) => (
-                <ApprovedRow key={r.id} record={r} />
+                <ApprovedRow key={r.id} record={r} busy={busy} onSaveUrl={saveUrl} />
               ))}
             </>
           ) : null}

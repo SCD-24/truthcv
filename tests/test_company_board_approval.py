@@ -21,8 +21,37 @@ def test_set_approved(data_dir):
     assert boards.load()["grafana labs"].approved is True
 
 
-def test_set_approved_unknown_company(data_dir):
-    assert boards.set_approved("Nobody", True) is None
+def test_set_approved_creates_a_board_for_an_unresolved_company(data_dir):
+    """Companies screened from a posting URL never had a board resolved; the
+    operator must still be able to trust them."""
+    entry = boards.set_approved("Nobody", True)
+    assert entry.approved is True
+    assert entry.company == "Nobody"
+    assert entry.careers_url == ""
+    assert entry.status == "unresolved"
+    assert boards.load()["nobody"].approved is True
+
+
+def test_prune_with_an_empty_watchlist_keeps_everything(data_dir):
+    """An empty watchlist means "unconfigured", not "delete every board"."""
+    boards.record("Grafana Labs", "https://grafana.com/careers")
+    boards.prune([])
+    assert "grafana labs" in boards.load()
+
+
+def test_prune_keeps_approved_companies_off_the_watchlist(data_dir):
+    boards.set_approved("Grafana Labs", True)
+    boards.record("Other Co", "https://other.example/careers")
+    boards.prune(["Other Co"])
+    remaining = boards.load()
+    assert remaining["grafana labs"].approved is True
+    assert "other co" in remaining
+
+
+def test_prune_still_drops_unapproved_companies_off_the_watchlist(data_dir):
+    boards.record("Grafana Labs", "https://grafana.com/careers")
+    boards.prune(["Other Co"])
+    assert "grafana labs" not in boards.load()
 
 
 def test_record_preserves_approval(data_dir):

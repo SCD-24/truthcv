@@ -298,9 +298,9 @@ else
 fi
 
 # A bare GET here would prove nothing: the app serves an SPA catch-all, so every
-# URL under it answers 200 and the old probe passed while all nine tools failed
+# URL under it answers 200 and the old probe passed while all eleven tools failed
 # to register. Do the real MCP handshake instead - initialize, initialized,
-# tools/list - and insist on the nine tools by name.
+# tools/list - and insist on the eleven tools by name.
 if [[ -n "${TRUTHCV_MCP_URL:-}" ]]; then
   if MCP_OUT="$(node -e '
     const u = new URL(process.env.TRUTHCV_MCP_URL);
@@ -363,9 +363,10 @@ if [[ -n "${TRUTHCV_MCP_URL:-}" ]]; then
     }
 
     const EXPECTED = [
-      "check_cooldown", "generate_cover_letter", "get_canonical_cv",
-      "get_job_profiles", "get_profile_answers", "recommend_salary",
-      "record_application", "record_company_board", "record_screening",
+      "check_cooldown", "generate_cover_letter", "get_approved_applications",
+      "get_canonical_cv", "get_job_profiles", "get_profile_answers",
+      "recommend_salary", "record_application", "record_company_board",
+      "record_screening", "report_apply_failure",
     ].sort();
 
     (async () => {

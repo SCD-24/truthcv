@@ -306,6 +306,16 @@ export function setScreeningApproval(
   });
 }
 
+/** Supply the URL a historical import left blank; the agent cannot apply
+ * without one. */
+export function setScreeningUrl(id: string, url: string): Promise<ScreeningRecord> {
+  return request("/api/screenings/" + encodeURIComponent(id), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+}
+
 /** One decision across many screenings; the result reports each id separately. */
 export function bulkSetApproval(
   ids: string[],

@@ -3,6 +3,9 @@
 # Stubs agent-config.js fetch and PROMPT_FILE, drives prompt-composition path,
 # asserts three cases: configured values appear, blank criteria omit lines,
 # fetch failure produces byte-identical prompt to before-change baseline.
+# Also asserts the per-run application cap: config's maxApplicationsPerRun
+# wins over MAX_APPLICATIONS_PER_RUN when present, and the cap line is
+# omitted entirely when neither source supplies one.
 
 set -euo pipefail
 
@@ -89,6 +92,58 @@ if ! diff -q "$BASELINE3" "$PROMPT_OUTPUT3" >/dev/null 2>&1; then
   exit 1
 fi
 echo "PASS: Fetch failure leaves prompt unchanged"
+
+# --- Per-run application cap: config-first, env-fallback -------------------
+# Mirrors daily-apply.sh's actual cap-resolution logic verbatim (see the
+# "Per-run application cap" block there), so a divergence between this
+# simulation and the real script is a bug in one of the two, not just here.
+render_cap() {
+  local job_config="$1" env_cap="$2"
+  local config_cap="" apply_cap="" prompt=""
+  if [[ -n "$job_config" ]]; then
+    config_cap="$(jq -r '.maxApplicationsPerRun' <<<"$job_config")"
+  fi
+  if [[ "$config_cap" =~ ^[1-9][0-9]*$ ]]; then
+    apply_cap="$config_cap"
+  else
+    apply_cap="$env_cap"
+  fi
+  if [[ "$apply_cap" =~ ^[1-9][0-9]*$ ]]; then
+    prompt="Apply to at most $apply_cap role(s) this run."
+  fi
+  echo "$prompt"
+}
+
+# Case 4: config supplies maxApplicationsPerRun (5) - config wins over env,
+# and the cap line is rendered from the config value.
+echo "Testing: cap line rendered from config value (maxApplicationsPerRun: 5)..."
+CAP_CONFIG_SET='{"profiles":[],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":5,"companyBoards":[]}'
+CAP_LINE_4="$(render_cap "$CAP_CONFIG_SET" "9")"
+if [[ "$CAP_LINE_4" != "Apply to at most 5 role(s) this run." ]]; then
+  echo "FAIL: expected cap line from config value 5, got: '$CAP_LINE_4'"
+  exit 1
+fi
+echo "PASS: cap line rendered from config value, config (5) wins over env (9)"
+
+# Case 5: config's maxApplicationsPerRun is null (jq renders it as the string
+# "null") and no env fallback is set either - no cap line at all.
+echo "Testing: cap line omitted when config is null and env unset..."
+CAP_CONFIG_NULL='{"profiles":[],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":null,"companyBoards":[]}'
+CAP_LINE_5="$(render_cap "$CAP_CONFIG_NULL" "")"
+if [[ -n "$CAP_LINE_5" ]]; then
+  echo "FAIL: expected no cap line when both sources are absent, got: '$CAP_LINE_5'"
+  exit 1
+fi
+echo "PASS: cap line omitted when both config and env are absent"
+
+# Case 6: config's maxApplicationsPerRun is null - falls back to the env var.
+echo "Testing: cap line falls back to env var when config is null..."
+CAP_LINE_6="$(render_cap "$CAP_CONFIG_NULL" "7")"
+if [[ "$CAP_LINE_6" != "Apply to at most 7 role(s) this run." ]]; then
+  echo "FAIL: expected cap line from env fallback 7, got: '$CAP_LINE_6'"
+  exit 1
+fi
+echo "PASS: cap line falls back to env var when config does not set it"
 
 echo ""
 echo "All tests passed!"

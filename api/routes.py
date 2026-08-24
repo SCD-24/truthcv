@@ -166,13 +166,24 @@ def bulk_set_approval(body: BulkApprovalUpdate) -> BulkApprovalResult:
 
 @router.patch("/screenings/{screening_id}", response_model=ScreeningModel)
 def set_screening_approval(screening_id: str, body: ApprovalUpdate) -> ScreeningModel:
-    """The operator's approval decision for one screening."""
-    try:
-        screening = screening_store.set_approval(screening_id, body.approval)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
-    if screening is None:
-        raise HTTPException(status_code=404, detail="Screening not found.")
+    """The operator's approval decision and/or posting URL for one screening."""
+    if body.approval is None and body.url is None:
+        raise HTTPException(status_code=422, detail="Provide approval or url.")
+
+    screening = None
+    if body.url is not None:
+        screening = screening_store.update(screening_id, {"url": body.url})
+        if screening is None:
+            raise HTTPException(status_code=404, detail="Screening not found.")
+
+    if body.approval is not None:
+        try:
+            screening = screening_store.set_approval(screening_id, body.approval)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+        if screening is None:
+            raise HTTPException(status_code=404, detail="Screening not found.")
+
     return _screening_model(screening)
 
 
@@ -181,11 +192,11 @@ def set_company_approval(company: str, body: CompanyApprovalUpdate) -> CompanyBo
     """Grant or revoke company-level trust.
 
     Weaker than approving a posting: it clears the blockers that caused a
-    deferral, and never skips per-role screening.
+    deferral, and never skips per-role screening. Recording the decision does
+    not require a resolved careers board — most queued companies were screened
+    from a posting URL and have none.
     """
     entry = companyboards_store.set_approved(company, body.approved)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="Company board not found.")
     return CompanyBoardModel(
         company=entry.company,
         careers_url=entry.careers_url,
