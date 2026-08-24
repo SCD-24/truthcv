@@ -35,7 +35,8 @@ _TOOL_REGISTRY = {
     ),
     "record_screening": (
         _record_screening,
-        "Records a rejected or deferred posting.",
+        "Records a rejected or deferred posting. The posting's own URL is required and the call is rejected without it. "
+        "You must also pass posting_text — the posting exactly as you read it — because the operator will draft the cover letter from it days later, on a page the agent never sees.",
     ),
     "check_cooldown": (
         _check_cooldown,

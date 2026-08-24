@@ -23,6 +23,7 @@ import coverletter.store as _letter_store
 import screening.store as _screening_store
 from screening.cooldown import cooldown as _cooldown
 from screening.store import create as create_screening
+from screening.url import validate_posting_url as _validate_posting_url
 from truth.answers import canonical_cv as _canonical_cv
 from truth.answers import load as _load_answers
 
@@ -99,8 +100,24 @@ def record_application(**fields) -> dict:
     return app.to_dict()
 
 
-def record_screening(**fields) -> dict:
-    """Persist one screening verdict via ``screening.store.create``."""
+def record_screening(
+    url: str, posting_text: str = "", posted_date: str = "", **fields
+) -> dict:
+    """Persist one screening verdict via ``screening.store.create``.
+
+    The posting's own ``url`` is mandatory: the operator must be able to open
+    the posting to act on this verdict, and the agent cannot apply to a
+    posting it has no URL for. The URL is validated by
+    ``screening.url.validate_posting_url``; a ``ValueError`` it raises is left
+    to propagate, which is the intended rejection of a call that gave no
+    usable URL.
+    """
+    validated_url = _validate_posting_url(url)
+    fields["url"] = validated_url
+    if posting_text:
+        fields["posting_text"] = posting_text
+    if posted_date:
+        fields["posted_date"] = posted_date
     screening = create_screening(fields)
     return screening.to_dict()
 

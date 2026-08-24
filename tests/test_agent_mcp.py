@@ -16,6 +16,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
@@ -367,7 +368,10 @@ def test_check_cooldown_agrees_with_the_http_route(data_dir):
     client = TestClient(app)
     future = (datetime.now(timezone.utc) + timedelta(days=10)).isoformat()
     tools_ledger.record_screening(
-        company="Acme Corp", verdict="rejected", cooldown_expires=future
+        company="Acme Corp",
+        url="https://acme.example/jobs/1",
+        verdict="rejected",
+        cooldown_expires=future,
     )
 
     tool_result = tools_ledger.check_cooldown("Acme Corp")
@@ -381,6 +385,29 @@ def test_check_cooldown_agrees_with_the_http_route(data_dir):
     assert tool_result_none["in_cooldown"] is False
     assert tool_result_none["in_cooldown"] == http_result_none["inCooldown"]
     assert tool_result_none["expires"] == http_result_none["expires"] is None
+
+
+def test_record_screening_rejects_a_blank_url_and_persists_nothing(data_dir):
+    """A posting URL is mandatory: record_screening with a blank url must
+    raise and write no screening, so the agent cannot queue a verdict it has
+    no way to act on."""
+    from screening import store as screening_store
+
+    with pytest.raises(ValueError):
+        tools_ledger.record_screening(
+            company="Acme Corp", url="", verdict="rejected"
+        )
+
+    assert screening_store.load_all() == []
+
+
+def test_record_screening_schema_marks_url_required():
+    """The tool schema the agent reads must advertise url as required, so a
+    caller knows the posting URL cannot be omitted."""
+    from agenttools.mcp_app import _input_schema
+
+    schema = _input_schema(tools_ledger.record_screening)
+    assert "url" in schema["required"]
 
 
 def test_generate_cover_letter_refuses_blocked_company(data_dir):

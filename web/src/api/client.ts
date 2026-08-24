@@ -339,6 +339,19 @@ export function setScreeningUrl(id: string, url: string): Promise<ScreeningRecor
   });
 }
 
+/** Supply the posting text a record was created without; the operator cannot
+ * draft a cover letter without it. */
+export function setScreeningPostingText(
+  id: string,
+  postingText: string,
+): Promise<ScreeningRecord> {
+  return request("/api/screenings/" + encodeURIComponent(id), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ postingText }),
+  });
+}
+
 /** The stored draft, or null when none has been generated yet.
  *
  * `request`'s errors are plain `Error`s carrying only a message (see its
