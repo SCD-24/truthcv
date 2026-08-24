@@ -339,6 +339,17 @@ export function setScreeningUrl(id: string, url: string): Promise<ScreeningRecor
   });
 }
 
+/** Correct a screening's job title — used both to fill a role a historical
+ * import left blank and to fix a garbled one. The server rejects an unusable
+ * title (empty, placeholder text, a URL, too long) with a 422. */
+export function setScreeningRole(id: string, role: string): Promise<ScreeningRecord> {
+  return request("/api/screenings/" + encodeURIComponent(id), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role }),
+  });
+}
+
 /** Supply the posting text a record was created without; the operator cannot
  * draft a cover letter without it. */
 export function setScreeningPostingText(

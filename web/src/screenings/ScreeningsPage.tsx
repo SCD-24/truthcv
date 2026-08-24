@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { KeyboardEvent } from "react";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Button from "@mui/material/Button";
@@ -15,7 +16,8 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Chip from "@mui/material/Chip";
 import Tooltip from "@mui/material/Tooltip";
-import { deleteScreening, listScreenings } from "../api/client";
+import TextField from "@mui/material/TextField";
+import { deleteScreening, listScreenings, setScreeningRole } from "../api/client";
 import type { ScreeningRecord } from "../api/types";
 import { isCooldownActive } from "../settings/cooldown";
 import { lastAgentActivity } from "../settings/agentActivity";
@@ -28,6 +30,92 @@ function cooldownLabel(record: ScreeningRecord, active: boolean): string {
 }
 
 export { cooldownLabel };
+
+/** A role a user typed vs the role as last committed — if they match, a
+ * commit is a no-op that must not fire a request. */
+export function roleUnchanged(draft: string, stored: string): boolean {
+  return draft === stored;
+}
+
+/** The Role cell, editable in place: click to open a text field seeded with
+ * the current role, commit on Enter or blur, cancel on Escape. The server's
+ * (possibly normalized) response is what gets shown — never the typed
+ * string — and a rejected commit stays in edit mode with the server's
+ * message, leaving the stored role untouched. */
+function RoleCell({
+  record,
+  busy,
+  onSave,
+}: {
+  record: ScreeningRecord;
+  busy: boolean;
+  onSave: (id: string, role: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(record.role);
+  const [error, setError] = useState("");
+
+  function startEdit() {
+    setDraft(record.role);
+    setError("");
+    setEditing(true);
+  }
+
+  function cancel() {
+    setDraft(record.role);
+    setError("");
+    setEditing(false);
+  }
+
+  async function commit() {
+    if (!editing) return;
+    if (roleUnchanged(draft, record.role)) {
+      setEditing(false);
+      return;
+    }
+    setError("");
+    try {
+      await onSave(record.id, draft);
+      setEditing(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't save the role.");
+    }
+  }
+
+  function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") commit();
+    else if (e.key === "Escape") cancel();
+  }
+
+  if (!editing) {
+    return (
+      <TableCell onClick={startEdit} sx={{ cursor: "pointer" }}>
+        {record.role || "—"}
+      </TableCell>
+    );
+  }
+
+  return (
+    <TableCell>
+      <Stack spacing={0.5}>
+        <TextField
+          size="small"
+          autoFocus
+          value={draft}
+          disabled={busy}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={onKeyDown}
+          onBlur={commit}
+        />
+        {error ? (
+          <Typography variant="caption" color="error">
+            {error}
+          </Typography>
+        ) : null}
+      </Stack>
+    </TableCell>
+  );
+}
 
 /** Human wording for WHY a company is blocked, so the user can tell which
  * setting governs it: a blocklist entry vs a same-role vs a same-company
@@ -44,10 +132,14 @@ function ScreeningRow({
   record,
   deleting,
   onDelete,
+  savingRole,
+  onSaveRole,
 }: {
   record: ScreeningRecord;
   deleting: boolean;
   onDelete: (id: string) => void;
+  savingRole: boolean;
+  onSaveRole: (id: string, role: string) => Promise<void>;
 }) {
   const active = isCooldownActive(record.cooldownExpires);
   return (
@@ -57,7 +149,7 @@ function ScreeningRow({
           <Typography variant="body2">{record.company || "—"}</Typography>
         </Tooltip>
       </TableCell>
-      <TableCell>{record.role || "—"}</TableCell>
+      <RoleCell record={record} busy={savingRole} onSave={onSaveRole} />
       <TableCell>{record.verdict || "—"}</TableCell>
       <TableCell>{record.failingCriterion || "—"}</TableCell>
       <TableCell>
@@ -94,6 +186,7 @@ export function ScreeningsPage({ onBack }: { onBack: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [savingRoleId, setSavingRoleId] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -113,6 +206,18 @@ export function ScreeningsPage({ onBack }: { onBack: () => void }) {
       alive = false;
     };
   }, []);
+
+  /** Save a corrected role and replace the record with the server's
+   * (normalized) response — errors propagate for RoleCell to show inline. */
+  async function handleSaveRole(id: string, role: string) {
+    setSavingRoleId(id);
+    try {
+      const updated = await setScreeningRole(id, role);
+      setScreenings((prev) => prev.map((r) => (r.id === id ? updated : r)));
+    } finally {
+      setSavingRoleId(null);
+    }
+  }
 
   /** Delete a screening record and drop it from the loaded list. */
   async function handleDelete(id: string) {
@@ -190,6 +295,8 @@ export function ScreeningsPage({ onBack }: { onBack: () => void }) {
                   record={record}
                   deleting={deletingId === record.id}
                   onDelete={handleDelete}
+                  savingRole={savingRoleId === record.id}
+                  onSaveRole={handleSaveRole}
                 />
               ))}
             </TableBody>

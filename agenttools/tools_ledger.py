@@ -22,6 +22,7 @@ import applications.store as _apps_store
 import coverletter.store as _letter_store
 import screening.store as _screening_store
 from screening.cooldown import cooldown as _cooldown
+from screening.role import validate_role_title as _validate_role_title
 from screening.store import create as create_screening
 from screening.url import validate_posting_url as _validate_posting_url
 from truth.answers import canonical_cv as _canonical_cv
@@ -101,7 +102,11 @@ def record_application(**fields) -> dict:
 
 
 def record_screening(
-    url: str, posting_text: str = "", posted_date: str = "", **fields
+    url: str,
+    role: str,
+    posting_text: str = "",
+    posted_date: str = "",
+    **fields,
 ) -> dict:
     """Persist one screening verdict via ``screening.store.create``.
 
@@ -111,9 +116,20 @@ def record_screening(
     ``screening.url.validate_posting_url``; a ``ValueError`` it raises is left
     to propagate, which is the intended rejection of a call that gave no
     usable URL.
+
+    ``role`` is equally mandatory: the operator screens the approval queue on
+    the job title, so a blank or garbled one makes the verdict unreadable and
+    the record useless for that purpose. It is validated by
+    ``screening.role.validate_role_title``, which normalizes whitespace and
+    rejects placeholder text (e.g. "Apply now", "Remote", an empty string) or
+    a value that looks like a URL or a posting body rather than a title; its
+    ``ValueError`` is likewise left to propagate, so a call with no usable
+    role title persists nothing.
     """
     validated_url = _validate_posting_url(url)
+    validated_role = _validate_role_title(role)
     fields["url"] = validated_url
+    fields["role"] = validated_role
     if posting_text:
         fields["posting_text"] = posting_text
     if posted_date:

@@ -69,6 +69,36 @@ def test_create_list_delete_screening(client):
     assert all(s["id"] != screening_id for s in r.json())
 
 
+def test_create_screening_normalizes_messy_role(client):
+    """Whitespace in a manually-submitted role is normalized on creation."""
+    r = client.post(
+        "/api/screenings",
+        json={
+            "company": "Acme",
+            "role": "Senior  Backend\nEngineer",
+            "url": "https://acme.example/jobs/2",
+            "verdict": "rejected",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["role"] == "Senior Backend Engineer"
+
+
+def test_create_screening_without_role_still_succeeds(client):
+    """role stays optional on this route — the manual/import path (e.g.
+    scripts/migrate_jobs_history.py) must keep working with no role."""
+    r = client.post(
+        "/api/screenings",
+        json={
+            "company": "Acme",
+            "url": "https://acme.example/jobs/3",
+            "verdict": "rejected",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["role"] == ""
+
+
 def test_create_list_screening_carries_posting_text_and_posted_date(client):
     # Regression test: ScreeningModel omitted posting_text/posted_date, so
     # Pydantic's extra="ignore" silently dropped both from the response even

@@ -164,8 +164,9 @@ if [[ "$AGENT_MODE" == "semi" ]]; then
 Do NOT apply to a posting you find this run, however well it scores, and do not
 write a cover letter for it. For a posting that passes every criterion, call
 record_screening with verdict \"passed\", the full posting text in posting_text,
-the posting's own URL in url as a required field, and the employer's
-publication date in posted_date when the board states one.
+the posting's own job title (as posted, not a placeholder) in role as a
+required field, the posting's own URL in url as a required field, and the
+employer's publication date in posted_date when the board states one.
 It enters the operator's approval queue; they draft the letter and decide.
 
 Phase 0 is unchanged: postings the operator already approved ARE applied to,
@@ -175,7 +176,8 @@ else
 
 A posting that passes every criterion is applied to this run, as described in
 agent/RUNBOOK.md. Record the full posting text in posting_text, the posting's
-own URL in url, and the employer's publication date in posted_date on every
+own job title (as posted, not a placeholder) in role, the posting's own URL
+in url, and the employer's publication date in posted_date on every
 record_screening call."
 fi
 

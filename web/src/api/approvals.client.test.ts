@@ -13,6 +13,7 @@ import {
   getScreeningLetter,
   saveScreeningLetter,
   setScreeningApproval,
+  setScreeningRole,
   setScreeningUrl,
 } from "./client";
 
@@ -73,6 +74,16 @@ describe("approval writers", () => {
     expect(init.method).toBe("PATCH");
     expect(init.headers["Content-Type"]).toBe("application/json");
     expect(JSON.parse(init.body)).toEqual({ url: "https://x.example/job" });
+  });
+
+  it("setScreeningRole PATCHes JSON with the JSON content type", async () => {
+    const fetchMock = stubFetch({ id: "s1", role: "Staff Engineer" });
+    await setScreeningRole("s1", "Staff Engineer");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/screenings/s1");
+    expect(init.method).toBe("PATCH");
+    expect(init.headers["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(init.body)).toEqual({ role: "Staff Engineer" });
   });
 
   it("generateScreeningLetter POSTs JSON with the JSON content type", async () => {
