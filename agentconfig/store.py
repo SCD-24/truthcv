@@ -217,12 +217,24 @@ class AgentConfig:
         if "max_applications_per_run" in raw and isinstance(raw["max_applications_per_run"], int):
             kwargs["max_applications_per_run"] = raw["max_applications_per_run"]
 
-        # max_posting_age_days: int | None. A non-int falls back to None rather
-        # than raising, so a hand-edited config never blocks the run — the same
-        # rule the cooldown windows above follow.
+        # max_posting_age_days: int | None. A value that is not a usable day
+        # count falls back to None rather than raising, so a hand-edited config
+        # never blocks the run.
+        #
+        # `isinstance(True, int)` is True in Python, so a bare isinstance check
+        # stores the bool: `true` then rendered as the Google parameter
+        # "qdr:dTrue", which Google ignores — silently widening discovery to all
+        # time while the run prompt announced an active filter. Booleans are
+        # excluded explicitly, and the API's own bounds are applied here too,
+        # since this path reads the file directly and never sees the validator.
         if "max_posting_age_days" in raw:
             value = raw["max_posting_age_days"]
-            kwargs["max_posting_age_days"] = value if isinstance(value, int) else None
+            usable = (
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and 0 <= value <= 365
+            )
+            kwargs["max_posting_age_days"] = value if usable else None
 
         return cls(**kwargs)
 

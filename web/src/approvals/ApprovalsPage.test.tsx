@@ -577,15 +577,62 @@ describe("Found ordering", () => {
   it("falls back to screenedDate, then createdAt, when no posted date exists", () => {
     expect(
       orderingDate(makeRecord({ postedDate: "2026-07-01", screenedDate: "2026-08-01" })),
-    ).toBe("2026-07-01");
+    ).toBe(Date.parse("2026-07-01"));
     expect(orderingDate(makeRecord({ postedDate: "", screenedDate: "2026-08-01" }))).toBe(
-      "2026-08-01",
+      Date.parse("2026-08-01"),
     );
     expect(
       orderingDate(
         makeRecord({ postedDate: "", screenedDate: "", createdAt: "2026-08-24T18:00:00Z" }),
       ),
-    ).toBe("2026-08-24T18:00:00Z");
+    ).toBe(Date.parse("2026-08-24T18:00:00Z"));
+  });
+
+  it("ignores a free-text postedDate instead of ranking it above every real date", () => {
+    // This exact value is in the live data. Compared as a string, "3..." beats
+    // "2026-...", so the stalest posting sorted to the very top.
+    // The free-text value must contribute nothing, so this record ranks by its
+    // fallback dates alone — here deliberately older than the fresh posting.
+    const stale = makeRecord({
+      id: "stale",
+      company: "Zillow Group",
+      postedDate: "30+ days ago (as stated on posting)",
+      screenedDate: "2026-06-01",
+      createdAt: "2026-06-01T17:00:00Z",
+    });
+    const fresh = makeRecord({ id: "fresh", postedDate: "2026-08-24" });
+    expect(byDateDesc([stale, fresh]).map((r) => r.id)).toEqual(["fresh", "stale"]);
+    // And the free text itself never becomes the sort key.
+    expect(orderingDate(stale)).toBe(Date.parse("2026-06-01"));
+  });
+
+  it("falls through an unparseable postedDate to the next usable date", () => {
+    // It must not poison the record's position — the screened date still ranks it.
+    const record = makeRecord({
+      postedDate: "August 2026",
+      screenedDate: "2026-08-20",
+      createdAt: "2026-01-01T00:00:00Z",
+    });
+    expect(orderingDate(record)).toBe(Date.parse("2026-08-20"));
+  });
+
+  it("does not let a year-like prefix parse as a date", () => {
+    // Date.parse("30") is a valid date in 2030; the format guard is what stops it.
+    const record = makeRecord({ postedDate: "30", screenedDate: "", createdAt: "" });
+    expect(orderingDate(record)).toBeNull();
+  });
+
+  it("ranks a posting by instant, not by string length, on the same day", () => {
+    // "2026-08-24T00:00:01Z" > "2026-08-24" as strings, so a record merely
+    // created that day used to outrank one actually posted that day.
+    const posted = makeRecord({ id: "posted", postedDate: "2026-08-24" });
+    const created = makeRecord({
+      id: "created",
+      postedDate: "",
+      screenedDate: "",
+      createdAt: "2026-08-24T00:00:01Z",
+    });
+    expect(byDateDesc([created, posted]).map((r) => r.id)).toEqual(["created", "posted"]);
   });
 
   it("does not mutate the array it is given", () => {
@@ -597,12 +644,13 @@ describe("Found ordering", () => {
     expect(rows.map((r) => r.id)).toEqual(["a", "b"]);
   });
 
-  it("puts a record with no date at all last", () => {
+  it("puts a record with no usable date at all last", () => {
     const rows = [
       makeRecord({ id: "none", postedDate: "", screenedDate: "", createdAt: "" }),
       makeRecord({ id: "dated", postedDate: "2026-04-09" }),
     ];
     expect(byDateDesc(rows).map((r) => r.id)).toEqual(["dated", "none"]);
+    expect(orderingDate(rows[0])).toBeNull();
   });
 
   it("renders the Found tab newest first", async () => {

@@ -204,10 +204,17 @@ def mark_screening_applied(screening_id: str) -> ApplicationModel:
     409 rather than a second row when the screening has already been applied:
     a double click must not create a duplicate application.
     """
-    screening = screening_store.get(screening_id)
-    if screening is None:
+    if screening_store.get(screening_id) is None:
         raise HTTPException(status_code=404, detail="Screening not found.")
-    if screening.approval == "applied":
+
+    # Retire FIRST, atomically, and create the row only if this call is the one
+    # that won the claim. Checking then creating then retiring let two requests
+    # both pass the check and create two Applications rows for one posting —
+    # two tabs, or one slow response and a second click, was enough. Ordering
+    # it this way also means a crash between the two writes leaves a retired
+    # screening with no row (visible, fixable) rather than a duplicate row.
+    screening = screening_store.claim_for_apply(screening_id)
+    if screening is None:
         raise HTTPException(
             status_code=409, detail="This screening has already been applied to."
         )
@@ -225,7 +232,6 @@ def mark_screening_applied(screening_id: str) -> ApplicationModel:
             "capture_method": "manual",
         }
     )
-    screening_store.mark_applied(screening_id)
     return _application_model(app)
 
 
@@ -1006,13 +1012,29 @@ def get_agent_config() -> AgentConfigModel:
 @router.put("/agent/config", response_model=AgentConfigModel)
 def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:
     """Merge only the fields the client sent onto the stored config.
-    
-    Profiles are WHOLESALE-REPLACED (not merged) because exclude_none=True
-    means an omitted or null profiles field never reaches the merge dict.
-    Other sibling fields (enabled, blocklist, schedule, globals) merge partially.
+
+    Profiles are WHOLESALE-REPLACED (not merged) because a null or omitted
+    profiles field never reaches the merge dict.
+
+    The optional numeric windows are the exception to exclude_none: for them a
+    null is a real value meaning "unset", and dropping it made those fields
+    impossible to clear once set. Emptying the box on the Agents page sends
+    null, the merge discarded it, and the UI then repainted the old value
+    beside a "saved" indicator. They are re-applied explicitly below, still
+    only when the client actually sent the key.
     """
+    sent = body.model_dump(exclude_unset=True, by_alias=False)
     merged = agent_config_store.load().to_dict()
-    merged.update(body.model_dump(exclude_unset=True, exclude_none=True, by_alias=False))
+    merged.update({k: v for k, v in sent.items() if v is not None})
+    for nullable in (
+        "cooldown_days",
+        "cooldown_days_same_role",
+        "cooldown_days_same_company",
+        "max_applications_per_run",
+        "max_posting_age_days",
+    ):
+        if nullable in sent and sent[nullable] is None:
+            merged[nullable] = None
     cfg = agent_config_store.AgentConfig.from_dict(merged)
     return AgentConfigModel.model_validate(agent_config_store.save(cfg).to_dict())
 

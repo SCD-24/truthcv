@@ -177,3 +177,44 @@ describe("Run now cancel control", () => {
     expect(screen.getByText(/exit/)).toBeTruthy();
   });
 });
+
+describe("polling lifecycle", () => {
+  it("installs no interval after unmount when a cancel resolves late", async () => {
+    // The leak: setPoll ran from the cancel's async continuation after cleanup
+    // had already cleared the interval, so the new one was unreachable and
+    // polled for the rest of the session.
+    vi.useFakeTimers();
+    try {
+      let resolveCancel: (v: unknown) => void = () => {};
+      vi.mocked(cancelAgentRun).mockReturnValue(
+        new Promise((res) => {
+          resolveCancel = res;
+        }) as never,
+      );
+      vi.mocked(getAgentConfig).mockResolvedValue(makeConfig());
+      vi.mocked(getAgentStatus).mockResolvedValue(makeAgentStatus({ running: true }));
+      vi.mocked(getProfileAnswers).mockResolvedValue(makeAnswers());
+      vi.mocked(getRouting).mockResolvedValue(makeRouting());
+      vi.mocked(listConnections).mockResolvedValue({ connections: [] } as never);
+      vi.mocked(listConnectionModels).mockResolvedValue([]);
+
+      const { unmount } = render(<AgentsPage onBack={vi.fn()} />);
+      await vi.waitFor(() =>
+        expect(screen.getByRole("button", { name: "Cancel agent run" })).toBeTruthy(),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Cancel agent run" }));
+
+      unmount();
+      const callsAtUnmount = vi.mocked(getAgentStatus).mock.calls.length;
+
+      resolveCancel({ cancelled: true, running: true });
+      await Promise.resolve();
+      await Promise.resolve();
+      vi.advanceTimersByTime(30_000);
+
+      expect(vi.mocked(getAgentStatus).mock.calls.length).toBe(callsAtUnmount);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

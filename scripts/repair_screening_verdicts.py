@@ -37,6 +37,15 @@ that writes nothing and only reports.
 This script goes through ``screening.store`` for every read and write; it never
 touches ``data/screenings.json`` directly.
 
+**Stop the agent before running with ``--apply``.** This makes one write per
+recovered record and another per stripped block, against the same file an agent
+run records screenings into. The stores take a lock, so nothing is corrupted
+either way, but a long repair interleaved with a run is needless contention:
+
+    docker compose stop agent
+    python scripts/repair_screening_verdicts.py --apply --strip-blocks
+    docker compose start agent
+
 Usage::
 
     python scripts/repair_screening_verdicts.py           # dry run, report only
@@ -62,13 +71,47 @@ from screening.model import validate_verdict  # noqa: E402
 
 # The workaround block the agent wrote, e.g.
 #   [COMPANY: Bjak | VERDICT: rejected | MATCHED PROFILE: … ]
-# Both labels are matched independently: the block's later fields vary in name
-# and order between records, so anchoring on the pair would miss half of them.
-_COMPANY_RE = re.compile(r"\[\s*COMPANY:\s*(?P<value>[^|\]]+)", re.IGNORECASE)
+#
+# Every pattern below is applied to the BLOCK only, never to the whole
+# posting_text (see `_block`). Searching the whole text let the posting's own
+# prose supply the values: a body containing "Reason: we grew 3x last year"
+# became the rejection reason. Each value also stops at a newline, because the
+# fields are one-per-segment on a single line — without that, a block using a
+# separator other than "|" swallowed the rest of itself into the company name.
+# The body may not span lines: the agent wrote the block as a single line, and
+# allowing newlines let an UNTERMINATED block run on until a "]" in the posting
+# body (a "1] Python" list marker), whose text then got stripped as if it were
+# part of the block.
+_BLOCK_RE = re.compile(r"^\s*\[\s*COMPANY:(?P<body>[^\]\n]*)\]", re.IGNORECASE)
+# A value runs to the next "|" or the end of the line. A block that used some
+# other separator therefore captures the following fields too — which is
+# detected and REFUSED below rather than guessed at: trimming at the next
+# ALL-CAPS label looked tidy but silently truncated "Acme GmbH VERDICT: …" to
+# "Acme Gmb", and a wrong employer name is worse than an unrepaired record.
+_COMPANY_RE = re.compile(r"^\s*COMPANY:\s*(?P<value>[^|\n]+)", re.IGNORECASE)
+# An ALL-CAPS "LABEL:" surviving inside a captured value means the block was
+# not "|"-separated and the capture ran past its field.
+_STRAY_LABEL_RE = re.compile(r"[A-Z][A-Z ]{2,}:")
 _VERDICT_RE = re.compile(r"\bVERDICT:\s*(?P<value>[A-Za-z]+)", re.IGNORECASE)
 # Singular and plural both occur; so does a trailing "ADDITIONALLY:" clause.
-_CRITERION_RE = re.compile(r"\bFAILING CRITERI(?:ON|A):\s*(?P<value>[^|\]]+)", re.IGNORECASE)
-_REASON_RE = re.compile(r"\bREASON:\s*(?P<value>[^|\]]+)", re.IGNORECASE)
+_CRITERION_RE = re.compile(r"\bFAILING CRITERI(?:ON|A):\s*(?P<value>[^|\n]+)", re.IGNORECASE)
+_REASON_RE = re.compile(r"\bREASON:\s*(?P<value>[^|\n]+)", re.IGNORECASE)
+
+
+def _block(posting_text: str) -> str | None:
+    """The leading ``[COMPANY: … ]`` block's inner text, or None.
+
+    Requires the block to open the text and to CLOSE with a ``]`` before any
+    further ``[``. An unterminated block returns None rather than running to
+    the first ``]`` anywhere in the document — that behaviour truncated real
+    posting bodies whose first ``]`` was a list marker ("1] Python").
+    """
+    if not isinstance(posting_text, str):
+        return None
+    found = _BLOCK_RE.match(posting_text)
+    if found is None or "[" in found.group("body"):
+        return None
+    return "COMPANY:" + found.group("body")
 
 
 def _match(pattern: re.Pattern, text: str) -> str:
@@ -89,10 +132,17 @@ def recover(screening) -> dict:
     the block yields no usable company/verdict pair. Only blank fields are
     filled: a value the record already holds always wins over the block.
     """
-    text = screening.posting_text or ""
+    block = _block(screening.posting_text or "")
+    if block is None:
+        return {}
+    raw_company = _match(_COMPANY_RE, block)
+    if _STRAY_LABEL_RE.search(raw_company):
+        # Ambiguous block: report it as manual-repair rather than storing a
+        # company name that is really three fields concatenated.
+        return {}
     try:
-        company = validate_company_name(_match(_COMPANY_RE, text))
-        verdict = validate_verdict(_match(_VERDICT_RE, text))
+        company = validate_company_name(raw_company)
+        verdict = validate_verdict(_match(_VERDICT_RE, block))
     except ValueError:
         return {}
 
@@ -102,11 +152,11 @@ def recover(screening) -> dict:
     if not (screening.verdict or "").strip():
         patch["verdict"] = verdict
     if not (screening.failing_criterion or "").strip():
-        criterion = _match(_CRITERION_RE, text)
+        criterion = _match(_CRITERION_RE, block)
         if criterion:
             patch["failing_criterion"] = criterion
     if not (screening.reason or "").strip():
-        reason = _match(_REASON_RE, text)
+        reason = _match(_REASON_RE, block)
         if reason:
             patch["reason"] = reason
     return patch
@@ -199,12 +249,28 @@ def strippable(screening) -> str | None:
     if needs_repair(screening):
         return None
     text = (screening.posting_text or "").lstrip()
-    if not text.startswith("[COMPANY:"):
+    block = _block(text)
+    if block is None:
         return None
-    close = text.find("]")
-    if close == -1 or "[" in text[1:close]:
+    # The block must re-parse to the company and verdict this record already
+    # holds. That is what proves the "]" found is the block's own terminator
+    # and not one inside a value: "[COMPANY: Acme (formerly Foo] Ltd) | …]"
+    # otherwise strips to "Ltd) | VERDICT: rejected]" plus the real body,
+    # keeping the debris and discarding nothing useful — but on other inputs
+    # the same slip discards the posting itself.
+    raw_company = _match(_COMPANY_RE, block)
+    if _STRAY_LABEL_RE.search(raw_company):
         return None
-    rest = text[close + 1 :].strip()
+    try:
+        company = validate_company_name(raw_company)
+        verdict = validate_verdict(_match(_VERDICT_RE, block))
+    except ValueError:
+        return None
+    if company != (screening.company or "").strip():
+        return None
+    if verdict != (screening.verdict or "").strip().casefold():
+        return None
+    rest = text[text.index("]") + 1 :].strip()
     return rest or None
 
 

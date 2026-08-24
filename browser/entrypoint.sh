@@ -74,20 +74,40 @@ log "noVNC running on PID $NOVNC_PID (http://localhost:$NOVNC_PORT)"
 # --user-data-dir: persistent profile (mounted at /browser-profile)
 # --viewport-size: browser window size
 # DISPLAY must be set for Chromium to run headful under Xvfb
-# Chromium writes SingletonLock/Cookie/Socket into the profile and names them
-# after the host and PID that hold it. The profile is a persistent volume but
-# the container's hostname changes on every recreate, so a container that was
-# killed rather than shut down cleanly leaves a lock Chromium can no longer
-# attribute — and refuses to start on. @playwright/mcp surfaces that as
-# "Browser is already in use for <profile>" on every navigate, for the life of
-# the volume. Nothing can legitimately hold the profile at container start, so
-# clearing them here is safe and is the only point at which that is true.
-for singleton in SingletonLock SingletonCookie SingletonSocket; do
-  if [[ -e "$BROWSER_PROFILE_DIR/$singleton" || -L "$BROWSER_PROFILE_DIR/$singleton" ]]; then
-    log "clearing stale $singleton in $BROWSER_PROFILE_DIR"
-    rm -f "$BROWSER_PROFILE_DIR/$singleton"
+# Chromium refuses to start on a profile whose SingletonLock it cannot
+# attribute. The lock is a symlink named "<hostname>-<pid>", and the profile is
+# a persistent volume: a container RECREATED after an unclean stop gets a new
+# hostname, so the old lock matches nothing Chromium can check and it gives up
+# — surfacing through @playwright/mcp as "Browser is already in use for
+# <profile>" on every navigate, for the life of the volume.
+#
+# Only that case is cleared, and only after checking. Chromium already breaks a
+# stale lock itself when the hostname matches and the pid is dead — which is
+# the common restart path, since `restart: unless-stopped` keeps the hostname —
+# so deleting unconditionally would throw away the one artefact that
+# distinguishes a stale lock from a live holder the next time this breaks for a
+# different reason. Nothing else mounts this volume today (docker-compose.yml
+# declares browser-profile with a single mount), but that is a fact about the
+# current compose file, not an invariant this script should assume.
+#
+# SingletonCookie and SingletonSocket do not gate startup and are left alone.
+lock_path="$BROWSER_PROFILE_DIR/SingletonLock"
+if [[ -L "$lock_path" ]]; then
+  lock_target="$(readlink "$lock_path" 2>/dev/null || true)"
+  lock_host="${lock_target%-*}"
+  lock_pid="${lock_target##*-}"
+  if [[ -z "$lock_target" ]]; then
+    log "SingletonLock is unreadable — leaving it for Chromium to adjudicate"
+  elif [[ "$lock_host" != "$(hostname)" ]]; then
+    log "clearing SingletonLock from a previous container ($lock_target; this host is $(hostname))"
+    rm -f "$lock_path"
+  elif [[ "$lock_pid" =~ ^[0-9]+$ ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+    log "clearing SingletonLock held by dead pid $lock_pid on this host"
+    rm -f "$lock_path"
+  else
+    log "SingletonLock ($lock_target) looks live — leaving it alone"
   fi
-done
+fi
 
 log "starting @playwright/mcp on port $BROWSER_MCP_PORT..."
 exec env DISPLAY="$DISPLAY" \

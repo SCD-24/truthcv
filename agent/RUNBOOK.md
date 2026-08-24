@@ -102,10 +102,20 @@ Judge each posting by the matched profile's own fields:
 ### The posting freshness window
 
 One filter is not per-profile: the operator's **posting freshness window**,
-rendered into your run prompt as a "Posting freshness window:" line. When it
-names a number of days, reject any posting whose stated publication date is
-older than that, recording `failing_criterion: "posting_age"`. Pass the date
-you found as `posted_date` on every screening you record, fresh or stale.
+rendered into your run prompt as a "Posting freshness window:" line. That line
+is the whole rule — read it, and do exactly what it says:
+
+- When it names a number of days, reject any posting whose stated publication
+  date is older than that, recording `failing_criterion: "posting_age"`.
+- When it says **not configured**, a posting's age is never a rejection reason.
+  Prefer recent postings when choosing what to open, but do not reject one for
+  being old, and do not substitute a default window of your own.
+
+Pass the date you found as `posted_date` on every screening you record, fresh
+or stale — as an ISO date (`2026-08-24`) when the board gives one. If the board
+only says something like "30+ days ago", leave `posted_date` empty and put that
+wording in `reason`: the operator's queue sorts on this field, and a phrase
+sorts above every real date.
 
 Two rules keep this honest:
 

@@ -163,11 +163,16 @@ if [[ "$AGENT_MODE" == "semi" ]]; then
 
 Do NOT apply to a posting you find this run, however well it scores, and do not
 write a cover letter for it. For a posting that passes every criterion, call
-record_screening with verdict \"passed\", the full posting text in posting_text,
-the posting's own job title (as posted, not a placeholder) in role as a
-required field, the posting's own URL in url as a required field, and the
-employer's publication date in posted_date when the board states one.
+record_screening passing \"passed\" in verdict, the employing entity's name
+in company, the posting's own job title (as posted, not a placeholder)
+in role, the posting's own URL in url, the full posting text in posting_text,
+and the employer's publication date in posted_date when the board states one.
+company, verdict, role and url are each required.
 It enters the operator's approval queue; they draft the letter and decide.
+
+record_screening REJECTS the call and stores nothing unless company, verdict,
+role and url all carry usable values — this applies to every screening you
+record, rejections included, not only to passing ones.
 
 Phase 0 is unchanged: postings the operator already approved ARE applied to,
 using the cover_letter text that arrives with each item, verbatim."
@@ -175,10 +180,14 @@ else
   PROMPT="$PROMPT"$'\n\n'"## Autonomy mode: FULL AUTO
 
 A posting that passes every criterion is applied to this run, as described in
-agent/RUNBOOK.md. Record the full posting text in posting_text, the posting's
-own job title (as posted, not a placeholder) in role, the posting's own URL
-in url, and the employer's publication date in posted_date on every
-record_screening call."
+agent/RUNBOOK.md. On every record_screening call pass the employing entity's
+name in company, the verdict (rejected, passed or deferred) in verdict, the
+posting's own job title (as posted, not a placeholder) in role, the posting's
+own URL in url, the full posting text in posting_text, and the employer's
+publication date in posted_date when the board states one.
+
+record_screening REJECTS the call and stores nothing unless company, verdict,
+role and url all carry usable values."
 fi
 
 # jq program rendering one criteria block per configured profile: name,
@@ -263,13 +272,22 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     # baked into the composed search URLs: WebSearch results and an employer's
     # own board both ignore Google's tbs parameter, so without this the agent
     # would still surface and screen months-old postings from those channels.
-    MAX_AGE="$(jq -r 'if .maxPostingAgeDays == null then "unset" else (.maxPostingAgeDays|tostring) end' <<<"$JOB_CONFIG")"
-    if [[ "$MAX_AGE" == "unset" ]]; then
-      AGE_LINE="Posting freshness window: not configured (default: prefer postings from the last 7 days)"
-    elif [[ "$MAX_AGE" == "0" ]]; then
-      AGE_LINE="Posting freshness window: disabled — a posting's age is not a rejection reason"
-    else
+    # Only a whole number of days 1..365 is a filter. Anything else — absent,
+    # null, 0, a bool, a negative, a hand-edited string — means no age
+    # filtering, and must say so rather than falling through to the filter
+    # branch. The else-branch used to be the catch-all, so a config holding
+    # `true` rendered "true days. HARD FILTER" and `-1` rendered "-1 days.
+    # HARD FILTER", while the search side treated both as disabled. Guarded
+    # the same way maxApplicationsPerRun is below.
+    MAX_AGE="$(jq -r 'if (.maxPostingAgeDays|type) == "number" then (.maxPostingAgeDays|tostring) else "unset" end' <<<"$JOB_CONFIG" 2>/dev/null || echo unset)"
+    if [[ "$MAX_AGE" =~ ^[1-9][0-9]*$ ]] && (( MAX_AGE <= 365 )); then
       AGE_LINE="Posting freshness window: ${MAX_AGE} days. HARD FILTER — reject any posting whose stated publication date is older than this, with failing_criterion 'posting_age'. When a board states no date, do NOT infer one and do NOT reject on age."
+    else
+      # Unset is NOT a rejection rule. Discovery still carries a past-week
+      # preference in the composed search URLs, but a posting arriving by any
+      # other route is judged on the profile criteria alone — exactly what
+      # happened before this setting existed.
+      AGE_LINE="Posting freshness window: not configured — a posting's age is never a rejection reason on this run. Prefer recent postings when choosing what to open, but never reject one for being old."
     fi
     PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$AGE_LINE"$'\n'
 

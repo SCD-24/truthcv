@@ -202,17 +202,43 @@ def build_letter(
     }
 
 
+# A signature is a name, not prose. The bound is deliberately generous — long
+# double-barrelled names with post-nominals exist — while still refusing the
+# sentence-length value that is the tell of a claim smuggled into the letter.
+_MAX_SIGN_OFF_CHARS = 60
+
+
 def _with_sign_off(text: str, name: str) -> str:
     """Append "Kind regards, / <name>" as the letter's closing paragraphs.
 
     Emitted as two blank-line-separated blocks because every consumer splits on
     the blank line: the HTML/DOCX renderers turn each into its own paragraph,
     and the agent pastes the raw text into an application form where a single
-    newline would collapse. A blank or placeholder-looking name appends
-    nothing.
+    newline would collapse.
+
+    The name is appended after the guardrail has run, so it is checked here
+    instead — against exactly what the guardrail would have caught:
+
+    * ``_placeholders`` scans for a template slot ANYWHERE in the letter. An
+      earlier version of this function guarded with ``fullmatch``, which is not
+      the same test: "[Your Name] Smith" is not a whole-string placeholder, so
+      it shipped a literal template slot to an employer.
+    * A name long enough to be a sentence is refused. ``answers.name`` has no
+      validator on the write path, and ``tools_letter`` deliberately does NOT
+      pass the answers store to the guardrail as a claim source — so an
+      unbounded value here would append an unvalidated factual claim
+      ("ex-Google Staff Engineer with 15 years at NASA") to a guardrailed
+      letter, after the only thing that checks claims has finished.
+
+    Anything refused appends nothing: an unsigned letter is correct, a letter
+    signed with a template slot or a resume line is not.
     """
     cleaned = " ".join(name.split()) if isinstance(name, str) else ""
-    if not cleaned or _PLACEHOLDER.fullmatch(cleaned):
+    if not cleaned:
+        return text
+    if _placeholders(cleaned):
+        return text
+    if len(cleaned) > _MAX_SIGN_OFF_CHARS:
         return text
     return f"{text}\n\nKind regards,\n\n{cleaned}"
 

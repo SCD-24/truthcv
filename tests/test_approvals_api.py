@@ -301,7 +301,55 @@ class TestMarkScreeningApplied:
     def test_unknown_screening_is_404(self, client, data_dir):
         assert client.post("/api/screenings/nope/applied").status_code == 404
 
-    def test_a_screening_with_no_url_is_a_general_submission(self, client, data_dir):
+    def test_a_screening_with_a_url_is_a_posting_submission(self, client, data_dir):
         sid = self._screening(client, url="https://example.com/x")
         r = client.post(f"/api/screenings/{sid}/applied")
         assert r.json()["submissionType"] == "Posting"
+
+    def test_a_screening_with_no_url_is_a_general_submission(self, client, data_dir):
+        """The other branch of `"Posting" if screening.url else "General"`.
+
+        The test that carried this name passed a URL and asserted "Posting",
+        so the General branch had no coverage at all.
+        """
+        from screening import store as screening_store
+
+        created = screening_store.create(
+            {"company": "No URL Co", "role": "Engineer", "verdict": "passed"}
+        )
+        r = client.post(f"/api/screenings/{created.id}/applied")
+        assert r.status_code == 201
+        assert r.json()["submissionType"] == "General"
+
+    def test_concurrent_applies_create_exactly_one_row(self, client, data_dir):
+        """Two tabs, or a slow response and a second click, must not duplicate.
+
+        The check-then-create-then-retire ordering let both requests pass the
+        409 check and create two Applications rows for one posting.
+        """
+        import threading
+
+        from screening import store as screening_store
+
+        sid = self._screening(client)
+        winners = []
+
+        def claim():
+            winners.append(screening_cl := screening_store.claim_for_apply(sid))
+
+        threads = [threading.Thread(target=claim) for _ in range(8)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+
+        assert sum(1 for w in winners if w is not None) == 1
+
+    def test_a_failed_claim_creates_no_application(self, client, data_dir):
+        """The row is created only by the caller that won the claim, so a
+        losing request must leave the Applications page untouched."""
+        sid = self._screening(client)
+        assert client.post(f"/api/screenings/{sid}/applied").status_code == 201
+        before = len(client.get("/api/applications").json())
+
+        assert client.post(f"/api/screenings/{sid}/applied").status_code == 409
+
+        assert len(client.get("/api/applications").json()) == before

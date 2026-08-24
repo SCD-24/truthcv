@@ -662,3 +662,27 @@ def test_get_canonical_cv_returns_all_none_when_nothing_is_registered(data_dir):
         "path": None,
         "download_url": None,
     }
+
+
+def test_record_application_schema_advertises_the_fields_the_agent_must_send():
+    """The tool that records REAL applications must not advertise an empty
+    property set for an eighteen-field record.
+
+    Same defect class as the screening one above: a field reachable only via
+    **kwargs is invisible to the agent reading the schema, so it goes unsent.
+    """
+    from agenttools.mcp_app import _input_schema
+
+    properties = _input_schema(tools_ledger.record_application)["properties"]
+    for field in ("company", "role", "application_url", "screening_id", "applied_date"):
+        assert field in properties, f"not advertised to the agent: {field}"
+
+
+def test_record_application_still_backfills_when_identity_is_omitted(data_dir):
+    """Naming the fields must not turn the backfill path into a required one."""
+    sid = _approve_screening("Backfill Co", "Platform Engineer", "https://b.example/jobs/9")
+    created = tools_ledger.record_application(screening_id=sid, applied_date="2026-02-01")
+
+    reloaded = next(a for a in load_applications() if a.id == created["id"])
+    assert reloaded.company == "Backfill Co"
+    assert reloaded.role == "Platform Engineer"
