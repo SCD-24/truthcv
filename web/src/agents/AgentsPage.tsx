@@ -345,18 +345,29 @@ type Mode = (typeof MODES)[number];
 
 const MODE_HELP: Record<Mode, string> = {
   off: "Scheduled runs wake, log that the agent is off, and exit. Nothing is submitted.",
-  semi: "The agent finds and screens roles, then waits. You draft the cover letter and approve; approved roles are applied to on the next scheduled run.",
+  semi: "The agent finds and screens roles, then waits. You draft the cover letter and approve; approved roles are applied on the next scheduled run.",
   full: "The agent finds, screens, writes the letter and applies on its own. Roles it cannot decide alone still wait for you.",
 };
 
-/** Agent autonomy slider. Optimistic — moves immediately, reverts and
- * surfaces an error if the PUT fails.
+/** Agent autonomy slider. Optimistic — moves immediately on commit, reverts
+ * and surfaces an error if the PUT fails.
  *
  * `onChange` takes an updater over the *current* config rather than a
  * snapshot, so the optimistic set and its revert only ever touch the
  * `mode` field against whatever the latest state is — a save from
  * another section (e.g. Schedule) that lands while this PUT is in flight
- * is never clobbered by a stale full-config revert. */
+ * is never clobbered by a stale full-config revert.
+ *
+ * The network write happens on `onChangeCommitted`, not `onChange`: MUI's
+ * `Slider` fires `onChange` for every mark the thumb crosses during a drag,
+ * so wiring the PUT to `onChange` sends one request per intermediate mark,
+ * unordered and uncancellable — a drag from full auto to off could land on
+ * semi-auto if the requests resolve out of order. `onChangeCommitted` fires
+ * once per interaction (drag release; each keypress is its own interaction
+ * for the keyboard path), so exactly one PUT goes out per operator gesture,
+ * carrying only the final value. `localIndex` tracks the thumb during the
+ * drag so it still moves live; it is display-only and never itself triggers
+ * a save. */
 function ModeSection({
   config,
   onChange,
@@ -365,6 +376,15 @@ function ModeSection({
   onChange: (updater: (prev: AgentConfig) => AgentConfig) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+
+  const configIndex = Math.max(0, MODES.indexOf(config.mode));
+  const [localIndex, setLocalIndex] = useState(configIndex);
+
+  // Keeps the thumb in sync when the mode changes for a reason other than
+  // this control's own commit — the initial load, and a failed PUT's revert.
+  useEffect(() => {
+    setLocalIndex(configIndex);
+  }, [configIndex]);
 
   async function handleMode(mode: Mode) {
     const previous = config.mode;
@@ -379,12 +399,10 @@ function ModeSection({
     }
   }
 
-  const index = Math.max(0, MODES.indexOf(config.mode));
-
   return (
     <Section title="Agent">
       <Slider
-        value={index}
+        value={localIndex}
         min={0}
         max={2}
         step={null}
@@ -393,7 +411,8 @@ function ModeSection({
           { value: 1, label: "Semi-auto" },
           { value: 2, label: "Full auto" },
         ]}
-        onChange={(_e, v) => handleMode(MODES[v as number])}
+        onChange={(_e, v) => setLocalIndex(v as number)}
+        onChangeCommitted={(_e, v) => handleMode(MODES[v as number])}
         sx={{ maxWidth: 360, ml: 1 }}
         aria-label="Agent autonomy"
       />
