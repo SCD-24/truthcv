@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 
 from agentconfig.store import AgentConfig
+from screening.url import validate_posting_url
 
 _RUN_AT_RE = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 _RUN_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
@@ -635,10 +636,22 @@ class ApprovalUpdate(_Camel):
     ``url`` is patchable here because an imported screening can carry no URL
     (a prose migration had none to capture), and the agent cannot apply to a
     posting it has nothing to open.
+
+    ``posting_text`` is patchable because records created before the agent
+    captured it carry none, and the operator cannot draft a cover letter
+    without it.
     """
 
     approval: str | None = None
     url: str | None = None
+    posting_text: str | None = None
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return validate_posting_url(v)
 
 
 class CoverLetterDraftModel(_Camel):
@@ -687,11 +700,17 @@ class BulkApprovalResult(_Camel):
 
 
 class ScreeningCreate(_Camel):
-    """Client-supplied fields for a new screening record."""
+    """Client-supplied fields for a new screening record.
+
+    A resolvable posting URL is required: ``url`` is validated on creation, so
+    a screening cannot be created without one.
+    """
 
     company: str = ""
     role: str = ""
-    url: str = ""
+    # validate_default=True so an entirely omitted `url` key is rejected the
+    # same as an explicit empty string — the validator below must run either way.
+    url: str = Field(default="", validate_default=True)
     screened_date: str = ""
     verdict: str = ""
     failing_criterion: str = ""
@@ -700,6 +719,11 @@ class ScreeningCreate(_Camel):
     source: str = ""
     posting_text: str = ""
     posted_date: str = ""
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, v: str) -> str:
+        return validate_posting_url(v)
 
 
 class CooldownResult(_Camel):

@@ -84,9 +84,27 @@ def test_patch_sets_url_and_approval(client):
     assert reloaded.approval == "approved"
 
 
+def test_patch_sets_posting_text(client):
+    s = _deferred()
+    r = client.patch(
+        f"/api/screenings/{s.id}", json={"postingText": "We are hiring an Engineer."}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["postingText"] == "We are hiring an Engineer."
+    reloaded = store.get(s.id)
+    assert reloaded.posting_text == "We are hiring an Engineer."
+    assert reloaded.approval == "pending"
+
+
 def test_patch_empty_body_422(client):
     s = _deferred()
     assert client.patch(f"/api/screenings/{s.id}", json={}).status_code == 422
+
+
+def test_patch_schemeless_url_422(client):
+    s = _deferred()
+    r = client.patch(f"/api/screenings/{s.id}", json={"url": "acme.example/jobs/1"})
+    assert r.status_code == 422, r.text
 
 
 def test_patch_url_unknown_id_404(client):

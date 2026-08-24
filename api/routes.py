@@ -143,7 +143,12 @@ def list_screenings(approval: str | None = None) -> list[ScreeningModel]:
 
 @router.post("/screenings", response_model=ScreeningModel, status_code=201)
 def create_screening(body: ScreeningCreate) -> ScreeningModel:
-    """Create a new screening record from client-supplied fields."""
+    """Create a new screening record from client-supplied fields.
+
+    A screening cannot be created without a resolvable posting URL: the
+    requirement is enforced by ``ScreeningCreate``'s ``url`` validator, which
+    surfaces an unusable URL as a 422 before this handler runs.
+    """
     screening = screening_store.create(body.model_dump(by_alias=False))
     return _screening_model(screening)
 
@@ -186,12 +191,21 @@ def bulk_set_approval(body: BulkApprovalUpdate) -> BulkApprovalResult:
 @router.patch("/screenings/{screening_id}", response_model=ScreeningModel)
 def set_screening_approval(screening_id: str, body: ApprovalUpdate) -> ScreeningModel:
     """The operator's approval decision and/or posting URL for one screening."""
-    if body.approval is None and body.url is None:
-        raise HTTPException(status_code=422, detail="Provide approval or url.")
+    if body.approval is None and body.url is None and body.posting_text is None:
+        raise HTTPException(
+            status_code=422, detail="Provide approval, url or postingText."
+        )
 
     screening = None
     if body.url is not None:
         screening = screening_store.update(screening_id, {"url": body.url})
+        if screening is None:
+            raise HTTPException(status_code=404, detail="Screening not found.")
+
+    if body.posting_text is not None:
+        screening = screening_store.update(
+            screening_id, {"posting_text": body.posting_text}
+        )
         if screening is None:
             raise HTTPException(status_code=404, detail="Screening not found.")
 

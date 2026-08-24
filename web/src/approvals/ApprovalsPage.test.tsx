@@ -13,6 +13,7 @@ import {
   listRejectedApprovals,
   saveScreeningLetter,
   setScreeningApproval,
+  setScreeningPostingText,
   setScreeningUrl,
 } from "../api/client";
 import type { ScreeningRecord } from "../api/types";
@@ -27,6 +28,7 @@ vi.mock("../api/client", () => ({
   setScreeningApproval: vi.fn(),
   bulkSetApproval: vi.fn(),
   setScreeningUrl: vi.fn(),
+  setScreeningPostingText: vi.fn(),
   getScreeningLetter: vi.fn(),
   generateScreeningLetter: vi.fn(),
   saveScreeningLetter: vi.fn(),
@@ -287,6 +289,27 @@ describe("ApprovalsPage cover letter", () => {
     const button = await screen.findByRole("button", { name: /Generate cover letter/ });
     expect(button.hasAttribute("disabled")).toBe(true);
     expect(screen.getByText(/No posting text/)).toBeTruthy();
+    expect(screen.getByLabelText(/posting text/i)).toBeTruthy();
+  });
+
+  it("pasting and saving posting text enables Generate cover letter", async () => {
+    vi.mocked(getScreeningLetter).mockResolvedValue(null);
+    vi.mocked(setScreeningPostingText).mockResolvedValue(
+      makeRecord({ postingText: "Some pasted posting text." }),
+    );
+    await renderPage([makeRecord({ postingText: "" })]);
+    const field = await screen.findByLabelText(/posting text/i);
+    fireEvent.change(field, { target: { value: "Some pasted posting text." } });
+    fireEvent.click(screen.getByRole("button", { name: /save posting text/i }));
+    await waitFor(() =>
+      expect(setScreeningPostingText).toHaveBeenCalledWith("s1", "Some pasted posting text."),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /Generate cover letter/ }).hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    expect(screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("shows the posted and found dates", async () => {

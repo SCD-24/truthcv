@@ -78,6 +78,7 @@ def test_create_list_screening_carries_posting_text_and_posted_date(client):
         json={
             "company": "Acme",
             "role": "Engineer",
+            "url": "https://acme.example/jobs/1",
             "verdict": "passed",
             "postingText": "We are hiring an Engineer.",
             "postedDate": "2026-07-01",
@@ -97,8 +98,14 @@ def test_create_list_screening_carries_posting_text_and_posted_date(client):
 
 
 def test_list_screenings_most_recent_first(client):
-    first = client.post("/api/screenings", json={"company": "First", "verdict": "passed"}).json()
-    second = client.post("/api/screenings", json={"company": "Second", "verdict": "passed"}).json()
+    first = client.post(
+        "/api/screenings",
+        json={"company": "First", "url": "https://acme.example/jobs/1", "verdict": "passed"},
+    ).json()
+    second = client.post(
+        "/api/screenings",
+        json={"company": "Second", "url": "https://acme.example/jobs/1", "verdict": "passed"},
+    ).json()
 
     listed = client.get("/api/screenings").json()
     ids = [s["id"] for s in listed]
@@ -113,12 +120,44 @@ def test_delete_unknown_screening_returns_404(client):
 
 def test_delete_already_deleted_screening_returns_404(client):
     screening_id = client.post(
-        "/api/screenings", json={"company": "Acme", "verdict": "passed"}
+        "/api/screenings",
+        json={"company": "Acme", "url": "https://acme.example/jobs/1", "verdict": "passed"},
     ).json()["id"]
     assert client.delete(f"/api/screenings/{screening_id}").status_code == 204
     r = client.delete(f"/api/screenings/{screening_id}")
     assert r.status_code == 404
     assert r.json() == {"detail": "Screening not found."}
+
+
+# --- url is mandatory on create -------------------------------------------------
+
+def test_create_screening_without_url_is_rejected(client):
+    r = client.post(
+        "/api/screenings",
+        json={"company": "Acme", "role": "Engineer", "verdict": "passed"},
+    )
+    assert r.status_code == 422, r.text
+
+
+def test_create_screening_with_empty_url_is_rejected(client):
+    r = client.post(
+        "/api/screenings",
+        json={"company": "Acme", "role": "Engineer", "url": "", "verdict": "passed"},
+    )
+    assert r.status_code == 422, r.text
+
+
+def test_create_screening_with_schemeless_url_is_rejected(client):
+    r = client.post(
+        "/api/screenings",
+        json={
+            "company": "Acme",
+            "role": "Engineer",
+            "url": "acme.example/jobs/1",
+            "verdict": "passed",
+        },
+    )
+    assert r.status_code == 422, r.text
 
 
 # --- GET /api/cooldown -----------------------------------------------------------
@@ -130,6 +169,7 @@ def test_cooldown_from_screening_data_source(client):
         json={
             "company": "Acme",
             "role": "Engineer",
+            "url": "https://acme.example/jobs/1",
             "verdict": "rejected",
             "cooldownExpires": future,
         },
@@ -150,6 +190,7 @@ def test_cooldown_role_mismatch_not_in_cooldown(client):
         json={
             "company": "Acme",
             "role": "Engineer",
+            "url": "https://acme.example/jobs/1",
             "verdict": "rejected",
             "cooldownExpires": future,
         },
@@ -182,7 +223,7 @@ def test_cooldown_prefers_later_expiry_across_both_sources(client, monkeypatch):
     near = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
     client.post(
         "/api/screenings",
-        json={"company": "Acme", "verdict": "rejected", "cooldownExpires": near},
+        json={"company": "Acme", "url": "https://acme.example/jobs/1", "verdict": "rejected", "cooldownExpires": near},
     )
 
     # Application-derived expiry lands further out.

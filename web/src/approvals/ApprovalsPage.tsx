@@ -28,6 +28,7 @@ import {
   listRejectedApprovals,
   saveScreeningLetter,
   setScreeningApproval,
+  setScreeningPostingText,
   setScreeningUrl,
 } from "../api/client";
 import type { CoverLetterDraft, ScreeningRecord } from "../api/types";
@@ -51,6 +52,8 @@ function CoverLetterSection({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showPosting, setShowPosting] = useState(false);
+  const [postingText, setPostingText] = useState(record.postingText);
+  const [postingTextDraft, setPostingTextDraft] = useState("");
 
   useEffect(() => {
     let live = true;
@@ -97,6 +100,19 @@ function CoverLetterSection({
     }
   }
 
+  async function savePostingText() {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await setScreeningPostingText(record.id, postingTextDraft);
+      setPostingText(r.postingText);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!loaded) return null;
 
   return (
@@ -108,7 +124,7 @@ function CoverLetterSection({
           {record.screenedDate ? `Found ${record.screenedDate}` : null}
         </Typography>
       )}
-      {record.postingText ? (
+      {postingText ? (
         <>
           <Button size="small" onClick={() => setShowPosting((s) => !s)} sx={{ mt: 0.5 }}>
             {showPosting ? "Hide posting text" : "Show posting text"}
@@ -118,7 +134,7 @@ function CoverLetterSection({
               variant="body2"
               sx={{ whiteSpace: "pre-wrap", color: "text.secondary", mt: 0.5 }}
             >
-              {record.postingText}
+              {postingText}
             </Typography>
           </Collapse>
         </>
@@ -159,16 +175,35 @@ function CoverLetterSection({
         <Button
           variant="outlined"
           size="small"
-          disabled={busy || !record.postingText}
+          disabled={busy || !postingText}
           onClick={generate}
         >
           Generate cover letter
         </Button>
       )}
-      {!draft && !record.postingText ? (
+      {!draft && !postingText ? (
         <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }}>
           No posting text was captured for this screening — there is nothing to draft from.
         </Typography>
+      ) : null}
+      {!postingText ? (
+        <Stack spacing={1} sx={{ mt: 1 }}>
+          <TextField
+            label="Posting text"
+            multiline
+            minRows={4}
+            value={postingTextDraft}
+            onChange={(e) => setPostingTextDraft(e.target.value)}
+          />
+          <Button
+            variant="outlined"
+            size="small"
+            disabled={busy || !postingTextDraft.trim()}
+            onClick={savePostingText}
+          >
+            Save posting text
+          </Button>
+        </Stack>
       ) : null}
     </Box>
   );
