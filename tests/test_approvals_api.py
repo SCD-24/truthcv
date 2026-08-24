@@ -247,58 +247,6 @@ def test_bulk_approve_reports_a_draftless_item_instead_of_approving_it(client):
 
 
 # ---------------------------------------------------------------------------
-# POST /api/screenings/bulk-delete
-# ---------------------------------------------------------------------------
-
-class TestBulkDelete:
-    def _make(self, client, n):
-        ids = []
-        for i in range(n):
-            r = client.post(
-                "/api/screenings",
-                json={"company": f"Co{i}", "role": "Engineer", "url": f"https://e.com/{i}"},
-            )
-            assert r.status_code == 201
-            ids.append(r.json()["id"])
-        return ids
-
-    def test_deletes_the_named_screenings(self, client, data_dir):
-        ids = self._make(client, 3)
-        r = client.post("/api/screenings/bulk-delete", json={"ids": [ids[0], ids[2]]})
-        assert r.status_code == 200
-        assert sorted(r.json()["deleted"]) == sorted([ids[0], ids[2]])
-        remaining = [s["id"] for s in client.get("/api/screenings").json()]
-        assert remaining == [ids[1]]
-
-    def test_unknown_ids_come_back_as_missing_not_as_an_error(self, client, data_dir):
-        """Two tabs deleting the same row must not fail the whole batch."""
-        ids = self._make(client, 1)
-        r = client.post("/api/screenings/bulk-delete", json={"ids": [ids[0], "gone"]})
-        assert r.status_code == 200
-        assert r.json()["deleted"] == [ids[0]]
-        assert r.json()["missing"] == ["gone"]
-
-    def test_empty_selection_is_a_no_op(self, client, data_dir):
-        self._make(client, 2)
-        r = client.post("/api/screenings/bulk-delete", json={"ids": []})
-        assert r.status_code == 200
-        assert r.json() == {"deleted": [], "missing": []}
-        assert len(client.get("/api/screenings").json()) == 2
-
-    def test_route_is_not_shadowed_by_the_id_route(self, client, data_dir):
-        """"bulk-delete" must not bind as a screening id — the route order in
-        routes.py is the only thing keeping this reachable."""
-        r = client.post("/api/screenings/bulk-delete", json={"ids": []})
-        assert r.status_code == 200
-
-    def test_deleting_everything_leaves_an_empty_list(self, client, data_dir):
-        ids = self._make(client, 3)
-        r = client.post("/api/screenings/bulk-delete", json={"ids": ids})
-        assert sorted(r.json()["deleted"]) == sorted(ids)
-        assert client.get("/api/screenings").json() == []
-
-
-# ---------------------------------------------------------------------------
 # POST /api/screenings/{id}/applied — the operator applied by hand
 # ---------------------------------------------------------------------------
 

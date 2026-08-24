@@ -9,9 +9,12 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import applications
+from coverletter.store import CoverLetterDraft
+from coverletter.store import save as save_letter_draft
+from coverletter.store import draft_path as letter_draft_path
 from screening.cooldown import cooldown
 from screening.model import VERDICT_VALUES
-from screening.store import create, load_all, screenings_path
+from screening.store import create, delete, delete_many, load_all, screenings_path
 
 
 def test_empty_when_no_file(data_dir):
@@ -222,3 +225,58 @@ def test_window_none_when_clear_or_blocklisted(data_dir):
     clear = cooldown("QuietCo")
     assert clear.in_cooldown is False
     assert clear.window is None
+
+
+# --- delete / delete_many ----------------------------------------------------
+
+
+def test_delete_many_removes_named_ids_and_leaves_others(data_dir):
+    a = create({"company": "Acme", "verdict": "rejected"})
+    b = create({"company": "Beta", "verdict": "rejected"})
+    c = create({"company": "Gamma", "verdict": "rejected"})
+
+    results = delete_many([a.id, c.id])
+
+    assert results == [(a.id, True), (c.id, True)]
+    remaining = {s.id for s in load_all()}
+    assert remaining == {b.id}
+
+
+def test_delete_many_reports_unknown_ids_false(data_dir):
+    a = create({"company": "Acme", "verdict": "rejected"})
+
+    results = delete_many([a.id, "not-a-real-id"])
+
+    assert results == [(a.id, True), ("not-a-real-id", False)]
+    assert load_all() == []
+
+
+def test_delete_many_empty_list_is_noop(data_dir):
+    create({"company": "Acme", "verdict": "rejected"})
+
+    assert delete_many([]) == []
+    assert len(load_all()) == 1
+
+
+def test_delete_removes_saved_cover_letter_draft(data_dir):
+    a = create({"company": "Acme", "verdict": "rejected"})
+    save_letter_draft(a.id, CoverLetterDraft(text="Dear hiring manager,"))
+    assert letter_draft_path(a.id).exists()
+
+    assert delete(a.id) is True
+
+    assert not letter_draft_path(a.id).exists()
+
+
+def test_delete_many_removes_saved_cover_letter_drafts(data_dir):
+    a = create({"company": "Acme", "verdict": "rejected"})
+    b = create({"company": "Beta", "verdict": "rejected"})
+    save_letter_draft(a.id, CoverLetterDraft(text="Dear hiring manager,"))
+    save_letter_draft(b.id, CoverLetterDraft(text="Dear hiring manager,"))
+    assert letter_draft_path(a.id).exists()
+    assert letter_draft_path(b.id).exists()
+
+    delete_many([a.id, b.id])
+
+    assert not letter_draft_path(a.id).exists()
+    assert not letter_draft_path(b.id).exists()

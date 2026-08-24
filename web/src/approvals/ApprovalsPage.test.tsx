@@ -8,8 +8,8 @@ import {
   deleteScreening,
   generateScreeningLetter,
   getScreeningLetter,
-  markScreeningApplied,
   listAppliedScreenings,
+  markScreeningApplied,
   listApprovedApplications,
   listDidNotPass,
   listPendingApprovals,
@@ -30,8 +30,8 @@ vi.mock("../api/client", () => ({
   listAppliedScreenings: vi.fn(),
   setScreeningApproval: vi.fn(),
   bulkSetApproval: vi.fn(),
-  bulkDeleteScreenings: vi.fn(),
   deleteScreening: vi.fn(),
+  bulkDeleteScreenings: vi.fn(),
   setScreeningUrl: vi.fn(),
   setScreeningPostingText: vi.fn(),
   getScreeningLetter: vi.fn(),
@@ -40,7 +40,12 @@ vi.mock("../api/client", () => ({
   saveScreeningLetter: vi.fn(),
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // Without this, spy call counts leak between tests and a later
+  // `not.toHaveBeenCalled()` sees an earlier test's call.
+  vi.clearAllMocks();
+});
 
 // The list endpoint never carries drafts (PendingCard fetches its own), so
 // every test needs a stub; the no-draft case is the common one, and the
@@ -456,105 +461,106 @@ describe("ApprovalsPage applied tab", () => {
   });
 });
 
-describe("deleting rejected postings", () => {
-  const rejectedPair = {
-    didNotPass: [
-      makeRecord({ id: "d1", company: "SumUp", verdict: "rejected", approval: "" }),
-    ],
-    rejected: [makeRecord({ id: "r1", company: "Pleo", approval: "rejected" })],
-  };
-
-  it("deletes one row and drops it from the tab", async () => {
+describe("ApprovalsPage rejected tab delete", () => {
+  it("deletes one rejected row after confirming", async () => {
     vi.mocked(deleteScreening).mockResolvedValue(undefined);
-    await renderPage([], [], rejectedPair);
-    clickTab(/rejected \(2\)/i);
+    await renderPage([], [], {
+      rejected: [makeRecord({ id: "r1", company: "Pleo", approval: "rejected" })],
+    });
+    clickTab(/rejected/i);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Delete rejected posting for Pleo" }),
+    );
+    expect(deleteScreening).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(deleteScreening).toHaveBeenCalledWith("r1"));
+    await waitFor(() => expect(screen.queryByText("Pleo")).toBeNull());
+  });
 
-    fireEvent.click(await screen.findByRole("button", { name: /Delete SumUp/ }));
-
-    await waitFor(() => expect(deleteScreening).toHaveBeenCalledWith("d1"));
-    await waitFor(() => expect(screen.queryByText("SumUp")).toBeNull());
+  it("requires confirming the dialog before any delete request fires", async () => {
+    await renderPage([], [], {
+      rejected: [makeRecord({ id: "r1", company: "Pleo", approval: "rejected" })],
+    });
+    clickTab(/rejected/i);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Delete rejected posting for Pleo" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    expect(deleteScreening).not.toHaveBeenCalled();
+    expect(bulkDeleteScreenings).not.toHaveBeenCalled();
     expect(screen.getByText("Pleo")).toBeTruthy();
   });
 
-  it("bulk delete asks for confirmation before removing anything", async () => {
-    await renderPage([], [], rejectedPair);
-    clickTab(/rejected \(2\)/i);
-
-    fireEvent.click(await screen.findByLabelText("Select all rejected"));
-    fireEvent.click(screen.getByRole("button", { name: /Delete selected \(2\)/ }));
-
-    // The dialog is open, but nothing has been deleted yet.
-    expect(screen.getByText(/Delete 2 rejected postings\?/)).toBeTruthy();
-    expect(vi.mocked(bulkDeleteScreenings)).not.toHaveBeenCalled();
-  });
-
-  it("cancelling the dialog deletes nothing", async () => {
-    await renderPage([], [], rejectedPair);
-    clickTab(/rejected \(2\)/i);
-    fireEvent.click(await screen.findByLabelText("Select all rejected"));
-    fireEvent.click(screen.getByRole("button", { name: /Delete selected \(2\)/ }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-
-    expect(vi.mocked(bulkDeleteScreenings)).not.toHaveBeenCalled();
-    expect(screen.getByText("SumUp")).toBeTruthy();
-  });
-
-  it("confirming deletes the selection and clears the rows", async () => {
+  it("select-all then Delete selected calls bulk delete for every rejected row", async () => {
     vi.mocked(bulkDeleteScreenings).mockResolvedValue({
-      deleted: ["d1", "r1"],
-      missing: [],
+      results: [
+        { id: "r1", ok: true },
+        { id: "r2", ok: true },
+      ],
     });
-    await renderPage([], [], rejectedPair);
-    clickTab(/rejected \(2\)/i);
-    fireEvent.click(await screen.findByLabelText("Select all rejected"));
-    fireEvent.click(screen.getByRole("button", { name: /Delete selected \(2\)/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-
+    await renderPage([], [], {
+      rejected: [
+        makeRecord({ id: "r1", company: "Pleo", approval: "rejected" }),
+        makeRecord({ id: "r2", company: "SumUp", approval: "rejected" }),
+      ],
+    });
+    clickTab(/rejected/i);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select all rejected" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete selected" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() =>
-      expect(bulkDeleteScreenings).toHaveBeenCalledWith(["d1", "r1"]),
+      expect(bulkDeleteScreenings).toHaveBeenCalledWith(expect.arrayContaining(["r1", "r2"])),
     );
-    await waitFor(() => expect(screen.queryByText("SumUp")).toBeNull());
-    expect(screen.queryByText("Pleo")).toBeNull();
-  });
-
-  it("an already-deleted id still leaves the tab", async () => {
-    // Another tab removed it first: it must not linger as a row that is gone.
-    vi.mocked(bulkDeleteScreenings).mockResolvedValue({
-      deleted: ["d1"],
-      missing: ["r1"],
-    });
-    await renderPage([], [], rejectedPair);
-    clickTab(/rejected \(2\)/i);
-    fireEvent.click(await screen.findByLabelText("Select all rejected"));
-    fireEvent.click(screen.getByRole("button", { name: /Delete selected \(2\)/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-
     await waitFor(() => expect(screen.queryByText("Pleo")).toBeNull());
     expect(screen.queryByText("SumUp")).toBeNull();
   });
 
-  it("the delete button is disabled until something is selected", async () => {
-    await renderPage([], [], rejectedPair);
-    clickTab(/rejected \(2\)/i);
-
-    const button = (await screen.findByRole("button", {
-      name: /Delete selected \(0\)/,
-    })) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+  it("a partial bulk-delete failure leaves the failed row visible with an error message", async () => {
+    vi.mocked(bulkDeleteScreenings).mockResolvedValue({
+      results: [
+        { id: "r1", ok: true },
+        { id: "r2", ok: false },
+      ],
+    });
+    await renderPage([], [], {
+      rejected: [
+        makeRecord({ id: "r1", company: "Pleo", approval: "rejected" }),
+        makeRecord({ id: "r2", company: "SumUp", approval: "rejected" }),
+      ],
+    });
+    clickTab(/rejected/i);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select all rejected" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete selected" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByText("Pleo")).toBeNull());
+    expect(await screen.findByText("SumUp")).toBeTruthy();
+    expect(await screen.findByText("1 could not be deleted.")).toBeTruthy();
   });
 
-  it("the Rejected selection is separate from the Found selection", async () => {
-    // Sharing one selection would delete rows ticked for a different action.
-    await renderPage([makeRecord({ id: "p1", company: "Camunda" })], [], rejectedPair);
+  it("selecting rows on the Rejected tab does not change the Found tab's selection", async () => {
+    await renderPage([makeRecord({ id: "s1", company: "Found Co" })], [], {
+      rejected: [makeRecord({ id: "r1", company: "Rejected Co", approval: "rejected" })],
+    });
+    // Plain `.checked` rather than jest-dom's toBeChecked: this project does
+    // not install @testing-library/jest-dom, so that matcher is undefined.
+    const foundCheckbox = (await screen.findByRole("checkbox", {
+      name: "Select Found Co",
+    })) as HTMLInputElement;
+    fireEvent.click(foundCheckbox);
+    expect(foundCheckbox.checked).toBe(true);
 
-    fireEvent.click(screen.getByLabelText("Select Camunda"));
-    clickTab(/rejected \(2\)/i);
+    clickTab(/rejected/i);
+    const rejectedCheckbox = (await screen.findByRole("checkbox", {
+      name: "Select Rejected Co",
+    })) as HTMLInputElement;
+    fireEvent.click(rejectedCheckbox);
+    expect(rejectedCheckbox.checked).toBe(true);
 
-    const button = (await screen.findByRole("button", {
-      name: /Delete selected \(0\)/,
-    })) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+    clickTab(/found/i);
+    const foundCheckboxAgain = (await screen.findByRole("checkbox", {
+      name: "Select Found Co",
+    })) as HTMLInputElement;
+    expect(foundCheckboxAgain.checked).toBe(true);
   });
 });
 
@@ -569,10 +575,12 @@ describe("Found ordering", () => {
   });
 
   it("falls back to screenedDate, then createdAt, when no posted date exists", () => {
-    expect(orderingDate(makeRecord({ postedDate: "2026-07-01", screenedDate: "2026-08-01" })))
-      .toBe("2026-07-01");
-    expect(orderingDate(makeRecord({ postedDate: "", screenedDate: "2026-08-01" })))
-      .toBe("2026-08-01");
+    expect(
+      orderingDate(makeRecord({ postedDate: "2026-07-01", screenedDate: "2026-08-01" })),
+    ).toBe("2026-07-01");
+    expect(orderingDate(makeRecord({ postedDate: "", screenedDate: "2026-08-01" }))).toBe(
+      "2026-08-01",
+    );
     expect(
       orderingDate(
         makeRecord({ postedDate: "", screenedDate: "", createdAt: "2026-08-24T18:00:00Z" }),

@@ -294,19 +294,6 @@ export function markScreeningApplied(id: string): Promise<Application> {
   });
 }
 
-/** Delete many screenings in one request. `missing` names ids that were
- * already gone — not an error, just a stale selection. POST rather than
- * DELETE because the id list travels in the body. */
-export function bulkDeleteScreenings(
-  ids: string[],
-): Promise<{ deleted: string[]; missing: string[] }> {
-  return request("/api/screenings/bulk-delete", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ids }),
-  });
-}
-
 /** The approval queue: screenings the agent deferred and is waiting on. */
 export function listPendingApprovals(): Promise<ScreeningRecord[]> {
   return request("/api/screenings?approval=pending");
@@ -430,6 +417,19 @@ export function bulkSetApproval(
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ids, approval }),
+  });
+}
+
+/** Delete many screening records at once; the result reports each id separately.
+ * Deleting a screening ends its cooldown contribution and un-blocks that target
+ * for re-screening, same as the single-record delete. */
+export function bulkDeleteScreenings(
+  ids: string[],
+): Promise<{ results: { id: string; ok: boolean }[] }> {
+  return request("/api/screenings/deletions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
   });
 }
 

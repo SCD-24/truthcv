@@ -93,32 +93,45 @@ def update(screening_id: str, patch: dict) -> Screening | None:
 
 
 def delete(screening_id: str) -> bool:
-    """Remove a screening record. True if it existed."""
+    """Remove a screening record and its orphaned cover-letter draft.
+
+    Returns:
+        True if the screening existed and was removed.
+    """
+    from coverletter import store as _coverletter_store
+
     screenings = load_all()
     screening = next((s for s in screenings if s.id == screening_id), None)
     if screening is None:
         return False
     _write_all([s for s in screenings if s.id != screening_id])
+    _coverletter_store.delete(screening_id)
     return True
 
 
-def delete_many(screening_ids: list[str]) -> list[str]:
-    """Remove several screenings in one read-modify-write; returns the ids removed.
+def delete_many(ids: list[str]) -> list[tuple[str, bool]]:
+    """Remove several screening records (and their draft letters) in one write.
 
-    Not a loop over ``delete``: that reloads and rewrites the whole file per id,
-    which is quadratic over a selection and leaves the list half-deleted if the
-    process dies midway. One write also means a concurrent agent run can only
-    observe the selection as wholly present or wholly gone.
+    Loads the list once, writes the survivors once, and removes each deleted
+    id's cover-letter draft. Unknown ids are reported False rather than
+    raising, so a partially-stale selection from the client is not fatal.
+
+    Args:
+        ids: Screening ids to remove, in the order to report results.
+
+    Returns:
+        One (id, ok) pair per input id, in input order.
     """
-    wanted = set(screening_ids)
-    if not wanted:
-        return []
+    from coverletter import store as _coverletter_store
+
     screenings = load_all()
-    removed = [s.id for s in screenings if s.id in wanted]
-    if not removed:
-        return []
-    _write_all([s for s in screenings if s.id not in wanted])
-    return removed
+    existing_ids = {s.id for s in screenings}
+    to_delete = {i for i in ids if i in existing_ids}
+    if to_delete:
+        _write_all([s for s in screenings if s.id not in to_delete])
+        for deleted_id in to_delete:
+            _coverletter_store.delete(deleted_id)
+    return [(i, i in to_delete) for i in ids]
 
 
 def set_approval(screening_id: str, approval: str) -> Screening | None:

@@ -63,7 +63,7 @@ from .schemas import (
     ApprovalUpdate,
     BulkApprovalResult,
     BulkApprovalUpdate,
-    BulkDelete,
+    BulkDeleteRequest,
     BulkDeleteResult,
     CoverLetterDraftModel,
     LetterGenerateRequest,
@@ -229,24 +229,20 @@ def mark_screening_applied(screening_id: str) -> ApplicationModel:
     return _application_model(app)
 
 
-# Declared BEFORE /screenings/{screening_id} for the same reason as the route
-# above: otherwise "bulk-delete" binds as an id and this is unreachable.
-@router.post("/screenings/bulk-delete", response_model=BulkDeleteResult)
-def bulk_delete_screenings(body: BulkDelete) -> BulkDeleteResult:
-    """Delete many screenings in one write.
+# Declared BEFORE /screenings/{screening_id}: otherwise the router binds
+# "deletions" as an id and this route is unreachable.
+@router.post("/screenings/deletions", response_model=BulkDeleteResult)
+def bulk_delete_screenings(body: BulkDeleteRequest) -> BulkDeleteResult:
+    """Delete many screening records at once.
 
-    A POST rather than a DELETE because the id list is a body, and DELETE with
-    a body is not reliably carried by proxies. Ids that were already gone come
-    back in `missing` rather than failing the call: the common cause is two
-    tabs deleting the same row, and that is not an error worth losing the rest
-    of the batch over.
+    Reports per-id outcomes rather than failing wholesale, so a partial
+    failure is visible instead of silently dropping some ids. An unknown id
+    is reported ok:false, never a 404 — an empty list is a no-op.
     """
-    deleted = screening_store.delete_many(body.ids)
-    removed = set(deleted)
-    return BulkDeleteResult(
-        deleted=deleted,
-        missing=[i for i in body.ids if i not in removed],
-    )
+    results = [
+        {"id": sid, "ok": ok} for sid, ok in screening_store.delete_many(body.ids)
+    ]
+    return BulkDeleteResult(results=results)
 
 
 @router.patch("/screenings/{screening_id}", response_model=ScreeningModel)

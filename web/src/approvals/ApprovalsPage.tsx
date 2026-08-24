@@ -12,6 +12,7 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogContentText from "@mui/material/DialogContentText";
 import DialogTitle from "@mui/material/DialogTitle";
 import FormControlLabel from "@mui/material/FormControlLabel";
+import IconButton from "@mui/material/IconButton";
 import Link from "@mui/material/Link";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
@@ -20,6 +21,9 @@ import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+// MUI icons v9 names this "DeleteOutlined"; "DeleteOutline" does not exist
+// in the installed package and fails the build at import time.
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
 import { isCooldownActive } from "../settings/cooldown";
 import { cooldownBlockLabel } from "../screenings/ScreeningsPage";
 import {
@@ -449,7 +453,7 @@ function ApprovedRow({
 }
 
 /** The date a row is ordered by, newest first.
-
+ *
  * `postedDate` is the posting's own publication date and the one that matters
  * for "newest", but many boards publish none — so it falls back to when the
  * agent screened it, then to when the record was written. Without the
@@ -518,9 +522,7 @@ function ReviewRow({
         <Checkbox
           checked={checked}
           onChange={() => onToggle(record.id)}
-          disabled={busy}
-          sx={{ mt: -1, ml: -1 }}
-          slotProps={{ input: { "aria-label": `Select ${record.company} ${record.role}` } }}
+          slotProps={{ input: { "aria-label": `Select ${record.company}` } }}
         />
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="subtitle1" sx={{ overflowWrap: "anywhere" }}>
@@ -571,26 +573,23 @@ function ReviewRow({
             ) : null}
           </Stack>
         </Box>
-        <Stack spacing={1} sx={{ flexShrink: 0 }}>
-          <Button
-            variant="outlined"
-            size="small"
-            disabled={busy}
-            onClick={() => onMoveToApprovals(record.id)}
-          >
-            Move to approvals
-          </Button>
-          <Button
-            variant="text"
-            size="small"
-            color="error"
-            disabled={busy}
-            onClick={() => onDelete(record.id)}
-            aria-label={`Delete ${record.company} ${record.role}`}
-          >
-            Delete
-          </Button>
-        </Stack>
+        <Button
+          variant="outlined"
+          size="small"
+          disabled={busy}
+          onClick={() => onMoveToApprovals(record.id)}
+          sx={{ flexShrink: 0 }}
+        >
+          Move to approvals
+        </Button>
+        <IconButton
+          aria-label={`Delete rejected posting for ${record.company}`}
+          disabled={busy}
+          onClick={() => onDelete(record.id)}
+          sx={{ flexShrink: 0 }}
+        >
+          <DeleteOutlineIcon />
+        </IconButton>
       </Stack>
     </Paper>
   );
@@ -651,9 +650,12 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
   const [didNotPass, setDidNotPass] = useState<ScreeningRecord[]>([]);
   const [applied, setApplied] = useState<ScreeningRecord[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
-  const [rejectedSelected, setRejectedSelected] = useState<string[]>([]);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  // Separate selection for the Rejected tab: it must never share state with
+  // `selected`, which drives the Found tab's approve/reject bar.
+  const [selectedRejected, setSelectedRejected] = useState<string[]>([]);
   const [appliedNotice, setAppliedNotice] = useState("");
+  // The ids pending confirmation in the delete dialog; null when it's closed.
+  const [deleteTarget, setDeleteTarget] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -703,55 +705,13 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
   const toggleAll = () =>
     setSelected((s) => (s.length === pending.length ? [] : pending.map((r) => r.id)));
 
-  // The Rejected tab keeps its own selection. Sharing `selected` with Found
-  // would carry a selection across a tab switch and delete rows the operator
-  // ticked for a different action entirely.
   const toggleRejected = (id: string) =>
-    setRejectedSelected((s) =>
-      s.includes(id) ? s.filter((x) => x !== id) : [...s, id],
-    );
+    setSelectedRejected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   const toggleAllRejected = () =>
-    setRejectedSelected((s) =>
+    setSelectedRejected((s) =>
       s.length === rejectedRows.length ? [] : rejectedRows.map((r) => r.id),
     );
-
-  /** Drop ids from whichever rejected list held them, plus the selection. */
-  function forgetRejected(ids: string[]) {
-    const gone = new Set(ids);
-    setRejected((rows) => rows.filter((r) => !gone.has(r.id)));
-    setDidNotPass((rows) => rows.filter((r) => !gone.has(r.id)));
-    setRejectedSelected((s) => s.filter((x) => !gone.has(x)));
-  }
-
-  async function deleteOne(id: string) {
-    setBusy(true);
-    setError("");
-    try {
-      await deleteScreening(id);
-      forgetRejected([id]);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function deleteSelectedRejected() {
-    setBusy(true);
-    setError("");
-    try {
-      const { deleted, missing } = await bulkDeleteScreenings(rejectedSelected);
-      // A missing id is one another tab already removed: drop it from the list
-      // too, or it lingers as a row that no longer exists anywhere.
-      forgetRejected([...deleted, ...missing]);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-      setConfirmDelete(false);
-    }
-  }
 
   async function decide(id: string, approval: "approved" | "rejected") {
     setBusy(true);
@@ -794,6 +754,48 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
       setError(String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  function requestDeleteSingle(id: string) {
+    setDeleteTarget([id]);
+  }
+
+  function requestDeleteSelected() {
+    setDeleteTarget(selectedRejected);
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    const ids = deleteTarget;
+    setBusy(true);
+    setError("");
+    try {
+      let succeeded: Set<string>;
+      if (ids.length === 1) {
+        try {
+          await deleteScreening(ids[0]);
+          succeeded = new Set(ids);
+        } catch {
+          succeeded = new Set();
+        }
+      } else {
+        const { results } = await bulkDeleteScreenings(ids);
+        succeeded = new Set(results.filter((r) => r.ok).map((r) => r.id));
+      }
+      const failed = ids.filter((id) => !succeeded.has(id));
+      // Remove succeeded ids from both source lists — the Rejected tab merges
+      // agent-filtered and operator-rejected populations, and a deleted
+      // record could be in either.
+      setRejected((rows) => rows.filter((r) => !succeeded.has(r.id)));
+      setDidNotPass((rows) => rows.filter((r) => !succeeded.has(r.id)));
+      setSelectedRejected([]);
+      if (failed.length) setError(`${failed.length} could not be deleted.`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+      setDeleteTarget(null);
     }
   }
 
@@ -897,9 +899,9 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
           </Tabs>
 
           <QueuePanel value={tab} index={0}>
-            {/* Outside the empty-check: applying the last row empties the list,
-                which is exactly when the operator most needs telling where it
-                went. */}
+            {/* Outside the empty-check below: applying the last row empties the
+                list, which is exactly when the operator most needs telling
+                where it went. */}
             {appliedNotice ? (
               <Alert
                 severity="success"
@@ -987,33 +989,29 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
                   Postings set aside by the agent's criteria or by you. You can send
                   either kind back to the queue, or delete them for good.
                 </Typography>
-                <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
+                <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
                   <FormControlLabel
                     control={
                       <Checkbox
                         checked={
-                          rejectedSelected.length === rejectedRows.length &&
+                          selectedRejected.length === rejectedRows.length &&
                           rejectedRows.length > 0
-                        }
-                        indeterminate={
-                          rejectedSelected.length > 0 &&
-                          rejectedSelected.length < rejectedRows.length
                         }
                         onChange={toggleAllRejected}
                         disabled={busy}
                         slotProps={{ input: { "aria-label": "Select all rejected" } }}
                       />
                     }
-                    label={`Select all (${rejectedRows.length})`}
+                    label="Select all"
                   />
                   <Button
                     variant="outlined"
-                    size="small"
                     color="error"
-                    disabled={busy || rejectedSelected.length === 0}
-                    onClick={() => setConfirmDelete(true)}
+                    size="small"
+                    disabled={busy || selectedRejected.length === 0}
+                    onClick={requestDeleteSelected}
                   >
-                    Delete selected ({rejectedSelected.length})
+                    Delete selected
                   </Button>
                 </Stack>
                 {rejectedRows.map((r) => (
@@ -1021,11 +1019,11 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
                     key={r.id}
                     record={r}
                     busy={busy}
-                    checked={rejectedSelected.includes(r.id)}
+                    checked={selectedRejected.includes(r.id)}
                     onToggle={toggleRejected}
                     onMoveToApprovals={moveToApprovals}
                     onSaveUrl={saveUrl}
-                    onDelete={deleteOne}
+                    onDelete={requestDeleteSingle}
                     rejectedLabel={
                       agentRejected.has(r.id) ? "Rejected by agent" : "Rejected by you"
                     }
@@ -1033,29 +1031,6 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
                 ))}
               </Stack>
             )}
-            {/* Deletion is the one action on this page with no way back —
-                Move to approvals is reversible, this is not. */}
-            <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)}>
-              <DialogTitle>
-                Delete {rejectedSelected.length} rejected{" "}
-                {rejectedSelected.length === 1 ? "posting" : "postings"}?
-              </DialogTitle>
-              <DialogContent>
-                <DialogContentText>
-                  This removes the screening records for good, including the stored
-                  posting text. Their companies also stop being in cooldown, so a
-                  future run may find and screen these postings again.
-                </DialogContentText>
-              </DialogContent>
-              <DialogActions>
-                <Button onClick={() => setConfirmDelete(false)} disabled={busy}>
-                  Cancel
-                </Button>
-                <Button color="error" onClick={deleteSelectedRejected} disabled={busy}>
-                  Delete
-                </Button>
-              </DialogActions>
-            </Dialog>
           </QueuePanel>
 
           <QueuePanel value={tab} index={3}>
@@ -1074,6 +1049,26 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
           </QueuePanel>
         </>
       )}
+
+      <Dialog open={deleteTarget !== null} onClose={() => !busy && setDeleteTarget(null)}>
+        <DialogTitle>
+          Delete {deleteTarget && deleteTarget.length > 1 ? "these postings" : "this posting"}?
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Deleting {deleteTarget && deleteTarget.length > 1 ? "ends each target's" : "ends this target's"}{" "}
+            cooldown and un-blocks it for re-screening. This cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteTarget(null)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={confirmDelete} color="error" disabled={busy}>
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
