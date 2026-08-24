@@ -17,6 +17,7 @@ if (process.env.FAKE_AGENT_CONFIG && field !== "llm_credentials") {
         cooldownDaysSameRole: cfg.cooldownDaysSameRole,
         cooldownDaysSameCompany: cfg.cooldownDaysSameCompany,
         maxApplicationsPerRun: cfg.maxApplicationsPerRun,
+        maxPostingAgeDays: cfg.maxPostingAgeDays,
         companyBoards: cfg.companyBoards || [],
         searchQueries: cfg.searchQueries || [],
       })
@@ -91,6 +92,7 @@ const req = http.get(u, { timeout: 5000 }, (res) => {
           cooldownDaysSameRole: cfg.cooldownDaysSameRole,
           cooldownDaysSameCompany: cfg.cooldownDaysSameCompany,
           maxApplicationsPerRun: cfg.maxApplicationsPerRun,
+          maxPostingAgeDays: cfg.maxPostingAgeDays,
           companyBoards: cfg.companyBoards || [],
           searchQueries: cfg.searchQueries || [],
         };

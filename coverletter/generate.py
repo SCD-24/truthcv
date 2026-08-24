@@ -137,6 +137,7 @@ def build_letter(
     denied_texts: set[str] | None = None,
     paragraphs: list[dict] | None = None,
     answers: Answers | None = None,
+    sign_off_name: str = "",
 ) -> dict:
     """Generate a guardrailed cover letter.
 
@@ -157,6 +158,14 @@ def build_letter(
     ``answers`` (optional screening answers) are passed to the guardrail as
     allowed claim sources for THIS generation only (never written to truth),
     along with profile-header values and approved_texts.
+
+    ``sign_off_name`` appends a closing signature to the finished letter. It is
+    added here, after validation, rather than asked of the model — which the
+    style prompt explicitly forbids from writing the candidate's name — because
+    a name the model types is a claim the guardrail must then check, and one it
+    can get subtly wrong. Appended text is the operator's own stored name, so
+    it asserts nothing new. A blank name appends nothing: a letter with no
+    sign-off is correct, a letter signed "[Your Name]" is not.
     """
     if paragraphs is None:
         paragraphs = _generate_paragraphs(posting, tone, length, truth, provider, answers)
@@ -185,7 +194,27 @@ def build_letter(
             ],
             "text": "",
         }
-    return {"blocked": False, "unverifiable": [], "blocked_claims": [], "text": text}
+    return {
+        "blocked": False,
+        "unverifiable": [],
+        "blocked_claims": [],
+        "text": _with_sign_off(text, sign_off_name),
+    }
+
+
+def _with_sign_off(text: str, name: str) -> str:
+    """Append "Kind regards, / <name>" as the letter's closing paragraphs.
+
+    Emitted as two blank-line-separated blocks because every consumer splits on
+    the blank line: the HTML/DOCX renderers turn each into its own paragraph,
+    and the agent pastes the raw text into an application form where a single
+    newline would collapse. A blank or placeholder-looking name appends
+    nothing.
+    """
+    cleaned = " ".join(name.split()) if isinstance(name, str) else ""
+    if not cleaned or _PLACEHOLDER.fullmatch(cleaned):
+        return text
+    return f"{text}\n\nKind regards,\n\n{cleaned}"
 
 
 # A template slot the model failed to fill: "[Your Name]", "[Company]" — or

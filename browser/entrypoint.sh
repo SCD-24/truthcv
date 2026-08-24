@@ -74,6 +74,21 @@ log "noVNC running on PID $NOVNC_PID (http://localhost:$NOVNC_PORT)"
 # --user-data-dir: persistent profile (mounted at /browser-profile)
 # --viewport-size: browser window size
 # DISPLAY must be set for Chromium to run headful under Xvfb
+# Chromium writes SingletonLock/Cookie/Socket into the profile and names them
+# after the host and PID that hold it. The profile is a persistent volume but
+# the container's hostname changes on every recreate, so a container that was
+# killed rather than shut down cleanly leaves a lock Chromium can no longer
+# attribute — and refuses to start on. @playwright/mcp surfaces that as
+# "Browser is already in use for <profile>" on every navigate, for the life of
+# the volume. Nothing can legitimately hold the profile at container start, so
+# clearing them here is safe and is the only point at which that is true.
+for singleton in SingletonLock SingletonCookie SingletonSocket; do
+  if [[ -e "$BROWSER_PROFILE_DIR/$singleton" || -L "$BROWSER_PROFILE_DIR/$singleton" ]]; then
+    log "clearing stale $singleton in $BROWSER_PROFILE_DIR"
+    rm -f "$BROWSER_PROFILE_DIR/$singleton"
+  fi
+done
+
 log "starting @playwright/mcp on port $BROWSER_MCP_PORT..."
 exec env DISPLAY="$DISPLAY" \
   npx @playwright/mcp \

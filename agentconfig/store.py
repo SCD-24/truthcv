@@ -139,6 +139,11 @@ class AgentConfig:
     cooldown_days_same_role: int | None = None
     cooldown_days_same_company: int | None = None
     max_applications_per_run: int | None = None
+    # Discovery freshness window: only consider postings published within this
+    # many days. None means "unset", which keeps the past-week window the dork
+    # URLs have always carried; 0 disables the window entirely (any age),
+    # mirroring how 0 disables a cooldown window.
+    max_posting_age_days: int | None = None
 
     @property
     def enabled(self) -> bool:
@@ -212,6 +217,13 @@ class AgentConfig:
         if "max_applications_per_run" in raw and isinstance(raw["max_applications_per_run"], int):
             kwargs["max_applications_per_run"] = raw["max_applications_per_run"]
 
+        # max_posting_age_days: int | None. A non-int falls back to None rather
+        # than raising, so a hand-edited config never blocks the run — the same
+        # rule the cooldown windows above follow.
+        if "max_posting_age_days" in raw:
+            value = raw["max_posting_age_days"]
+            kwargs["max_posting_age_days"] = value if isinstance(value, int) else None
+
         return cls(**kwargs)
 
     def to_dict(self) -> dict:
@@ -230,6 +242,7 @@ class AgentConfig:
             "cooldown_days_same_role": self.cooldown_days_same_role,
             "cooldown_days_same_company": self.cooldown_days_same_company,
             "max_applications_per_run": self.max_applications_per_run,
+            "max_posting_age_days": self.max_posting_age_days,
         }
 
     def _storage_dict(self) -> dict:

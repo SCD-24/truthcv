@@ -21,7 +21,9 @@ import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
-import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
+// MUI icons v9 names this "DeleteOutlined"; "DeleteOutline" does not exist
+// in the installed package and fails the build at import time.
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
 import { isCooldownActive } from "../settings/cooldown";
 import { cooldownBlockLabel } from "../screenings/ScreeningsPage";
 import {
@@ -30,6 +32,7 @@ import {
   deleteScreening,
   generateScreeningLetter,
   getScreeningLetter,
+  markScreeningApplied,
   listAppliedScreenings,
   listApprovedApplications,
   listDidNotPass,
@@ -318,6 +321,7 @@ function PendingCard({
   onToggle,
   onDecide,
   onSaveUrl,
+  onMarkApplied,
 }: {
   record: ScreeningRecord;
   checked: boolean;
@@ -325,6 +329,7 @@ function PendingCard({
   onToggle: (id: string) => void;
   onDecide: (id: string, approval: "approved" | "rejected") => void;
   onSaveUrl: (id: string, url: string) => void;
+  onMarkApplied: (id: string) => void;
 }) {
   // The server enforces this at approval time too (PATCH 409s with no draft
   // stored) — this only makes the reason visible before the click.
@@ -375,6 +380,18 @@ function PendingCard({
             onClick={() => onDecide(record.id, "rejected")}
           >
             Reject
+          </Button>
+          {/* The manual escape hatch: the operator applied themselves, so the
+              posting becomes an Applications row without the agent ever
+              submitting it. No cover-letter gate — they already applied. */}
+          <Button
+            variant="text"
+            size="small"
+            disabled={busy}
+            onClick={() => onMarkApplied(record.id)}
+            title="I applied to this myself — track it on the Applications page"
+          >
+            I applied
           </Button>
         </Stack>
       </Stack>
@@ -435,6 +452,46 @@ function ApprovedRow({
   );
 }
 
+/** The date a row is ordered by, newest first.
+ *
+ * `postedDate` is the posting's own publication date and the one that matters
+ * for "newest", but many boards publish none — so it falls back to when the
+ * agent screened it, then to when the record was written. Without the
+ * fallbacks every dateless posting would clump at one end regardless of how
+ * recently it was found.
+ */
+export function orderingDate(record: ScreeningRecord): string {
+  return record.postedDate || record.screenedDate || record.createdAt || "";
+}
+
+/** Newest first. Does not mutate the array it is given. */
+export function byDateDesc(records: ScreeningRecord[]): ScreeningRecord[] {
+  return [...records].sort((a, b) => {
+    const da = orderingDate(a);
+    const db = orderingDate(b);
+    if (da === db) return 0;
+    // ISO-8601 dates sort correctly as strings; a blank sorts last, which is
+    // only reachable when a record carries no date of any kind.
+    if (!da) return 1;
+    if (!db) return -1;
+    return da < db ? 1 : -1;
+  });
+}
+
+/** Chip styling that lets a long label wrap instead of forcing the row wide.
+ * MUI fixes a Chip's height and sets `white-space: nowrap` on its label, so a
+ * multi-hundred-character value overflows the viewport unless both are undone. */
+const WRAPPING_CHIP = {
+  maxWidth: "100%",
+  height: "auto",
+  "& .MuiChip-label": {
+    whiteSpace: "normal",
+    overflowWrap: "anywhere",
+    py: 0.5,
+    display: "block",
+  },
+} as const;
+
 /** A rejected or agent-filtered posting, reviewable and reversible: shows
  * why it was set aside and offers the one way back into the queue. When
  * ``rejectedLabel`` is set the row carries a provenance stamp saying who
@@ -460,16 +517,21 @@ function ReviewRow({
 }) {
   const active = isCooldownActive(record.cooldownExpires);
   return (
-    <Paper variant="outlined" sx={{ p: 2 }}>
-      <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+    <Paper variant="outlined" sx={{ p: 2, overflow: "hidden" }}>
+      <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start" }}>
         <Checkbox
           checked={checked}
           onChange={() => onToggle(record.id)}
           slotProps={{ input: { "aria-label": `Select ${record.company}` } }}
         />
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="subtitle1">{record.company}</Typography>
-          <Typography variant="body2" sx={{ color: "text.secondary" }}>
+          <Typography variant="subtitle1" sx={{ overflowWrap: "anywhere" }}>
+            {record.company}
+          </Typography>
+          <Typography
+            variant="body2"
+            sx={{ color: "text.secondary", overflowWrap: "anywhere" }}
+          >
             {record.role}
           </Typography>
           <PostingUrl
@@ -486,14 +548,29 @@ function ReviewRow({
               sx={{ mt: 0.5 }}
             />
           ) : null}
-          <Stack direction="row" spacing={1} sx={{ mt: 0.5, alignItems: "center" }}>
-            {rejectedLabel ? <Chip size="small" label={rejectedLabel} /> : null}
-            {record.failingCriterion ? (
-              <Chip size="small" label={record.failingCriterion} />
+          {/* A failing criterion is free text the agent writes and runs to
+              several hundred characters. A Chip never wraps its label, so an
+              unwrapped one pushed the whole page sideways; these let it break
+              and grow instead. */}
+          <Stack
+            direction="row"
+            spacing={1}
+            sx={{ mt: 0.5, alignItems: "flex-start", flexWrap: "wrap", rowGap: 1 }}
+          >
+            {rejectedLabel ? (
+              <Chip size="small" label={rejectedLabel} sx={{ flexShrink: 0 }} />
             ) : null}
-            <Typography variant="body2" sx={{ color: "text.secondary" }}>
-              {record.reason}
-            </Typography>
+            {record.failingCriterion ? (
+              <Chip size="small" label={record.failingCriterion} sx={WRAPPING_CHIP} />
+            ) : null}
+            {record.reason ? (
+              <Typography
+                variant="body2"
+                sx={{ color: "text.secondary", minWidth: 0, overflowWrap: "anywhere" }}
+              >
+                {record.reason}
+              </Typography>
+            ) : null}
           </Stack>
         </Box>
         <Button
@@ -501,6 +578,7 @@ function ReviewRow({
           size="small"
           disabled={busy}
           onClick={() => onMoveToApprovals(record.id)}
+          sx={{ flexShrink: 0 }}
         >
           Move to approvals
         </Button>
@@ -508,6 +586,7 @@ function ReviewRow({
           aria-label={`Delete rejected posting for ${record.company}`}
           disabled={busy}
           onClick={() => onDelete(record.id)}
+          sx={{ flexShrink: 0 }}
         >
           <DeleteOutlineIcon />
         </IconButton>
@@ -574,6 +653,7 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
   // Separate selection for the Rejected tab: it must never share state with
   // `selected`, which drives the Found tab's approve/reject bar.
   const [selectedRejected, setSelectedRejected] = useState<string[]>([]);
+  const [appliedNotice, setAppliedNotice] = useState("");
   // The ids pending confirmation in the delete dialog; null when it's closed.
   const [deleteTarget, setDeleteTarget] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -719,6 +799,24 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
     }
   }
 
+  /** The operator applied by hand: create the Applications row, retire the
+   * queue item. The row leaves Found because it is no longer a decision the
+   * operator owes the agent — it is a tracked application now. */
+  async function markApplied(id: string) {
+    setBusy(true);
+    setError("");
+    try {
+      await markScreeningApplied(id);
+      setPending((rows) => rows.filter((r) => r.id !== id));
+      setSelected((sel) => sel.filter((x) => x !== id));
+      setAppliedNotice("Added to the Applications page.");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveUrl(id: string, url: string) {
     setBusy(true);
     setError("");
@@ -801,6 +899,18 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
           </Tabs>
 
           <QueuePanel value={tab} index={0}>
+            {/* Outside the empty-check below: applying the last row empties the
+                list, which is exactly when the operator most needs telling
+                where it went. */}
+            {appliedNotice ? (
+              <Alert
+                severity="success"
+                sx={{ mb: 2 }}
+                onClose={() => setAppliedNotice("")}
+              >
+                {appliedNotice}
+              </Alert>
+            ) : null}
             {pending.length === 0 ? (
               <Typography variant="body1">Nothing waiting.</Typography>
             ) : (
@@ -833,7 +943,7 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
                     Reject selected
                   </Button>
                 </Stack>
-                {pending.map((r) => (
+                {byDateDesc(pending).map((r) => (
                   <PendingCard
                     key={r.id}
                     record={r}
@@ -842,6 +952,7 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
                     onToggle={toggle}
                     onDecide={decide}
                     onSaveUrl={saveUrl}
+                    onMarkApplied={markApplied}
                   />
                 ))}
               </Stack>

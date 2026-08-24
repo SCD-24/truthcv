@@ -30,6 +30,27 @@ DEFAULT_BOARD_DOMAINS: list[str] = [
 
 MAX_QUERIES = 24
 
+# Google's recency filter for the search URL when no window is configured.
+# This is the value these URLs have always carried, kept as the unset default
+# so an existing config's discovery behaviour does not change when the setting
+# is introduced.
+DEFAULT_RECENCY = "qdr:w"
+
+
+def recency_param(max_posting_age_days: int | None) -> str:
+    """Google ``tbs`` recency value for a freshness window, or "" for none.
+
+    ``None`` means unset and keeps the historical past-week filter; ``0``
+    disables the window and returns "" so no ``tbs`` is appended at all,
+    mirroring how 0 disables a cooldown window. Any other value becomes
+    ``qdr:d{N}``, Google's N-days form.
+    """
+    if max_posting_age_days is None:
+        return DEFAULT_RECENCY
+    if max_posting_age_days <= 0:
+        return ""
+    return f"qdr:d{max_posting_age_days}"
+
 
 def _site_filter(source: str) -> str | None:
     """Resolve a preferred_sources entry to a site: domain, or None if unrecognised."""
@@ -64,19 +85,28 @@ def _resolve_sources(profile: JobProfile) -> list[str]:
     return resolved
 
 
-def compose_profile_queries(profile: JobProfile) -> list[dict]:
-    """Compose one dork query + URL per resolved source for a single profile."""
+def compose_profile_queries(
+    profile: JobProfile, max_posting_age_days: int | None = None
+) -> list[dict]:
+    """Compose one dork query + URL per resolved source for a single profile.
+
+    ``max_posting_age_days`` sets the search URL's recency filter; see
+    ``recency_param``.
+    """
     keyword_group = _or_group(profile.keywords)
     location_group = _or_group(profile.locations)
     negatives = " ".join(f'-"{t}"' for t in profile.rejected_role_types)
 
     parts_template = [keyword_group, location_group, negatives]
 
+    recency = recency_param(max_posting_age_days)
     results = []
     for domain in _resolve_sources(profile):
         parts = [f"site:{domain}"] + [p for p in parts_template if p]
         query = " ".join(parts)
-        url = f"https://www.google.com/search?q={quote_plus(query)}&tbs=qdr:w"
+        url = f"https://www.google.com/search?q={quote_plus(query)}"
+        if recency:
+            url += f"&tbs={recency}"
         results.append({
             "profile": profile.name,
             "source": domain,
@@ -86,13 +116,15 @@ def compose_profile_queries(profile: JobProfile) -> list[dict]:
     return results
 
 
-def compose_queries(profiles: list[JobProfile]) -> list[dict]:
+def compose_queries(
+    profiles: list[JobProfile], max_posting_age_days: int | None = None
+) -> list[dict]:
     """Compose dork queries for every enabled, keyword-bearing profile, capped at MAX_QUERIES."""
     results: list[dict] = []
     for profile in profiles:
         if not profile.enabled or not profile.keywords:
             continue
-        results.extend(compose_profile_queries(profile))
+        results.extend(compose_profile_queries(profile, max_posting_age_days))
         if len(results) >= MAX_QUERIES:
             break
     return results[:MAX_QUERIES]

@@ -9,6 +9,7 @@ import {
   generateScreeningLetter,
   getScreeningLetter,
   listAppliedScreenings,
+  markScreeningApplied,
   listApprovedApplications,
   listDidNotPass,
   listPendingApprovals,
@@ -19,7 +20,7 @@ import {
   setScreeningUrl,
 } from "../api/client";
 import type { ScreeningRecord } from "../api/types";
-import { ApprovalsPage } from "./ApprovalsPage";
+import { ApprovalsPage, byDateDesc, orderingDate } from "./ApprovalsPage";
 
 vi.mock("../api/client", () => ({
   listPendingApprovals: vi.fn(),
@@ -35,10 +36,16 @@ vi.mock("../api/client", () => ({
   setScreeningPostingText: vi.fn(),
   getScreeningLetter: vi.fn(),
   generateScreeningLetter: vi.fn(),
+  markScreeningApplied: vi.fn(),
   saveScreeningLetter: vi.fn(),
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // Without this, spy call counts leak between tests and a later
+  // `not.toHaveBeenCalled()` sees an earlier test's call.
+  vi.clearAllMocks();
+});
 
 // The list endpoint never carries drafts (PendingCard fetches its own), so
 // every test needs a stub; the no-draft case is the common one, and the
@@ -534,17 +541,121 @@ describe("ApprovalsPage rejected tab delete", () => {
     await renderPage([makeRecord({ id: "s1", company: "Found Co" })], [], {
       rejected: [makeRecord({ id: "r1", company: "Rejected Co", approval: "rejected" })],
     });
-    const foundCheckbox = await screen.findByRole("checkbox", { name: "Select Found Co" });
+    // Plain `.checked` rather than jest-dom's toBeChecked: this project does
+    // not install @testing-library/jest-dom, so that matcher is undefined.
+    const foundCheckbox = (await screen.findByRole("checkbox", {
+      name: "Select Found Co",
+    })) as HTMLInputElement;
     fireEvent.click(foundCheckbox);
-    expect(foundCheckbox).toBeChecked();
+    expect(foundCheckbox.checked).toBe(true);
 
     clickTab(/rejected/i);
-    const rejectedCheckbox = await screen.findByRole("checkbox", { name: "Select Rejected Co" });
+    const rejectedCheckbox = (await screen.findByRole("checkbox", {
+      name: "Select Rejected Co",
+    })) as HTMLInputElement;
     fireEvent.click(rejectedCheckbox);
-    expect(rejectedCheckbox).toBeChecked();
+    expect(rejectedCheckbox.checked).toBe(true);
 
     clickTab(/found/i);
-    const foundCheckboxAgain = await screen.findByRole("checkbox", { name: "Select Found Co" });
-    expect(foundCheckboxAgain).toBeChecked();
+    const foundCheckboxAgain = (await screen.findByRole("checkbox", {
+      name: "Select Found Co",
+    })) as HTMLInputElement;
+    expect(foundCheckboxAgain.checked).toBe(true);
+  });
+});
+
+describe("Found ordering", () => {
+  it("orders by the posting's own date, newest first", () => {
+    const rows = [
+      makeRecord({ id: "old", postedDate: "2026-04-09" }),
+      makeRecord({ id: "new", postedDate: "2026-07-16" }),
+      makeRecord({ id: "mid", postedDate: "2026-05-27" }),
+    ];
+    expect(byDateDesc(rows).map((r) => r.id)).toEqual(["new", "mid", "old"]);
+  });
+
+  it("falls back to screenedDate, then createdAt, when no posted date exists", () => {
+    expect(
+      orderingDate(makeRecord({ postedDate: "2026-07-01", screenedDate: "2026-08-01" })),
+    ).toBe("2026-07-01");
+    expect(orderingDate(makeRecord({ postedDate: "", screenedDate: "2026-08-01" }))).toBe(
+      "2026-08-01",
+    );
+    expect(
+      orderingDate(
+        makeRecord({ postedDate: "", screenedDate: "", createdAt: "2026-08-24T18:00:00Z" }),
+      ),
+    ).toBe("2026-08-24T18:00:00Z");
+  });
+
+  it("does not mutate the array it is given", () => {
+    const rows = [
+      makeRecord({ id: "a", postedDate: "2026-04-09" }),
+      makeRecord({ id: "b", postedDate: "2026-07-16" }),
+    ];
+    byDateDesc(rows);
+    expect(rows.map((r) => r.id)).toEqual(["a", "b"]);
+  });
+
+  it("puts a record with no date at all last", () => {
+    const rows = [
+      makeRecord({ id: "none", postedDate: "", screenedDate: "", createdAt: "" }),
+      makeRecord({ id: "dated", postedDate: "2026-04-09" }),
+    ];
+    expect(byDateDesc(rows).map((r) => r.id)).toEqual(["dated", "none"]);
+  });
+
+  it("renders the Found tab newest first", async () => {
+    await renderPage([
+      makeRecord({ id: "old", company: "OldCo", postedDate: "2026-04-09" }),
+      makeRecord({ id: "new", company: "NewCo", postedDate: "2026-07-16" }),
+    ]);
+    const text = document.body.textContent ?? "";
+    expect(text.indexOf("NewCo")).toBeLessThan(text.indexOf("OldCo"));
+  });
+});
+
+describe("applying by hand from the Found tab", () => {
+  it("creates the application and drops the row from Found", async () => {
+    vi.mocked(markScreeningApplied).mockResolvedValue({ id: "app1" } as never);
+    await renderPage([
+      makeRecord({ id: "p1", company: "Camunda" }),
+      makeRecord({ id: "p2", company: "Pleo" }),
+    ]);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "I applied" })[0]);
+
+    await waitFor(() => expect(markScreeningApplied).toHaveBeenCalledWith("p1"));
+    await waitFor(() => expect(screen.queryByText("Camunda")).toBeNull());
+    expect(screen.getByText("Pleo")).toBeTruthy();
+  });
+
+  it("confirms where the posting went", async () => {
+    vi.mocked(markScreeningApplied).mockResolvedValue({ id: "app1" } as never);
+    await renderPage([makeRecord({ id: "p1", company: "Camunda" })]);
+
+    fireEvent.click(screen.getByRole("button", { name: "I applied" }));
+
+    expect(await screen.findByText("Added to the Applications page.")).toBeTruthy();
+  });
+
+  it("is available without a cover-letter draft, unlike Approve", async () => {
+    // The operator already applied; the draft gate does not apply to them.
+    await renderPage([makeRecord({ id: "p1", company: "Camunda" })]);
+
+    const applied = screen.getByRole("button", { name: "I applied" }) as HTMLButtonElement;
+    const approve = screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement;
+    expect(applied.disabled).toBe(false);
+    expect(approve.disabled).toBe(true);
+  });
+
+  it("keeps the row and surfaces the error when the call fails", async () => {
+    vi.mocked(markScreeningApplied).mockRejectedValue(new Error("already applied"));
+    await renderPage([makeRecord({ id: "p1", company: "Camunda" })]);
+
+    fireEvent.click(screen.getByRole("button", { name: "I applied" }));
+
+    await waitFor(() => expect(screen.getByText(/already applied/)).toBeTruthy());
+    expect(screen.getByText("Camunda")).toBeTruthy();
   });
 });

@@ -465,6 +465,138 @@ def test_record_screening_schema_marks_role_required():
     assert "role" in schema["required"]
 
 
+def test_record_screening_schema_advertises_every_editable_field():
+    """Every field the store accepts must appear in the tool's inputSchema.
+
+    The schema is derived from the signature, so a field reachable only via
+    **kwargs is invisible to the agent and never sent — `additionalProperties`
+    does not rescue it. That is how live runs wrote screenings with an empty
+    `verdict`, which silenced the operator's approval queue entirely.
+    """
+    from agenttools.mcp_app import _input_schema
+    from screening.model import Screening
+
+    properties = _input_schema(tools_ledger.record_screening)["properties"]
+    missing = [f for f in Screening.EDITABLE if f not in properties]
+    assert not missing, f"not advertised to the agent: {missing}"
+
+
+def test_record_screening_persists_verdict_and_company(data_dir):
+    """A verdict passed by name reaches the store, and a deferred one queues.
+
+    `screening.store.create` gates the approval queue on `verdict`, so a
+    dropped verdict means nothing ever reaches the operator.
+    """
+    s = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/deferred-1",
+        role="Applied AI Engineer",
+        company="ExampleCo",
+        verdict="deferred",
+        failing_criterion="glassdoor_rating",
+        reason="Rating not published; operator to decide.",
+        source="agent",
+    )
+    assert s["company"] == "ExampleCo"
+    assert s["verdict"] == "deferred"
+    assert s["failing_criterion"] == "glassdoor_rating"
+    assert s["reason"] == "Rating not published; operator to decide."
+    assert s["source"] == "agent"
+    assert s["approval"] == "pending"
+
+    from screening import store as screening_store
+
+    reloaded = screening_store.get(s["id"])
+    assert reloaded is not None
+    assert reloaded.verdict == "deferred"
+    assert reloaded.company == "ExampleCo"
+
+
+def _all_screenings():
+    """Every stored screening — used to assert a rejected call persisted nothing."""
+    from screening import store as screening_store
+
+    return screening_store.load_all()
+
+
+def test_record_screening_requires_a_company(data_dir):
+    """A blank company persists nothing: cooldown, the blocklist and the queue
+    all key on the employer, so a record without one is unusable for each."""
+    before = len(_all_screenings())
+    with pytest.raises(ValueError, match="company name is required"):
+        tools_ledger.record_screening(
+            url="https://jobs.example.com/postings/no-company",
+            role="Data Engineer",
+            company="",
+            verdict="rejected",
+        )
+    assert len(_all_screenings()) == before
+
+
+def test_record_screening_rejects_a_placeholder_company(data_dir):
+    """"Unknown" is not an employer name — it reads as one, which is worse."""
+    with pytest.raises(ValueError, match="placeholder text"):
+        tools_ledger.record_screening(
+            url="https://jobs.example.com/postings/placeholder-company",
+            role="Data Engineer",
+            company="Unknown",
+            verdict="rejected",
+        )
+
+
+def test_record_screening_requires_a_verdict(data_dir):
+    """A blank verdict fails silently rather than loudly: store.create routes on
+    it, so the record would be stored and never reach the operator."""
+    before = len(_all_screenings())
+    with pytest.raises(ValueError, match="verdict is required"):
+        tools_ledger.record_screening(
+            url="https://jobs.example.com/postings/no-verdict",
+            role="Data Engineer",
+            company="ExampleCo",
+            verdict="",
+        )
+    assert len(_all_screenings()) == before
+
+
+def test_record_screening_rejects_an_unknown_verdict(data_dir):
+    """A misspelled verdict must raise, not silently skip the approval queue."""
+    with pytest.raises(ValueError, match="Unknown verdict"):
+        tools_ledger.record_screening(
+            url="https://jobs.example.com/postings/bad-verdict",
+            role="Data Engineer",
+            company="ExampleCo",
+            verdict="approved",
+        )
+
+
+def test_record_screening_schema_marks_company_and_verdict_required(data_dir):
+    """The agent reading the schema must see both as required, not optional."""
+    from agenttools.mcp_app import _input_schema
+
+    required = _input_schema(tools_ledger.record_screening)["required"]
+    assert "company" in required
+    assert "verdict" in required
+
+
+def test_record_screening_omitted_fields_are_not_written(data_dir):
+    """A field left at its default must not overwrite anything.
+
+    The named parameters default to "", so writing them unconditionally would
+    make an omitted field indistinguishable from a deliberate blanking.
+    """
+    s = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/minimal-1",
+        role="Data Engineer",
+        company="ExampleCo",
+        verdict="rejected",
+    )
+    assert s["verdict"] == "rejected"
+    assert s["company"] == "ExampleCo"
+    assert s["reason"] == ""
+    assert s["failing_criterion"] == ""
+    assert s["source"] == ""
+    assert s["approval"] == ""
+
+
 def test_generate_cover_letter_refuses_blocked_company(data_dir):
     """When `company` is given and blocklisted, generate_cover_letter must
     refuse before any provider is resolved — no LLM cost for a refused

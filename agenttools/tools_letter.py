@@ -19,6 +19,7 @@ from dataclasses import asdict
 from agentconfig.store import is_blocked, load as load_agent_config
 from coverletter.generate import _generate_paragraphs, build_letter
 from providers import get_provider
+from truth.answers import load as load_answers
 from truth.store import load as load_truth
 
 
@@ -68,6 +69,11 @@ def generate_cover_letter(
         provider,
         denied_texts=set(denied_texts or []),
         paragraphs=paras,
+        # Same signature the wizard produces. Only the name is taken from the
+        # answers store here — the answers are deliberately NOT passed as
+        # guardrail claim sources on this path, which would widen what the
+        # unattended agent is allowed to assert.
+        sign_off_name=load_answers().name or truth.profile.name,
     )
     return {
         "text": result["text"],

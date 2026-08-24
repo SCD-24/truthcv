@@ -244,3 +244,64 @@ def test_bulk_approve_reports_a_draftless_item_instead_of_approving_it(client):
     ).json()
     assert {r["id"]: r["ok"] for r in body["results"]} == {a.id: True, b.id: False}
     assert store.get(b.id).approval == "pending"
+
+
+# ---------------------------------------------------------------------------
+# POST /api/screenings/{id}/applied — the operator applied by hand
+# ---------------------------------------------------------------------------
+
+class TestMarkScreeningApplied:
+    def _screening(self, client, **overrides):
+        body = {
+            "company": "Grafana Labs",
+            "role": "Staff AI Engineer",
+            "url": "https://grafana.com/jobs/1",
+            "postingText": "Staff AI Engineer, Germany (Remote).",
+            "verdict": "passed",
+            **overrides,
+        }
+        r = client.post("/api/screenings", json=body)
+        assert r.status_code == 201
+        return r.json()["id"]
+
+    def test_creates_an_application_from_the_screening(self, client, data_dir):
+        sid = self._screening(client)
+        r = client.post(f"/api/screenings/{sid}/applied")
+        assert r.status_code == 201
+        app = r.json()
+        assert app["company"] == "Grafana Labs"
+        assert app["role"] == "Staff AI Engineer"
+        assert app["applicationUrl"] == "https://grafana.com/jobs/1"
+        assert app["posting"] == "Staff AI Engineer, Germany (Remote)."
+        assert app["submitted"] is True
+        assert app["status"] == "Applied"
+        assert app["captureMethod"] == "manual"
+        assert app["applicationDate"]
+
+    def test_the_application_is_listed_on_the_applications_page(self, client, data_dir):
+        sid = self._screening(client)
+        client.post(f"/api/screenings/{sid}/applied")
+        apps = client.get("/api/applications").json()
+        assert [a["company"] for a in apps] == ["Grafana Labs"]
+
+    def test_the_screening_leaves_the_found_queue(self, client, data_dir):
+        sid = self._screening(client)
+        client.post(f"/api/screenings/{sid}/applied")
+        record = next(s for s in client.get("/api/screenings").json() if s["id"] == sid)
+        assert record["approval"] == "applied"
+        assert sid not in [s["id"] for s in client.get("/api/screenings?approval=pending").json()]
+
+    def test_applying_twice_does_not_create_a_duplicate(self, client, data_dir):
+        """A double click must not put two rows on the Applications page."""
+        sid = self._screening(client)
+        assert client.post(f"/api/screenings/{sid}/applied").status_code == 201
+        assert client.post(f"/api/screenings/{sid}/applied").status_code == 409
+        assert len(client.get("/api/applications").json()) == 1
+
+    def test_unknown_screening_is_404(self, client, data_dir):
+        assert client.post("/api/screenings/nope/applied").status_code == 404
+
+    def test_a_screening_with_no_url_is_a_general_submission(self, client, data_dir):
+        sid = self._screening(client, url="https://example.com/x")
+        r = client.post(f"/api/screenings/{sid}/applied")
+        assert r.json()["submissionType"] == "Posting"

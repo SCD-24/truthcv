@@ -18,6 +18,7 @@ import Chip from "@mui/material/Chip";
 import Link from "@mui/material/Link";
 import {
   getAgentConfig,
+  cancelAgentRun,
   getAgentStatus,
   getProfileAnswers,
   getRouting,
@@ -232,6 +233,7 @@ const STATUS_POLL_ACTIVE_MS = 2_000;
 function RunNowSection({ agentEnabled }: { agentEnabled: boolean }) {
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [triggering, setTriggering] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [unreachable, setUnreachable] = useState<string | null>(null);
 
   // Ref always holds the *current* active interval ID so the cleanup function
@@ -247,6 +249,9 @@ function RunNowSection({ agentEnabled }: { agentEnabled: boolean }) {
         .then((s) => {
           setAgentStatus(s);
           setUnreachable(null);
+          // The run is gone, so a cancel of it is no longer in progress —
+          // clear the local flag or the button stays stuck on "Stopping…".
+          if (!s.running) setCancelling(false);
           // Slow down once the run finishes
           if (!s.running && intervalMs === STATUS_POLL_ACTIVE_MS) {
             setPoll(STATUS_POLL_IDLE_MS);
@@ -284,7 +289,24 @@ function RunNowSection({ agentEnabled }: { agentEnabled: boolean }) {
   }, []);
 
   const running = agentStatus?.running ?? false;
+  // The supervisor's own cancelling flag outlives this component's local one
+  // across a remount, so a stopping run still reads as stopping after a reload.
+  const stopping = cancelling || (agentStatus?.cancelling ?? false);
   const buttonDisabled = !agentEnabled || triggering || running;
+
+  async function handleCancel() {
+    setCancelling(true);
+    setUnreachable(null);
+    try {
+      await cancelAgentRun();
+      // Keep polling at the active pace: the run is signalled, not yet gone,
+      // and only the status poll can tell us when it has actually exited.
+      setPoll(STATUS_POLL_ACTIVE_MS);
+    } catch (e: unknown) {
+      setUnreachable(e instanceof Error ? e.message : "Agent service unreachable");
+      setCancelling(false);
+    }
+  }
 
   async function handleRunNow() {
     setTriggering(true);
@@ -295,7 +317,14 @@ function RunNowSection({ agentEnabled }: { agentEnabled: boolean }) {
         setAgentStatus((prev) =>
           prev
             ? { ...prev, running: true }
-            : { running: true, lastStartedAt: null, lastFinishedAt: null, lastExitCode: null },
+            : {
+                running: true,
+                cancelling: false,
+                lastStartedAt: null,
+                lastFinishedAt: null,
+                lastExitCode: null,
+                lastCancelled: false,
+              },
         );
         // Poll faster while the run is active
         setPoll(STATUS_POLL_ACTIVE_MS);
@@ -310,7 +339,7 @@ function RunNowSection({ agentEnabled }: { agentEnabled: boolean }) {
   return (
     <Section
       title="Run now"
-      description="Trigger an immediate agent run outside the scheduled slots."
+      description="Trigger an immediate agent run outside the scheduled slots, or stop the one in progress."
     >
       <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
         {agentEnabled ? (
@@ -328,16 +357,31 @@ function RunNowSection({ agentEnabled }: { agentEnabled: boolean }) {
             Run now
           </Button>
         )}
+        {running && (
+          <Button
+            variant="outlined"
+            color="warning"
+            onClick={handleCancel}
+            disabled={stopping}
+            aria-label="Cancel agent run"
+          >
+            {stopping && <ButtonSpinner />}
+            {stopping ? "Stopping…" : "Cancel run"}
+          </Button>
+        )}
         {agentStatus && !running && agentStatus.lastFinishedAt && (
           <Typography variant="body2" color="text.secondary">
-            Last run finished at{" "}
+            Last run {agentStatus.lastCancelled ? "cancelled" : "finished"} at{" "}
             {new Date(agentStatus.lastFinishedAt).toLocaleString(undefined, {
               dateStyle: "short",
               timeStyle: "short",
             })}
-            {agentStatus.lastExitCode !== null && agentStatus.lastExitCode !== 0 && (
-              <> &mdash; exit&nbsp;{agentStatus.lastExitCode}</>
-            )}
+            {/* A cancelled run's non-zero exit is the cancel, not a failure. */}
+            {!agentStatus.lastCancelled &&
+              agentStatus.lastExitCode !== null &&
+              agentStatus.lastExitCode !== 0 && (
+                <> &mdash; exit&nbsp;{agentStatus.lastExitCode}</>
+              )}
           </Typography>
         )}
       </Stack>
@@ -785,6 +829,9 @@ function ProfilesSection({
   const [maxApplicationsPerRun, setMaxApplicationsPerRun] = useState(
     numberToText(config.maxApplicationsPerRun),
   );
+  const [maxPostingAgeDays, setMaxPostingAgeDays] = useState(
+    numberToText(config.maxPostingAgeDays),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -817,11 +864,13 @@ function ProfilesSection({
       const fresh = await updateAgentConfig({
         profiles: drafts.map(draftToProfile),
         maxApplicationsPerRun: textToIntOrNull(maxApplicationsPerRun),
+        maxPostingAgeDays: textToIntOrNull(maxPostingAgeDays),
       });
       onChange(fresh);
       setDrafts(fresh.profiles.map(profileToDraft));
       setCooldownDays(numberToText(fresh.cooldownDays));
       setMaxApplicationsPerRun(numberToText(fresh.maxApplicationsPerRun));
+      setMaxPostingAgeDays(numberToText(fresh.maxPostingAgeDays));
       setSaved(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't save the job profiles.");
@@ -835,6 +884,18 @@ function ProfilesSection({
       title="Job profiles"
       description="Search criteria the agent matches postings against. A blank field means that criterion is off — the agent won't filter on it."
     >
+      {/* Above the profile cards deliberately: this applies to every profile,
+          and a keyword-heavy profile can run to hundreds of lines, which put
+          it below a scroll long enough that it could not be found. */}
+      <TextField
+        label="Only postings from the last (days)"
+        size="small"
+        value={maxPostingAgeDays}
+        onChange={(e) => setMaxPostingAgeDays(e.target.value)}
+        slotProps={{ htmlInput: { inputMode: "numeric" } }}
+        sx={{ maxWidth: 420 }}
+        helperText="Applies to all profiles. Filters discovery and rejects older postings when screening. Blank keeps the default past-week filter; 0 considers any age. Press Save profiles below to apply."
+      />
       <Stack spacing={2}>
         {drafts.map((draft, index) => (
           <Card key={index} variant="outlined">

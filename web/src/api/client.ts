@@ -25,6 +25,7 @@ import type {
   AgentConfigUpdate,
   AgentStatus,
   AgentRunResult,
+  AgentCancelResult,
   ConnectionStatus,
   ConnectionList,
   StartLoginResult,
@@ -285,6 +286,14 @@ export function deleteScreening(id: string): Promise<void> {
   });
 }
 
+/** Record that the operator applied to this posting themselves: creates the
+ * Applications row and retires the queue item. 409 if it was already applied. */
+export function markScreeningApplied(id: string): Promise<Application> {
+  return request("/api/screenings/" + encodeURIComponent(id) + "/applied", {
+    method: "POST",
+  });
+}
+
 /** The approval queue: screenings the agent deferred and is waiting on. */
 export function listPendingApprovals(): Promise<ScreeningRecord[]> {
   return request("/api/screenings?approval=pending");
@@ -449,6 +458,13 @@ export function updateAgentConfig(body: AgentConfigUpdate): Promise<AgentConfig>
  * finishes. Throws when the agent container is unreachable (503). */
 export function triggerAgentRun(): Promise<AgentRunResult> {
   return request("/api/agent/run", { method: "POST" });
+}
+
+/** Stop the run in progress. Fire-and-forget: the supervisor signals the run
+ * and answers immediately, so poll getAgentStatus for the transition to idle.
+ * Throws when the agent container is unreachable (503). */
+export function cancelAgentRun(): Promise<AgentCancelResult> {
+  return request("/api/agent/cancel", { method: "POST" });
 }
 
 /** Poll the agent supervisor for running/idle status. */

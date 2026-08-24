@@ -120,3 +120,46 @@ def test_placeholders_are_deduped_in_order():
         "[Company]",
         "[Your Name]",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Sign-off
+# ---------------------------------------------------------------------------
+
+class TestSignOff:
+    """The finished letter closes with the operator's stored name.
+
+    The style prompt forbids the model from writing the candidate's name, so
+    the signature is appended deterministically after validation instead.
+    """
+
+    def test_sign_off_is_appended(self):
+        from coverletter.generate import _with_sign_off
+
+        assert _with_sign_off("Body.", "Glenn Chon") == "Body.\n\nKind regards,\n\nGlenn Chon"
+
+    def test_blank_name_appends_nothing(self):
+        """No name is better than an unsigned-looking placeholder."""
+        from coverletter.generate import _with_sign_off
+
+        assert _with_sign_off("Body.", "") == "Body."
+        assert _with_sign_off("Body.", "   ") == "Body."
+
+    def test_placeholder_name_appends_nothing(self):
+        """"[Your Name]" must never ship to an employer as a signature."""
+        from coverletter.generate import _with_sign_off
+
+        assert _with_sign_off("Body.", "[Your Name]") == "Body."
+
+    def test_whitespace_in_name_is_normalized(self):
+        from coverletter.generate import _with_sign_off
+
+        assert _with_sign_off("Body.", "  Glenn \n Chon ").endswith("Glenn Chon")
+
+    def test_sign_off_is_its_own_paragraph_block(self):
+        """Consumers split on the blank line: the renderers to make paragraphs,
+        the agent to paste into a form. A single newline would collapse."""
+        from coverletter.generate import _with_sign_off
+
+        blocks = _with_sign_off("Body.", "Glenn Chon").split("\n\n")
+        assert blocks == ["Body.", "Kind regards,", "Glenn Chon"]

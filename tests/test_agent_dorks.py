@@ -94,3 +94,57 @@ def test_total_is_truncated_at_max_queries():
     entries = dorks.compose_queries(profiles)
     assert len(entries) <= dorks.MAX_QUERIES
     assert len(entries) == dorks.MAX_QUERIES  # 10 profiles * 4 default sources = 40 > 24
+
+
+# ---------------------------------------------------------------------------
+# Posting freshness window
+# ---------------------------------------------------------------------------
+
+def _url(days):
+    p = JobProfile(name="p", enabled=True, keywords=["backend"], preferred_sources=["ashby"])
+    return dorks.compose_queries([p], days)[0]["url"]
+
+
+def test_unset_window_keeps_the_historical_past_week_filter():
+    """None must not silently widen discovery on an existing config: these URLs
+    have always carried qdr:w, and introducing the setting changes nothing."""
+    assert "&tbs=qdr:w" in _url(None)
+
+
+def test_zero_days_disables_the_recency_filter_entirely():
+    """0 disables the window, mirroring how 0 disables a cooldown window."""
+    assert "tbs=" not in _url(0)
+
+
+def test_a_window_renders_googles_n_days_form():
+    assert "&tbs=qdr:d3" in _url(3)
+    assert "&tbs=qdr:d30" in _url(30)
+
+
+def test_negative_window_is_treated_as_disabled_not_as_a_malformed_url():
+    """The API validator rejects negatives, but the composer is called with
+    stored config too — a hand-edited -1 must not emit tbs=qdr:d-1."""
+    assert "tbs=" not in _url(-1)
+
+
+def test_recency_param_values():
+    assert dorks.recency_param(None) == "qdr:w"
+    assert dorks.recency_param(0) == ""
+    assert dorks.recency_param(7) == "qdr:d7"
+
+
+def test_window_applies_to_every_composed_query_not_just_the_first():
+    p = JobProfile(name="p", enabled=True, keywords=["backend"], preferred_sources=[])
+    entries = dorks.compose_queries([p], 5)
+    assert len(entries) == len(dorks.DEFAULT_BOARD_DOMAINS)
+    assert all("&tbs=qdr:d5" in e["url"] for e in entries)
+
+
+def test_window_does_not_alter_the_query_string_itself():
+    """The recency filter is a URL parameter; the query text the agent feeds to
+    WebSearch must be unchanged, since WebSearch ignores tbs anyway."""
+    p = JobProfile(name="p", enabled=True, keywords=["backend"], preferred_sources=["ashby"])
+    assert (
+        dorks.compose_queries([p], 5)[0]["query"]
+        == dorks.compose_queries([p], None)[0]["query"]
+    )

@@ -259,6 +259,20 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
 
     PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Cooldown days (stale company filter): $(jq -r '.cooldownDays // "not configured"' <<<"$JOB_CONFIG")"$'\n'
 
+    # Discovery freshness window. Rendered as a hard filter rather than only
+    # baked into the composed search URLs: WebSearch results and an employer's
+    # own board both ignore Google's tbs parameter, so without this the agent
+    # would still surface and screen months-old postings from those channels.
+    MAX_AGE="$(jq -r 'if .maxPostingAgeDays == null then "unset" else (.maxPostingAgeDays|tostring) end' <<<"$JOB_CONFIG")"
+    if [[ "$MAX_AGE" == "unset" ]]; then
+      AGE_LINE="Posting freshness window: not configured (default: prefer postings from the last 7 days)"
+    elif [[ "$MAX_AGE" == "0" ]]; then
+      AGE_LINE="Posting freshness window: disabled — a posting's age is not a rejection reason"
+    else
+      AGE_LINE="Posting freshness window: ${MAX_AGE} days. HARD FILTER — reject any posting whose stated publication date is older than this, with failing_criterion 'posting_age'. When a board states no date, do NOT infer one and do NOT reject on age."
+    fi
+    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$AGE_LINE"$'\n'
+
     # Render each profile's full criteria: name, employment country, remote
     # model, salary band, Glassdoor minimum, EOR/entity-verification rules,
     # working language, and accepted/rejected role types. The agent matches

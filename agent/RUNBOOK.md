@@ -99,6 +99,25 @@ Judge each posting by the matched profile's own fields:
 - **`acceptedRoleTypes` / `rejectedRoleTypes`** — which kinds of roles this
   profile targets and which it excludes.
 
+### The posting freshness window
+
+One filter is not per-profile: the operator's **posting freshness window**,
+rendered into your run prompt as a "Posting freshness window:" line. When it
+names a number of days, reject any posting whose stated publication date is
+older than that, recording `failing_criterion: "posting_age"`. Pass the date
+you found as `posted_date` on every screening you record, fresh or stale.
+
+Two rules keep this honest:
+
+- **Never infer a date.** Many boards publish none. When the posting states no
+  publication date, it passes this filter — do not estimate one from a
+  copyright year, a job id, or where it sat in a search result.
+- **The window is not only a search parameter.** The composed search URLs
+  carry it as a Google recency filter, but WebSearch results and an employer's
+  own board ignore that entirely, so a stale posting still reaches you through
+  those channels. Apply the filter when you read the posting, not only when
+  you search.
+
 A single profile passing all its criteria drives an application
 (single-profile-passes rule); each profile waives criteria independently.
 Record which profile drove each application in the screening report.
@@ -324,6 +343,26 @@ the title from there.
 The tool **raises** on an unusable `role` and persists nothing — exactly as
 it already does for a missing `url`. Fix the value and call it again; a
 raised error is not a reason to skip recording the verdict.
+
+### `record_screening` — `company` and `verdict` are mandatory too
+
+`company` must be the employing entity's name as the posting gives it. Not a
+placeholder: `"Unknown"`, `"N/A"`, `"Confidential"`, `"The Company"` and an
+empty string are all rejected. Cooldown matching, the blocked-company list
+and the operator's approval queue every one of them key on this name, so a
+record without it is dead weight for all three. Where a posting is carried by
+an aggregator that hides the employer, name the aggregator and say so in
+`reason` — that is a fact about the posting, not a placeholder.
+
+`verdict` must be exactly one of `rejected`, `passed`, or `deferred`. Anything
+else — a blank, a synonym like `"approved"`, a sentence — is rejected. This is
+the field the operator's queue is built from: a `deferred` or (in SEMI-AUTO) a
+`passed` verdict is what puts a posting in front of them. A screening recorded
+without a usable verdict is a screening they never see.
+
+Both **raise** and persist nothing, exactly as `url` and `role` do. Put the
+verdict in the named argument — never in `posting_text` prose. `posting_text`
+is the posting, and the operator drafts a letter from it verbatim.
 
 When `generate_cover_letter` returns `blocked: true`, it means the letter
 contains at least one factual claim its guardrail could not ground in the
