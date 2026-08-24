@@ -122,9 +122,11 @@ class JobProfile:
 
 @dataclass
 class AgentConfig:
-    """Agent configuration: enabled flag, blocklist, schedule, and job profiles."""
+    """Agent configuration: autonomy mode, blocklist, schedule, and job profiles."""
 
-    enabled: bool = True
+    MODES = ("off", "semi", "full")
+
+    mode: str = "full"
     blocked_companies: list[str] = field(default_factory=list)
     run_at: list[str] = field(default_factory=lambda: ["09:00", "15:00"])
     run_days: list[str] = field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
@@ -133,14 +135,31 @@ class AgentConfig:
     cooldown_days: int | None = None
     max_applications_per_run: int | None = None
 
+    @property
+    def enabled(self) -> bool:
+        """Whether a scheduled run does anything at all.
+
+        Derived rather than stored: two writers for one piece of state is how
+        they diverge. Every existing consumer — agent/agent-config.js, the
+        run gate in agent/daily-apply.sh, the Agents page's Run now section —
+        reads this and keeps working unchanged.
+        """
+        return self.mode != "off"
+
     @classmethod
     def from_dict(cls, raw: dict) -> AgentConfig:
         """Construct from a dict, ignoring unknown keys and falling back to defaults on wrong types."""
         kwargs = {}
 
-        # enabled: bool
-        if "enabled" in raw and isinstance(raw["enabled"], bool):
-            kwargs["enabled"] = raw["enabled"]
+        # mode: str. Migrated from the pre-mode `enabled` boolean when absent,
+        # so a config already on the volume keeps the behaviour it has: an
+        # enabled agent was a full-auto agent. An explicit mode wins over a
+        # stale enabled, and an unrecognised one falls back to the default
+        # rather than disabling the agent by accident.
+        if "mode" in raw and raw["mode"] in cls.MODES:
+            kwargs["mode"] = raw["mode"]
+        elif "enabled" in raw and isinstance(raw["enabled"], bool):
+            kwargs["mode"] = "full" if raw["enabled"] else "off"
 
         # blocked_companies: list[str]
         if "blocked_companies" in raw:
@@ -184,6 +203,9 @@ class AgentConfig:
     def to_dict(self) -> dict:
         """Serialize to a dict with snake_case keys."""
         return {
+            "mode": self.mode,
+            # Derived, not stored — emitted so existing readers of the wire
+            # shape (agent-config.js, the Agents page) need no change.
             "enabled": self.enabled,
             "blocked_companies": self.blocked_companies,
             "run_at": self.run_at,
