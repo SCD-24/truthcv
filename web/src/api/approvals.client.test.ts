@@ -8,6 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  bulkDeleteScreenings,
   bulkSetApproval,
   generateScreeningLetter,
   getScreeningLetter,
@@ -64,6 +65,16 @@ describe("approval writers", () => {
     expect(init.method).toBe("PATCH");
     expect(init.headers["Content-Type"]).toBe("application/json");
     expect(JSON.parse(init.body)).toEqual({ ids: ["a", "b"], approval: "approved" });
+  });
+
+  it("bulkDeleteScreenings POSTs JSON with the JSON content type", async () => {
+    const fetchMock = stubFetch({ results: [] });
+    await bulkDeleteScreenings(["a", "b"]);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/screenings/deletions");
+    expect(init.method).toBe("POST");
+    expect(init.headers["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(init.body)).toEqual({ ids: ["a", "b"] });
   });
 
   it("setScreeningUrl PATCHes JSON with the JSON content type", async () => {

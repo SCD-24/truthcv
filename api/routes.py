@@ -62,6 +62,8 @@ from .schemas import (
     ApprovalUpdate,
     BulkApprovalResult,
     BulkApprovalUpdate,
+    BulkDeleteRequest,
+    BulkDeleteResult,
     CoverLetterDraftModel,
     LetterGenerateRequest,
     LetterSaveRequest,
@@ -186,6 +188,22 @@ def bulk_set_approval(body: BulkApprovalUpdate) -> BulkApprovalResult:
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     return BulkApprovalResult(results=results)
+
+
+# Declared BEFORE /screenings/{screening_id}: otherwise the router binds
+# "deletions" as an id and this route is unreachable.
+@router.post("/screenings/deletions", response_model=BulkDeleteResult)
+def bulk_delete_screenings(body: BulkDeleteRequest) -> BulkDeleteResult:
+    """Delete many screening records at once.
+
+    Reports per-id outcomes rather than failing wholesale, so a partial
+    failure is visible instead of silently dropping some ids. An unknown id
+    is reported ok:false, never a 404 — an empty list is a no-op.
+    """
+    results = [
+        {"id": sid, "ok": ok} for sid, ok in screening_store.delete_many(body.ids)
+    ]
+    return BulkDeleteResult(results=results)
 
 
 @router.patch("/screenings/{screening_id}", response_model=ScreeningModel)

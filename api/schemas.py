@@ -723,6 +723,18 @@ class BulkApprovalResult(_Camel):
     results: list[dict] = []
 
 
+class BulkDeleteRequest(_Camel):
+    """POST /screenings/deletions: delete many screening records at once."""
+
+    ids: list[str] = []
+
+
+class BulkDeleteResult(_Camel):
+    """POST /screenings/deletions response: per-id delete outcome."""
+
+    results: list[dict] = []
+
+
 class ScreeningCreate(_Camel):
     """Client-supplied fields for a new screening record.
 
