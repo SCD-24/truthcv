@@ -36,6 +36,11 @@ its browser — on discovery.
 - **On failure**, call `report_apply_failure` with the reason. The item stays
   queued and is retried next run; the operator sees the attempt count and your
   error on the Approvals page.
+- Each item carries the cover letter the operator approved, in `cover_letter`.
+  That text is submitted verbatim. It may have been written or edited by the
+  operator, in which case it did not pass the guardrail and does not need to —
+  they are the source of the truth document. Regenerating it would discard
+  their work, so do not.
 
 ## 1. There is no daily quota
 
