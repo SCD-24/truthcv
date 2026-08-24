@@ -36,16 +36,22 @@ its browser — on discovery.
 - **§4 still governs.** An application approval is not permission to assert a
   claim the cover-letter guardrail rejects. If the letter blocks, §6 applies
   exactly as it does for any other application.
+- **The letter is the operator's, not yours.** Each item carries `cover_letter`,
+  the exact text to submit, verbatim, for this one already-approved item. The
+  operator may have written or edited it themselves — in which case it did not
+  pass the guardrail and does not need to, because they are the source of the
+  truth document, not a claim the guardrail must ground. That exemption
+  belongs to them and to this string alone: it does not extend to any letter
+  you generate. Every letter you produce still goes through
+  `generate_cover_letter` and is still validated under §6, always — no
+  operator decision anywhere licenses you to assert an ungrounded claim of
+  your own. Do not regenerate or edit `cover_letter`; doing so would discard
+  the operator's decision.
 - **On success**, call `record_application` with that entry's `screening_id`
   so the item retires from the queue.
 - **On failure**, call `report_apply_failure` with the reason. The item stays
   queued and is retried next run; the operator sees the attempt count and your
   error on the Approvals page.
-- Each item carries the cover letter the operator approved, in `cover_letter`.
-  That text is submitted verbatim. It may have been written or edited by the
-  operator, in which case it did not pass the guardrail and does not need to —
-  they are the source of the truth document. Regenerating it would discard
-  their work, so do not.
 
 ## 1. There is no daily quota
 
