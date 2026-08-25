@@ -13,6 +13,8 @@
 // starts. Both halves are required: either alone leaves a race.
 
 const http = require("http");
+const fs = require("fs");
+const path = require("path");
 const { spawn, execFileSync } = require("child_process");
 const crypto = require("crypto");
 
@@ -21,12 +23,42 @@ const TOKEN = (process.env.AGENT_API_TOKEN || "").trim();
 const PROFILE_DIR = process.env.BROWSER_PROFILE_DIR || "/browser-profile";
 const AGENT_CONTROL_PORT = process.env.AGENT_CONTROL_PORT || "9099";
 const GRACE_MS = parseInt(process.env.SESSION_GRACE_MS || "180000", 10);
-const CHROME_BIN = process.env.SESSION_CHROME_BIN || "chromium";
+// How long a closed session gets to exit on SIGTERM before SIGKILL. Same
+// escalation shape as agent/supervisor.js's cancel-run timer (CANCEL_GRACE_MS).
+const CLOSE_GRACE_MS = parseInt(process.env.SESSION_CLOSE_GRACE_MS || "10000", 10);
 const TICK_MS = 5000;
 
 function log(...args) {
   console.log(new Date().toISOString().slice(11, 19), ...args);
 }
+
+// Resolves the Chromium binary Playwright's build ships under this image,
+// rather than assuming a `chromium` executable on PATH — there isn't one
+// (mcr.microsoft.com/playwright ships its browsers under /ms-playwright, not
+// PATH). The directory name carries a build number that moves every time
+// @playwright/mcp bumps its bundled playwright-core — see the Dockerfile's
+// own comment on that same drift — so this globs for it instead of hard-
+// coding a version. `chromium-*` also matches nothing under
+// `chromium_headless_shell-*` (underscore, not hyphen), so that build is
+// naturally excluded. SESSION_CHROME_BIN remains an override.
+function resolveChromeBin() {
+  if (process.env.SESSION_CHROME_BIN) return process.env.SESSION_CHROME_BIN;
+  const root = "/ms-playwright";
+  try {
+    const build = fs
+      .readdirSync(root)
+      .filter((name) => name.startsWith("chromium-"))
+      .sort()
+      .pop();
+    if (build) return path.join(root, build, "chrome-linux64", "chrome");
+  } catch (err) {
+    log(`could not list ${root}: ${err.message}`);
+  }
+  log(`WARNING: no chromium build found under ${root} — attended sessions will fail to launch`);
+  return "chromium"; // last resort; keeps the old (broken) default as a floor
+}
+
+const CHROME_BIN = resolveChromeBin();
 
 // ---------------------------------------------------------------------------
 // Auth — identical rule to agent/supervisor.js: no token configured means no
@@ -47,8 +79,18 @@ function tokenOk(given) {
 // can be tested without launching a browser or reaching the agent.
 // ---------------------------------------------------------------------------
 function createSessionManager(deps) {
-  const { supervisorIdle, profileInUse, launch, now, graceMs } = deps;
-  let session = null; // { url, proc, startedAt, evictDeadline }
+  const { supervisorIdle, profileInUse, launch, now, graceMs, closeGraceMs = CLOSE_GRACE_MS } = deps;
+  // session shape: { url, proc, startedAt, evictDeadline, closing?, closeDeadline? }
+  //
+  // `proc` is null for the brief window between reserving the slot and the
+  // launch being confirmed (see open()), and `closing`/`closeDeadline` are
+  // set once close() has signalled the browser and is waiting for it to
+  // actually exit. state()'s fixed response shape ({open,url,startedAt,
+  // evictDeadline}) reports BOTH of those as open:true — a reservation and a
+  // browser mid-close both still hold (or are about to hold) the profile, so
+  // reporting open:false during either window would let a second open, or an
+  // eviction, race in against a slot that is not actually free yet.
+  let session = null;
 
   function state() {
     return {
@@ -69,9 +111,75 @@ function createSessionManager(deps) {
     return parsed.protocol === "http:" || parsed.protocol === "https:";
   }
 
+  // Launches the browser and waits one tick for it to fail to start.
+  // spawn() (and any injected `launch`) returns synchronously even when the
+  // executable does not exist — the 'error' event (ENOENT, EACCES, ...)
+  // arrives asynchronously. Waiting a tick turns a missing binary into a
+  // refusal instead of a session that silently never opened (and, absent any
+  // listener at all, an unhandled 'error' that would throw and kill the
+  // whole server — see attachExitHandler for the listener kept for the rest
+  // of the process's life).
+  function launchAndConfirm(url) {
+    return new Promise((resolve) => {
+      let proc;
+      try {
+        proc = launch(url);
+      } catch (err) {
+        log(`launch threw: ${err.message}`);
+        resolve({ ok: false, reason: "launch_failed" });
+        return;
+      }
+      if (!proc || typeof proc.on !== "function") {
+        // No event surface to wait on — nothing to confirm.
+        resolve({ ok: true, proc });
+        return;
+      }
+      let settled = false;
+      proc.once("error", (err) => {
+        if (settled) return;
+        settled = true;
+        log(`launch failed: ${err.message}`);
+        resolve({ ok: false, reason: "launch_failed" });
+      });
+      setImmediate(() => {
+        if (settled) return;
+        settled = true;
+        resolve({ ok: true, proc });
+      });
+    });
+  }
+
+  // Attached once a launch is confirmed. Keeps the session in step with the
+  // real process for the rest of its life: a spontaneous crash (exit) clears
+  // it, and a later spawn-level error (rare, but possible after a clean
+  // start) is logged instead of being left to throw as an unhandled 'error'.
+  // Both listeners check identity — `session.proc === proc` — because a
+  // process signalled by an earlier close()/eviction can still have this
+  // listener attached when its 'exit' arrives after a NEW session has
+  // already opened; without the check that stale event would null out the
+  // new session (see the "stale exit" test).
+  function attachExitHandler(proc) {
+    if (!proc || typeof proc.on !== "function") return;
+    proc.on("exit", () => {
+      if (session && session.proc === proc) onBrowserExit();
+    });
+    proc.on("error", (err) => {
+      log(`browser process error: ${err.message}`);
+      if (session && session.proc === proc) onBrowserExit();
+    });
+  }
+
   async function open(url) {
     if (!validUrl(url)) return { ok: false, reason: "bad_url" };
     if (session) return { ok: false, reason: "session_open", url: session.url };
+
+    // Reserve the slot synchronously, before the first await. Without this,
+    // two POSTs racing on the same tick both see session === null through
+    // every check below and both launch a Chromium — the second assignment
+    // would overwrite `session`, orphaning the first process: untracked,
+    // unkillable by /session/close or /session/evict, holding the profile
+    // forever.
+    session = { url, proc: null, startedAt: null, evictDeadline: null };
 
     let idle;
     try {
@@ -80,28 +188,72 @@ function createSessionManager(deps) {
       // Fail closed. daily-apply.sh already treats an unreachable config API
       // as "do not run" rather than assuming a safe state; the same rule
       // applies here, in the other direction.
+      session = null;
       return { ok: false, reason: "agent_unreachable" };
     }
-    if (!idle) return { ok: false, reason: "agent_running" };
-
-    if (await profileInUse()) return { ok: false, reason: "profile_busy" };
-
-    const proc = launch(url);
-    session = { url, proc, startedAt: now().toISOString(), evictDeadline: null };
-    if (proc && typeof proc.on === "function") {
-      proc.on("exit", () => onBrowserExit());
+    if (!idle) {
+      session = null;
+      return { ok: false, reason: "agent_running" };
     }
-    log(`session opened at ${url} (pid ${proc && proc.pid})`);
+
+    let busy;
+    try {
+      busy = await profileInUse();
+    } catch (err) {
+      // Fail closed here too: an unreadable process table is not evidence
+      // the profile is free — it means the probe itself is broken (procps
+      // missing, /proc unmounted, exec failure) — and reading it as "free"
+      // would launch a second Chromium onto a profile that may already be
+      // held.
+      session = null;
+      log(`profile probe failed: ${err.message}`);
+      return { ok: false, reason: "probe_failed" };
+    }
+    if (busy) {
+      session = null;
+      return { ok: false, reason: "profile_busy" };
+    }
+
+    const result = await launchAndConfirm(url);
+    if (!result.ok) {
+      session = null;
+      return result;
+    }
+    session.proc = result.proc;
+    session.startedAt = now().toISOString();
+    attachExitHandler(result.proc);
+    log(`session opened at ${url} (pid ${result.proc && result.proc.pid})`);
     return { ok: true };
   }
 
   function close() {
     if (!session) return { closed: false };
+    if (session.closing) {
+      // Already signalled and waiting (or escalating) — a repeat close must
+      // not fire a second SIGTERM/SIGKILL escalation racing the first.
+      return { closed: false, closing: true };
+    }
+
+    const proc = session.proc;
     try {
-      session.proc.kill("SIGTERM");
+      if (proc) proc.kill("SIGTERM");
     } catch (err) {
       log(`kill failed: ${err.message}`);
     }
+
+    if (proc && typeof proc.on === "function") {
+      // Wait for the 'exit' event (attachExitHandler's listener, attached at
+      // launch time, clears the session when it fires) instead of trusting
+      // SIGTERM was enough: a hung renderer or a beforeunload dialog can
+      // survive it, and state() must not claim the profile is free while a
+      // live Chromium still holds it — the agent's eviction path would read
+      // {evicting:false} and start a run onto a profile that isn't free.
+      session.closing = true;
+      session.closeDeadline = new Date(now().getTime() + closeGraceMs).toISOString();
+      log(`session close requested (pid ${proc.pid}); waiting for exit`);
+      return { closed: false, closing: true };
+    }
+
     log("session closed");
     session = null;
     return { closed: true };
@@ -120,7 +272,24 @@ function createSessionManager(deps) {
   }
 
   function tick() {
-    if (!session || !session.evictDeadline) return;
+    if (!session) return;
+    if (session.closing) {
+      if (session.closeDeadline && now().getTime() >= Date.parse(session.closeDeadline)) {
+        log(`close escalation: still alive after grace — SIGKILL (pid ${session.proc && session.proc.pid})`);
+        try {
+          session.proc.kill("SIGKILL");
+        } catch (err) {
+          log(`SIGKILL failed: ${err.message}`);
+        }
+        // SIGKILL cannot be caught or blocked, so treat the profile as free
+        // from here rather than waiting on an 'exit' event that (unlike a
+        // plain SIGTERM) is now all but guaranteed — matching
+        // agent/supervisor.js's cancel escalation, which does the same.
+        session = null;
+      }
+      return;
+    }
+    if (!session.evictDeadline) return;
     if (now().getTime() >= Date.parse(session.evictDeadline)) {
       log("eviction deadline reached");
       close();
@@ -129,7 +298,7 @@ function createSessionManager(deps) {
 
   function onBrowserExit() {
     if (!session) return;
-    log("browser exited on its own");
+    log("browser exited");
     session = null;
   }
 
@@ -180,12 +349,15 @@ async function profileInUse() {
   // Any LIVE chromium process in this container means the profile may be
   // held. Cheaper and safer than interpreting SingletonLock a second time —
   // browser/entrypoint.sh already adjudicates that on startup.
-  try {
-    const out = execFileSync("ps", ["-eo", "stat=,comm="], { encoding: "utf8" });
-    return hasLiveChrome(out);
-  } catch {
-    return false;
-  }
+  //
+  // Errors here are NOT read as "no chromium found": unlike the old pgrep
+  // probe, `ps -eo` exits 0 whether or not anything matches, so a failure
+  // means the probe itself is broken (procps missing from a rebuilt image,
+  // exec failure, /proc not mounted) — not that the profile is free.
+  // Propagate it so open() fails closed, the same direction as an
+  // unreachable supervisor two checks earlier.
+  const out = execFileSync("ps", ["-eo", "stat=,comm="], { encoding: "utf8" });
+  return hasLiveChrome(out);
 }
 
 function launchBrowser(url) {
@@ -195,6 +367,10 @@ function launchBrowser(url) {
       `--user-data-dir=${PROFILE_DIR}`,
       "--no-first-run",
       "--no-default-browser-check",
+      // The container runs as root (no `user:` in compose) and Chrome
+      // refuses to start as root without this — @playwright/mcp's own
+      // launches in this same image already carry the equivalent flag.
+      "--no-sandbox",
       "--start-maximized",
       url,
     ],
@@ -234,6 +410,8 @@ const REFUSAL_STATUS = {
   agent_running: 409,
   agent_unreachable: 503,
   profile_busy: 409,
+  probe_failed: 503,
+  launch_failed: 500,
 };
 
 function createServer(manager) {
@@ -271,6 +449,7 @@ if (require.main === module) {
     launch: launchBrowser,
     now: () => new Date(),
     graceMs: GRACE_MS,
+    closeGraceMs: CLOSE_GRACE_MS,
   });
   setInterval(() => manager.tick(), TICK_MS).unref();
   const server = createServer(manager);

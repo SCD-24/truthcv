@@ -80,17 +80,6 @@ if ! kill -0 "$NOVNC_PID" 2>/dev/null; then
 fi
 log "noVNC running on PID $NOVNC_PID (http://localhost:$NOVNC_PORT)"
 
-# Start the attended session control server (see browser/session-server.js).
-log "starting session server on port ${SESSION_SERVER_PORT:-8932}..."
-node /browser/session-server.js &
-SESSION_PID=$!
-sleep 1
-
-if ! kill -0 "$SESSION_PID" 2>/dev/null; then
-  abort "session server failed to start (PID $SESSION_PID)"
-fi
-log "session server running on PID $SESSION_PID"
-
 # Start @playwright/mcp
 # --browser chromium: use Chromium (shipped by the playwright base image)
 # --port / --host: HTTP transport (not stdio)
@@ -131,6 +120,20 @@ if [[ -L "$lock_path" ]]; then
     log "SingletonLock ($lock_target) looks live — leaving it alone"
   fi
 fi
+
+# Start the attended session control server (see browser/session-server.js).
+# Started here, after the SingletonLock adjudication above rather than before
+# it: a POST /session arriving in that window would launch Chromium against a
+# lock the entrypoint was about to clear.
+log "starting session server on port ${SESSION_SERVER_PORT:-8932}..."
+node /browser/session-server.js &
+SESSION_PID=$!
+sleep 1
+
+if ! kill -0 "$SESSION_PID" 2>/dev/null; then
+  abort "session server failed to start (PID $SESSION_PID)"
+fi
+log "session server running on PID $SESSION_PID"
 
 log "starting @playwright/mcp on port $BROWSER_MCP_PORT..."
 exec env DISPLAY="$DISPLAY" \

@@ -2,8 +2,22 @@
 // and the supervisor probe injected so nothing real is started.
 const test = require("node:test");
 const assert = require("node:assert");
+const { EventEmitter } = require("node:events");
 
 const { createSessionManager, hasLiveChrome } = require("./session-server.js");
+
+// A launch() double that behaves like a real ChildProcess: an EventEmitter
+// with pid/kill/killed, so tests can exercise the 'error'/'exit' handling
+// that a plain { pid, kill, killed } stand-in has no surface for.
+function fakeProc(pid) {
+  const proc = new EventEmitter();
+  proc.pid = pid;
+  proc.killed = false;
+  proc.kill = function () {
+    this.killed = true;
+  };
+  return proc;
+}
 
 function manager(overrides = {}) {
   return createSessionManager({
@@ -143,4 +157,118 @@ test("hasLiveChrome detects a live chromium mixed with zombies", () => {
 test("hasLiveChrome is false when no chrome process is present", () => {
   const ps = "S  node\nS  Xvfb\n";
   assert.strictEqual(hasLiveChrome(ps), false);
+});
+
+// --- Fix round 2: launch failure, concurrent opens, stale exits, probe errors ---
+
+test("a launch that fails to start (missing binary) refuses the session instead of crashing", async () => {
+  const m = manager({
+    launch: () => {
+      const proc = fakeProc(undefined);
+      // Real spawn() reports a missing executable asynchronously; emitting on
+      // the next tick (after launchAndConfirm has attached its listener)
+      // reproduces that instead of a synchronous throw.
+      process.nextTick(() => proc.emit("error", new Error("spawn chrome ENOENT")));
+      return proc;
+    },
+  });
+  const result = await m.open("https://example.com/login");
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, "launch_failed");
+  assert.strictEqual(m.state().open, false);
+});
+
+test("two concurrent opens do not both launch a browser", async () => {
+  let resolveIdle;
+  const idlePromise = new Promise((resolve) => {
+    resolveIdle = resolve;
+  });
+  let launchCount = 0;
+  const m = manager({
+    supervisorIdle: () => idlePromise,
+    launch: () => {
+      launchCount += 1;
+      return { pid: 4242, kill() { this.killed = true; }, killed: false };
+    },
+  });
+
+  const first = m.open("https://example.com/login");
+  const second = m.open("https://other.com/login");
+  resolveIdle(true);
+  const [firstResult, secondResult] = await Promise.all([first, second]);
+
+  assert.strictEqual(launchCount, 1);
+  const results = [firstResult, secondResult];
+  assert.strictEqual(results.filter((r) => r.ok).length, 1);
+  const refused = results.find((r) => !r.ok);
+  assert.strictEqual(refused.reason, "session_open");
+});
+
+test("close waits for the browser to actually exit before reporting the session closed", async () => {
+  const proc = fakeProc(99);
+  const m = manager({ launch: () => proc });
+  await m.open("https://example.com/login");
+
+  const result = m.close();
+  assert.strictEqual(result.closed, false);
+  assert.strictEqual(result.closing, true);
+  assert.strictEqual(proc.killed, true);
+  // SIGTERM was sent, but the profile is not free until the browser actually
+  // exits — state() must keep reporting the session open until then.
+  assert.strictEqual(m.state().open, true);
+
+  proc.emit("exit");
+  assert.strictEqual(m.state().open, false);
+});
+
+test("close escalates to SIGKILL if the browser does not exit within the grace period", async () => {
+  let t = new Date("2026-08-25T12:00:00.000Z");
+  const proc = fakeProc(99);
+  const signals = [];
+  proc.kill = function (signal) {
+    signals.push(signal);
+    this.killed = true;
+  };
+  const m = manager({ now: () => t, launch: () => proc, closeGraceMs: 10000 });
+  await m.open("https://example.com/login");
+
+  m.close();
+  t = new Date(t.getTime() + 10001);
+  m.tick();
+
+  assert.deepStrictEqual(signals, ["SIGTERM", "SIGKILL"]);
+  assert.strictEqual(m.state().open, false);
+});
+
+test("a stale exit event from a killed process does not clear a later session", async () => {
+  let t = new Date("2026-08-25T12:00:00.000Z");
+  const firstProc = fakeProc(1);
+  const secondProc = fakeProc(2);
+  const procs = [firstProc, secondProc];
+  let launchCount = 0;
+  const m = manager({ now: () => t, launch: () => procs[launchCount++], closeGraceMs: 10000 });
+
+  await m.open("https://example.com/login");
+  m.close(); // SIGTERM sent; session is "closing", waiting for firstProc to exit.
+  t = new Date(t.getTime() + 10001);
+  m.tick(); // Grace expires: SIGKILL sent, session stops tracking firstProc.
+
+  await m.open("https://other.com/login"); // A new session opens on secondProc.
+
+  // firstProc's exit finally arrives, late — it must not clear the new session.
+  firstProc.emit("exit");
+
+  assert.strictEqual(m.state().open, true);
+  assert.strictEqual(m.state().url, "https://other.com/login");
+});
+
+test("a broken profile probe refuses the session (fails closed)", async () => {
+  const m = manager({
+    profileInUse: async () => {
+      throw new Error("ps: command not found");
+    },
+  });
+  const result = await m.open("https://example.com/login");
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, "probe_failed");
 });
