@@ -8,8 +8,11 @@ reports why it did not go out.
 
 from __future__ import annotations
 
+import pytest
+
 import applications.store as apps
 import screening.store as store
+from agenttools import tools_ledger
 from agenttools.tools_ledger import get_approved_applications, report_apply_failure
 
 
@@ -224,3 +227,71 @@ def test_cooldown_takes_precedence_over_a_missing_letter(data_dir):
 
     items = get_approved_applications()
     assert [i["blocked_reason"] for i in items] == ["cooldown"]
+
+
+def test_record_application_is_idempotent_per_screening_id_reproducing_robco(data_dir):
+    """The RobCo incident: four record_application calls against one approved
+    queue item must write ONE application row, not four. The idempotency keys on
+    screening_id; a re-record improves the same row, a malformed evidence
+    payload persists nothing, and the item ends up retired and double-submit
+    guarded."""
+    s = _approved(company="RobCo", url="https://robco.example/jobs/4d090169/")
+
+    # 1st: minimal args create the row.
+    created = tools_ledger.record_application(
+        screening_id=s.id,
+        application_url="https://robco.example/jobs/4d090169/application",
+    )
+    assert created["created"] is True
+    first_id = created["id"]
+
+    # 2nd: fields_submitted arrives as a JSON-encoded STRING (the actual bug).
+    created = tools_ledger.record_application(
+        screening_id=s.id,
+        fields_submitted='[{"label": "resume", "value": "attached", "source": "operator"}]',
+    )
+    assert created["created"] is False
+    assert created["id"] == first_id
+
+    # 3rd: confirmation arrives as a JSON-encoded string.
+    created = tools_ledger.record_application(
+        screening_id=s.id,
+        confirmation='{"text": "Application submitted!", "confirmed_at": "2026-02-01"}',
+    )
+    assert created["created"] is False
+    assert created["id"] == first_id
+
+    # 4th: genuinely malformed evidence must raise and persist nothing.
+    with pytest.raises(ValueError):
+        tools_ledger.record_application(
+            screening_id=s.id,
+            attachments="not valid json{{{",
+        )
+
+    # Exactly one row exists, carrying the evidence calls 2 and 3 persisted.
+    robco_rows = [a for a in apps.load_all() if a.company == "RobCo"]
+    assert len(robco_rows) == 1
+    row = robco_rows[0]
+    assert row.id == first_id
+    assert [(f.label, f.value) for f in row.fields_submitted] == [("resume", "attached")]
+    assert row.confirmation.text == "Application submitted!"
+
+    # The approved item is retired once its application is confirmed.
+    assert store.get(s.id).approval == "applied"
+
+    # Re-approving surfaces it in the queue again, and the double-submit guard
+    # now flags it: the submission row keys on the same screening_id.
+    store.set_approval(s.id, "approved")
+    items = get_approved_applications()
+    assert [i["blocked_reason"] for i in items] == ["already_applied"]
+
+
+def test_record_application_malformed_evidence_persists_nothing(data_dir):
+    """Parse-before-write: a malformed evidence payload raises before any store
+    write, so no orphan application row is left behind."""
+    s = _approved(company="RobCo", url="https://robco.example/jobs/orphan/")
+
+    with pytest.raises(ValueError):
+        tools_ledger.record_application(screening_id=s.id, confirmation="{not json")
+
+    assert apps.load_all() == []

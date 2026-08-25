@@ -609,6 +609,7 @@ class ApplicationModel(_Camel):
     attachments: list[AttachmentModel] = Field(default_factory=list)
     gaps_disclosed: list[str] = Field(default_factory=list)
     profile: str = ""
+    screening_id: str = ""
     cv_document: ApplicationDocument | None = None
     cover_letter_document: ApplicationDocument | None = None
     created_at: str = ""

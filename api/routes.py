@@ -230,6 +230,7 @@ def mark_screening_applied(screening_id: str) -> ApplicationModel:
             "status": "Applied",
             "application_date": date.today().isoformat(),
             "capture_method": "manual",
+            "screening_id": screening_id,
         }
     )
     return _application_model(app)

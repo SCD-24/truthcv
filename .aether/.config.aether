@@ -1137,6 +1137,12 @@
                 },
                 {
                   "flags": "",
+                  "name": "screening_id",
+                  "notes": "The approved screening this application was recorded against. The dedupe key: record_application creates-or-fetches by it under one lock, so a retried agent call updates the existing row instead of adding another.",
+                  "type": "string"
+                },
+                {
+                  "flags": "",
                   "name": "fields_submitted",
                   "notes": "Every form field the agent actually submitted, with its provenance (observed | canonical). Written only by the agent via MCP; read-only to the client.",
                   "type": "list<{label,value,source}>"

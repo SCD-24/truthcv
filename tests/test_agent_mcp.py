@@ -678,6 +678,19 @@ def test_record_application_schema_advertises_the_fields_the_agent_must_send():
         assert field in properties, f"not advertised to the agent: {field}"
 
 
+def test_record_application_schema_types_structured_evidence_params():
+    """fields_submitted/attachments are lists, confirmation/screening are
+    objects — promoting them out of **fields must produce a typed schema,
+    not just a visible one."""
+    from agenttools.mcp_app import _input_schema
+
+    properties = _input_schema(tools_ledger.record_application)["properties"]
+    assert properties["fields_submitted"]["type"] == "array"
+    assert properties["attachments"]["type"] == "array"
+    assert properties["confirmation"]["type"] == "object"
+    assert properties["screening"]["type"] == "object"
+
+
 def test_record_application_schema_advertises_evidence_fields():
     """The evidence fields (fields_submitted, confirmation, screening,
     attachments) must be named parameters, not just reachable via **fields,
