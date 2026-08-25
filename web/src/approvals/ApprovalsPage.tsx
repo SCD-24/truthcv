@@ -54,6 +54,7 @@ import type {
   ScreeningRecord,
 } from "../api/types";
 import { approvalsFrom, BlockedClaimsPanel, type Decision } from "../components/BlockedClaimsPanel";
+import { safeHref } from "../utils/safeUrl";
 
 /** The letter draft for one posting: fetches its own state on mount because
  * the list endpoint (GET /api/screenings) never carries drafts. Offers
@@ -304,11 +305,20 @@ function PostingUrl({
   }
 
   if (!editing) {
+    // The posting URL can be agent-scraped, so a disallowed scheme
+    // (javascript:, …) must render as inert text, never a clickable href.
+    const safe = safeHref(url);
     return (
       <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-        <Link href={url} target="_blank" rel="noreferrer" variant="body2">
-          {url}
-        </Link>
+        {safe ? (
+          <Link href={safe} target="_blank" rel="noreferrer" variant="body2">
+            {url}
+          </Link>
+        ) : (
+          <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>
+            {url}
+          </Typography>
+        )}
         <Button
           size="small"
           onClick={() => {
@@ -678,15 +688,24 @@ function ReviewRow({
 /** An applied queue item, settled into an application. Read-only here: its
  * record lives on the Applications page, not in this queue. */
 function AppliedRow({ record }: { record: ScreeningRecord }) {
+  // The posting URL can be agent-scraped, so a disallowed scheme
+  // (javascript:, …) must render as inert text, never a clickable href.
+  const safeUrl = safeHref(record.url);
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
       <Typography variant="subtitle2">
         {record.company} — {record.role}
       </Typography>
       {record.url ? (
-        <Link href={record.url} target="_blank" rel="noreferrer" variant="body2">
-          {record.url}
-        </Link>
+        safeUrl ? (
+          <Link href={safeUrl} target="_blank" rel="noreferrer" variant="body2">
+            {record.url}
+          </Link>
+        ) : (
+          <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>
+            {record.url}
+          </Typography>
+        )
       ) : null}
       {record.screenedDate ? (
         <Typography variant="body2" sx={{ color: "text.secondary" }}>

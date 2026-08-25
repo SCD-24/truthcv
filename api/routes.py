@@ -570,9 +570,18 @@ def _truth_doc(truth: Truth) -> TruthDoc:
     return TruthDoc.model_validate(truth.to_dict())
 
 
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MiB — a CV/cover-letter upload has no legitimate reason to exceed this
+
+
 @router.post("/upload", status_code=204)
 async def upload(file: UploadFile = File(...)) -> None:
-    data = await file.read()
+    # Read one byte past the cap so an oversized upload is detected without
+    # ever buffering the whole body into process memory.
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413, detail="Upload exceeds the maximum allowed size."
+        )
     ext = extension_for(file.filename or "")
     try:
         text = extract_document_text(file.filename or "", data)

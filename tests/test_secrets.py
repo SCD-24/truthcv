@@ -47,3 +47,41 @@ def test_invalid_key_disables(data_dir, monkeypatch):
     monkeypatch.setenv("ENCRYPTION_KEY", "not-a-valid-fernet-key")
     assert sec.encryption_available() is False
     assert sec.read_secrets() == {}
+
+
+def test_wrong_key_after_rotation_refuses_overwrite(data_dir, monkeypatch):
+    """A rotated/wrong ENCRYPTION_KEY must refuse to overwrite secrets.enc and
+    instead back it up, so still-encrypted credentials are never destroyed."""
+    import secretstore
+    from cryptography.fernet import Fernet
+
+    from api.config import secrets_path
+
+    # A different, valid Fernet key to simulate rotation.
+    fernet_key_b = Fernet.generate_key().decode("utf-8")
+    assert fernet_key_b != FERNET_KEY
+
+    # Write secrets.enc with key A.
+    monkeypatch.setenv("ENCRYPTION_KEY", FERNET_KEY)
+    secretstore.save_store(
+        {"version": 2, "connections": {"claude": {"apiKey": "old-secret"}}}
+    )
+    p = secrets_path()
+    original = p.read_bytes()
+
+    # Rotate to a different valid key B — decryption of the old blob will fail.
+    monkeypatch.setenv("ENCRYPTION_KEY", fernet_key_b)
+
+    with pytest.raises(secretstore.SecretsDecryptError):
+        secretstore.load_store()
+
+    # The original file was NOT overwritten.
+    assert p.read_bytes() == original
+
+    # A backup of the raw bytes now exists.
+    backups = list(p.parent.glob("secrets.enc.corrupt-*.bak"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == original
+
+    # The shim re-exports the exception too.
+    assert sec.SecretsDecryptError is secretstore.SecretsDecryptError

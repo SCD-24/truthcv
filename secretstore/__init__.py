@@ -15,11 +15,16 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 
 class SecretsUnavailable(RuntimeError):
     """Raised when a write is attempted without a valid ENCRYPTION_KEY."""
+
+
+class SecretsDecryptError(RuntimeError):
+    """Raised when secrets.enc exists but cannot be decrypted with the current ENCRYPTION_KEY."""
 
 
 def encryption_key() -> str:
@@ -51,15 +56,24 @@ def encryption_available() -> bool:
 
 
 def read_secrets() -> dict:
-    """Decrypt and return stored secrets, or {} if unavailable/absent/corrupt."""
+    """Decrypt and return stored secrets.
+
+    Returns {} when secrets are genuinely unavailable: no valid ENCRYPTION_KEY
+    (``f is None``) or no file on disk. But when the file EXISTS yet cannot be
+    decrypted/parsed with the current key (rotated/wrong key, corrupt blob),
+    raise SecretsDecryptError rather than masquerading as absent — silently
+    returning {} there would let a later write overwrite and destroy the blob.
+    """
     f = _fernet()
     p = secrets_path()
     if f is None or not p.exists():
         return {}
     try:
         return json.loads(f.decrypt(p.read_bytes()).decode("utf-8"))
-    except Exception:  # noqa: BLE001 — corrupt/foreign blob behaves as absent
-        return {}
+    except Exception as exc:  # noqa: BLE001 — file present but undecryptable/unparseable
+        raise SecretsDecryptError(
+            "secrets.enc exists but could not be decrypted with the current ENCRYPTION_KEY."
+        ) from exc
 
 
 def write_secrets(data: dict) -> None:
@@ -107,8 +121,21 @@ def migrate_v1(raw: dict) -> dict:
 
 
 def load_store() -> dict:
-    """Return the v2 store, migrating a v1 file in place (with a .bak) once."""
-    raw = read_secrets()
+    """Return the v2 store, migrating a v1 file in place (with a .bak) once.
+
+    If secrets.enc exists but cannot be decrypted (wrong/rotated key), back up
+    the raw bytes and re-raise so no subsequent write can overwrite and destroy
+    the still-encrypted credentials.
+    """
+    try:
+        raw = read_secrets()
+    except SecretsDecryptError:
+        p = secrets_path()
+        if p.exists():
+            bak = p.with_name(f"secrets.enc.corrupt-{int(time.time())}.bak")
+            if not bak.exists():
+                bak.write_bytes(p.read_bytes())
+        raise
     if raw.get("version") == SCHEMA_VERSION:
         return raw
     store = migrate_v1(raw)
@@ -130,9 +157,21 @@ _ENV_KEY_FALLBACK = {"claude": "ANTHROPIC_API_KEY", "codex": "OPENAI_API_KEY"}
 _V1_PROVIDER_TO_CARD = {"anthropic": "claude", "openai": "codex", "ollama": "ollama"}
 
 
+def _load_store_for_read() -> dict:
+    """Like load_store(), but for read paths that must keep degrading to env
+    vars (per the documented secrets.enc -> env resolution order) rather than
+    raising when secrets.enc is present but undecryptable. Write paths
+    (set_connection/save_store) go through load_store() directly so they
+    still refuse to overwrite an undecryptable store."""
+    try:
+        return load_store()
+    except SecretsDecryptError:
+        return {}
+
+
 def get_connection(card: str) -> dict:
     """Stored connection for a card, with env vars filling absent fields."""
-    conn = dict(load_store().get("connections", {}).get(card, {}))
+    conn = dict(_load_store_for_read().get("connections", {}).get(card, {}))
     env_var = _ENV_KEY_FALLBACK.get(card)
     if env_var and not conn.get("apiKey"):
         v = os.environ.get(env_var, "").strip()
@@ -165,7 +204,7 @@ def clear_mode(card: str, mode: str) -> None:
 
 def legacy_default() -> tuple[str | None, str]:
     """(card, model) equivalent of the v1 activeProvider/model behavior."""
-    leg = load_store().get("legacyDefault", {})
+    leg = _load_store_for_read().get("legacyDefault", {})
     provider = (leg.get("provider") or os.environ.get("LLM_PROVIDER", "anthropic")).strip().lower()
     model = (leg.get("model") or os.environ.get("LLM_MODEL", "")).strip()
     return _V1_PROVIDER_TO_CARD.get(provider), model

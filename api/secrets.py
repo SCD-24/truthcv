@@ -9,6 +9,7 @@ project's only import cycle). Prefer importing from `secretstore` in new code.
 from __future__ import annotations
 
 from secretstore import (
+    SecretsDecryptError,
     SecretsUnavailable,
     encryption_available,
     read_secrets,
@@ -16,6 +17,7 @@ from secretstore import (
 )
 
 __all__ = [
+    "SecretsDecryptError",
     "SecretsUnavailable",
     "encryption_available",
     "read_secrets",
