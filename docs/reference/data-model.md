@@ -51,6 +51,7 @@ Projected from `schema` widgets on the architecture canvas.
 | `created_at / updated_at` | string | - | ISO timestamps. |
 | `application_date` | string | - | User-set date the application was submitted (ISO yyyy-mm-dd); distinct from the auto created_at/updated_at timestamps. |
 | `notes` | string | - | Free-text notes the user attaches to the application record. |
+| `screening_id` | string |  | The approved screening this application was recorded against. The dedupe key: record_application creates-or-fetches by it under one lock, so a retried agent call updates the existing row instead of adding another. |
 <!-- generated:end comp:application-tracker -->
 
 <!-- generated:start comp:connections -->

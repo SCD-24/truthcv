@@ -678,6 +678,19 @@ def test_record_application_schema_advertises_the_fields_the_agent_must_send():
         assert field in properties, f"not advertised to the agent: {field}"
 
 
+def test_record_application_schema_types_structured_evidence_params():
+    """fields_submitted/attachments are lists, confirmation/screening are
+    objects — promoting them out of **fields must produce a typed schema,
+    not just a visible one."""
+    from agenttools.mcp_app import _input_schema
+
+    properties = _input_schema(tools_ledger.record_application)["properties"]
+    assert properties["fields_submitted"]["type"] == "array"
+    assert properties["attachments"]["type"] == "array"
+    assert properties["confirmation"]["type"] == "object"
+    assert properties["screening"]["type"] == "object"
+
+
 def test_record_application_still_backfills_when_identity_is_omitted(data_dir):
     """Naming the fields must not turn the backfill path into a required one."""
     sid = _approve_screening("Backfill Co", "Platform Engineer", "https://b.example/jobs/9")

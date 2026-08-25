@@ -198,6 +198,7 @@ class Application:
     created_at: str = ""
     updated_at: str = ""
     profile: str = ""
+    screening_id: str = ""
 
     # Fields a client may set directly on create/update (documents are managed
     # by the save-and-render routes, not by generic writes).
@@ -220,6 +221,9 @@ class Application:
         "capture_method",
         "gaps_disclosed",
         "profile",
+        # Dedupe key: lets a re-record of a screening's auto-applied result find
+        # the row it already wrote instead of creating a duplicate.
+        "screening_id",
     )
 
     # Fields with dedicated (de)serialization below, excluded from the

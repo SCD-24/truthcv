@@ -74,16 +74,64 @@ def get(app_id: str) -> Application | None:
     return next((a for a in load_all() if a.id == app_id), None)
 
 
-def create(fields: dict) -> Application:
-    """Create a new application from client-supplied editable fields."""
+def _create_locked(fields: dict, apps: list[Application]) -> Application:
+    """Mint, populate, append, and persist a new application into ``apps``.
+
+    Callers must already hold ``locked(applications_path())`` and pass the list
+    they loaded under that lock: this mints the id and timestamps, applies the
+    editable fields, appends the record to ``apps``, and writes the list once.
+    Returns the created application.
+    """
     now = _now()
     app = Application(id=new_id(), created_at=now, updated_at=now)
     _apply_editable(app, fields)
+    apps.append(app)
+    _write_all(apps)
+    return app
+
+
+def create(fields: dict) -> Application:
+    """Create a new application from client-supplied editable fields."""
     with locked(applications_path()):
         apps = load_all()
-        apps.append(app)
-        _write_all(apps)
+        app = _create_locked(fields, apps)
     return app
+
+
+def find_by_screening(screening_id: str) -> Application | None:
+    """The first application tied to this screening_id, or None.
+
+    A plain read, no lock (mirrors ``get``). An empty ``screening_id`` never
+    matches a real record, so return None without loading anything.
+    """
+    if not screening_id:
+        return None
+    return next((a for a in load_all() if a.screening_id == screening_id), None)
+
+
+def create_for_screening(fields: dict, screening_id: str) -> tuple[Application, bool]:
+    """Create an application for a screening, at most once per screening_id.
+
+    Returns ``(application, created)``. With no ``screening_id`` there is
+    nothing to key on, so this falls back to an unconditional ``create`` and
+    always reports ``created=True``.
+
+    Otherwise the existence check and the write share one lock — like
+    ``screening.store.claim_for_apply`` — which is what makes it idempotent:
+    two concurrent callers racing on the same ``screening_id`` cannot both find
+    it absent and both create a row. The loser sees the winner's record and gets
+    ``(existing, False)`` without writing anything.
+    """
+    if not screening_id:
+        return create(fields), True
+    with locked(applications_path()):
+        apps = load_all()
+        existing = next((a for a in apps if a.screening_id == screening_id), None)
+        if existing is not None:
+            return existing, False
+        fields = {**fields, "screening_id": screening_id}
+        app = _create_locked(fields, apps)
+    return app, True
 
 
 def update(app_id: str, patch: dict) -> Application | None:

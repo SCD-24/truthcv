@@ -1134,6 +1134,12 @@
                   "name": "notes",
                   "notes": "Free-text notes the user attaches to the application record.",
                   "type": "string"
+                },
+                {
+                  "flags": "",
+                  "name": "screening_id",
+                  "notes": "The approved screening this application was recorded against. The dedupe key: record_application creates-or-fetches by it under one lock, so a retried agent call updates the existing row instead of adding another.",
+                  "type": "string"
                 }
               ]
             },

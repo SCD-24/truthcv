@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import applications
-from applications.store import applications_path, cv_filenames, cover_letter_filenames
+from applications.store import (
+    applications_path,
+    cover_letter_filenames,
+    create_for_screening,
+    cv_filenames,
+)
 from truth.store import data_dir
 
 
@@ -173,3 +178,39 @@ def test_delete_removes_record_and_owned_files(data_dir):
 
 def test_delete_unknown_returns_false(data_dir):
     assert applications.delete("nope") is False
+
+
+def test_create_for_screening_is_idempotent(data_dir):
+    first, created_first = create_for_screening({"company": "EPAM"}, "s1")
+    assert created_first is True
+    assert first.screening_id == "s1"
+
+    second, created_second = create_for_screening({"company": "EPAM"}, "s1")
+    assert created_second is False
+    assert second.id == first.id
+
+    # Exactly one persisted row keys on that screening_id.
+    matching = [a for a in applications.load_all() if a.screening_id == "s1"]
+    assert len(matching) == 1
+    assert matching[0].id == first.id
+
+
+def test_create_for_screening_distinct_ids_create_separate_rows(data_dir):
+    a, created_a = create_for_screening({"company": "EPAM"}, "s1")
+    b, created_b = create_for_screening({"company": "Nagarro"}, "s2")
+
+    assert created_a is True
+    assert created_b is True
+    assert a.id != b.id
+    assert {app.screening_id for app in applications.load_all()} == {"s1", "s2"}
+    assert len(applications.load_all()) == 2
+
+
+def test_create_for_screening_empty_id_never_dedupes(data_dir):
+    a, created_a = create_for_screening({"company": "EPAM"}, "")
+    b, created_b = create_for_screening({"company": "EPAM"}, "")
+
+    assert created_a is True
+    assert created_b is True
+    assert a.id != b.id
+    assert len(applications.load_all()) == 2
