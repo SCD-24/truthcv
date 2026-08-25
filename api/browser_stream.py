@@ -19,14 +19,34 @@ import websockets
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_until_first_complete
 
+# Hostnames a legitimate viewer can reach this app on. The app binds to
+# loopback, so anything else is either a misconfiguration or a DNS-rebinding
+# attack: an attacker domain resolving to 127.0.0.1 sends a Host header that
+# matches its own Origin, which makes an Origin-vs-Host comparison agree with
+# itself. Mirrors the --allowed-hosts defence browser/entrypoint.sh already
+# applies to @playwright/mcp for the same reason.
+_LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def allowed_origin_hostnames() -> frozenset[str]:
+    """Loopback by default; extend via BROWSER_STREAM_ALLOWED_HOSTS (comma-separated)
+    for a deployment that deliberately publishes the app beyond loopback."""
+    extra = os.environ.get("BROWSER_STREAM_ALLOWED_HOSTS", "")
+    names = {h.strip().casefold() for h in extra.split(",") if h.strip()}
+    return frozenset(_LOOPBACK_HOSTNAMES | names)
+
 
 def origin_allowed(origin: str, host: str) -> bool:
-    """True when `origin`'s host:port is exactly the app's own `host` header.
+    """True when `origin`'s host:port is exactly the app's own `host` header,
+    and the origin's hostname is a loopback identity (or explicitly allowed).
 
     Compares the full authority, so neither a different port on the same host
     nor a hostname that merely starts with ours ("localhost:5627.evil.example")
     passes. An absent Origin is refused: every browser sends one on a WebSocket
-    handshake, so its absence means the caller is not a browser.
+    handshake, so its absence means the caller is not a browser. Origin and
+    Host agreeing is not sufficient on its own: under DNS rebinding an
+    attacker controls both, so the hostname is also checked against
+    `allowed_origin_hostnames()`.
     """
     if not origin or not host:
         return False
@@ -36,7 +56,12 @@ def origin_allowed(origin: str, host: str) -> bool:
         return False
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         return False
-    return parsed.netloc.casefold() == host.casefold()
+    if parsed.netloc.casefold() != host.casefold():
+        return False
+    hostname = (parsed.hostname or "").casefold()
+    if hostname not in allowed_origin_hostnames():
+        return False
+    return True
 
 
 def novnc_url() -> str:

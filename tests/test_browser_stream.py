@@ -43,6 +43,22 @@ class TestOriginAllowed:
     def test_a_garbage_origin_is_refused(self):
         assert origin_allowed("not a url", "localhost:5627") is False
 
+    def test_dns_rebinding_origin_is_refused(self):
+        """Origin and Host agreeing is not enough: under DNS rebinding an attacker
+        controls both. Only loopback hostnames may reach this socket."""
+        assert origin_allowed("http://evil.example:5627", "evil.example:5627") is False
+
+    def test_loopback_ip_origin_is_allowed(self):
+        assert origin_allowed("http://127.0.0.1:5627", "127.0.0.1:5627") is True
+
+    def test_an_extra_allowed_host_can_be_configured(self, monkeypatch):
+        monkeypatch.setenv("BROWSER_STREAM_ALLOWED_HOSTS", "truthcv.local")
+        assert origin_allowed("http://truthcv.local:5627", "truthcv.local:5627") is True
+
+    def test_a_configured_host_still_requires_the_ports_to_match(self, monkeypatch):
+        monkeypatch.setenv("BROWSER_STREAM_ALLOWED_HOSTS", "truthcv.local")
+        assert origin_allowed("http://truthcv.local:9999", "truthcv.local:5627") is False
+
 
 class TestRelayHandshake:
     def test_cross_origin_connection_is_rejected(self, client):
