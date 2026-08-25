@@ -29,7 +29,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Install additional tools:
 #   xvfb:       Virtual X11 display server (Chromium runs headful here)
 #   x11vnc:     VNC server over the X11 display (observe running tests)
-#   novnc:      Browser-based VNC client (accessible as http://localhost:7900)
+#   novnc:      Browser-based VNC client (accessible as http://localhost:5628)
 #   websockify: WebSocket-to-socket bridge, required by noVNC
 RUN apt-get update && apt-get install -y --no-install-recommends \
       xvfb x11vnc novnc websockify \

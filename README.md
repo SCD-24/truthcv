@@ -52,7 +52,7 @@ does not mount the data volume.
 > **It submits from a real Chromium**, running headful in its own `browser`
 > container, not this one. Watch a run live, or do the one-time manual login
 > an ATS needs (SSO, CAPTCHA, SMS MFA), at the noVNC viewport on
-> http://localhost:7900 — that login then persists on the `browser-profile`
+> http://localhost:5628 — that login then persists on the `browser-profile`
 > volume, so it survives container restarts. There is no headless fallback:
 > that was a deliberate choice, because a fresh, logged-out browser would
 > apply as nobody. If the `browser` service is not reachable, the agent aborts
@@ -97,7 +97,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Then open **http://localhost:8080**.
+Then open **http://localhost:5627**.
 
 Generated CVs and your truth file are persisted in `./data` (mounted into the
 container), so they survive restarts.

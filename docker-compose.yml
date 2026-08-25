@@ -38,7 +38,7 @@ services:
   # Containerised headful Chromium MCP server, reached by the agent over HTTP.
   # Started on a bare `docker compose up` (no profiles) so the agent can drive
   # it immediately without manual setup. The browser runs headful under Xvfb
-  # with a noVNC viewport at http://localhost:7900 for observation or manual
+  # with a noVNC viewport at http://localhost:5628 for observation or manual
   # one-time login (CAPTCHA, SMS MFA, etc.). The persistent /browser-profile
   # named volume preserves sessions across restarts.
   browser:
@@ -47,6 +47,7 @@ services:
       dockerfile: browser/Dockerfile
     restart: unless-stopped
     ports:
+      # noVNC web viewer (public; use this to watch or debug a run)
       # Host side only. NOVNC_HOST_PORT, deliberately NOT NOVNC_PORT —
       # browser/entrypoint.sh:20 already reads NOVNC_PORT for the port inside
       # the container, and reusing the name would move the internal port and

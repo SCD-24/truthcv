@@ -23,7 +23,7 @@ can never take the agent's own run loop down.
 
 > **First run against a login-walled site (SSO, CAPTCHA, SMS MFA) needs a
 > one-time manual sign-in.** Watch or drive the real Chromium through the
-> noVNC viewport at http://localhost:7900; its profile persists on the named
+> noVNC viewport at http://localhost:5628; its profile persists on the named
 > volume `browser-profile`, so the session survives container restarts and
 > you should not need to sign in again. See
 > [`browser/README.md`](../browser/README.md) for detail.

@@ -26,7 +26,7 @@
 
 ## Rationale
 
-These twelve members form **one deployable unit**: a single Docker image (`Dockerfile`) run as the lone application service in `docker-compose.yml` (`docker compose up` → `localhost:8080`). The image is a two-stage build — stage 1 compiles the **Web UI** (React/Vite/TS in `web/`, output to `api/static` per `vite.config.ts`), stage 2 is a Python 3.11 runtime that copies every backend package (`secretstore/`, `prompts/`, `providers/`, `truth/`, `tailor/`, `guardrail/`, `render/`, `coverletter/`, `applications/`, `api/`) and the built bundle, then runs `python -m api.main`. So the grouping is a **deployment boundary first**: all members share one process, one port, and one filesystem, with no network hops between them (in-process Python imports, not services).
+These twelve members form **one deployable unit**: a single Docker image (`Dockerfile`) run as the lone application service in `docker-compose.yml` (`docker compose up` → `localhost:5627`). The image is a two-stage build — stage 1 compiles the **Web UI** (React/Vite/TS in `web/`, output to `api/static` per `vite.config.ts`), stage 2 is a Python 3.11 runtime that copies every backend package (`secretstore/`, `prompts/`, `providers/`, `truth/`, `tailor/`, `guardrail/`, `render/`, `coverletter/`, `applications/`, `api/`) and the built bundle, then runs `python -m api.main`. So the grouping is a **deployment boundary first**: all members share one process, one port, and one filesystem, with no network hops between them (in-process Python imports, not services).
 
 Within that boundary the members are the **bounded contexts that enforce the system intent** — truthful, ATS-passing CVs where every fact traces to `truth.yaml`:
 
