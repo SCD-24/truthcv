@@ -27,11 +27,11 @@ from truth import load, persist_source_hash, save
 from truth.answers import Answers
 from truth.answers import load as load_answers
 from truth.answers import save as save_answers
+from truth.document import extract_document_text, extension_for
 from truth.extract import build_truth_from_text, write_confirmed
 from truth.model import Truth
 from truth.pdf import (
-    PdfExtractError,
-    extract_text,
+    DocumentExtractError,
     has_profile,
     load_source_text,
     persist_profile,
@@ -425,20 +425,21 @@ def _truth_doc(truth: Truth) -> TruthDoc:
 @router.post("/upload", status_code=204)
 async def upload(file: UploadFile = File(...)) -> None:
     data = await file.read()
+    ext = extension_for(file.filename or "")
     try:
-        text = extract_text(data)
-    except PdfExtractError as e:
+        text = extract_document_text(file.filename or "", data)
+    except DocumentExtractError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     persist_source_text(text)
     persist_source_hash(text)  # keyed cache: lets /extract skip a repeat LLM pass
-    persist_profile(data)
+    persist_profile(data, ext)
 
 
 @router.post("/extract", response_model=TruthDoc)
 def extract() -> TruthDoc:
     text = load_source_text()
     if not text.strip():
-        raise HTTPException(status_code=400, detail="Upload a PDF before extracting.")
+        raise HTTPException(status_code=400, detail="Upload your CV before extracting.")
     try:
         truth = build_truth_from_text(text, get_provider("truth_extract"))
     except ProviderError as e:

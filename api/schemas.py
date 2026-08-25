@@ -26,7 +26,7 @@ class _Camel(BaseModel):
 class BulletModel(_Camel):
     id: str
     value: str
-    source: str = "linkedin-pdf"
+    source: str = "uploaded-cv"
 
 
 class ExperienceModel(_Camel):
@@ -35,7 +35,7 @@ class ExperienceModel(_Camel):
     company: str = ""
     start: str = ""
     end: str = ""
-    source: str = "linkedin-pdf"
+    source: str = "uploaded-cv"
     bullets: list[BulletModel] = Field(default_factory=list)
 
 
@@ -45,13 +45,13 @@ class EducationModel(_Camel):
     school: str = ""
     start: str = ""
     end: str = ""
-    source: str = "linkedin-pdf"
+    source: str = "uploaded-cv"
 
 
 class SkillModel(_Camel):
     id: str
     value: str
-    source: str = "linkedin-pdf"
+    source: str = "uploaded-cv"
 
 
 class LinkModel(_Camel):

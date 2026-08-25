@@ -90,7 +90,7 @@ def test_full_happy_path(client):
     assert set(doc.keys()) == {"experiences", "education", "skills", "profile"}
     exp = doc["experiences"][0]
     assert exp["role"] == "Senior Software Engineer"
-    assert exp["source"] == "linkedin-pdf"
+    assert exp["source"] == "uploaded-cv"
     assert exp["bullets"][0]["value"] == "Built a payments API in Python"
     assert doc["skills"][0]["value"] == "Python"
 
@@ -117,6 +117,30 @@ def test_full_happy_path(client):
     # confirm (reject the inference so the guardrail stays satisfiable)
     r = client.post("/api/confirm-inferences", json={"approvedIds": []})
     assert r.status_code == 204
+
+
+def test_upload_accepts_txt(client):
+    r = client.post(
+        "/api/upload",
+        files={"file": ("cv.txt", io.BytesIO(b"Jane Doe\nSoftware Engineer"), "text/plain")},
+    )
+    assert r.status_code == 204, r.text
+
+
+def test_upload_accepts_md(client):
+    r = client.post(
+        "/api/upload",
+        files={"file": ("cv.md", io.BytesIO(b"# Jane Doe\n\n- Engineer"), "text/markdown")},
+    )
+    assert r.status_code == 204, r.text
+
+
+def test_upload_rejects_unsupported_extension(client):
+    r = client.post(
+        "/api/upload",
+        files={"file": ("cv.rtf", io.BytesIO(b"some bytes"), "application/rtf")},
+    )
+    assert r.status_code == 400
 
 
 def test_confirm_writes_edited_claim(client):

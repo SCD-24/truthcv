@@ -16,12 +16,12 @@ import type {
 } from "../api/types";
 import "../styles/step.css";
 
-// Every fact is stamped with where it came from — attested from the PDF, or a
-// fact the user is standing behind (edits and additions).
+// Every fact is stamped with where it came from — attested from the uploaded
+// CV, or a fact the user is standing behind (edits and additions).
 function Stamp({ source }: { source: TruthSource }) {
   return (
     <span className="stamp stamp--attested">
-      {source === "linkedin-pdf" ? "Attested · linkedin" : "Confirmed · you"}
+      {source === "user-confirmed" ? "Confirmed · you" : "Attested · CV"}
     </span>
   );
 }

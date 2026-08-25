@@ -1,7 +1,7 @@
 /** Domain types shared across the wizard, matching the API contract. */
 
 /** Where a fact came from — the provenance the whole UI is built around. */
-export type TruthSource = "linkedin-pdf" | "user-confirmed";
+export type TruthSource = "uploaded-cv" | "linkedin-pdf" | "user-confirmed";
 
 /** One achievement line, owned by an experience. */
 export interface Bullet {
