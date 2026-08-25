@@ -11,7 +11,10 @@ jobs:
         with:
           python-version: "3.12"
       # tests/test_daily_apply_session_probe.py runs the real node snippet out
-      # of agent/daily-apply.sh, so the backend job needs node on PATH too.
+      # of agent/daily-apply.sh. The runner already ships a node, so this is
+      # not about availability: it pins the same major the agent container
+      # runs (agent/Dockerfile: FROM node:22-bookworm-slim) so the snippet is
+      # exercised under the version production uses. Do not drop this step.
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

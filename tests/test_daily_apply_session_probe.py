@@ -47,6 +47,28 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
+@pytest.fixture(autouse=True)
+def _node_runs():
+    """Fail loudly if `node` cannot execute, rather than letting the two
+    non-zero-exit tests below pass without ever running the snippet: a missing
+    node, or an nvm shim printing 'version not installed', also exits non-zero.
+    """
+    try:
+        probe = subprocess.run(
+            ["node", "-e", "process.exit(0)"],
+            capture_output=True,
+            env={"PATH": os.environ["PATH"]},
+        )
+    except FileNotFoundError:
+        pytest.skip("node is not installed in this environment")
+    if probe.returncode != 0:
+        pytest.fail(
+            f"node is on PATH but cannot run a trivial program "
+            f"(rc={probe.returncode}, stderr={probe.stderr!r}); the tests below "
+            f"would pass vacuously."
+        )
+
+
 @pytest.fixture()
 def server():
     httpd = HTTPServer(("127.0.0.1", 0), _Handler)
@@ -63,9 +85,11 @@ def _run(port: int) -> subprocess.CompletedProcess:
         capture_output=True,
         # Inherit the caller's PATH rather than hard-coding one: node is at
         # /usr/local/bin on the CI runner and in the toolcache under
-        # actions/setup-node, so "/usr/bin:/bin" would not find it.
+        # actions/setup-node, so "/usr/bin:/bin" would not find it. No default
+        # here on purpose — "/usr/bin:/bin" is the value that broke CI, so a
+        # KeyError naming the real problem beats silently reinstating it.
         env={
-            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "PATH": os.environ["PATH"],
             "SESSION_SERVER_PORT": str(port),
             "AGENT_API_TOKEN": "t",
         },
@@ -86,6 +110,7 @@ def test_a_403_is_a_failure_not_data(server):
     _Handler.body = b'{"detail":"Forbidden"}'
     result = _run(server.server_port)
     assert result.returncode != 0
+    assert result.stdout == b"", "a failed probe must not forward a body"
 
 
 def test_a_500_is_a_failure(server):
@@ -93,3 +118,4 @@ def test_a_500_is_a_failure(server):
     _Handler.body = b"boom"
     result = _run(server.server_port)
     assert result.returncode != 0
+    assert result.stdout == b"", "a failed probe must not forward a body"
