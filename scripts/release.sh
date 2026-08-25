@@ -39,8 +39,29 @@ FORBIDDEN_PATTERNS=(
   '(^|/)data(/|$)'
   '(^|/)answers\.local\.yaml(/|$)'
 )
+#
+# Listing the archive is its own checked step: piping unzip straight into
+# `grep -q` inside an `if` hides unzip's exit status (an `if` condition is
+# exempt from `set -e`, and `pipefail` only forwards grep's own benign
+# no-match status). If unzip is missing or the archive can't be read, that
+# pipeline silently takes the "nothing forbidden found" branch and ships an
+# archive that was never actually inspected.
+LISTING="$(mktemp)"
+trap 'rm -f "$LISTING"' EXIT
+
+if ! unzip -Z1 "$ARCHIVE" > "$LISTING"; then
+  rm -f "$ARCHIVE"
+  echo "ABORT: could not list the archive's contents, so it cannot be verified. Not shipping it." >&2
+  exit 1
+fi
+if [ ! -s "$LISTING" ]; then
+  rm -f "$ARCHIVE"
+  echo "ABORT: archive listing was empty. Not shipping an unverified archive." >&2
+  exit 1
+fi
+
 for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
-  if unzip -Z1 "$ARCHIVE" | grep -qE "$pattern"; then
+  if grep -qiE "$pattern" "$LISTING"; then
     rm -f "$ARCHIVE"
     echo "ABORT: archive matched forbidden pattern $pattern. Not shipping it." >&2
     exit 1

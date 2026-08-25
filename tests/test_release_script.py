@@ -8,7 +8,9 @@ way, because the cost of getting this wrong is mailing colleagues an API key.
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import subprocess
 import zipfile
 from pathlib import Path
@@ -32,7 +34,9 @@ def _forbidden_patterns() -> list[str]:
 
 
 def _matches_any(pattern_strings: list[str], path: str) -> bool:
-    return any(re.search(p, path) for p in pattern_strings)
+    # release.sh matches with `grep -qiE` — case-insensitive — so mirror that
+    # here rather than testing a stricter comparison the script doesn't make.
+    return any(re.search(p, path, re.IGNORECASE) for p in pattern_strings)
 
 
 @pytest.fixture(scope="module")
@@ -68,6 +72,8 @@ def test_zip_excludes_personal_answers(built_zip):
         ("truthcv-abc/.env.example", False),
         ("truthcv-abc/xenv", False),
         ("truthcv-abc/mydata/x", False),
+        ("truthcv-abc/.ENV", True),
+        ("truthcv-abc/DATA/x", True),
     ],
 )
 def test_forbidden_patterns_match_exactly_what_they_should(path, should_match):
@@ -75,6 +81,45 @@ def test_forbidden_patterns_match_exactly_what_they_should(path, should_match):
     assert _matches_any(patterns, path) is should_match, (
         f"{path!r} should {'match' if should_match else 'not match'} "
         f"one of {patterns}"
+    )
+
+
+def test_missing_unzip_aborts_and_leaves_no_archive(tmp_path):
+    """If unzip can't be found, the archive must never be shipped unverified.
+
+    Builds a PATH containing every other external tool release.sh needs
+    (git, mkdir, dirname, grep, mktemp, rm) but not unzip, so the script's
+    own listing step fails the way it would if unzip were absent.
+    """
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for tool in ("git", "mkdir", "dirname", "grep", "mktemp", "rm", "cat", "sh"):
+        real = shutil.which(tool)
+        if real is not None:
+            (fake_bin / tool).symlink_to(real)
+    assert not (fake_bin / "unzip").exists()
+
+    out = tmp_path / "out"
+    out.mkdir()
+    env = dict(os.environ)
+    env["PATH"] = str(fake_bin)
+    bash = shutil.which("bash")
+    assert bash is not None, "bash not found on the test runner's PATH"
+
+    result = subprocess.run(
+        [bash, str(SCRIPT), "--out", str(out)],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0, (
+        f"expected a non-zero exit when unzip is unavailable, got 0. "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert not list(out.glob("truthcv-*.zip")), (
+        "an unverified archive was left behind when unzip was unavailable"
     )
 
 
