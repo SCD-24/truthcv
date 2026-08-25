@@ -1223,6 +1223,33 @@ def put_profile_answers(body: AnswersUpdate) -> AnswersModel:
     return AnswersModel.model_validate(save_answers(answers).to_dict())
 
 
+def _resolved_job_boards(cfg: agent_config_store.AgentConfig) -> list[dict]:
+    """Build the RESOLVED wire list of job boards from an agent config.
+
+    Both GET and PUT responses go through this helper so they cannot drift.
+    Iterates ``cfg.resolved_board_sources()`` (the four defaults, then the
+    operator's own boards) and for each source emits its stored sign-in
+    override (if any), plus the server-resolved domain, effective sign-in URL
+    and default marker. The response deliberately carries this resolved list
+    rather than the stored one, so the client never re-implements the union —
+    and ``is_default`` is what tells the UI to withhold a remove button.
+    """
+    from agentconfig import boards
+
+    overrides = {b.source.strip().casefold(): b.signin_url for b in cfg.job_boards}
+    result = []
+    for source in cfg.resolved_board_sources():
+        override = overrides.get(source.strip().casefold(), "")
+        result.append({
+            "source": source,
+            "signin_url": override,
+            "domain": boards.resolve_domain(source) or "",
+            "effective_signin_url": boards.resolve_signin_url(source, override),
+            "is_default": boards.is_default_source(source),
+        })
+    return result
+
+
 @router.get("/agent/config", response_model=AgentConfigModel)
 def get_agent_config() -> AgentConfigModel:
     """Fetch agent config with resolved company boards and composed search queries.
@@ -1236,7 +1263,7 @@ def get_agent_config() -> AgentConfigModel:
     data = cfg.to_dict()
     
     # Load company boards and prune to target watchlist
-    boards = board_store.load()
+    boards_store_boards = board_store.load()
     board_store.prune(cfg.target_companies)
     
     # Populate company_boards in response. Matched by identity key (not raw
@@ -1245,14 +1272,17 @@ def get_agent_config() -> AgentConfigModel:
     target_company_keys = {company_identity_key(name) for name in cfg.target_companies}
     data["company_boards"] = [
         {"company": board.company, "careers_url": board.careers_url, "ats": board.ats, "status": board.status, "resolved_at": board.resolved_at}
-        for board in boards.values()
+        for board in boards_store_boards.values()
         if company_identity_key(board.company) in target_company_keys
     ]
+
+    # Populate job_boards with the resolved (defaults-first) list.
+    data["job_boards"] = _resolved_job_boards(cfg)
 
     # Populate search_queries in response. The freshness window is applied to
     # the composed URLs here rather than stored on them, so changing the
     # setting takes effect on the next fetch with no stored state to migrate.
-    data["search_queries"] = compose_queries(cfg.profiles, cfg.max_posting_age_days)
+    data["search_queries"] = compose_queries(cfg.profiles, cfg.max_posting_age_days, cfg.resolved_board_sources())
     
     return AgentConfigModel.model_validate(data)
 
@@ -1262,7 +1292,14 @@ def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:
     """Merge only the fields the client sent onto the stored config.
 
     Profiles are WHOLESALE-REPLACED (not merged) because a null or omitted
-    profiles field never reaches the merge dict.
+    profiles field never reaches the merge dict. job_boards is replaced the
+    same way, but first NORMALISED: the response-only keys (domain,
+    effective_signin_url, is_default) are stripped — they are derived, and a
+    stored copy is a second writer that can go stale — and any default-source
+    entry with a blank signin_url is DROPPED, so a client echoing back the
+    resolved GET list does not bloat storage with the four defaults. A
+    default-source entry WITH a signin_url is kept, since that is a
+    legitimate override.
 
     The optional numeric windows are the exception to exclude_none: for them a
     null is a real value meaning "unset", and dropping it made those fields
@@ -1271,7 +1308,18 @@ def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:
     beside a "saved" indicator. They are re-applied explicitly below, still
     only when the client actually sent the key.
     """
+    from agentconfig import boards
+
     sent = body.model_dump(exclude_unset=True, by_alias=False)
+    if "job_boards" in sent and sent["job_boards"] is not None:
+        normalised = []
+        for item in sent["job_boards"]:
+            source = item.get("source", "")
+            signin_url = item.get("signin_url", "")
+            if boards.is_default_source(source) and not signin_url.strip():
+                continue
+            normalised.append({"source": source, "signin_url": signin_url})
+        sent["job_boards"] = normalised
     merged = agent_config_store.load().to_dict()
     merged.update({k: v for k, v in sent.items() if v is not None})
     for nullable in (
@@ -1284,7 +1332,10 @@ def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:
         if nullable in sent and sent[nullable] is None:
             merged[nullable] = None
     cfg = agent_config_store.AgentConfig.from_dict(merged)
-    return AgentConfigModel.model_validate(agent_config_store.save(cfg).to_dict())
+    saved = agent_config_store.save(cfg)
+    data = saved.to_dict()
+    data["job_boards"] = _resolved_job_boards(saved)
+    return AgentConfigModel.model_validate(data)
 
 
 @router.get("/agent/llm-credentials", response_model=AgentLlmCredentials)

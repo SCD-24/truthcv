@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from agentconfig.boards import DEFAULT_BOARD_SOURCES
 from screening.company import company_identity_key
 from truth.store import data_dir
 
@@ -19,6 +20,41 @@ def _is_string_list(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
+def _dedupe_boards(boards: list["JobBoard"]) -> list["JobBoard"]:
+    """De-duplicate JobBoards by casefolded source, first entry wins, order preserved."""
+    seen: set[str] = set()
+    result = []
+    for board in boards:
+        key = board.source.strip().casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(board)
+    return result
+
+
+@dataclass
+class JobBoard:
+    """One job board the operator has configured beyond the always-searched defaults."""
+
+    source: str = ""
+    signin_url: str = ""
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "JobBoard":
+        """Construct from a dict, ignoring unknown keys and falling back to defaults on wrong types."""
+        kwargs = {}
+        if "source" in raw and isinstance(raw["source"], str):
+            kwargs["source"] = raw["source"]
+        if "signin_url" in raw and isinstance(raw["signin_url"], str):
+            kwargs["signin_url"] = raw["signin_url"]
+        return cls(**kwargs)
+
+    def to_dict(self) -> dict:
+        """Serialize to a dict with snake_case keys."""
+        return {"source": self.source, "signin_url": self.signin_url}
+
+
 @dataclass
 class JobProfile:
     """Job search profile with search criteria and requirements."""
@@ -28,7 +64,6 @@ class JobProfile:
     # Search group
     keywords: list[str] = field(default_factory=list)
     locations: list[str] = field(default_factory=list)
-    preferred_sources: list[str] = field(default_factory=list)
     # Requirement fields (all optional/nullable per spec)
     remote_model: str | None = None
     employment_country: str | None = None
@@ -57,8 +92,8 @@ class JobProfile:
         if "enabled" in raw and isinstance(raw["enabled"], bool):
             kwargs["enabled"] = raw["enabled"]
 
-        # keywords, locations, preferred_sources: list[str]
-        for field_name in ("keywords", "locations", "preferred_sources"):
+        # keywords, locations: list[str]
+        for field_name in ("keywords", "locations"):
             if field_name in raw:
                 if _is_string_list(raw[field_name]):
                     kwargs[field_name] = raw[field_name]
@@ -104,7 +139,6 @@ class JobProfile:
             "enabled": self.enabled,
             "keywords": self.keywords,
             "locations": self.locations,
-            "preferred_sources": self.preferred_sources,
             "remote_model": self.remote_model,
             "employment_country": self.employment_country,
             "eor_allowed": self.eor_allowed,
@@ -145,6 +179,11 @@ class AgentConfig:
     # URLs have always carried; 0 disables the window entirely (any age),
     # mirroring how 0 disables a cooldown window.
     max_posting_age_days: int | None = None
+    # The operator's OWN boards, beyond the four defaults. The defaults
+    # (agentconfig.boards.DEFAULT_BOARD_SOURCES) are unioned in at resolve
+    # time via resolved_board_sources(), never stored here, so they are
+    # always searched and cannot be lost to a bad PUT or a hand-edited file.
+    job_boards: list[JobBoard] = field(default_factory=list)
 
     @property
     def enabled(self) -> bool:
@@ -156,6 +195,21 @@ class AgentConfig:
         reads this and keeps working unchanged.
         """
         return self.mode != "off"
+
+    def resolved_board_sources(self) -> list[str]:
+        """Job board sources actually searched: the four defaults, then the operator's own.
+
+        The one place the union is expressed, so discovery (agentconfig/dorks.py)
+        and the API cannot drift apart on what "the boards" means.
+        """
+        result = list(DEFAULT_BOARD_SOURCES)
+        seen = {s.casefold() for s in DEFAULT_BOARD_SOURCES}
+        for board in self.job_boards:
+            key = board.source.strip().casefold()
+            if key and key not in seen:
+                seen.add(key)
+                result.append(board.source)
+        return result
 
     @classmethod
     def from_dict(cls, raw: dict) -> AgentConfig:
@@ -197,6 +251,40 @@ class AgentConfig:
                     if isinstance(item, dict):
                         profiles.append(JobProfile.from_dict(item))
                 kwargs["profiles"] = profiles
+
+        # job_boards: list[JobBoard]. Each item may be a dict or a bare
+        # string (JobBoard(source=item)) so a hand-edited config is
+        # forgiving. Blank sources are dropped; duplicates (casefolded
+        # source) are dropped, first entry wins.
+        if "job_boards" in raw:
+            boards: list[JobBoard] = []
+            if isinstance(raw["job_boards"], list):
+                for item in raw["job_boards"]:
+                    if isinstance(item, dict):
+                        board = JobBoard.from_dict(item)
+                    elif isinstance(item, str):
+                        board = JobBoard(source=item)
+                    else:
+                        continue
+                    if not board.source.strip():
+                        continue
+                    boards.append(board)
+            kwargs["job_boards"] = _dedupe_boards(boards)
+        else:
+            # Migrated from each profile's old preferred_sources when the
+            # job_boards key is absent, so an existing config's discovery
+            # behaviour survives the upgrade. The defaults are NOT seeded
+            # here — they are added at resolve time by resolved_board_sources()
+            # — so an empty result here is correct and simply means "just
+            # the defaults".
+            migrated: list[JobBoard] = []
+            raw_profiles = raw.get("profiles")
+            if isinstance(raw_profiles, list):
+                for item in raw_profiles:
+                    if isinstance(item, dict) and _is_string_list(item.get("preferred_sources")):
+                        for source in item["preferred_sources"]:
+                            migrated.append(JobBoard(source=source))
+            kwargs["job_boards"] = _dedupe_boards(migrated)
 
         # target_companies: list[str]
         if "target_companies" in raw:
@@ -250,6 +338,7 @@ class AgentConfig:
             "run_at": self.run_at,
             "run_days": self.run_days,
             "profiles": [p.to_dict() for p in self.profiles],
+            "job_boards": [b.to_dict() for b in self.job_boards],
             "target_companies": self.target_companies,
             "cooldown_days": self.cooldown_days,
             "cooldown_days_same_role": self.cooldown_days_same_role,

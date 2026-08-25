@@ -43,6 +43,7 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     runAt: ["09:00"],
     runDays: ["mon"],
     profiles: [],
+    jobBoards: [],
     targetCompanies: [],
     cooldownDays: null,
     cooldownDaysSameRole: null,
@@ -60,7 +61,6 @@ function makeProfile(overrides: Partial<JobProfile> = {}): JobProfile {
     enabled: true,
     keywords: [],
     locations: [],
-    preferredSources: [],
     remoteModel: null,
     employmentCountry: null,
     eorAllowed: null,
@@ -242,7 +242,6 @@ describe("AgentsPage profiles section", () => {
         enabled: true,
         keywords: [],
         locations: [],
-        preferredSources: [],
         remoteModel: "remote",
         employmentCountry: "Germany",
         eorAllowed: false,
@@ -352,5 +351,12 @@ describe("AgentsPage profiles section", () => {
 
     expect(await screen.findByText("Salary floor must be <= ask minimum")).toBeTruthy();
     expect(updateAgentConfig).not.toHaveBeenCalled();
+  });
+
+  it("no longer offers a per-profile Preferred sources field", async () => {
+    await renderLoaded(makeConfig());
+
+    fireEvent.click(screen.getByRole("button", { name: "Add profile" }));
+    expect(screen.queryByLabelText("Preferred sources")).toBeNull();
   });
 });

@@ -33,7 +33,7 @@ import { ButtonSpinner } from "../components/ButtonSpinner";
 import { ModelRoutePicker } from "../settings/ModelRoutePicker";
 import { SettingsModal } from "../settings/SettingsModal";
 import { isValidRunTime, WEEKDAYS } from "./schedule";
-import { SigninSection } from "./SigninSection";
+import { JobBoardsSection } from "./JobBoardsSection";
 import type {
   AgentConfig,
   AgentStatus,
@@ -206,15 +206,7 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
             onChange={setConfig}
             onOpenSettings={() => setSettingsSection("job-search-policy")}
           />
-          <SigninSection
-            sources={Array.from(
-              new Set(
-                config.profiles
-                  .filter((p) => p.enabled)
-                  .flatMap((p) => p.preferredSources),
-              ),
-            )}
-          />
+          <JobBoardsSection config={config} onChange={setConfig} />
           <BlocklistSection config={config} onChange={setConfig} />
           {settingsSection && (
             <SettingsModal
@@ -779,7 +771,6 @@ interface ProfileDraft {
   enabled: boolean;
   keywordsText: string;
   locationsText: string;
-  preferredSourcesText: string;
   remoteModel: string;
   employmentCountry: string;
   eorAllowed: "" | "true" | "false";
@@ -833,7 +824,6 @@ function profileToDraft(p: JobProfile): ProfileDraft {
     enabled: p.enabled,
     keywordsText: listToText(p.keywords),
     locationsText: listToText(p.locations),
-    preferredSourcesText: listToText(p.preferredSources),
     remoteModel: p.remoteModel ?? "",
     employmentCountry: p.employmentCountry ?? "",
     eorAllowed: p.eorAllowed === null ? "" : p.eorAllowed ? "true" : "false",
@@ -856,7 +846,6 @@ function emptyDraft(): ProfileDraft {
     enabled: true,
     keywordsText: "",
     locationsText: "",
-    preferredSourcesText: "",
     remoteModel: "remote",
     employmentCountry: "Germany",
     eorAllowed: "false",
@@ -880,7 +869,6 @@ function draftToProfile(d: ProfileDraft): JobProfile {
     enabled: d.enabled,
     keywords: textToList(d.keywordsText),
     locations: textToList(d.locationsText),
-    preferredSources: textToList(d.preferredSourcesText),
     remoteModel: d.remoteModel.trim() || null,
     employmentCountry: d.employmentCountry.trim() || null,
     eorAllowed: d.eorAllowed === "" ? null : d.eorAllowed === "true",
@@ -1072,14 +1060,6 @@ function ProfilesSection({
                   value={draft.locationsText}
                   onChange={(e) => updateDraft(index, { locationsText: e.target.value })}
                   helperText="Comma-separated. Blank means no location filter."
-                />
-                <TextField
-                  label="Preferred sources"
-                  size="small"
-                  fullWidth
-                  value={draft.preferredSourcesText}
-                  onChange={(e) => updateDraft(index, { preferredSourcesText: e.target.value })}
-                  helperText="Comma-separated. Blank means no source preference."
                 />
                 <TextField
                   label="Accepted role types"

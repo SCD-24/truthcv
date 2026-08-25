@@ -204,3 +204,65 @@ def test_job_profile_currency_defaults_to_none():
     assert profile.currency is None
     restored = store.JobProfile.from_dict(profile.to_dict())
     assert restored.currency is None
+
+
+# --- Global job boards (migrated from per-profile preferred_sources) -------
+
+
+def test_preferred_sources_migrates_to_job_boards_union():
+    """Legacy per-profile preferred_sources fold into a single global,
+    order-preserving, de-duplicated job_boards list; defaults are never seeded."""
+    cfg = store.AgentConfig.from_dict(
+        {
+            "profiles": [
+                {"preferred_sources": ["ashby", "custom.com"]},
+                {"preferred_sources": ["ashby", "linkedin"]},
+            ]
+        }
+    )
+    sources = [b.source for b in cfg.job_boards]
+    assert sources == ["ashby", "custom.com", "linkedin"]
+    # Defaults beyond what was explicitly listed are absent from storage; they
+    # only appear via resolved_board_sources().
+    assert "greenhouse" not in sources
+    assert "lever" not in sources
+    assert "workday" not in sources
+
+
+def test_resolved_board_sources_defaults_first():
+    """The four defaults always lead; the operator's own boards follow,
+    without duplicating a default they happen to name."""
+    assert store.AgentConfig().resolved_board_sources() == [
+        "ashby",
+        "greenhouse",
+        "lever",
+        "workday",
+    ]
+    assert store.AgentConfig(
+        job_boards=[store.JobBoard(source="linkedin")]
+    ).resolved_board_sources() == ["ashby", "greenhouse", "lever", "workday", "linkedin"]
+    assert store.AgentConfig(
+        job_boards=[store.JobBoard(source="ashby")]
+    ).resolved_board_sources() == ["ashby", "greenhouse", "lever", "workday"]
+
+
+def test_job_board_round_trips_source_and_signin_url():
+    cfg = store.AgentConfig(
+        job_boards=[store.JobBoard(source="jobs.acme.com", signin_url="https://acme.com/login")]
+    )
+    restored = store.AgentConfig.from_dict(cfg.to_dict())
+    assert restored.job_boards == cfg.job_boards
+
+
+def test_malformed_job_boards_yields_empty_list():
+    assert store.AgentConfig.from_dict({"job_boards": "not-a-list"}).job_boards == []
+    assert store.AgentConfig.from_dict({"job_boards": [1, 2, 3]}).job_boards == []
+
+
+def test_profile_with_legacy_preferred_sources_loads_without_error():
+    cfg = store.AgentConfig.from_dict(
+        {"profiles": [{"name": "p", "preferred_sources": ["ashby"]}]}
+    )
+    assert len(cfg.profiles) == 1
+    assert cfg.profiles[0].name == "p"
+    assert not hasattr(cfg.profiles[0], "preferred_sources")
