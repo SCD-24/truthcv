@@ -1267,11 +1267,6 @@
                   "key": "BROWSER_MCP_URL"
                 },
                 {
-                  "desc": "Bind-mounted host interceptor binary, used only under the interceptor driver.",
-                  "example": "/opt/interceptor/bin/interceptor",
-                  "key": "INTERCEPTOR_BIN"
-                },
-                {
                   "desc": "Fallback schedule slots (HH:MM, container TZ) when the app config API is unreachable.",
                   "example": "09:00,15:00",
                   "key": "RUN_AT"

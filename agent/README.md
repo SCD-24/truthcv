@@ -28,60 +28,6 @@ can never take the agent's own run loop down.
 > you should not need to sign in again. See
 > [`browser/README.md`](../browser/README.md) for detail.
 
-### The other driver: your own Chrome, via Interceptor
-
-If your host runs [Interceptor](https://interceptor.ai), you can skip the
-containerised browser and the noVNC sign-in entirely and drive the Chrome you
-are *already logged into*:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.interceptor.yml up
-```
-
-That overlay flips `AGENT_BROWSER_DRIVER` to `interceptor` and bind-mounts two
-host paths: the `interceptor` binary (read-only, at
-`/opt/interceptor/bin/interceptor`) and the daemon's unix socket. The `claude`
-CLI then spawns `interceptor mcp serve` over stdio inside the agent container;
-that subprocess shells to the real `interceptor <verb>` command, which dials the
-socket to reach the host daemon, which drives Chrome via native messaging.
-
-The two drivers are mutually exclusive by design — `daily-apply.sh` grants only
-the selected one's tools, because two ways to drive a browser with no rule
-saying which is how an unattended run applies from the wrong session.
-
-The bind mounts live in an overlay rather than in `docker-compose.yml` because
-their sources exist only on a host that actually runs Interceptor, and Docker
-answers a missing bind-mount source by silently creating a *directory* at the
-target — so mounting them unconditionally would break `docker compose up` for
-everyone else. For the same reason this driver is opt-in rather than the
-default: it depends on host state this repo neither controls nor can test in
-CI, while the `browser` service is self-contained.
-
-**Run the smoke test before trusting it.** The binary is compiled on your host
-and has to load under the agent image's glibc, which is not a given:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.interceptor.yml \
-  run --rm --entrypoint /app/agent/smoke-test.sh agent
-```
-
-It checks the binary loads, that `interceptor mcp serve` announces `serving over
-stdio`, and that the socket accepts a real connection.
-
-#### Safety tiers
-
-Interceptor classifies its own operations. `read` and `mutate` are permitted by
-default; `destructive` and arbitrary-exec operations are refused unless you opt
-into them via `INTERCEPTOR_MCP_ALLOW`. Filling and submitting an ATS form is
-`mutate`, so **leave `INTERCEPTOR_MCP_ALLOW` empty for an unattended
-submitter** — there is nothing it needs that is not already allowed, and
-widening it grants an unsupervised agent powers no one is watching.
-
-Keep `INTERCEPTOR_MCP_FENCE=on`. Job postings are attacker-controlled text that
-the agent reads and acts on, which is the textbook prompt-injection setup; the
-fence is what stands between a booby-trapped posting and your real browser
-session.
-
 ## The agent has no identity until you seed one
 
 `get_profile_answers` returns every field — name, email, phone, work
@@ -159,14 +105,8 @@ under the operator's name. Watch it.
 | `RUN_ONCE` | unset | `1` = run immediately and exit. |
 | `TZ` | container default | Timezone the schedule is expressed in. |
 | `TRUTHCV_MCP_URL` | `http://app:8080/mcp` | The `app` service's MCP streamable-HTTP JSON-RPC tool surface (`POST /mcp`, `agenttools/mcp_app.py`). In-network only — not reachable from the host or the internet. |
-| `AGENT_BROWSER_DRIVER` | `browser` | Which browser the agent may drive: `browser` (the containerised Chromium) or `interceptor` (your host Chrome). Only the selected driver's tools are granted to `claude`. |
+| `AGENT_BROWSER_DRIVER` | `browser` | Which browser driver the agent uses. `browser` (the containerised Chromium) is currently the only supported value — kept as a validating seam so a second driver can be added later without every call site needing to change. |
 | `BROWSER_MCP_URL` | `http://browser:8931/mcp` | In-network address of the `browser` compose service's MCP endpoint (see [`browser/README.md`](../browser/README.md)). Also in-network only. Used by the `browser` driver. |
-| `INTERCEPTOR_BIN` | `/opt/interceptor/bin/interceptor` | Where the Bun-compiled Interceptor binary is mounted *inside* the container; `claude` spawns it as a stdio MCP server. Mounted by `docker-compose.interceptor.yml`. |
-| `INTERCEPTOR_BIN_HOST` | `${HOME}/.local/bin/interceptor` | The *host* path that mount reads from. Set it to your own — `command -v interceptor`. |
-| `INTERCEPTOR_SOCKET` | `/tmp/interceptor.sock` | The Interceptor CLI-to-daemon IPC socket, bind-mounted at the same path inside and out. The daemon listens on the host; the mount only carries the channel in. |
-| `INTERCEPTOR_MCP_ALLOW` | empty | Safety-tier opt-in. Empty already permits `read` and `mutate`, which covers filling and submitting a form. **Leave it empty for an unattended submitter**; widening it grants `destructive` and arbitrary-exec powers to a process no one is watching. |
-| `INTERCEPTOR_MCP_FENCE` | `on` | Prompt-injection protection while reading job postings — attacker-controlled text the agent acts on. Keep it on. |
-| `INTERCEPTOR_MCP_GROUP` | `truthcv-agent` | Group scope recorded in the daemon's own audit trail. |
 | `MAX_APPLICATIONS_PER_RUN` | empty | Empty means **no cap**, matching RUNBOOK §1 ("there is no daily quota"). Not zero. |
 | `RUN_LOG_DIR` | `/app/runs` | Where `daily-apply.sh` writes per-run logs. Must stay inside the `agent-runs` volume or logs vanish on restart. |
 
@@ -240,7 +180,7 @@ and a run with zero enabled profiles aborts instead of applying defaults.
 `smoke-test.sh` checks, without applying to anything:
 
 - the `claude` CLI is present and the agent's files parse
-- `mcp.json` is valid and declares both servers the allow-list names
+- `mcp.json` is valid and declares the server the allow-list names
 - **no browser is present in the image** — this is pinned as a test, so re-adding
   one turns it red
 - `--check-schedule` resolves the configured slots
