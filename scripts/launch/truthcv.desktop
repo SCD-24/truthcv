@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=TruthCV
+Comment=Start TruthCV and open it in your browser
+Exec=sh -c '"$(dirname "%k")/truthcv.sh"'
+Terminal=true
+Categories=Office;
