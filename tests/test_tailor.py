@@ -8,8 +8,9 @@ import yaml
 from providers.fake import FakeProvider
 from truth.model import Bullet, Experience, Skill, Truth
 from tailor import tailor, claims_for_ids
-from tailor.keywords import extract_keywords, _is_junk_token
+from tailor.keywords import extract_keywords, extract_keywords_with_aliases, _is_junk_token
 from tailor.infer import _uncovered_keywords, _infer_user_message
+from tailor.model import Draft
 
 
 def _truth() -> Truth:
@@ -279,3 +280,80 @@ def test_empty_provider_falls_back_to_verbatim_truth(data_dir):
         e.id for e in truth.experiences
     }
     assert result["draft"].skills == [s.value for s in truth.skills]
+
+
+def test_extract_keywords_with_aliases_reads_object_shape(data_dir):
+    """Object-shaped responses yield terms plus a map of only aliased terms."""
+
+    def router(system, messages, schema):
+        return {
+            "keywords": [
+                {"term": "Kubernetes", "aliases": ["K8s"]},
+                {"term": "Python"},
+            ]
+        }
+
+    provider = FakeProvider(router=router)
+    terms, aliases = extract_keywords_with_aliases("some posting", provider)
+    assert terms == ["Kubernetes", "Python"]
+    assert aliases == {"Kubernetes": ["K8s"]}
+
+
+def test_extract_keywords_supports_legacy_flat_string_shape(data_dir):
+    """Legacy flat-string responses still parse and still drop junk terms."""
+
+    def router(system, messages, schema):
+        return {
+            "keywords": ["Senior Data Engineer", "ETL", "Remote in Germany", "Python"]
+        }
+
+    provider = FakeProvider(router=router)
+    assert extract_keywords("some posting", provider) == ["ETL", "Python"]
+
+
+def test_uncovered_keywords_treats_interleaved_phrasing_as_covered():
+    """Interleaved natural phrasing counts as covering the keyword phrase."""
+    assert _uncovered_keywords(["unit tests"], {"wrote unit and integration tests"}) == []
+
+
+def test_uncovered_keywords_no_longer_matches_substring_tokens():
+    """A spurious substring hit ('Go' inside 'django') no longer counts as covered."""
+    assert _uncovered_keywords(["Go"], {"built services in django"}) == ["Go"]
+
+
+def test_uncovered_keywords_honours_alias_argument():
+    """A supplied alias lets an equivalent phrasing count as coverage."""
+    assert (
+        _uncovered_keywords(
+            ["CI/CD"],
+            {"we used continuous integration and continuous delivery"},
+            aliases={"CI/CD": ["Continuous Integration and Continuous Delivery"]},
+        )
+        == []
+    )
+    # Without the alias, the same fact does not cover the acronym.
+    assert (
+        _uncovered_keywords(
+            ["CI/CD"], {"we used continuous integration and continuous delivery"}
+        )
+        == ["CI/CD"]
+    )
+
+
+def test_draft_keyword_aliases_round_trip_and_legacy_default():
+    """keyword_aliases survives to_dict/from_dict; a legacy dict defaults to {}."""
+    draft = Draft(
+        keywords=["CI/CD"],
+        keyword_aliases={"CI/CD": ["Continuous Integration and Continuous Delivery"]},
+    )
+    d = draft.to_dict()
+    assert d["keywordAliases"] == {
+        "CI/CD": ["Continuous Integration and Continuous Delivery"]
+    }
+    restored = Draft.from_dict(d)
+    assert restored.keyword_aliases == {
+        "CI/CD": ["Continuous Integration and Continuous Delivery"]
+    }
+    # A legacy dict with no keywordAliases key defaults to an empty map.
+    legacy = Draft.from_dict({"keywords": ["Python"]})
+    assert legacy.keyword_aliases == {}

@@ -9,6 +9,11 @@ silently attaching to another.
 Common English stopwords and pure formatting/punctuation are always allowed so
 light rephrasing ("Built" -> "Delivered a") does not trip the guardrail. No LLM
 dependency — the same input always yields the same result.
+
+Beyond stopwords, an operator-maintained synonym/equivalence file
+(data/vocabulary/synonyms.txt) is a second traceability source: a term attested
+in one accepted form is also treated as traceable in any of its registered
+equivalent forms.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from truth.store import data_dir
+from vocabulary.synonyms import synonym_groups
 
 # Connective/function words that carry no factual content. Rephrasing may freely
 # introduce these; they are never treated as claims.
@@ -145,6 +151,37 @@ def _truth_tokens(values: Iterable[str]) -> set[str]:
     return tokens
 
 
+def _absorb_synonym_group(group: frozenset[str], tokens: set[str]) -> None:
+    """If some form in `group` is fully attested in `tokens`, add every form's tokens."""
+    if any(_tokenize(form) and set(_tokenize(form)) <= tokens for form in group):
+        for form in group:
+            tokens.update(_tokenize(form))
+
+
+def _synonym_expanded(allowed: set[str]) -> set[str]:
+    """Widen `allowed` with every sibling form of an already-attested synonym group.
+
+    For each equivalence group in the operator's data/vocabulary/synonyms.txt
+    (loaded via vocabulary.synonyms.synonym_groups()), if the tokens of SOME form
+    in that group are already fully present in `allowed`, every token of EVERY
+    form in that group is added too. Iterated to a small fixed point (at most
+    twice) so a chain of two synonym groups both resolve in one call.
+
+    This only ever ADDS tokens to `allowed` — it can flip a verdict from blocked
+    to allowed but never the reverse, so no currently-passing render can begin
+    failing. Mirrors the safety argument for the Unicode-aware tokenizer above:
+    a token that used to be traceable stays traceable.
+    """
+    expanded = set(allowed)
+    for _ in range(2):
+        before = len(expanded)
+        for group in synonym_groups():
+            _absorb_synonym_group(group, expanded)
+        if len(expanded) == before:
+            break
+    return expanded
+
+
 def validate(scopes: Iterable[Scope], global_values: Iterable[str] = ()) -> ValidationResult:
     """Return ok + the list of unverifiable draft tokens.
 
@@ -161,6 +198,7 @@ def validate(scopes: Iterable[Scope], global_values: Iterable[str] = ()) -> Vali
 
     for scope in scopes:
         allowed = _truth_tokens(scope.allowed) | global_tokens
+        allowed = _synonym_expanded(allowed)
         for text in scope.texts:
             bad = _untraceable_tokens(text, allowed)
             if not bad:

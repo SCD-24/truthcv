@@ -167,7 +167,16 @@ def select_system(
     conventions: CvConventions = DEFAULT_CONVENTIONS,
     vocabulary: DomainVocabulary = DEFAULT_VOCABULARY,
 ) -> str:
-    """System prompt: choose, order, and lightly rephrase facts by id (+ CV style)."""
+    """System prompt: choose, order, and lightly rephrase facts by id (+ CV style).
+
+    Selection still may NOT add information. A rephrasing that introduces an
+    acronym/expansion whose tokens are not present in the truth WILL be blocked
+    by ``guardrail/validate.py``'s traceability check UNLESS that specific
+    equivalence is registered in the operator's ``data/vocabulary/synonyms.txt``
+    file (loaded by ``vocabulary/synonyms.py``). This is intentional: such a
+    claim surfaces at the existing approve/deny gate rather than being silently
+    emitted.
+    """
     return (
         "You tailor a CV to a job posting using ONLY the candidate's verified facts. "
         "You are given experiences (each with an id and bullets that each have an id) "
@@ -180,6 +189,12 @@ def select_system(
         "companies, or dates, those are fixed."
         + cv_standard(conventions, vocabulary)
         + cv_style(conventions)
+        + (" " + vocabulary.acronym_policy if vocabulary.acronym_policy else "")
+        + (
+            " " + vocabulary.phrase_repetition_policy
+            if vocabulary.phrase_repetition_policy
+            else ""
+        )
         + _CV_ANTI_TELL_RULES
     )
 

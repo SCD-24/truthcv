@@ -14,6 +14,7 @@ from render.ats import lint
 from render import pdf as pdf_mod
 from render import docx as docx_mod
 from tailor.model import Draft, DraftExperience
+import vocabulary.synonyms as vocab_synonyms
 
 
 DRAFT = Draft(
@@ -149,3 +150,73 @@ def test_docx_smoke_or_skip(data_dir):
     except docx_mod.RenderUnavailable:
         pytest.skip("pandoc not installed in this environment")
     assert out.exists() and out.stat().st_size > 0
+
+
+def test_ats_flags_interleaved_keyword():
+    """A keyword phrase whose words are spliced apart ('unit and integration
+    tests' for 'unit tests') is not a contiguous ATS match: it must be flagged
+    as interleaved, not reported as missing."""
+    html = (
+        "<html><body>"
+        "<p>Wrote unit and integration tests for the platform. "
+        "Contact: ada@example.com</p>"
+        "</body></html>"
+    )
+    warnings = lint(html, keywords=["unit tests"])
+    codes = {w["code"] for w in warnings}
+    assert "interleaved-keyword" in codes
+    assert "missing-keyword" not in codes
+
+
+def test_ats_flags_missing_keyword_form_from_aliases_arg():
+    """When only an alias form (the expansion) of the keyword is present, and the
+    equivalence is supplied via the `aliases` argument, the linter reports
+    missing-keyword-form rather than missing-keyword."""
+    html = (
+        "<html><body>"
+        "<p>Ran Continuous Integration and Continuous Delivery pipelines. "
+        "Contact: ada@example.com</p>"
+        "</body></html>"
+    )
+    warnings = lint(
+        html,
+        keywords=["CI/CD"],
+        aliases={"CI/CD": ["Continuous Integration and Continuous Delivery"]},
+    )
+    codes = {w["code"] for w in warnings}
+    assert "missing-keyword-form" in codes
+    assert "missing-keyword" not in codes
+
+
+def test_ats_flags_missing_keyword_form_from_synonyms_file(data_dir):
+    """The same missing-keyword-form verdict is driven purely by an operator
+    synonyms.txt file (no `aliases` argument), loaded via vocabulary.synonyms."""
+    vocab_dir = data_dir / "vocabulary"
+    vocab_dir.mkdir()
+    (vocab_dir / "synonyms.txt").write_text(
+        "CI/CD = Continuous Integration and Continuous Delivery\n", encoding="utf-8"
+    )
+    # Reset the per-process synonyms cache so the freshly written file is read.
+    vocab_synonyms._synonyms_cache = None
+    html = (
+        "<html><body>"
+        "<p>Ran Continuous Integration and Continuous Delivery pipelines. "
+        "Contact: ada@example.com</p>"
+        "</body></html>"
+    )
+    warnings = lint(html, keywords=["CI/CD"])
+    codes = {w["code"] for w in warnings}
+    assert "missing-keyword-form" in codes
+
+
+def test_ats_go_is_not_a_substring_of_django():
+    """Regression: token-aware matching must not credit 'Go' just because the
+    letters appear inside 'Django'. 'Go' is genuinely absent here."""
+    html = (
+        "<html><body>"
+        "<p>Built services in Django. Contact: ada@example.com</p>"
+        "</body></html>"
+    )
+    warnings = lint(html, keywords=["Go"])
+    codes = {w["code"] for w in warnings}
+    assert "missing-keyword" in codes

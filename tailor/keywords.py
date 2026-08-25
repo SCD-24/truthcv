@@ -12,7 +12,19 @@ import prompts
 
 _SCHEMA: dict[str, Any] = {
     "type": "object",
-    "properties": {"keywords": {"type": "array", "items": {"type": "string"}}},
+    "properties": {
+        "keywords": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "term": {"type": "string"},
+                    "aliases": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["term"],
+            },
+        }
+    },
     "required": ["keywords"],
 }
 
@@ -98,20 +110,82 @@ def _is_junk_token(keyword: str) -> bool:
     return low.startswith(seniority_prefixes())
 
 
-def extract_keywords(posting: str, provider: LLMProvider) -> list[str]:
-    """Return an ordered, de-duplicated list of screenable posting keywords."""
+def _parse_keyword_item(item: Any) -> tuple[str, list[str]]:
+    """Split one raw keyword item into (term, raw_aliases).
+
+    Accepts both the new object shape ({"term", "aliases"}) and the legacy flat
+    string shape, which carries no aliases.
+    """
+    if isinstance(item, dict):
+        return str(item.get("term", "")).strip(), list(item.get("aliases", []) or [])
+    return str(item).strip(), []
+
+
+def _dedupe_aliases(raw_aliases: list[Any]) -> list[str]:
+    """Strip, drop empties, and de-duplicate aliases case-insensitively (first-seen)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for alias in raw_aliases:
+        text = str(alias).strip()
+        low = text.lower()
+        if text and low not in seen:
+            seen.add(low)
+            out.append(text)
+    return out
+
+
+def extract_keywords_with_aliases(
+    posting: str, provider: LLMProvider
+) -> tuple[list[str], dict[str, list[str]]]:
+    """Extract screenable keywords plus their model-supplied alternate phrasings.
+
+    Terms are filtered exactly as :func:`extract_keywords` filters them (deduped
+    by lowercase, empties and junk tokens dropped, order preserved). Aliases are
+    alternate phrasings of an already-approved term (e.g. an acronym and its
+    spelled-out expansion), deduped case-insensitively but NOT junk-filtered.
+
+    WARNING: these aliases come from the LLM and must NEVER be fed to the
+    guardrail as truth-equivalent — a model-supplied alias must never widen what
+    counts as truth. Only the operator's own data/vocabulary/synonyms.txt file
+    (loaded by vocabulary/synonyms.py, a separate, unrelated mechanism) is
+    trusted for that.
+
+    Args:
+        posting: The raw job posting text.
+        provider: The LLM provider used to extract structured keywords.
+
+    Returns:
+        A tuple of (ordered de-duplicated term list, alias map). The alias map is
+        keyed by the exact stripped term strings and only holds terms that have
+        at least one non-empty alias.
+    """
     if not posting or not posting.strip():
-        return []
+        return [], {}
     result = provider.extract_json(
         prompts.keywords_system(), [{"role": "user", "content": posting}], _SCHEMA
     )
     raw = result.get("keywords", []) if isinstance(result, dict) else []
     seen: set[str] = set()
-    out: list[str] = []
-    for k in raw:
-        kw = str(k).strip()
-        low = kw.lower()
-        if kw and low not in seen and not _is_junk_token(kw):
-            seen.add(low)
-            out.append(kw)
-    return out
+    terms: list[str] = []
+    aliases: dict[str, list[str]] = {}
+    for item in raw:
+        term, raw_aliases = _parse_keyword_item(item)
+        low = term.lower()
+        if not term or low in seen or _is_junk_token(term):
+            continue
+        seen.add(low)
+        terms.append(term)
+        deduped = _dedupe_aliases(raw_aliases)
+        if deduped:
+            aliases[term] = deduped
+    return terms, aliases
+
+
+def extract_keywords(posting: str, provider: LLMProvider) -> list[str]:
+    """Return an ordered, de-duplicated list of screenable posting keywords.
+
+    Thin wrapper over :func:`extract_keywords_with_aliases` that discards the
+    alias map and returns only the term list.
+    """
+    terms, _ = extract_keywords_with_aliases(posting, provider)
+    return terms

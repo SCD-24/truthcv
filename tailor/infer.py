@@ -13,6 +13,7 @@ from typing import Any
 
 from providers.base import LLMProvider
 from truth.model import Truth
+from vocabulary.match import match_keyword, ABSENT
 
 import prompts
 
@@ -37,17 +38,39 @@ _SCHEMA: dict[str, Any] = {
     "required": ["inferences"],
 }
 
-def _uncovered_keywords(keywords: list[str], existing: set[str]) -> list[str]:
+def _keyword_is_covered(kw: str, kw_aliases: list[str], existing: set[str]) -> bool:
+    """Whether any existing fact backs ``kw`` under the loose coverage matcher."""
+    return any(match_keyword(kw, fact, kw_aliases) != ABSENT for fact in existing)
+
+
+def _uncovered_keywords(
+    keywords: list[str], existing: set[str], aliases: dict[str, list[str]] | None = None
+) -> list[str]:
     """Keywords not already stated in truth — the real gaps worth inferring.
 
     Pre-filtering here focuses the model on genuine coverage gaps so it does not
     waste effort (or hallucinate) re-proposing keywords the CV already backs.
+
+    Coverage is now token/phrase aware: it uses the loose "interleaved" matcher
+    from ``vocabulary.match``, so "unit and integration tests" counts as
+    covering "unit tests", while spurious substring hits (e.g. "Go" inside
+    "django") no longer count. ``aliases``, when given, is keyed by the exact
+    original keyword string and lets a known-equivalent form count as coverage.
+
+    Note the deliberate asymmetry versus ``render/ats.py``'s ATS lint: this is
+    the LOOSE check ("does truth back this claim at all, even interleaved or via
+    a known alias?"), whereas ``render/ats.py::lint`` uses the STRICT contiguous
+    check ("will an ATS actually see this phrase as written?"). Same underlying
+    matcher, different verdict threshold — intentionally.
     """
     out: list[str] = []
     for kw in keywords:
-        low = kw.strip().lower()
-        if low and not any(low in fact or fact in low for fact in existing):
-            out.append(kw.strip())
+        stripped = kw.strip()
+        if not stripped:
+            continue
+        kw_aliases = aliases.get(kw, []) if aliases is not None else []
+        if not _keyword_is_covered(kw, kw_aliases, existing):
+            out.append(stripped)
     return out
 
 
@@ -70,7 +93,10 @@ def _infer_user_message(keywords: list[str], truth: Truth) -> str:
 
 
 def detect_inferences(
-    keywords: list[str], truth: Truth, provider: LLMProvider
+    keywords: list[str],
+    truth: Truth,
+    provider: LLMProvider,
+    aliases: dict[str, list[str]] | None = None,
 ) -> list[Inference]:
     """Return Inferences (each tagged with a target experience id) for claims not
     already in truth."""
@@ -79,7 +105,7 @@ def detect_inferences(
     exp_ids = {e.id for e in truth.experiences}
     default_exp = truth.experiences[0].id if truth.experiences else ""
 
-    user = _infer_user_message(_uncovered_keywords(keywords, existing), truth)
+    user = _infer_user_message(_uncovered_keywords(keywords, existing, aliases), truth)
     result = provider.extract_json(
         prompts.infer_system(), [{"role": "user", "content": user}], _SCHEMA
     )
