@@ -101,3 +101,11 @@ def test_bump_rejects_an_unknown_variable(repo: Path):
 def test_bump_without_an_env_file_fails_clearly(repo: Path, capsys):
     assert bootstrap.main(["--repo", str(repo), "--bump", "APP_PORT"]) == 2
     assert "run without --bump first" in capsys.readouterr().err
+
+
+def test_missing_env_example_fails_clearly_instead_of_a_traceback(tmp_path: Path, capsys):
+    # No .env.example written into tmp_path, and no .env either.
+    assert bootstrap.main(["--repo", str(tmp_path)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err != ""

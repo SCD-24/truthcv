@@ -4,7 +4,9 @@ Bootstrap runs before the stack starts and must never destroy an existing
 configuration — the maintainer's own or a colleague's. Only three writes are
 performed: creating the file when it is absent, filling a blank assignment in
 place, and appending a key that is absent entirely. A line carrying a value is
-never touched, so comments, ordering and formatting survive byte-for-byte.
+never touched, so comments, ordering and content survive — except that line
+endings are normalised to LF on any write, since every write reassembles the
+file with `"\n".join(...)`.
 
 `set_value` is the single exception, reserved for the port variables the
 launcher owns; see its docstring for why that is safe.
@@ -24,15 +26,38 @@ MANAGED_HEADER = "# --- added by the TruthCV launcher ---"
 
 
 def parse(text: str) -> dict[str, str]:
-    """KEY=VALUE pairs from .env text; comments and blank lines ignored."""
+    """KEY=VALUE pairs from .env text; comments and blank lines ignored.
+
+    A leading `export ` (as in a line meant to be sourced by a shell) is
+    stripped from the key, and an inline comment — a `#` preceded by
+    whitespace — ends the value, matching `docker compose`'s own reading of
+    the file. A `#` with no preceding whitespace is part of the value, since
+    a password may legitimately contain one.
+    """
     values: dict[str, str] = {}
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
+        stripped = _strip_export(stripped)
         key, _, value = stripped.partition("=")
-        values[key.strip()] = value.strip()
+        values[key.strip()] = _strip_inline_comment(value).strip()
     return values
+
+
+def _strip_export(stripped: str) -> str:
+    """Drop a leading `export` keyword, as used in a line meant to be sourced."""
+    if stripped.startswith("export") and stripped[6:7] in (" ", "\t"):
+        return stripped[6:].lstrip()
+    return stripped
+
+
+def _strip_inline_comment(value: str) -> str:
+    """Cut off an inline comment: a `#` preceded by whitespace."""
+    for index, char in enumerate(value):
+        if char == "#" and index > 0 and value[index - 1] in (" ", "\t"):
+            return value[:index]
+    return value
 
 
 def generate_encryption_key() -> str:
@@ -150,6 +175,7 @@ def _blank_assignment_index(lines: list[str], key: str) -> int | None:
         stripped = line.strip()
         if stripped.startswith("#") or "=" not in stripped:
             continue
+        stripped = _strip_export(stripped)
         name, _, value = stripped.partition("=")
         if name.strip() == key and not value.strip():
             return index

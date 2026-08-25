@@ -44,7 +44,11 @@ def main(argv: list[str] | None = None) -> int:
         "APP_PORT": str(ports.default_for("APP_PORT")),
         "NOVNC_HOST_PORT": str(ports.default_for("NOVNC_HOST_PORT")),
     }
-    result = envfile.ensure(env_path, repo / ".env.example", required)
+    try:
+        result = envfile.ensure(env_path, repo / ".env.example", required)
+    except OSError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     _report(result)
     print(f"APP_PORT={result.values.get('APP_PORT', '')}")
     return 0
@@ -59,7 +63,11 @@ def _bump(env_path: Path, variable: str) -> int:
         print("No .env to bump — run without --bump first.", file=sys.stderr)
         return 2
 
-    values = envfile.parse(env_path.read_text(encoding="utf-8"))
+    try:
+        values = envfile.parse(env_path.read_text(encoding="utf-8"))
+    except OSError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     current = int(values.get(variable) or ports.default_for(variable))
     reserved = {
         int(value)
@@ -72,7 +80,11 @@ def _bump(env_path: Path, variable: str) -> int:
         print(str(error), file=sys.stderr)
         return 2
 
-    backup_path = envfile.set_value(env_path, variable, str(advanced))
+    try:
+        backup_path = envfile.set_value(env_path, variable, str(advanced))
+    except OSError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     print(
         f"{variable} {current} was already in use; trying {advanced}. "
         f"Previous .env saved to {backup_path.name}.",

@@ -170,3 +170,44 @@ def test_set_value_appends_when_the_key_is_absent(repo: Path):
     envfile.set_value(env, "APP_PORT", "5629")
 
     assert "APP_PORT=5629" in env.read_text(encoding="utf-8")
+
+
+def test_parse_strips_a_leading_export_keyword():
+    parsed = envfile.parse("export AGENT_API_TOKEN=value\n")
+    assert parsed == {"AGENT_API_TOKEN": "value"}
+
+
+def test_existing_export_prefixed_secret_is_not_rotated(repo: Path):
+    env = repo / ".env"
+    env.write_text("export AGENT_API_TOKEN=realsecret\n", encoding="utf-8")
+
+    result = envfile.ensure(env, repo / ".env.example", {"AGENT_API_TOKEN": "new"})
+
+    assert result.filled == []
+    assert result.appended == []
+    text = env.read_text(encoding="utf-8")
+    assert text.count("AGENT_API_TOKEN=") == 1
+    assert "realsecret" in text
+    assert "new" not in text
+
+
+def test_export_prefixed_blank_assignment_is_filled_in_place(repo: Path):
+    env = repo / ".env"
+    env.write_text("export ENCRYPTION_KEY=\n", encoding="utf-8")
+
+    result = envfile.ensure(env, repo / ".env.example", {"ENCRYPTION_KEY": "generated"})
+
+    assert result.filled == ["ENCRYPTION_KEY"]
+    text = env.read_text(encoding="utf-8")
+    assert text.count("ENCRYPTION_KEY=") == 1
+    assert "generated" in text
+
+
+def test_parse_strips_an_inline_comment_preceded_by_whitespace():
+    parsed = envfile.parse("APP_PORT=8080 # host port\n")
+    assert parsed == {"APP_PORT": "8080"}
+
+
+def test_parse_keeps_a_hash_with_no_preceding_whitespace():
+    parsed = envfile.parse("PASSWORD=abc#def\n")
+    assert parsed == {"PASSWORD": "abc#def"}
