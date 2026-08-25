@@ -60,6 +60,7 @@ export const COLUMN_DEFS: ColumnDef[] = [
   { label: "Notes", sortable: true, compare: text((a) => a.notes) },
   { label: "Posting", sortable: true, compare: presence((a) => a.posting) },
   { label: "Documents", sortable: true, compare: presence((a) => a.cvDocument ?? a.coverLetterDocument) },
+  { label: "Filled form", sortable: true, compare: presence((a) => a.fieldsSubmitted?.length) },
   { label: "", sortable: false },
 ];
 

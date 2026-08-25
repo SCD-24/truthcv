@@ -16,10 +16,12 @@ so the agent and the wizard can never disagree about what happened.
 
 from __future__ import annotations
 
+import json
+
 import agentconfig.store as _agentconfig_store
 from agentconfig.salary import clamp_ask as _clamp_ask
 from agentconfig.salary import format_ask as _format_ask
-from applications.model import Attachment, Confirmation, FieldSubmitted
+from applications.model import Attachment, Confirmation, FieldSubmitted, Screening
 from applications.store import create as create_application
 from applications.store import save_attachments as _save_attachments
 from applications.store import save_confirmation as _save_confirmation
@@ -34,8 +36,10 @@ from screening.model import validate_verdict as _validate_verdict
 from screening.role import validate_role_title as _validate_role_title
 from screening.store import create as create_screening
 from screening.url import validate_posting_url as _validate_posting_url
+from screening.url import normalize_application_url as _normalize_application_url
 from truth.answers import canonical_cv as _canonical_cv
 from truth.answers import load as _load_answers
+from truth.emailalias import alias_email as _alias_email
 
 
 def _backfill_from_screening(fields: dict, screening_id: str) -> dict:
@@ -64,6 +68,54 @@ def _backfill_from_screening(fields: dict, screening_id: str) -> dict:
     return fields
 
 
+def _as_list(value, name: str):
+    """Coerce a structured-list argument to a ``list``, or fail loudly.
+
+    ``None`` means "not provided" and is passed straight back for the caller to
+    interpret. A ``list`` is returned unchanged. A ``str`` is ``json.loads``-ed
+    (the agent occasionally sends a JSON-encoded string) and accepted only if it
+    decodes to a list; anything else raises ``ValueError`` naming the argument,
+    so the failure points at the bad input rather than surfacing later as
+    ``'str' object has no attribute 'get'``.
+    """
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        decoded = json.loads(value)
+        if not isinstance(decoded, list):
+            raise ValueError(
+                f"{name} must be a list; got JSON string decoding to "
+                f"{type(decoded).__name__}"
+            )
+        return decoded
+    raise ValueError(f"{name} must be a list; got {type(value).__name__}")
+
+
+def _as_dict(value, name: str):
+    """Coerce a structured-object argument to a ``dict``, or fail loudly.
+
+    Same contract as ``_as_list``: ``None`` passes through, a ``dict`` is
+    returned unchanged, a ``str`` is ``json.loads``-ed and accepted only if it
+    decodes to a dict, and anything else raises ``ValueError`` naming the
+    argument.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        decoded = json.loads(value)
+        if not isinstance(decoded, dict):
+            raise ValueError(
+                f"{name} must be a dict; got JSON string decoding to "
+                f"{type(decoded).__name__}"
+            )
+        return decoded
+    raise ValueError(f"{name} must be a dict; got {type(value).__name__}")
+
+
 def record_application(
     company: str = "",
     role: str = "",
@@ -78,6 +130,10 @@ def record_application(
     capture_method: str = "",
     profile: str = "",
     notes: str = "",
+    fields_submitted: list | None = None,
+    confirmation: dict | None = None,
+    screening: dict | None = None,
+    attachments: list | None = None,
     submitted: bool = True,
     **fields,
 ) -> dict:
@@ -88,7 +144,11 @@ def record_application(
     the agent reading the schema, and the tool then advertises an empty property
     set for a record with eighteen editable fields. That is the same defect that
     silently emptied ``company`` and ``verdict`` on 36 consecutive screenings,
-    on the tool that records real applications rather than verdicts.
+    on the tool that records real applications rather than verdicts. The four
+    structured-evidence params — ``fields_submitted``, ``confirmation``,
+    ``screening`` and ``attachments`` — are named for the same reason: they were
+    the same defect one level deeper, still swallowed by ``**fields`` and so
+    invisible in the schema until promoted here.
 
     Nothing here is a *required* argument, unlike ``record_screening``:
     ``_backfill_from_screening`` is designed to supply ``company``, ``role`` and
@@ -105,6 +165,12 @@ def record_application(
     writers of ``applications.json`` (via the store's atomic ``_write_all``);
     nothing here touches the file directly. ``applied_date`` is accepted as
     the agent-facing alias for the record's ``application_date`` field.
+
+    These four evidence fields are now named parameters too, not left to
+    ``**fields``, for the same inputSchema-visibility reason given for the
+    identity fields above: an agent reading the schema needs to see that the
+    tool accepts this evidence, not just the identity fields. They still fall
+    back to ``**fields`` for any caller routing them that way.
     """
     fields = dict(fields)
     if company:
@@ -136,30 +202,69 @@ def record_application(
     # True because that is this tool's contract — it records an application that
     # was submitted; a caller recording anything else passes submitted=False.
     fields["submitted"] = bool(submitted)
-    fields_submitted = fields.pop("fields_submitted", None)
-    confirmation = fields.pop("confirmation", None)
-    screening = fields.pop("screening", None)
-    attachments = fields.pop("attachments", None)
+    # `main` kept a `**fields` fallback for these four when the named parameter
+    # is absent, so a caller still routing evidence through `**fields` keeps
+    # working; the coercion and validation below then apply either way.
+    if fields_submitted is None:
+        fields_submitted = fields.pop("fields_submitted", None)
+    if confirmation is None:
+        confirmation = fields.pop("confirmation", None)
+    if screening is None:
+        screening = fields.pop("screening", None)
+    if attachments is None:
+        attachments = fields.pop("attachments", None)
 
-    app = create_application(_backfill_from_screening(fields, screening_id))
+    # Parse and validate the structured evidence BEFORE any store write. Doing
+    # this first is the fix for the orphan-row bug: the row used to be created
+    # first and a malformed evidence payload blew up the parse afterward,
+    # leaving a written application row with no evidence attached.
+    parsed_fields_submitted = (
+        [FieldSubmitted.from_dict(f) for f in _as_list(fields_submitted, "fields_submitted")]
+        if fields_submitted is not None else None
+    )
+    parsed_confirmation = (
+        Confirmation.from_dict(_as_dict(confirmation, "confirmation"))
+        if confirmation is not None else None
+    )
+    parsed_screening = (
+        Screening.from_dict(_as_dict(screening, "screening"))
+        if screening is not None else None
+    )
+    parsed_attachments = (
+        [Attachment.from_dict(a) for a in _as_list(attachments, "attachments")]
+        if attachments is not None else None
+    )
 
-    if fields_submitted is not None:
-        values = [FieldSubmitted.from_dict(f) for f in fields_submitted]
-        app = _save_fields_submitted(app.id, values) or app
-    if confirmation is not None:
-        app = _save_confirmation(app.id, Confirmation.from_dict(confirmation)) or app
-    if screening is not None:
-        app = _save_screening(app.id, screening) or app
-    if attachments is not None:
-        values = [Attachment.from_dict(a) for a in attachments]
-        app = _save_attachments(app.id, values) or app
+    backfilled = _backfill_from_screening(fields, screening_id)
+    if screening_id:
+        app, created = _apps_store.create_for_screening(backfilled, screening_id)
+        if not created:
+            # A retry against an existing row: apply the caller's editable
+            # fields so the re-record improves the record instead of being
+            # silently dropped. Use `fields`, not `backfilled`, so inherited
+            # values the caller did not actually send are not reintroduced.
+            app = _apps_store.update(app.id, fields) or app
+    else:
+        app = create_application(backfilled)
+        created = True
+
+    if parsed_fields_submitted is not None:
+        app = _save_fields_submitted(app.id, parsed_fields_submitted) or app
+    if parsed_confirmation is not None:
+        app = _save_confirmation(app.id, parsed_confirmation) or app
+    if parsed_screening is not None:
+        app = _save_screening(app.id, parsed_screening) or app
+    if parsed_attachments is not None:
+        app = _save_attachments(app.id, parsed_attachments) or app
 
     # An approved queue item retires on evidence of a confirmed application,
     # not on the agent electing to retire it.
     if screening_id:
         _screening_store.mark_applied(screening_id)
 
-    return app.to_dict()
+    result = app.to_dict()
+    result["created"] = created
+    return result
 
 
 def record_screening(
@@ -276,9 +381,23 @@ def get_canonical_cv() -> dict:
     }
 
 
-def get_profile_answers() -> dict:
-    """The canonical ATS screening answers (runbook §3), as a plain dict."""
-    return _load_answers().to_dict()
+def get_profile_answers(company: str = "") -> dict:
+    """The canonical ATS screening answers (runbook §3), as a plain dict.
+
+    When ``company`` (the employing entity for the application currently
+    being filled in) is given, the returned ``email`` is rewritten as a
+    per-company tracking address: local+tcv_<company_slug>@domain, so
+    replies from that employer are identifiable. This is a per-call
+    transformation only — it is never persisted. The stored answers, the
+    wizard's profile route, and the CV/cover-letter contact lines all
+    continue to see the real, un-aliased address. With ``company`` blank,
+    the returned email is unchanged from what is stored.
+    """
+    data = _load_answers().to_dict()
+    email = data.get("email")
+    if isinstance(email, str) and email:
+        data["email"] = _alias_email(email, company)
+    return data
 
 
 def get_job_profiles() -> list[dict]:
@@ -354,9 +473,16 @@ def get_approved_applications() -> list[dict]:
       to "no_letter" rather than reaching the agent with nothing to send.
     """
     applied_urls = {
-        a.application_url
+        norm
         for a in _apps_store.load_all()
-        if a.application_url and _is_submission(a)
+        if _is_submission(a)
+        for norm in (_normalize_application_url(a.application_url),)
+        if norm
+    }
+    applied_screening_ids = {
+        a.screening_id
+        for a in _apps_store.load_all()
+        if _is_submission(a) and a.screening_id
     }
     items = []
     for s in _screening_store.load_all():
@@ -366,7 +492,7 @@ def get_approved_applications() -> list[dict]:
         status = _cooldown(s.company, s.role or None)
         # already_applied outranks the rest: the others describe an item that
         # cannot go out yet, this one an item that must not go out at all.
-        if s.url and s.url in applied_urls:
+        if s.id in applied_screening_ids or (s.url and _normalize_application_url(s.url) in applied_urls):
             blocked_reason = "already_applied"
         elif status.blocked:
             blocked_reason = "cooldown"

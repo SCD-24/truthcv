@@ -230,6 +230,7 @@ def mark_screening_applied(screening_id: str) -> ApplicationModel:
             "status": "Applied",
             "application_date": date.today().isoformat(),
             "capture_method": "manual",
+            "screening_id": screening_id,
         }
     )
     return _application_model(app)
@@ -707,6 +708,10 @@ def _application_model(app) -> ApplicationModel:
         updated_at=app.updated_at,
         cv_document=_document_model(app.cv_document),
         cover_letter_document=_document_model(app.cover_letter_document),
+        fields_submitted=[f.to_dict() for f in app.fields_submitted],
+        confirmation=app.confirmation.to_dict(),
+        screening=app.screening.to_dict(),
+        attachments=[a.to_dict() for a in app.attachments],
         **data,
     )
 

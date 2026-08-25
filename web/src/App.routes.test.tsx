@@ -4,6 +4,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { App } from "./App";
 import { WizardProvider } from "./wizard/store";
+import { listApplications } from "./api/client";
 
 vi.mock("./api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./api/client")>();
@@ -40,6 +41,34 @@ describe("App routing", () => {
   it("shows the applications ledger at /applications", async () => {
     renderAt("/applications");
     expect(await screen.findByRole("heading", { name: "Applications" })).toBeTruthy();
+  });
+
+  it("shows the filled form page at /applications/abc123/filled-form", async () => {
+    vi.mocked(listApplications).mockResolvedValueOnce([
+      {
+        id: "abc123",
+        company: "Acme",
+        website: "",
+        applicationUrl: "",
+        submitted: true,
+        submissionType: "General",
+        reachedOut: false,
+        toWho: "",
+        responseReceived: false,
+        method: "",
+        posting: "",
+        applicationDate: "",
+        status: "",
+        notes: "",
+        cvDocument: null,
+        coverLetterDocument: null,
+        createdAt: "",
+        updatedAt: "",
+        fieldsSubmitted: [{ label: "Full name", value: "Jane Doe", source: "profile" }],
+      },
+    ]);
+    renderAt("/applications/abc123/filled-form");
+    expect(await screen.findByText("Jane Doe")).toBeTruthy();
   });
 
   it("shows the Upload step at /cv/upload", async () => {

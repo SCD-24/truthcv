@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link as RouterLink } from "react-router-dom";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Button from "@mui/material/Button";
@@ -37,6 +38,7 @@ import type {
 import { DocumentAttachModal } from "./DocumentAttachModal";
 import { COLUMN_DEFS, compareApplications } from "./sorting";
 import type { ColumnDef, SortDirection } from "./sorting";
+import { filledFormPath } from "../routes";
 import "../styles/applications.css";
 
 type PreviewKind = "cv" | "cover-letter";
@@ -423,6 +425,9 @@ function ApplicationRow({
         />
       </TableCell>
       <TableCell>
+        <FilledFormCell app={app} />
+      </TableCell>
+      <TableCell>
         <Stack direction="row" spacing={1}>
           <Button size="small" onClick={onEdit}>
             Edit
@@ -512,6 +517,34 @@ function PostingCell({ app, onOpen }: { app: Application; onOpen: () => void }) 
       <span className="apps__docmeta apps__postingpeek" title={firstLine}>
         {peek}
         {firstLine.length > peek.length ? "…" : ""}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Link to the read-only filled-form evidence page for this application —
+ * the field values, confirmation and attachments the agent recorded when it
+ * submitted the form. A muted dash when nothing was recorded (hand-logged
+ * applications legitimately have no evidence).
+ */
+function FilledFormCell({ app }: { app: Application }) {
+  const count = app.fieldsSubmitted?.length ?? 0;
+  if (count === 0) {
+    return <span className="apps__docmeta">—</span>;
+  }
+  return (
+    <div className="apps__docline">
+      <Link
+        component={RouterLink}
+        to={filledFormPath(app.id)}
+        className="apps__doclink"
+        title="View the fields the agent recorded for this application"
+      >
+        Filled form
+      </Link>
+      <span className="apps__docmeta">
+        {count} field{count === 1 ? "" : "s"}
       </span>
     </div>
   );

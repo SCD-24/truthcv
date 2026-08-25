@@ -226,10 +226,11 @@ def test_full_nested_evidence_shape_exact_round_trip():
     assert app.screening.glassdoor.waiver_applied is True
 
     # Whole-record round trip is exact. The fixture is a real legacy record and
-    # so carries no "profile" key; to_dict always emits it, defaulted to ""
-    # (pinned by test_legacy_record_without_profile_loads_default). Spelling the
-    # delta out here keeps the fixture faithful to what is actually on disk.
-    assert app.to_dict() == {**RECARE_FIXTURE, "profile": ""}
+    # so carries no "profile" or "screening_id" key; to_dict always emits them,
+    # each defaulted to "" (profile is pinned by
+    # test_legacy_record_without_profile_loads_default). Spelling the delta out
+    # here keeps the fixture faithful to what is actually on disk.
+    assert app.to_dict() == {**RECARE_FIXTURE, "profile": "", "screening_id": ""}
 
 
 # --- Generic editable writes refuse structured fields; setters persist them -
