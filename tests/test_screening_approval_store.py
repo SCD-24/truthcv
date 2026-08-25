@@ -33,12 +33,12 @@ def test_round_trip_preserves_approval():
 
 
 def test_deferred_create_becomes_pending(data_dir):
-    s = store.create({"company": "Grafana", "role": "Staff", "verdict": "deferred"})
+    s = store.create({"company": "Contoso", "role": "Staff", "verdict": "deferred"})
     assert s.approval == "pending"
 
 
 def test_rejected_create_is_not_an_approval_item(data_dir):
-    s = store.create({"company": "Pleo", "role": "Staff", "verdict": "rejected"})
+    s = store.create({"company": "Soylent", "role": "Staff", "verdict": "rejected"})
     assert s.approval == ""
 
 
@@ -57,7 +57,7 @@ def test_caller_cannot_set_approval_through_update(data_dir):
 
 
 def test_set_approval(data_dir):
-    s = store.create({"company": "Grafana", "verdict": "deferred"})
+    s = store.create({"company": "Contoso", "verdict": "deferred"})
     updated = store.set_approval(s.id, "approved")
     assert updated.approval == "approved"
     assert store.get(s.id).approval == "approved"
@@ -68,13 +68,13 @@ def test_set_approval_unknown_id_returns_none(data_dir):
 
 
 def test_set_approval_rejects_bad_value(data_dir):
-    s = store.create({"company": "Grafana", "verdict": "deferred"})
+    s = store.create({"company": "Contoso", "verdict": "deferred"})
     with pytest.raises(ValueError):
         store.set_approval(s.id, "yes-please")
 
 
 def test_record_apply_failure_increments_and_keeps_approval(data_dir):
-    s = store.create({"company": "Grafana", "verdict": "deferred"})
+    s = store.create({"company": "Contoso", "verdict": "deferred"})
     store.set_approval(s.id, "approved")
     store.record_apply_failure(s.id, "browser died")
     store.record_apply_failure(s.id, "form 404")
@@ -85,6 +85,6 @@ def test_record_apply_failure_increments_and_keeps_approval(data_dir):
 
 
 def test_mark_applied(data_dir):
-    s = store.create({"company": "Grafana", "verdict": "deferred"})
+    s = store.create({"company": "Contoso", "verdict": "deferred"})
     store.set_approval(s.id, "approved")
     assert store.mark_applied(s.id).approval == "applied"

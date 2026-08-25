@@ -57,15 +57,16 @@ class TestRecover:
     @pytest.mark.parametrize(
         "name",
         [
-            "ResMed (adiutaByte / MEDIFOX DAN)",
-            "IBIS Prof. Thome AG",
-            "accantec group (part of x1F)",
-            "Klar (Klar Technologies GmbH)",
+            "Medico (nordByte / CARESOFT DAN)",
+            "OTIS Prof. Mueller AG",
+            "adventec group (part of z9K)",
+            "Sable (Sable Technologies GmbH)",
         ],
     )
-    def test_real_employer_names_survive_intact(self, name):
-        """Names the live agent actually recorded, several with punctuation
-        and capitals that a naive terminator would truncate."""
+    def test_punctuated_employer_names_survive_intact(self, name):
+        """Awkwardly punctuated names of the shape the live agent records,
+        several with punctuation and capitals that a naive terminator would
+        truncate."""
         text = f"[COMPANY: {name} | VERDICT: deferred]\nBody."
         assert repair.recover(_Rec(text))["company"] == name
 

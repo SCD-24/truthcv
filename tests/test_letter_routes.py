@@ -24,7 +24,7 @@ def client(data_dir):
 def _queued(posting_text="Staff AI Engineer, Germany (Remote). Python, LLMs."):
     return store.create(
         {
-            "company": "Grafana Labs",
+            "company": "Contoso Labs",
             "role": "Staff AI Engineer",
             "verdict": "deferred",
             "posting_text": posting_text,
@@ -142,7 +142,7 @@ def test_blocked_generation_writes_nothing_and_names_the_claims(client, monkeypa
             return {
                 "paragraphs": [
                     {
-                        "text": "I personally invented Kubernetes at Grafana Labs.",
+                        "text": "I personally invented Kubernetes at Contoso Labs.",
                         "claims": ["invented Kubernetes"],
                     }
                 ]
@@ -164,7 +164,7 @@ def test_generate_422_when_company_is_blocklisted(client, stub_provider):
     import agentconfig.store as agent_config_store
 
     cfg = agent_config_store.load()
-    cfg.blocked_companies = ["Grafana Labs"]
+    cfg.blocked_companies = ["Contoso Labs"]
     agent_config_store.save(cfg)
 
     s = _queued()

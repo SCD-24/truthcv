@@ -161,7 +161,7 @@ Design only (this document). No commits belong to this feature yet.
       aggregator) and its ATS name list stay as prose.
     - Truthfulness/verification procedure, report format, schedule mechanics,
       cover-letter guardrail: untouched.
-    - German anecdotes inside RUNBOOK §2 (Arbeitnow/RobCo, Camunda/EOR
+    - German anecdotes inside RUNBOOK §2 (Jobfeed/Initech, Duff/EOR
       vendors): dropped from the *rendered* filter block, which states
       configured values only; the RUNBOOK file keeps them as default prose.
 

@@ -1,12 +1,11 @@
 """Application model: legacy defaults and full nested-evidence shapes.
 
-The nested-evidence fixture is shaped like a real Jobs applications/records/*.json
-entry — specifically
-2026-08-13_recare-deutschland-gmbh_ai-ml-engineer-m-w-d.json — so the evidence
+The nested-evidence fixture preserves the exact shape of a real Jobs
+applications/records/*.json entry — the nesting, field population, and
+evidence sub-objects a migrated record actually has — so the evidence
 dataclasses (Confirmation, Screening/Glassdoor, FieldSubmitted, Attachment) are
-exercised against an actual production record shape and actual production
-values (confirmation.confirmed_at/evidence, numeric Glassdoor rating/reviews),
-not invented ones.
+exercised against a real production record shape, with all identifying values
+replaced by placeholders rather than invented from scratch.
 """
 
 from __future__ import annotations
@@ -71,14 +70,14 @@ def test_application_from_dict_legacy_record_defaults_nested_evidence():
     load, with every nested evidence field at its dataclass default."""
     legacy = {
         "id": "abc123",
-        "company": "EPAM",
+        "company": "Hooli",
         "submitted": True,
         "submission_type": "General",
         "created_at": "2026-01-01T00:00:00+00:00",
         "updated_at": "2026-01-01T00:00:00+00:00",
     }
     app = Application.from_dict(legacy)
-    assert app.company == "EPAM"
+    assert app.company == "Hooli"
     assert app.submitted is True
     assert app.fields_submitted == []
     assert app.confirmation == Confirmation()
@@ -90,17 +89,18 @@ def test_application_from_dict_legacy_record_defaults_nested_evidence():
 
 # --- Full nested evidence shape, real Jobs-shaped fixture ------------------
 
-# Values below are lifted verbatim from the Jobs repo's
-# applications/records/2026-08-13_recare-deutschland-gmbh_ai-ml-engineer-m-w-d.json,
-# with the candidate's name and CV filename replaced by synthetic placeholders
-# (confirmation.confirmed_at/evidence and screening.glassdoor's numeric rating,
-# reviews and waiver_applied in particular are untouched) so the round trip is
-# checked against real evidence, not an invented shape.
-RECARE_FIXTURE = {
+# Values below preserve the exact shape of a real migrated Jobs applications
+# record — the nesting, field population, and evidence sub-objects
+# (confirmation.confirmed_at/evidence and screening.glassdoor's numeric
+# rating, reviews and waiver_applied in particular) — with every identifying
+# value (company, URLs, candidate name, CV filename, Glassdoor profile ids)
+# replaced by placeholders, so the round trip is checked against a real
+# evidence shape, not an invented one.
+NORTHWIND_FIXTURE = {
     "id": "a1b2c3d4e5f6",
-    "company": "Recare Deutschland GmbH",
-    "website": "https://recaresolutions.com",
-    "application_url": "https://careers.recaresolutions.com/o/ai-ml-engineer-mwd",
+    "company": "Northwind Health GmbH",
+    "website": "https://northwind-health.example",
+    "application_url": "https://careers.northwind-health.example/o/ai-ml-engineer-mwd",
     "submitted": True,
     "submission_type": "Tailored",
     "reached_out": False,
@@ -139,15 +139,15 @@ RECARE_FIXTURE = {
         "confirmed_at": "2026-08-13T09:27:00+02:00",
         "evidence": (
             "Page navigated to "
-            "https://careers.recaresolutions.com/o/ai-ml-engineer-mwd/applied "
+            "https://careers.northwind-health.example/o/ai-ml-engineer-mwd/applied "
             "and the Application tab relabelled itself \"Application \u2014 Applied\"."
         ),
     },
     "screening": {
         "entity": (
-            "Recare Deutschland GmbH, Bertha-Benz-Stra\u00dfe 5, 10557 Berlin \u2014 "
-            "HRB 169691 B, Amtsgericht Charlottenburg (Berlin), managing director "
-            "Maximilian Greschke, read off Recare's own Impressum."
+            "Northwind Health GmbH, Musterstra\u00dfe 1, 10115 Berlin \u2014 "
+            "HRB 100000 B, Amtsgericht Charlottenburg (Berlin), managing director "
+            "Erika Mustermann, read off Northwind's own Impressum."
         ),
         "remote": (
             "Passes, with a mild internal conflict raised in the letter. The "
@@ -173,12 +173,12 @@ RECARE_FIXTURE = {
             "waiver_applied": True,
             "note": (
                 "Read directly in the browser off Glassdoor's own company page, "
-                "not from a search snippet (the Jimdo rule). Profile "
-                "**E2145485**, identified as the right company by four "
+                "not from a search snippet (the Stark rule). Profile "
+                "**E1000001**, identified as the right company by four "
                 "independent markers on that page: HQ **Berlin, Deutschland**, "
-                "founded **2017**, CEO **Maximilian Greschke** (the same person "
+                "founded **2017**, CEO **Erika Mustermann** (the same person "
                 "named as managing director in the Impressum), and website "
-                "**recaresolutions.com**. Rating **3,3 \u2605**. The page reports "
+                "**northwind-health.example**. Rating **3,3 \u2605**. The page reports "
                 "its review count inconsistently \u2014 the overview header says "
                 "\"Basierend auf 8 Bewertungen\" while the FAQ says \"basierend "
                 "auf **17** anonymen Bewertungen\"; the higher of the two is "
@@ -189,14 +189,14 @@ RECARE_FIXTURE = {
                 "waiver, and that other sentiment figures on the page are weak "
                 "(54% would recommend, 37% positive business outlook, 61% "
                 "approve of CEO). A second, smaller Glassdoor profile literally "
-                "named \"Recare\" exists (E4906785, 3.1\u2605, 5 reviews) and is "
+                "named \"Northwind\" exists (E1000002, 3.1\u2605, 5 reviews) and is "
                 "also under 20 reviews, so the waiver holds on either profile."
             ),
         },
     },
     "attachments": [
         {"kind": "cv", "path": "2026_Ada_Example_CV_v2.pdf"},
-        {"kind": "cover_letter", "path": "scratchpad/recare_cover.pdf"},
+        {"kind": "cover_letter", "path": "scratchpad/northwind_cover.pdf"},
     ],
     "cv_document": None,
     "cover_letter_document": None,
@@ -206,7 +206,7 @@ RECARE_FIXTURE = {
 
 
 def test_full_nested_evidence_shape_exact_round_trip():
-    app = Application.from_dict(RECARE_FIXTURE)
+    app = Application.from_dict(NORTHWIND_FIXTURE)
 
     # Confirmation evidence matches the real record exactly (hard-coded here,
     # not read back off the fixture, so a typo in either place cannot hide).
@@ -216,7 +216,7 @@ def test_full_nested_evidence_shape_exact_round_trip():
     assert app.confirmation.confirmed_at == "2026-08-13T09:27:00+02:00"
     assert app.confirmation.evidence == (
         "Page navigated to "
-        "https://careers.recaresolutions.com/o/ai-ml-engineer-mwd/applied "
+        "https://careers.northwind-health.example/o/ai-ml-engineer-mwd/applied "
         "and the Application tab relabelled itself \"Application \u2014 Applied\"."
     )
 
@@ -230,7 +230,7 @@ def test_full_nested_evidence_shape_exact_round_trip():
     # each defaulted to "" (profile is pinned by
     # test_legacy_record_without_profile_loads_default). Spelling the delta out
     # here keeps the fixture faithful to what is actually on disk.
-    assert app.to_dict() == {**RECARE_FIXTURE, "profile": "", "screening_id": ""}
+    assert app.to_dict() == {**NORTHWIND_FIXTURE, "profile": "", "screening_id": ""}
 
 
 # --- Generic editable writes refuse structured fields; setters persist them -
@@ -238,17 +238,17 @@ def test_full_nested_evidence_shape_exact_round_trip():
 def test_create_and_update_ignore_structured_fields(data_dir):
     app = applications.create(
         {
-            "company": "Recare Deutschland GmbH",
+            "company": "Northwind Health GmbH",
             "status": "confirmed",
             # Structured/nested fields are not in Application.EDITABLE and
             # must be silently ignored by the generic create path.
-            "confirmation": RECARE_FIXTURE["confirmation"],
-            "screening": RECARE_FIXTURE["screening"],
-            "fields_submitted": RECARE_FIXTURE["fields_submitted"],
-            "attachments": RECARE_FIXTURE["attachments"],
+            "confirmation": NORTHWIND_FIXTURE["confirmation"],
+            "screening": NORTHWIND_FIXTURE["screening"],
+            "fields_submitted": NORTHWIND_FIXTURE["fields_submitted"],
+            "attachments": NORTHWIND_FIXTURE["attachments"],
         }
     )
-    assert app.company == "Recare Deutschland GmbH"
+    assert app.company == "Northwind Health GmbH"
     assert app.status == "confirmed"
     assert app.confirmation == Confirmation()
     assert app.screening == Screening()
@@ -259,8 +259,8 @@ def test_create_and_update_ignore_structured_fields(data_dir):
         app.id,
         {
             "notes": "Updated notes",
-            "confirmation": RECARE_FIXTURE["confirmation"],
-            "screening": RECARE_FIXTURE["screening"],
+            "confirmation": NORTHWIND_FIXTURE["confirmation"],
+            "screening": NORTHWIND_FIXTURE["screening"],
         },
     )
     assert updated.notes == "Updated notes"
@@ -274,23 +274,23 @@ def test_create_and_update_ignore_structured_fields(data_dir):
 
 
 def test_dedicated_setters_persist_structured_fields(data_dir):
-    app = applications.create({"company": "Recare Deutschland GmbH"})
+    app = applications.create({"company": "Northwind Health GmbH"})
 
-    saved = save_confirmation(app.id, RECARE_FIXTURE["confirmation"])
+    saved = save_confirmation(app.id, NORTHWIND_FIXTURE["confirmation"])
     assert saved.confirmation.confirmed_at == "2026-08-13T09:27:00+02:00"
-    assert saved.confirmation.evidence == RECARE_FIXTURE["confirmation"]["evidence"]
+    assert saved.confirmation.evidence == NORTHWIND_FIXTURE["confirmation"]["evidence"]
 
-    saved = save_screening(app.id, RECARE_FIXTURE["screening"])
+    saved = save_screening(app.id, NORTHWIND_FIXTURE["screening"])
     assert saved.screening.glassdoor.rating == 3.3
     assert saved.screening.glassdoor.reviews == 17
     assert saved.screening.glassdoor.waiver_applied is True
 
-    saved = save_fields_submitted(app.id, RECARE_FIXTURE["fields_submitted"])
+    saved = save_fields_submitted(app.id, NORTHWIND_FIXTURE["fields_submitted"])
     assert len(saved.fields_submitted) == 2
     assert saved.fields_submitted[0].label == "Full name *"
 
-    saved = save_attachments(app.id, RECARE_FIXTURE["attachments"])
-    assert [a.to_dict() for a in saved.attachments] == RECARE_FIXTURE["attachments"]
+    saved = save_attachments(app.id, NORTHWIND_FIXTURE["attachments"])
+    assert [a.to_dict() for a in saved.attachments] == NORTHWIND_FIXTURE["attachments"]
 
     # Persisted, not just in-memory.
     reloaded = applications.get(app.id)
@@ -298,7 +298,7 @@ def test_dedicated_setters_persist_structured_fields(data_dir):
     assert reloaded.screening.glassdoor.rating == 3.3
     assert reloaded.screening.glassdoor.reviews == 17
     assert len(reloaded.fields_submitted) == 2
-    assert [a.to_dict() for a in reloaded.attachments] == RECARE_FIXTURE["attachments"]
+    assert [a.to_dict() for a in reloaded.attachments] == NORTHWIND_FIXTURE["attachments"]
 
 
 def test_list_notes_from_a_jobs_record_flatten_to_one_string():
@@ -312,7 +312,7 @@ def test_list_notes_from_a_jobs_record_flatten_to_one_string():
     app = Application.from_dict(
         {
             "id": "31b806822964",
-            "company": "Jimdo",
+            "company": "Stark",
             "notes": [
                 "Heading flag: FILTER BREACH, see Glassdoor below",
                 "Status flag: Submitted in error: the company fails filter 5.",

@@ -8,7 +8,7 @@ scheduled run.
 
 The agent applies immediately when a role passes every criterion, and abandons
 the role when one is unverifiable. The 2026-08-23 19:09 run deferred three roles
-that way — a Grafana Labs staff role at €109k–€137k among them — because it
+that way — a Contoso Labs staff role at €100k–€130k among them — because it
 could not verify the German hiring entity from non-browser fetches. Nothing
 carried those decisions to the operator except prose in a run log, and nothing
 carried the operator's answer back to the next run.

@@ -162,7 +162,7 @@ under the operator's name. Watch it.
 | `AGENT_BROWSER_DRIVER` | `browser` | Which browser the agent may drive: `browser` (the containerised Chromium) or `interceptor` (your host Chrome). Only the selected driver's tools are granted to `claude`. |
 | `BROWSER_MCP_URL` | `http://browser:8931/mcp` | In-network address of the `browser` compose service's MCP endpoint (see [`browser/README.md`](../browser/README.md)). Also in-network only. Used by the `browser` driver. |
 | `INTERCEPTOR_BIN` | `/opt/interceptor/bin/interceptor` | Where the Bun-compiled Interceptor binary is mounted *inside* the container; `claude` spawns it as a stdio MCP server. Mounted by `docker-compose.interceptor.yml`. |
-| `INTERCEPTOR_BIN_HOST` | `/home/glenn/.local/bin/interceptor` | The *host* path that mount reads from. Set it to your own — `command -v interceptor`. |
+| `INTERCEPTOR_BIN_HOST` | `${HOME}/.local/bin/interceptor` | The *host* path that mount reads from. Set it to your own — `command -v interceptor`. |
 | `INTERCEPTOR_SOCKET` | `/tmp/interceptor.sock` | The Interceptor CLI-to-daemon IPC socket, bind-mounted at the same path inside and out. The daemon listens on the host; the mount only carries the channel in. |
 | `INTERCEPTOR_MCP_ALLOW` | empty | Safety-tier opt-in. Empty already permits `read` and `mutate`, which covers filling and submitting a form. **Leave it empty for an unattended submitter**; widening it grants `destructive` and arbitrary-exec powers to a process no one is watching. |
 | `INTERCEPTOR_MCP_FENCE` | `on` | Prompt-injection protection while reading job postings — attacker-controlled text the agent acts on. Keep it on. |

@@ -132,12 +132,12 @@ import screening.store as store
 
 
 def test_deferred_create_becomes_pending(data_dir):
-    s = store.create({"company": "Grafana", "role": "Staff", "verdict": "deferred"})
+    s = store.create({"company": "Contoso", "role": "Staff", "verdict": "deferred"})
     assert s.approval == "pending"
 
 
 def test_rejected_create_is_not_an_approval_item(data_dir):
-    s = store.create({"company": "Pleo", "role": "Staff", "verdict": "rejected"})
+    s = store.create({"company": "Soylent", "role": "Staff", "verdict": "rejected"})
     assert s.approval == ""
 
 
@@ -156,7 +156,7 @@ def test_caller_cannot_set_approval_through_update(data_dir):
 
 
 def test_set_approval(data_dir):
-    s = store.create({"company": "Grafana", "verdict": "deferred"})
+    s = store.create({"company": "Contoso", "verdict": "deferred"})
     updated = store.set_approval(s.id, "approved")
     assert updated.approval == "approved"
     assert store.get(s.id).approval == "approved"
@@ -167,13 +167,13 @@ def test_set_approval_unknown_id_returns_none(data_dir):
 
 
 def test_set_approval_rejects_bad_value(data_dir):
-    s = store.create({"company": "Grafana", "verdict": "deferred"})
+    s = store.create({"company": "Contoso", "verdict": "deferred"})
     with pytest.raises(ValueError):
         store.set_approval(s.id, "yes-please")
 
 
 def test_record_apply_failure_increments_and_keeps_approval(data_dir):
-    s = store.create({"company": "Grafana", "verdict": "deferred"})
+    s = store.create({"company": "Contoso", "verdict": "deferred"})
     store.set_approval(s.id, "approved")
     store.record_apply_failure(s.id, "browser died")
     store.record_apply_failure(s.id, "form 404")
@@ -184,7 +184,7 @@ def test_record_apply_failure_increments_and_keeps_approval(data_dir):
 
 
 def test_mark_applied(data_dir):
-    s = store.create({"company": "Grafana", "verdict": "deferred"})
+    s = store.create({"company": "Contoso", "verdict": "deferred"})
     store.set_approval(s.id, "approved")
     assert store.mark_applied(s.id).approval == "applied"
 ```
@@ -295,14 +295,14 @@ import companyboards.store as boards
 
 
 def test_approved_defaults_false(data_dir):
-    boards.record("Grafana Labs", "https://grafana.com/careers")
-    assert boards.load()["grafana labs"].approved is False
+    boards.record("Contoso Labs", "https://contoso.example/careers")
+    assert boards.load()["contoso labs"].approved is False
 
 
 def test_set_approved(data_dir):
-    boards.record("Grafana Labs", "https://grafana.com/careers")
-    assert boards.set_approved("Grafana Labs", True).approved is True
-    assert boards.load()["grafana labs"].approved is True
+    boards.record("Contoso Labs", "https://contoso.example/careers")
+    assert boards.set_approved("Contoso Labs", True).approved is True
+    assert boards.load()["contoso labs"].approved is True
 
 
 def test_set_approved_unknown_company(data_dir):
@@ -311,19 +311,19 @@ def test_set_approved_unknown_company(data_dir):
 
 def test_record_preserves_approval(data_dir):
     """The agent re-recording the board must not un-approve the company."""
-    boards.record("Grafana Labs", "https://grafana.com/careers")
-    boards.set_approved("Grafana Labs", True)
-    boards.record("Grafana Labs", "https://grafana.com/jobs", ats="greenhouse")
-    entry = boards.load()["grafana labs"]
+    boards.record("Contoso Labs", "https://contoso.example/careers")
+    boards.set_approved("Contoso Labs", True)
+    boards.record("Contoso Labs", "https://contoso.example/jobs", ats="greenhouse")
+    entry = boards.load()["contoso labs"]
     assert entry.approved is True
-    assert entry.careers_url == "https://grafana.com/jobs"
+    assert entry.careers_url == "https://contoso.example/jobs"
     assert entry.ats == "greenhouse"
 
 
 def test_record_round_trips_approved_through_disk(data_dir):
-    boards.record("Grafana Labs", "https://grafana.com/careers")
-    boards.set_approved("Grafana Labs", True)
-    assert boards.load()["grafana labs"].approved is True
+    boards.record("Contoso Labs", "https://contoso.example/careers")
+    boards.set_approved("Contoso Labs", True)
+    assert boards.load()["contoso labs"].approved is True
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -433,20 +433,20 @@ def client(data_dir):
     return TestClient(app)
 
 
-def _deferred(company="Grafana Labs", role="Staff AI Engineer"):
+def _deferred(company="Contoso Labs", role="Staff AI Engineer"):
     return store.create({"company": company, "role": role, "verdict": "deferred"})
 
 
 def test_list_filters_by_approval(client):
     _deferred()
-    store.create({"company": "Pleo", "verdict": "rejected"})
+    store.create({"company": "Soylent", "verdict": "rejected"})
     rows = client.get("/api/screenings?approval=pending").json()
-    assert [r["company"] for r in rows] == ["Grafana Labs"]
+    assert [r["company"] for r in rows] == ["Contoso Labs"]
 
 
 def test_list_unfiltered_returns_everything(client):
     _deferred()
-    store.create({"company": "Pleo", "verdict": "rejected"})
+    store.create({"company": "Soylent", "verdict": "rejected"})
     assert len(client.get("/api/screenings").json()) == 2
 
 
@@ -475,7 +475,7 @@ def test_patch_bad_value_422(client):
 
 
 def test_bulk_patch_reports_per_id(client):
-    a, b = _deferred("Grafana Labs"), _deferred("n8n")
+    a, b = _deferred("Contoso Labs"), _deferred("Aperture")
     body = client.patch(
         "/api/screenings/approvals",
         json={"ids": [a.id, b.id, "missing"], "approval": "approved"},
@@ -496,10 +496,10 @@ def test_bulk_route_is_not_shadowed_by_the_id_route(client):
 
 
 def test_company_approval(client):
-    boards.record("Grafana Labs", "https://grafana.com/careers")
-    body = client.patch("/api/company-boards/Grafana Labs", json={"approved": True}).json()
+    boards.record("Contoso Labs", "https://contoso.example/careers")
+    body = client.patch("/api/company-boards/Contoso Labs", json={"approved": True}).json()
     assert body["approved"] is True
-    assert boards.load()["grafana labs"].approved is True
+    assert boards.load()["contoso labs"].approved is True
 
 
 def test_company_approval_unknown_404(client):
@@ -744,7 +744,7 @@ import screening.store as store
 from agenttools.tools_ledger import get_approved_applications, report_apply_failure
 
 
-def _approved(company="Grafana Labs", url="https://grafana.com/jobs/1"):
+def _approved(company="Contoso Labs", url="https://contoso.example/jobs/1"):
     s = store.create({"company": company, "role": "Staff", "url": url, "verdict": "deferred"})
     store.set_approval(s.id, "approved")
     return s
@@ -754,7 +754,7 @@ def test_returns_approved_items(data_dir):
     s = _approved()
     items = get_approved_applications()
     assert [(i["screening_id"], i["company"], i["url"]) for i in items] == [
-        (s.id, "Grafana Labs", "https://grafana.com/jobs/1")
+        (s.id, "Contoso Labs", "https://contoso.example/jobs/1")
     ]
 
 
@@ -768,14 +768,14 @@ def test_excludes_pending_and_rejected(data_dir):
 def test_excludes_already_applied_url(data_dir):
     """Retry-forever would otherwise re-submit an application whose confirmation
     capture failed."""
-    _approved(url="https://grafana.com/jobs/1")
-    apps.create({"company": "Grafana Labs", "application_url": "https://grafana.com/jobs/1"})
+    _approved(url="https://contoso.example/jobs/1")
+    apps.create({"company": "Contoso Labs", "application_url": "https://contoso.example/jobs/1"})
     assert get_approved_applications() == []
 
 
 def test_cooldown_company_is_flagged_not_hidden(data_dir):
-    s = _approved(company="n8n")
-    apps.create({"company": "n8n", "application_url": "https://n8n.io/other"})
+    s = _approved(company="Aperture")
+    apps.create({"company": "Aperture", "application_url": "https://aperture.example/other"})
     items = get_approved_applications()
     assert len(items) == 1
     assert items[0]["screening_id"] == s.id
@@ -1111,9 +1111,9 @@ afterEach(cleanup);
 function makeRecord(overrides: Partial<ScreeningRecord> = {}): ScreeningRecord {
   return {
     id: "s1",
-    company: "Grafana Labs",
+    company: "Contoso Labs",
     role: "Staff AI Engineer",
-    url: "https://grafana.com/jobs/1",
+    url: "https://contoso.example/jobs/1",
     screenedDate: "2026-08-23",
     verdict: "deferred",
     failingCriterion: "entity",
@@ -1139,7 +1139,7 @@ async function renderPage(pending: ScreeningRecord[], approved: ScreeningRecord[
 describe("ApprovalsPage", () => {
   it("renders a pending item with the agent's deferral reason", async () => {
     await renderPage([makeRecord()]);
-    expect(await screen.findByText("Grafana Labs")).toBeTruthy();
+    expect(await screen.findByText("Contoso Labs")).toBeTruthy();
     expect(screen.getByText(/German hiring entity unverified/)).toBeTruthy();
   });
 
@@ -1164,7 +1164,7 @@ describe("ApprovalsPage", () => {
 
   it("bulk approve sends every selected id", async () => {
     vi.mocked(bulkSetApproval).mockResolvedValue({ results: [] });
-    await renderPage([makeRecord(), makeRecord({ id: "s2", company: "n8n" })]);
+    await renderPage([makeRecord(), makeRecord({ id: "s2", company: "Aperture" })]);
     fireEvent.click(await screen.findByRole("checkbox", { name: /select all/i }));
     fireEvent.click(screen.getByRole("button", { name: /approve selected/i }));
     await waitFor(() =>

@@ -12,12 +12,12 @@ import companyboards.store as boards
 
 def test_prune_with_an_empty_watchlist_keeps_everything(data_dir):
     """An empty watchlist means "unconfigured", not "delete every board"."""
-    boards.record("Grafana Labs", "https://grafana.com/careers")
+    boards.record("Contoso Labs", "https://contoso.example/careers")
     boards.prune([])
-    assert "grafana labs" in boards.load()
+    assert "contoso labs" in boards.load()
 
 
 def test_prune_drops_companies_off_the_watchlist(data_dir):
-    boards.record("Grafana Labs", "https://grafana.com/careers")
+    boards.record("Contoso Labs", "https://contoso.example/careers")
     boards.prune(["Other Co"])
-    assert "grafana labs" not in boards.load()
+    assert "contoso labs" not in boards.load()

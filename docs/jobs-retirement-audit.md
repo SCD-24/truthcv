@@ -130,8 +130,8 @@ was transcribed from the runbook during this plan set.
 | `applications/APPLICATION_LOG.md.prebackfill` | pre-backfill snapshot; the backfill it fed has run |
 | `docker/render-pdf` | Decision: TruthCV's `renderer/` is the one surviving implementation; the WeasyPrint/LibreOffice path is dropped |
 | `docker/compose.yaml` | `docker-compose.yml` in TruthCV, now carrying both services |
-| `applications/TQG/coverletter_tqg.docx` (the maintainer's-name-prefixed original) | an older manually-named copy; record `245bccd01cae` points at `cover_letter_245bccd01cae.{pdf,docx}`, both present in TruthCV |
-| `applications/*.docx`, `*.pdf` loose at top level (codecentric, chaptr, dexter_health, join, OH-SO, smartclip, supabase, teleclinic, trustyou) | manual-era duplicates of files now stored by document id in `data/` |
+| `applications/<company>/coverletter_<company>.docx` (the maintainer's-name-prefixed original) | an older manually-named copy; record `245bccd01cae` points at `cover_letter_245bccd01cae.{pdf,docx}`, both present in TruthCV |
+| `applications/*.docx`, `*.pdf` loose at top level (nine company-named files) | manual-era duplicates of files now stored by document id in `data/` |
 | `applications/cv_pii_rm.docx` | a PII-stripped variant predating the truth store |
 | `cv_v1.{docx,pdf}`, `cv_full_2026.pdf`, `cv_v2.{html,md}` | earlier CV generations (`cv_v1.*` predates `cv_v2.*`; `cv_full_2026.pdf` is a separately-named earlier export); `cv_v2.pdf` is the canonical one |
 | `requirements.txt` | TruthCV's own dependency set |
@@ -282,10 +282,10 @@ The effective cooldown window is 90 days. Spot-checked:
 
 | Company | In cooldown | Expires | Present before migration |
 |---|---|---|---|
-| Recare Deutschland GmbH | yes | 2026-11-11 | no |
-| Cohere | yes | 2026-11-11 | no |
-| Jedox GmbH | yes | 2026-11-11 | no |
-| HiPeople | yes | 2026-11-11 | no |
+| *(migrated company A)* | yes | 2026-11-11 | no |
+| *(migrated company B)* | yes | 2026-11-11 | no |
+| *(migrated company C)* | yes | 2026-11-11 | no |
+| *(migrated company D)* | yes | 2026-11-11 | no |
 | *(a company never seen)* | no | — | — |
 
 The control matters: an unknown company reports **not** in cooldown, so the
@@ -360,8 +360,8 @@ from sits beside it would buy nothing real.
 
 ## Data-integrity notes observed while auditing
 
-- Records `jetbrains` and `robco-gmbh` reference cover letters absent from the
+- Two records reference cover letters absent from the
   Jobs tree. They were already missing before this plan set began.
-- Application `245bccd01cae` (TQG) has `cv_document.source` holding the *cover
+- Application `245bccd01cae` has `cv_document.source` holding the *cover
   letter* text, identical to `cover_letter_document.source`. Pre-existing data
   defect, carried in from before the migration; not introduced by it.

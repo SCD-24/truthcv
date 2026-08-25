@@ -17,13 +17,13 @@ def _set_mode(mode: str) -> None:
 
 def test_passed_is_queued_in_semi(data_dir):
     _set_mode("semi")
-    s = store.create({"company": "Grafana Labs", "verdict": "passed"})
+    s = store.create({"company": "Contoso Labs", "verdict": "passed"})
     assert s.approval == "pending"
 
 
 def test_passed_is_not_queued_in_full(data_dir):
     _set_mode("full")
-    s = store.create({"company": "Grafana Labs", "verdict": "passed"})
+    s = store.create({"company": "Contoso Labs", "verdict": "passed"})
     assert s.approval == ""
 
 
@@ -42,9 +42,9 @@ def test_rejected_is_never_queued(data_dir):
 def test_posting_text_and_posted_date_round_trip(data_dir):
     s = store.create(
         {
-            "company": "Grafana Labs",
+            "company": "Contoso Labs",
             "verdict": "passed",
-            "posting_text": "Staff AI Engineer. Germany (Remote). EUR 109k-137k.",
+            "posting_text": "Staff AI Engineer. Germany (Remote). EUR 100k-130k.",
             "posted_date": "2026-08-20",
         }
     )

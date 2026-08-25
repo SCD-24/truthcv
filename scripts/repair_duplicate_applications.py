@@ -1,6 +1,6 @@
 """Merge duplicate Application rows left by a retried ``record_application``.
 
-The incident this repairs: while recording a single submission (the RobCo one),
+The incident this repairs: while recording a single submission (the Initech one),
 an agent retried the ``record_application`` MCP tool roughly four times within a
 couple of minutes — one of those calls failed partway through with a tooling
 error — and each attempt minted a *separate* Application row. The result was

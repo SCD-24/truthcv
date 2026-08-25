@@ -44,4 +44,4 @@ services:
       # The host Interceptor binary, read-only — the agent must never be able to
       # replace the executable it is about to run. Override INTERCEPTOR_BIN_HOST
       # if yours is not on the default path (`command -v interceptor` on the host).
-      - ${INTERCEPTOR_BIN_HOST:-/home/glenn/.local/bin/interceptor}:/opt/interceptor/bin/interceptor:ro
+      - ${INTERCEPTOR_BIN_HOST:-${HOME}/.local/bin/interceptor}:/opt/interceptor/bin/interceptor:ro

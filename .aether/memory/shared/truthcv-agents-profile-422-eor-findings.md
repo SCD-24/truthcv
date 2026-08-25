@@ -4,7 +4,7 @@ description: Investigation findings for the "422 on save job profile + EOR selec
 type: project
 ---
 
-MEMBER REF: /home/glenn/Documents/truthcv. Single-member workspace effectively. Plan set 4d72085e-a778-46f1-bce0-8adb0ee5c56b (unnamed) — I am in ITS planning conversation, so omit `set` on plan_component_work.
+MEMBER REF: <repo root>. Single-member workspace effectively. Plan set 4d72085e-a778-46f1-bce0-8adb0ee5c56b (unnamed) — I am in ITS planning conversation, so omit `set` on plan_component_work.
 
 USER BUG REPORT: "when trying to save job profile on agents page, I get 'That didn't work (error 422). Try again.' — for the EOR field, I'm unable to select one of the choices (can't even click them)"
 
@@ -26,9 +26,9 @@ Validators that can 422 (api/schemas.py):
 - _validate_cooldown_days >= 0; _validate_max_applications_per_run >= 1; run_at HH:MM regex; run_days enum.
 _Camel base = ConfigDict(alias_generator=to_camel, populate_by_name=True) — extras are IGNORED, so companyBoards in the body is NOT the cause (tests/test_agent_config_api.py::test_put_does_not_accept_company_boards_field asserts 200).
 
-MOST LIKELY CAUSE: AgentsPage.tsx `emptyDraft()` (line ~513) returns `name: ""`. "Add profile" creates a fully blank card; Save then always 422s with "profile name must not be empty" and the user sees only the generic message. NOTE the staged spec (docs/superpowers/specs/agent-job-profiles-staged-plans.json) said a new profile should be PRE-FILLED with §5.3 defaults (fully remote; Germany; EOR disallowed; entity verification required; salary floor 85000, ask 95000-110000; English; Glassdoor 3.5 waived under 20 reviews; accepted "agentic / AI engineering, data engineering"; rejected "generic full-stack, frontend, SRE, Java-heavy backend") and that there should be a DUPLICATE action — NEITHER was implemented. So the implementation diverged from the plan.
+MOST LIKELY CAUSE: AgentsPage.tsx `emptyDraft()` (line ~513) returns `name: ""`. "Add profile" creates a fully blank card; Save then always 422s with "profile name must not be empty" and the user sees only the generic message. NOTE the staged spec (docs/superpowers/specs/agent-job-profiles-staged-plans.json) said a new profile should be PRE-FILLED with §5.3 defaults (fully remote; Germany; EOR disallowed; entity verification required; salary floor 70000, ask 80000-100000; English; Glassdoor 3.5 waived under 20 reviews; accepted "backend engineering, platform engineering"; rejected "sales, marketing") and that there should be a DUPLICATE action — NEITHER was implemented. So the implementation diverged from the plan.
 SECOND CANDIDATE: user typed a salary that violates floor <= askMin <= askMax, or a Glassdoor rating > 5.
-STILL UNVERIFIED: the actual request body / stored profiles. data/agent_config.json is only 228 bytes (root-owned, live volume at /home/glenn/Documents/truthcv/data) — I never managed to cat it (run_command blocked `cat data/agent_config.json` when chained; a bare `cat data/agent_config.json` was not tried).
+STILL UNVERIFIED: the actual request body / stored profiles. data/agent_config.json is only 228 bytes (root-owned, live volume at <repo root>/data) — I never managed to cat it (run_command blocked `cat data/agent_config.json` when chained; a bare `cat data/agent_config.json` was not tried).
 
 === KEY SOURCE LOCATIONS ===
 - web/src/agents/AgentsPage.tsx (1040 lines): ProfileDraft iface ~l.445; listToText/textToList/numberToText/textToIntOrNull/textToFloatOrNull ~l.462-490; profileToDraft ~l.492; emptyDraft ~l.513; draftToProfile ~l.536; ProfilesSection ~l.566; handleSave ~l.593 calls updateAgentConfig({profiles, cooldownDays, maxApplicationsPerRun}); EOR TextField ~l.703.

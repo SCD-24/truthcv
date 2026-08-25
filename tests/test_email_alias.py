@@ -30,23 +30,23 @@ def test_company_slug_truncates_without_trailing_underscore():
 
 def test_alias_email_happy_path():
     assert (
-        alias_email("glenn.chon.de@gmail.com", "Acme Co.")
-        == "glenn.chon.de+tcv_acme_co@gmail.com"
+        alias_email("jane.doe@example.com", "Acme Co.")
+        == "jane.doe+tcv_acme_co@example.com"
     )
 
 
 def test_alias_email_contains_alias_prefix_marker():
-    result = alias_email("glenn.chon.de@gmail.com", "Acme Co.")
+    result = alias_email("jane.doe@example.com", "Acme Co.")
     assert f"+{ALIAS_PREFIX}" in result
 
 
 def test_alias_email_passthrough_blank_company():
-    email = "glenn.chon.de@gmail.com"
+    email = "jane.doe@example.com"
     assert alias_email(email, "") == email
 
 
 def test_alias_email_passthrough_company_slugs_to_empty():
-    email = "glenn.chon.de@gmail.com"
+    email = "jane.doe@example.com"
     assert alias_email(email, "!!!") == email
 
 
@@ -66,16 +66,16 @@ def test_alias_email_passthrough_empty_local_part():
 
 
 def test_alias_email_passthrough_empty_domain():
-    email = "glenn.chon.de@"
+    email = "jane.doe@"
     assert alias_email(email, "Acme Co.") == email
 
 
 def test_alias_email_passthrough_local_already_has_plus():
-    email = "glenn.chon.de+other@gmail.com"
+    email = "jane.doe+other@example.com"
     assert alias_email(email, "Acme Co.") == email
 
 
-def test_alias_email_non_gmail_domain():
+def test_alias_email_alternate_domain():
     assert (
         alias_email("jane.doe@example.org", "N26 GmbH")
         == "jane.doe+tcv_n26_gmbh@example.org"

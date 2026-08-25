@@ -6,8 +6,8 @@ type: project
 
 Companion to [[truthcv-agents-profile-422-eor-findings]] — read that first for all source locations.
 
-DECISIVE FACT: `cat data/agent_config.json` (live volume, member /home/glenn/Documents/truthcv) returns ONLY:
-{"enabled": true, "blocked_companies": ["cinemo","cinemo gmbh"], "run_at": ["09:00","15:00","03:00","18:00"], "run_days": ["mon","tue","wed","thu","fri"]}
+DECISIVE FACT: `cat data/agent_config.json` (live volume, member <repo root>) returns ONLY:
+{"enabled": true, "blocked_companies": ["acme","acme gmbh"], "run_at": ["09:00","15:00","03:00","18:00"], "run_days": ["mon","tue","wed","thu","fri"]}
 NO "profiles" key, NO target_companies, NO cooldown_days, NO max_applications_per_run.
 
 ⇒ The user has ZERO saved profiles. So the only way they can be "saving a job profile" is: click "Add profile" → `emptyDraft()` → name "" → Save → AgentConfigUpdate._validate_profiles raises "profile name must not be empty" → FastAPI 422 → client.ts can't read the list-shaped `detail` → generic "That didn't work (error 422). Try again."

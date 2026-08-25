@@ -14,20 +14,20 @@ def client(data_dir):
     return TestClient(app)
 
 
-def _deferred(company="Grafana Labs", role="Staff AI Engineer"):
+def _deferred(company="Contoso Labs", role="Staff AI Engineer"):
     return store.create({"company": company, "role": role, "verdict": "deferred"})
 
 
 def test_list_filters_by_approval(client):
     _deferred()
-    store.create({"company": "Pleo", "verdict": "rejected"})
+    store.create({"company": "Soylent", "verdict": "rejected"})
     rows = client.get("/api/screenings?approval=pending").json()
-    assert [r["company"] for r in rows] == ["Grafana Labs"]
+    assert [r["company"] for r in rows] == ["Contoso Labs"]
 
 
 def test_list_unfiltered_returns_everything(client):
     _deferred()
-    store.create({"company": "Pleo", "verdict": "rejected"})
+    store.create({"company": "Soylent", "verdict": "rejected"})
     assert len(client.get("/api/screenings").json()) == 2
 
 
@@ -163,7 +163,7 @@ def test_patch_url_unknown_id_404(client):
 def test_bulk_patch_reports_per_id(client):
     import coverletter.store as letters
 
-    a, b = _deferred("Grafana Labs"), _deferred("n8n")
+    a, b = _deferred("Contoso Labs"), _deferred("Aperture")
     letters.save(a.id, letters.CoverLetterDraft(text="Dear team,"))
     letters.save(b.id, letters.CoverLetterDraft(text="Dear team,"))
     body = client.patch(
@@ -237,7 +237,7 @@ def test_rejecting_never_needs_a_letter(client):
 def test_bulk_approve_reports_a_draftless_item_instead_of_approving_it(client):
     import coverletter.store as letters
 
-    a, b = _deferred("Grafana Labs"), _deferred("n8n")
+    a, b = _deferred("Contoso Labs"), _deferred("Aperture")
     letters.save(a.id, letters.CoverLetterDraft(text="Dear team,"))
     body = client.patch(
         "/api/screenings/approvals", json={"ids": [a.id, b.id], "approval": "approved"}
@@ -253,9 +253,9 @@ def test_bulk_approve_reports_a_draftless_item_instead_of_approving_it(client):
 class TestMarkScreeningApplied:
     def _screening(self, client, **overrides):
         body = {
-            "company": "Grafana Labs",
+            "company": "Contoso Labs",
             "role": "Staff AI Engineer",
-            "url": "https://grafana.com/jobs/1",
+            "url": "https://contoso.example/jobs/1",
             "postingText": "Staff AI Engineer, Germany (Remote).",
             "verdict": "passed",
             **overrides,
@@ -269,9 +269,9 @@ class TestMarkScreeningApplied:
         r = client.post(f"/api/screenings/{sid}/applied")
         assert r.status_code == 201
         app = r.json()
-        assert app["company"] == "Grafana Labs"
+        assert app["company"] == "Contoso Labs"
         assert app["role"] == "Staff AI Engineer"
-        assert app["applicationUrl"] == "https://grafana.com/jobs/1"
+        assert app["applicationUrl"] == "https://contoso.example/jobs/1"
         assert app["posting"] == "Staff AI Engineer, Germany (Remote)."
         assert app["submitted"] is True
         assert app["status"] == "Applied"
@@ -282,7 +282,7 @@ class TestMarkScreeningApplied:
         sid = self._screening(client)
         client.post(f"/api/screenings/{sid}/applied")
         apps = client.get("/api/applications").json()
-        assert [a["company"] for a in apps] == ["Grafana Labs"]
+        assert [a["company"] for a in apps] == ["Contoso Labs"]
 
     def test_the_screening_leaves_the_found_queue(self, client, data_dir):
         sid = self._screening(client)

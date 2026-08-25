@@ -13,18 +13,18 @@ from truth.model import Bullet, Experience, Profile, Truth
 
 def _truth() -> Truth:
     return Truth(
-        profile=Profile(name="Glenn Chon", location="Karlsruhe", email="g@example.com"),
+        profile=Profile(name="Jane Rivera", location="Berlin", email="jane.rivera@example.com"),
         experiences=[
             Experience(
-                id="exp-cinemo-1",
+                id="exp-acme-1",
                 role="Data Engineer",
-                company="Cinemo",
+                company="Acme",
                 start="2024",
                 end="Present",
                 source="linkedin-pdf",
                 bullets=[
                     Bullet(
-                        id="exp-cinemo-1-b1",
+                        id="exp-acme-1-b1",
                         value="Built Airflow DAGs in Python",
                         source="linkedin-pdf",
                     )
@@ -57,11 +57,11 @@ def _build(paragraphs):
 def test_label_prefixed_claim_is_traceable():
     """The facts block labels each fact and the prompt says quote it verbatim.
 
-    A model that complies emits "Location: Karlsruhe"; the label word appears in
+    A model that complies emits "Location: Berlin"; the label word appears in
     no truth value, which used to flag `location` and block the whole letter.
     """
     scope = _letter_scope(
-        [{"text": "x", "claims": ["Location: Karlsruhe"]}], _truth(), set(), set(), None
+        [{"text": "x", "claims": ["Location: Berlin"]}], _truth(), set(), set(), None
     )
     result = validate([scope])
     assert result.ok, f"blocked on {result.unverifiable}"
@@ -69,7 +69,7 @@ def test_label_prefixed_claim_is_traceable():
 
 def test_bare_value_still_traceable():
     scope = _letter_scope(
-        [{"text": "x", "claims": ["Karlsruhe"]}], _truth(), set(), set(), None
+        [{"text": "x", "claims": ["Berlin"]}], _truth(), set(), set(), None
     )
     assert validate([scope]).ok
 
@@ -86,7 +86,7 @@ def test_invented_fact_still_blocked():
 
 def test_facts_block_lines_are_labelled():
     lines = _facts_block_lines(_truth(), None)
-    assert "Location: Karlsruhe" in lines
+    assert "Location: Berlin" in lines
 
 
 def test_placeholder_blocks_the_letter():
@@ -97,9 +97,9 @@ def test_placeholder_blocks_the_letter():
 
 
 def test_clean_letter_passes():
-    result = _build([{"text": "I want this role at Cinemo.", "claims": ["Cinemo"]}])
+    result = _build([{"text": "I want this role at Acme.", "claims": ["Acme"]}])
     assert result["blocked"] is False
-    assert result["text"] == "I want this role at Cinemo."
+    assert result["text"] == "I want this role at Acme."
 
 
 def test_bracket_matching_is_deliberately_broad():
@@ -136,7 +136,7 @@ class TestSignOff:
     def test_sign_off_is_appended(self):
         from coverletter.generate import _with_sign_off
 
-        assert _with_sign_off("Body.", "Glenn Chon") == "Body.\n\nKind regards,\n\nGlenn Chon"
+        assert _with_sign_off("Body.", "Jane Rivera") == "Body.\n\nKind regards,\n\nJane Rivera"
 
     def test_blank_name_appends_nothing(self):
         """No name is better than an unsigned-looking placeholder."""
@@ -161,7 +161,7 @@ class TestSignOff:
         from coverletter.generate import _with_sign_off
 
         assert _with_sign_off("Body.", "[Your Name] Smith") == "Body."
-        assert _with_sign_off("Body.", "Glenn [Your Name]") == "Body."
+        assert _with_sign_off("Body.", "Jane [Your Name]") == "Body."
         assert _with_sign_off("Body.", "Ada [Company] Lovelace") == "Body."
 
     def test_a_sentence_length_name_appends_nothing(self):
@@ -170,7 +170,7 @@ class TestSignOff:
         into a guardrailed letter with nothing left to check it."""
         from coverletter.generate import _with_sign_off
 
-        smuggled = "Dr. Glenn Chon, ex-Google Staff Engineer with 15 years at NASA"
+        smuggled = "Dr. Jane Rivera, ex-Google Staff Engineer with 15 years at NASA"
         assert _with_sign_off("Body.", smuggled) == "Body."
 
     def test_a_long_but_genuine_name_still_signs(self):
@@ -183,12 +183,12 @@ class TestSignOff:
     def test_whitespace_in_name_is_normalized(self):
         from coverletter.generate import _with_sign_off
 
-        assert _with_sign_off("Body.", "  Glenn \n Chon ").endswith("Glenn Chon")
+        assert _with_sign_off("Body.", "  Jane \n Rivera ").endswith("Jane Rivera")
 
     def test_sign_off_is_its_own_paragraph_block(self):
         """Consumers split on the blank line: the renderers to make paragraphs,
         the agent to paste into a form. A single newline would collapse."""
         from coverletter.generate import _with_sign_off
 
-        blocks = _with_sign_off("Body.", "Glenn Chon").split("\n\n")
-        assert blocks == ["Body.", "Kind regards,", "Glenn Chon"]
+        blocks = _with_sign_off("Body.", "Jane Rivera").split("\n\n")
+        assert blocks == ["Body.", "Kind regards,", "Jane Rivera"]

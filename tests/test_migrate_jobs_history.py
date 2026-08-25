@@ -73,11 +73,11 @@ Narrative prose that must not be parsed.
 
 | Company / role | Failing criterion | Evidence |
 | --- | --- | --- |
-| **Nagarro — AI Engineer** | **1. Fully remote** | Office-based in Munich. |
-| **Mercor, Starbridge, KDCI** | **2. German contract** | Staffing intermediaries. |
-| **ClickHouse — Senior SWE** | **Not resolved — deferred** | Carry to the next run. |
+| **Vandelay — AI Engineer** | **1. Fully remote** | Office-based in Munich. |
+| **Cyberdyne, Oceanic, Wonka** | **2. German contract** | Staffing intermediaries. |
+| **Massive — Senior SWE** | **Not resolved — deferred** | Carry to the next run. |
 
-**Blocked by cooldown, not examined on merit:** Langfuse and n8n
+**Blocked by cooldown, not examined on merit:** Tyrell and Aperture
 (to 2026-08-15). Acme GmbH (to 2026-11-11 — applied today; **new**).
 
 # Screening record — 2026-08-13
@@ -87,10 +87,10 @@ same targets are not re-researched from scratch on the next run.
 
 | Company / role | Failing criterion | Evidence |
 |---|---|---|
-| Zapier — Engineer, Applied AI | **2. German contract** | USD band only. |
-| Dealfront — Senior Data Engineer | **Could not verify** | Board 404s from this machine. |
+| Wayne — Engineer, Applied AI | **2. German contract** | USD band only. |
+| Fabrikam — Senior Data Engineer | **Could not verify** | Board 404s from this machine. |
 
-**Blocked by cooldown, not examined on merit:** RobCo, JetBrains (to 2026-09-09).
+**Blocked by cooldown, not examined on merit:** Initech, Umbrella (to 2026-09-09).
 """
 
 
@@ -212,39 +212,39 @@ def test_finds_the_table_when_its_marker_is_a_plain_paragraph(jobs_tree):
     sentence the newest section writes as a ## heading."""
     rows = parse_screening_log(jobs_tree / "applications" / "SCREENING_LOG.md")
     older = [r for r in rows if r["screened_date"] == "2026-08-13"]
-    assert [r["company"] for r in older] == ["Zapier", "Dealfront"]
+    assert [r["company"] for r in older] == ["Wayne", "Fabrikam"]
 
 
 def test_an_unreachable_posting_is_deferred_not_rejected(jobs_tree):
     rows = parse_screening_log(jobs_tree / "applications" / "SCREENING_LOG.md")
-    assert next(r for r in rows if r["company"] == "Dealfront")["verdict"] == "deferred"
+    assert next(r for r in rows if r["company"] == "Fabrikam")["verdict"] == "deferred"
 
 
 def test_a_carried_over_check_is_deferred_not_rejected(jobs_tree):
     rows = parse_screening_log(jobs_tree / "applications" / "SCREENING_LOG.md")
-    clickhouse = next(r for r in rows if r["company"] == "ClickHouse")
-    assert clickhouse["verdict"] == "deferred"
-    assert next(r for r in rows if r["company"] == "Nagarro")["verdict"] == "rejected"
+    massive = next(r for r in rows if r["company"] == "Massive")
+    assert massive["verdict"] == "deferred"
+    assert next(r for r in rows if r["company"] == "Vandelay")["verdict"] == "rejected"
 
 
 def test_splits_company_from_role_on_the_em_dash(jobs_tree):
     rows = parse_screening_log(jobs_tree / "applications" / "SCREENING_LOG.md")
-    nagarro = next(r for r in rows if r["company"] == "Nagarro")
-    assert nagarro["role"] == "AI Engineer"
-    assert nagarro["failing_criterion"] == "1. Fully remote"
-    assert nagarro["reason"] == "Office-based in Munich."
+    vandelay = next(r for r in rows if r["company"] == "Vandelay")
+    assert vandelay["role"] == "AI Engineer"
+    assert vandelay["failing_criterion"] == "1. Fully remote"
+    assert vandelay["reason"] == "Office-based in Munich."
 
 
 def test_splits_a_multi_company_cell_with_no_role(jobs_tree):
     rows = parse_screening_log(jobs_tree / "applications" / "SCREENING_LOG.md")
     companies = {r["company"] for r in rows}
-    assert {"Mercor", "Starbridge", "KDCI"} <= companies
-    assert all(r["role"] == "" for r in rows if r["company"] == "Mercor")
+    assert {"Cyberdyne", "Oceanic", "Wonka"} <= companies
+    assert all(r["role"] == "" for r in rows if r["company"] == "Cyberdyne")
 
 
 def test_cooldown_prose_is_not_parsed_as_a_rejection(jobs_tree):
     rows = parse_screening_log(jobs_tree / "applications" / "SCREENING_LOG.md")
-    assert not any("Langfuse" in r["company"] for r in rows)
+    assert not any("Tyrell" in r["company"] for r in rows)
 
 
 # --- cooldowns -----------------------------------------------------------------
@@ -254,11 +254,11 @@ def test_cooldown_expiries_are_read_verbatim(jobs_tree):
     rather than recomputed from application_date under a different rule."""
     found = parse_cooldowns(jobs_tree / "applications" / "SCREENING_LOG.md")
     assert found == {
-        "Langfuse": "2026-08-15",
-        "n8n": "2026-08-15",
+        "Tyrell": "2026-08-15",
+        "Aperture": "2026-08-15",
         "Acme GmbH": "2026-11-11",
-        "RobCo": "2026-09-09",
-        "JetBrains": "2026-09-09",
+        "Initech": "2026-09-09",
+        "Umbrella": "2026-09-09",
     }
 
 
@@ -304,7 +304,7 @@ def test_a_fully_mapped_record_reports_nothing_unmapped(data_dir, jobs_tree):
 
 def test_an_unreadable_table_row_is_reported_not_dropped(data_dir, jobs_tree):
     log = jobs_tree / "applications" / "SCREENING_LOG.md"
-    marker = "| Dealfront — Senior Data Engineer |"
+    marker = "| Fabrikam — Senior Data Engineer |"
     truncated = "| **Orphan Co** | only two cells |\n" + marker
     log.write_text(LOG.replace(marker, truncated), encoding="utf-8")
     report = run(jobs_tree, dry_run=False)
