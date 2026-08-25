@@ -91,4 +91,28 @@ describe("BrowserSessionPage", () => {
       expect(screen.getByText(/browser is unavailable/i)).toBeTruthy();
     });
   });
+
+  it("offers to return to the already-open session on a session_open refusal", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: false,
+      status: 409,
+      json: async () => ({ detail: { reason: "session_open", url: "https://other.example.com/login" } }),
+    })));
+    renderPage();
+    const goTo = await screen.findByRole("button", { name: /go to the open session/i });
+    expect(goTo).toBeTruthy();
+  });
+
+  it("distinguishes a launch failure from the agent being busy", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: false,
+      status: 409,
+      json: async () => ({ detail: { reason: "launch_failed" } }),
+    })));
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/browser could not be started/i)).toBeTruthy();
+    });
+    expect(screen.queryByText(/agent is applying right now/i)).toBeNull();
+  });
 });

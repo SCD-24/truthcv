@@ -571,17 +571,43 @@ export function closeBrowserSession(): Promise<void> {
   return request<void>("/api/browser/session", { method: "DELETE" });
 }
 
+/** Reasons the session server can send back in a 409's `detail.reason`.
+ * `errorDetailToMessage` doesn't understand this shape (it only reads
+ * `detail.message` / `detail.blockedClaims`), so the raw reason is carried
+ * on `BrowserSessionError` itself for the caller to map to copy. */
+export type BrowserSessionRefusalReason =
+  | "agent_running"
+  | "session_open"
+  | "profile_busy"
+  | "launch_failed"
+  | "probe_failed";
+
 /** Raised by openBrowserSession so the session page can tell the three
  * outcomes apart. `request` collapses every failure into one message, which
  * is right for the wizard but wrong here: "the agent is busy" and "the
- * browser is broken" call for different words and different buttons. */
+ * browser is broken" call for different words and different buttons.
+ *
+ * `reason` and `conflictUrl` carry the 409 body's own `{reason, url}` —
+ * `errorDetailToMessage` returns "" for that shape (it has neither
+ * `message` nor `blockedClaims`), so the generic `message` alone can't
+ * distinguish "the agent is busy" from "you already have a session open
+ * at <url>". */
 export class BrowserSessionError extends Error {
   status: number;
+  reason: BrowserSessionRefusalReason | null;
+  conflictUrl: string | null;
 
-  constructor(status: number, message: string) {
+  constructor(
+    status: number,
+    message: string,
+    reason: BrowserSessionRefusalReason | null = null,
+    conflictUrl: string | null = null,
+  ) {
     super(message);
     this.name = "BrowserSessionError";
     this.status = status;
+    this.reason = reason;
+    this.conflictUrl = conflictUrl;
   }
 }
 
@@ -601,11 +627,24 @@ export async function openBrowserSession(url: string): Promise<BrowserSession> {
     throw new BrowserSessionError(0, "Can't reach the server. Check that TruthCV is running, then try again.");
   }
   if (!res.ok) {
-    const detail = await res
-      .json()
-      .then((b) => errorDetailToMessage(b))
-      .catch(() => "");
-    throw new BrowserSessionError(res.status, detail || `That didn't work (error ${res.status}).`);
+    const body = await res.json().catch(() => null);
+    const detail = errorDetailToMessage(body);
+    const rawDetail =
+      body && typeof body === "object" ? (body as { detail?: unknown }).detail : undefined;
+    const reason =
+      rawDetail && typeof rawDetail === "object" && typeof (rawDetail as { reason?: unknown }).reason === "string"
+        ? ((rawDetail as { reason: string }).reason as BrowserSessionRefusalReason)
+        : null;
+    const conflictUrl =
+      rawDetail && typeof rawDetail === "object" && typeof (rawDetail as { url?: unknown }).url === "string"
+        ? ((rawDetail as { url: string }).url)
+        : null;
+    throw new BrowserSessionError(
+      res.status,
+      detail || `That didn't work (error ${res.status}).`,
+      reason,
+      conflictUrl,
+    );
   }
   return (await res.json()) as BrowserSession;
 }

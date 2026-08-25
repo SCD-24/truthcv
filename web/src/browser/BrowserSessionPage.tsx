@@ -9,7 +9,18 @@ import {
   getBrowserSession,
   openBrowserSession,
 } from "../api/client";
-import { ROUTES } from "../routes";
+import { ROUTES, browserSessionPath } from "../routes";
+
+/** 409 refusal copy, keyed by the session server's `detail.reason`. A
+ * reason vitest/the server didn't send (or one this page doesn't
+ * recognize) falls back to the "agent is busy" wording below — the most
+ * common case in practice, since most 409s come from a run in progress. */
+const REFUSAL_COPY: Record<string, string> = {
+  agent_running: "The agent is applying right now. Try again in a few minutes.",
+  profile_busy: "The browser could not be started — its profile is busy. Try again shortly.",
+  launch_failed: "The browser could not be started.",
+  probe_failed: "The browser could not be started.",
+};
 
 type State = "starting" | "live" | "refused" | "unavailable" | "closed";
 
@@ -44,6 +55,7 @@ export function BrowserSessionPage() {
   const url = params.get("url") || "";
   const [state, setState] = useState<State>("starting");
   const [message, setMessage] = useState("");
+  const [conflictUrl, setConflictUrl] = useState<string | null>(null);
   const [deadline, setDeadline] = useState<string | null>(null);
   const [remaining, setRemaining] = useState(0);
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -62,7 +74,15 @@ export function BrowserSessionPage() {
         if (!live) return;
         if (e.status === 409) {
           setState("refused");
-          setMessage("The agent is applying right now. Try again in a few minutes.");
+          if (e.reason === "session_open") {
+            setMessage("A sign-in session is already open.");
+            setConflictUrl(e.conflictUrl);
+          } else {
+            setMessage(
+              (e.reason && REFUSAL_COPY[e.reason]) ||
+                "The agent is applying right now. Try again in a few minutes.",
+            );
+          }
         } else {
           setState("unavailable");
           setMessage("The browser is unavailable.");
@@ -137,6 +157,14 @@ export function BrowserSessionPage() {
     return (
       <Stack spacing={2} sx={{ p: 3 }}>
         <Alert severity={state === "refused" ? "info" : "error"}>{message}</Alert>
+        {conflictUrl && (
+          <Button
+            variant="contained"
+            onClick={() => navigate(browserSessionPath(conflictUrl))}
+          >
+            Go to the open session
+          </Button>
+        )}
         {back}
       </Stack>
     );
