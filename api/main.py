@@ -17,7 +17,7 @@ from agenttools.server import router as mcp_router
 from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
 from truth.store import data_dir
 
-from .config import cors_origins, port, static_dir
+from .config import cors_origins, port, public_url, static_dir
 from .routes import router
 
 # Build MCP Server app for streamable-HTTP JSON-RPC endpoint
@@ -222,6 +222,7 @@ _mount_static()
 def main() -> None:  # pragma: no cover
     import uvicorn
 
+    print(f"TruthCV is running at {public_url()}", flush=True)
     uvicorn.run(app, host="0.0.0.0", port=port())
 
 
