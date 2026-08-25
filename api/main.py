@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -131,6 +131,14 @@ app.add_middleware(
 
 app.include_router(router)
 app.include_router(mcp_router)
+
+from api.browser_stream import relay as _browser_relay  # noqa: E402
+
+
+@app.websocket("/api/browser/session/stream")
+async def browser_session_stream(websocket: WebSocket) -> None:
+    """noVNC relay for the attended sign-in session. See api/browser_stream.py."""
+    await _browser_relay(websocket)
 
 # Register the MCP streamable-HTTP JSON-RPC endpoint here (before _mount_static)
 # to ensure it takes precedence over the SPA fallback.
