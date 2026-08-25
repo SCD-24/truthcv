@@ -226,6 +226,11 @@
                   "desc": "Path to the mounted data volume (truth.yaml, secrets.enc, profile.pdf).",
                   "example": "./data",
                   "key": "DATA_DIR"
+                },
+                {
+                  "desc": "Host-side port the compose stack publishes the UI on (docker-compose.yml ${APP_PORT:-5627}). Display only — the app still binds PORT (8080) inside the container. Read by api.config.public_url() to print a reachable URL at startup. Unset in local dev, where it falls back to PORT.",
+                  "example": "8123",
+                  "key": "PUBLIC_PORT"
                 }
               ]
             },
