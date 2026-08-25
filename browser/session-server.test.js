@@ -384,3 +384,17 @@ test("an unexpected error inside open() produces a 500 instead of crashing the h
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+// --- Fix round 4: a launch producing no process must refuse, not open a permanently-stuck session ---
+
+test("a launch that resolves with no process refuses instead of leaving an unclosable session", async () => {
+  const m = manager({ launch: () => null });
+  const result = await m.open("https://example.com/login");
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, "launch_failed");
+  assert.strictEqual(m.state().open, false);
+
+  // Also confirm close()/evict() are not left refusing a phantom reservation.
+  assert.deepStrictEqual(m.close(), { closed: false });
+  assert.deepStrictEqual(m.evict(), { evicting: false });
+});

@@ -88,16 +88,19 @@ function tokenOk(given) {
 // ---------------------------------------------------------------------------
 function createSessionManager(deps) {
   const { supervisorIdle, profileInUse, launch, now, graceMs, closeGraceMs = CLOSE_GRACE_MS } = deps;
-  // session shape: { url, proc, startedAt, evictDeadline, closing?, closeDeadline? }
+  // session shape: { url, proc, startedAt, evictDeadline, reserved?, closing?, closeDeadline? }
   //
-  // `proc` is null for the brief window between reserving the slot and the
-  // launch being confirmed (see open()), and `closing`/`closeDeadline` are
-  // set once close() has signalled the browser and is waiting for it to
-  // actually exit. state()'s fixed response shape ({open,url,startedAt,
-  // evictDeadline}) reports BOTH of those as open:true — a reservation and a
-  // browser mid-close both still hold (or are about to hold) the profile, so
-  // reporting open:false during either window would let a second open, or an
-  // eviction, race in against a slot that is not actually free yet.
+  // `reserved: true` marks the brief window between reserving the slot and
+  // the launch being confirmed (see open()) — close()/evict() test this flag
+  // explicitly, not `proc`'s truthiness, so a launch that resolves with a
+  // falsy `proc` can never be mistaken for "still reserved" (launchAndConfirm
+  // refuses that case outright instead). `closing`/`closeDeadline` are set
+  // once close() has signalled the browser and is waiting for it to actually
+  // exit. state()'s fixed response shape ({open,url,startedAt,evictDeadline})
+  // reports BOTH windows as open:true — a reservation and a browser mid-close
+  // both still hold (or are about to hold) the profile, so reporting
+  // open:false during either window would let a second open, or an eviction,
+  // race in against a slot that is not actually free yet.
   let session = null;
 
   function state() {
@@ -137,7 +140,17 @@ function createSessionManager(deps) {
         resolve({ ok: false, reason: "launch_failed" });
         return;
       }
-      if (!proc || typeof proc.on !== "function") {
+      if (!proc) {
+        // A launch that produced no process is a failed launch, not a
+        // successful one — resolving ok:true here would hand open() a
+        // falsy session.proc, which is indistinguishable from an
+        // unpromoted reservation to close()/evict() and would leave the
+        // session permanently unclosable.
+        log("launch produced no process");
+        resolve({ ok: false, reason: "launch_failed" });
+        return;
+      }
+      if (typeof proc.on !== "function") {
         // No event surface to wait on — nothing to confirm.
         resolve({ ok: true, proc });
         return;
@@ -187,7 +200,14 @@ function createSessionManager(deps) {
     // would overwrite `session`, orphaning the first process: untracked,
     // unkillable by /session/close or /session/evict, holding the profile
     // forever.
-    const reservation = { url, proc: null, startedAt: null, evictDeadline: null };
+    // `reserved: true` is the explicit marker close()/evict() test for —
+    // not `!session.proc`. A launch can in principle resolve with a falsy
+    // `proc` (guarded against below in launchAndConfirm, which now refuses
+    // that as launch_failed), and relying on proc's truthiness to mean
+    // "still reserved" would make a future regression there silently
+    // reintroduce a permanently unclosable session. `reserved` is deleted
+    // the moment the reservation is promoted, below.
+    const reservation = { url, proc: null, startedAt: null, evictDeadline: null, reserved: true };
     session = reservation;
 
     // `close()`/`evict()` refuse a proc-less (reserved-but-not-launched)
@@ -257,6 +277,7 @@ function createSessionManager(deps) {
     }
     session.proc = result.proc;
     session.startedAt = now().toISOString();
+    delete session.reserved; // promoted: no longer a reservation
     attachExitHandler(result.proc);
     log(`session opened at ${url} (pid ${result.proc && result.proc.pid})`);
     return { ok: true };
@@ -264,7 +285,7 @@ function createSessionManager(deps) {
 
   function close() {
     if (!session) return { closed: false };
-    if (!session.proc) {
+    if (session.reserved) {
       // Still in open()'s reservation window — nothing has launched yet to
       // signal. Clearing `session` here would let open() resume and attach
       // a just-launched Chromium to session === null: untracked, unkillable,
@@ -305,7 +326,7 @@ function createSessionManager(deps) {
 
   function evict() {
     if (!session) return { evicting: false };
-    if (!session.proc) {
+    if (session.reserved) {
       // Same reservation-window hazard as close(): stamping a deadline here
       // would let tick() call close() against a still-reserving session once
       // the grace period passed, reaching the same orphan by a longer route.

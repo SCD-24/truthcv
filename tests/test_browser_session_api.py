@@ -156,3 +156,22 @@ class TestDeleteSession:
         body = r.json()
         assert body["closed"] is False
         assert body["closing"] is True
+
+    def test_a_close_refused_during_the_reservation_window_is_distinguished_from_no_session(
+        self, client, monkeypatch
+    ):
+        """A close arriving while open() has only a reservation (no browser
+        launched yet) is refused as closed=false, reserving=true — distinct
+        from closed=false, closing=false, which means no session existed at
+        all. See browser/session-server.js close()."""
+        monkeypatch.setenv("AGENT_API_TOKEN", "t")
+        with patch(
+            "urllib.request.urlopen",
+            return_value=_response({"closed": False, "reserving": True}),
+        ):
+            r = client.delete("/api/browser/session")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["closed"] is False
+        assert body["closing"] is False
+        assert body["reserving"] is True

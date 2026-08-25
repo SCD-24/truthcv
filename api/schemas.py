@@ -992,15 +992,19 @@ class BrowserSessionRequest(_Camel):
 class BrowserSessionClosed(_Camel):
     """DELETE /api/browser/session.
 
-    `closed` and `closing` are not opposites of the same bit: the session
-    server confirms a browser actually exited before reporting `closed`, so an
-    ordinary close reports `closed=false, closing=true` while it waits — see
-    browser/session-server.js's close(). Both false only for a request that
-    named no session to close.
+    `closed`, `closing` and `reserving` are three distinct states, not two
+    opposed bits: the session server confirms a browser actually exited
+    before reporting `closed`, so an ordinary close reports `closed=false,
+    closing=true` while it waits; a close arriving while open() is still
+    resolving the request (no browser launched yet) is refused outright as
+    `closed=false, reserving=true` rather than either applied or silently
+    dropped — see browser/session-server.js's close(). All three false only
+    for a request that named no session to close.
     """
 
     closed: bool
     closing: bool = False
+    reserving: bool = False
 
 
 class AgentRunResult(_Camel):

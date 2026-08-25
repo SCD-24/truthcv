@@ -1350,7 +1350,11 @@ def post_browser_session(payload: BrowserSessionRequest) -> BrowserSession:
 def delete_browser_session() -> BrowserSessionClosed:
     """Close the attended session and release the browser."""
     data = _forward_to_session_server("/session/close", method="POST")
-    return BrowserSessionClosed(closed=data.get("closed", False), closing=data.get("closing", False))
+    return BrowserSessionClosed(
+        closed=data.get("closed", False),
+        closing=data.get("closing", False),
+        reserving=data.get("reserving", False),
+    )
 
 
 def _letter_approvals(
