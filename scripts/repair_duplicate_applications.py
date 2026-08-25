@@ -16,12 +16,14 @@ land together:
   the dedupe key the store already uses, so rows sharing it are by construction
   the same screening's application.
 * A row *without* a ``screening_id`` is bucketed by
-  ``(company lowercased, normalize_application_url(application_url))`` — but only
-  if it "looks like a real submission" (``submitted`` is True or its
+  ``(company_identity_key(company), normalize_application_url(application_url))``
+  — but only if it "looks like a real submission" (``submitted`` is True or its
   ``confirmation`` carries any text/evidence) and only if its normalized URL is
   non-empty. Rows that are neither submitted nor confirmed, and rows whose URL
   normalizes to nothing, never group with anything by URL: they are left
-  strictly alone.
+  strictly alone. The company identity key (``screening.company.company_identity_key``)
+  ignores a trailing legal-entity suffix, so e.g. "RobCo" and "RobCo GmbH" are
+  treated as the same employer for grouping purposes.
 * A bucket holding a single row is UNCHANGED — never reported as a merge.
 * A bucket holding two or more rows is a mergeable GROUP.
 
@@ -75,6 +77,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import applications.store as applications_store  # noqa: E402
 from applications.model import Application  # noqa: E402
+from screening.company import company_identity_key  # noqa: E402
 from screening.url import normalize_application_url  # noqa: E402
 
 
@@ -121,9 +124,12 @@ def _bucket_key(app: Application):
     """The grouping key for ``app``, or None if it does not participate.
 
     A non-empty ``screening_id`` keys on that id. Otherwise the row keys on
-    ``(company lowercased, normalized url)`` — but only when it looks like a
+    ``(company identity key, normalized url)`` — but only when it looks like a
     real submission and its URL normalizes to something non-empty; anything else
-    is left ungrouped (returns None).
+    is left ungrouped (returns None). The company identity key
+    (``screening.company.company_identity_key``) ignores a trailing
+    legal-entity suffix, so "RobCo" and "RobCo GmbH" bucket together instead of
+    a suffix manufacturing a second company.
     """
     sid = (app.screening_id or "").strip()
     if sid:
@@ -133,7 +139,7 @@ def _bucket_key(app: Application):
     norm = normalize_application_url(app.application_url)
     if not norm:
         return None
-    return ("company_url", ((app.company or "").strip().lower(), norm))
+    return ("company_url", (company_identity_key(app.company or ""), norm))
 
 
 def group_duplicates(apps: list[Application]) -> list[tuple[tuple, list[Application]]]:
@@ -333,12 +339,12 @@ def apply_merges(plans: list[MergePlan]) -> None:
 # --- Reporting -----------------------------------------------------------------
 
 def _key_label(key: tuple) -> str:
-    """Human-readable bucket key: the screening_id or the (company, url) tuple."""
+    """Human-readable bucket key: the screening_id or the (identity key, url) tuple."""
     kind, value = key
     if kind == "screening_id":
         return f"screening_id={value!r}"
-    company, norm = value
-    return f"(company={company!r}, url={norm!r})"
+    identity_key, norm = value
+    return f"(company_identity_key={identity_key!r}, url={norm!r})"
 
 
 def print_report(

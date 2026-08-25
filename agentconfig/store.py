@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from screening.company import company_identity_key
 from truth.store import data_dir
 
 
@@ -307,14 +308,17 @@ def save(cfg: AgentConfig) -> AgentConfig:
 def is_blocked(cfg: AgentConfig, company: str) -> bool:
     """Check if a company is blocked.
 
-    Company matching: strip/casefold equality like screening/cooldown.py.
-    Non-string or blank company returns False.
+    Company matching: identity-key equality (screening.company.company_identity_key),
+    the same key used by screening/cooldown.py, so a legal-entity suffix does
+    not let a blocked company slip through under a slightly different name
+    (blocking "RobCo" also blocks "RobCo GmbH"). Non-string or blank company
+    returns False (checked before the key is computed).
     """
     if not isinstance(company, str) or not company.strip():
         return False
 
-    company_normalized = company.strip().casefold()
+    company_key = company_identity_key(company)
     return any(
-        blocked.strip().casefold() == company_normalized
+        company_identity_key(blocked) == company_key
         for blocked in cfg.blocked_companies
     )

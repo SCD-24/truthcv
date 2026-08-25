@@ -39,9 +39,33 @@ def test_is_blocked_matches_like_cooldown(data_dir):
     cfg = store.AgentConfig(blocked_companies=["  Acme GmbH "])
     assert store.is_blocked(cfg, "acme gmbh")
     assert store.is_blocked(cfg, "ACME GMBH  ")
-    assert not store.is_blocked(cfg, "Acme")          # exact equality, not substring
+    # Identity-key match: a legal-entity suffix does not let a blocked
+    # company slip through under a shorter spelling of the same name.
+    assert store.is_blocked(cfg, "Acme")
     assert not store.is_blocked(cfg, "")
     assert not store.is_blocked(cfg, None)  # type: ignore[arg-type]
+
+
+def test_is_blocked_suffix_equivalence_both_directions(data_dir):
+    """A legal-entity suffix on either the blocklist or the incoming name matches."""
+    bare = store.AgentConfig(blocked_companies=["RobCo"])
+    assert store.is_blocked(bare, "RobCo GmbH")
+    assert store.is_blocked(bare, "robco gmbh.")
+
+    suffixed = store.AgentConfig(blocked_companies=["RobCo GmbH"])
+    assert store.is_blocked(suffixed, "RobCo")
+    assert store.is_blocked(suffixed, "ROBCO")
+
+    # An unrelated company is still not blocked.
+    assert not store.is_blocked(bare, "Initech")
+
+
+def test_is_blocked_blank_and_non_str_still_false(data_dir):
+    cfg = store.AgentConfig(blocked_companies=["RobCo"])
+    assert not store.is_blocked(cfg, "")
+    assert not store.is_blocked(cfg, "   ")
+    assert not store.is_blocked(cfg, None)  # type: ignore[arg-type]
+    assert not store.is_blocked(cfg, 12345)  # type: ignore[arg-type]
 
 
 def test_from_dict_rejects_non_string_list_elements_blocked_companies(data_dir):

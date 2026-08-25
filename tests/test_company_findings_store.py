@@ -128,6 +128,27 @@ def test_key_normalization_matches_variants(data_dir):
     assert len(matches) == 1
 
 
+def test_key_matches_across_legal_entity_suffixes(data_dir):
+    """Findings for one employer are not split by a legal-entity suffix.
+
+    The company key delegates to the shared company_identity_key, so
+    research recorded against "RobCo GmbH" is found under "RobCo" too.
+    """
+    store.record("RobCo GmbH", "employer_rating", "4.5", "https://a.example/x", "press", "", "agent")
+    store.record("RobCo", "employer_rating", "4.5", "https://b.example/y", "press", "", "agent")
+
+    assert len(store.for_company("RobCo")) == 2
+    assert len(store.for_company("RobCo GmbH")) == 2
+
+
+def test_contradictions_detected_across_legal_entity_suffixes(data_dir):
+    """A contradicting claim under a suffix variant is still a contradiction."""
+    store.record("RobCo GmbH", "employer_rating", "4.5", "https://a.example/x", "press", "", "agent")
+    store.record("RobCo", "employer_rating", "2.0", "https://b.example/y", "review_site", "", "agent")
+
+    assert len(store.open_contradictions("RobCo")) == 1
+
+
 def test_record_invalid_company_stores_nothing(data_dir):
     with pytest.raises(ValueError):
         store.record("n/a", "employer_rating", "4.5", "https://a.example/x", "press", "", "agent")

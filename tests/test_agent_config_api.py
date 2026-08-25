@@ -334,6 +334,28 @@ def test_get_returns_resolved_boards_for_target_companies(client, data_dir):
     assert "Microsoft" not in company_names
 
 
+def test_get_returns_resolved_boards_for_suffix_equivalent_target_company(client, data_dir):
+    """A target company matches a board recorded under a legal-entity-suffix variant.
+
+    The match is by identity key (screening.company.company_identity_key), so
+    a target company "RobCo" also picks up a board recorded as "RobCo GmbH".
+    """
+    from companyboards import store as board_store
+
+    r = client.put("/api/agent/config", json={"targetCompanies": ["RobCo"]})
+    assert r.status_code == 200
+
+    board_store.record("RobCo GmbH", "https://careers.robco.example.com", "Greenhouse")
+    board_store.record("Microsoft", "https://careers.microsoft.com", "Workable")
+
+    r = client.get("/api/agent/config")
+    assert r.status_code == 200
+    boards = r.json()["companyBoards"]
+    company_names = {b["company"] for b in boards}
+    assert "RobCo GmbH" in company_names
+    assert "Microsoft" not in company_names
+
+
 def test_get_omits_boards_for_removed_target_companies(client, data_dir):
     """Boards for companies removed from watchlist are pruned."""
     from companyboards import store as board_store

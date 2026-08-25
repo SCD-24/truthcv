@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 from truth.store import data_dir
+from screening.company import company_identity_key
 import json
 
 
@@ -60,7 +61,15 @@ def board_path() -> Path:
 
 
 def load() -> dict[str, CompanyBoard]:
-    """Load company boards from storage, returning empty dict on missing/corrupt file."""
+    """Load company boards from storage, returning empty dict on missing/corrupt file.
+
+    The stored dict keys are re-keyed onto each entry's identity key (see
+    ``_reconcile_keys``) before being returned, so callers never see two
+    entries for legal-entity-suffix variants of the same company. This is an
+    in-memory reconciliation only; a pure read never rewrites the file — the
+    re-keyed map is only persisted the next time ``record()`` (or another
+    writer) calls ``save()``.
+    """
     path = board_path()
     if not path.exists():
         return {}
@@ -72,9 +81,47 @@ def load() -> dict[str, CompanyBoard]:
         for key, item in raw.items():
             if isinstance(item, dict):
                 boards[key] = CompanyBoard.from_dict(item)
-        return boards
+        return _reconcile_keys(boards)
     except (json.JSONDecodeError, OSError):
         return {}
+
+
+def _reconcile_keys(boards: dict[str, CompanyBoard]) -> dict[str, CompanyBoard]:
+    """Re-key ``boards`` onto each entry's identity key, merging any collisions.
+
+    Older data was persisted keyed by plain ``strip().casefold()``, and even
+    freshly-normalized keys can still collide once suffix-stripping is in
+    play (e.g. a "robco" entry and a "robco gmbh" entry once both re-key to
+    "robco"). When two stored entries collapse onto the same identity key,
+    one is picked to represent it — preferring the one with a non-empty
+    ``careers_url``, then the more recently resolved — and its ``company``
+    display field (and every other field) is kept exactly as stored; nothing
+    is concatenated or renamed. Idempotent: re-running this on an
+    already-reconciled map is a no-op.
+    """
+    reconciled: dict[str, CompanyBoard] = {}
+    for old_key, board in boards.items():
+        new_key = company_identity_key(board.company) or old_key
+        existing = reconciled.get(new_key)
+        reconciled[new_key] = board if existing is None else _pick_richer(existing, board)
+    return reconciled
+
+
+def _pick_richer(a: CompanyBoard, b: CompanyBoard) -> CompanyBoard:
+    """Pick the entry to keep when two boards collapse onto one identity key.
+
+    Prefers the one with a non-empty ``careers_url`` (an actual resolution
+    beats a placeholder), then the more recently resolved by ``resolved_at``
+    string order (ISO-8601 sorts correctly as a string), then falls back to
+    the first one seen.
+    """
+    a_has_url = bool(a.careers_url.strip())
+    b_has_url = bool(b.careers_url.strip())
+    if a_has_url != b_has_url:
+        return a if a_has_url else b
+    if a.resolved_at != b.resolved_at:
+        return a if a.resolved_at > b.resolved_at else b
+    return a
 
 
 def save(boards: dict[str, CompanyBoard]) -> None:
@@ -94,8 +141,15 @@ def save(boards: dict[str, CompanyBoard]) -> None:
 
 
 def _normalize_company(name: str) -> str:
-    """Normalize company name with consistent casing."""
-    return name.strip().casefold()
+    """Normalize a company name to its identity key for use as the store's dict key.
+
+    Delegates to ``screening.company.company_identity_key`` so a
+    legal-entity suffix (e.g. "RobCo" vs "RobCo GmbH") does not produce two
+    board entries for the same employer. See ``load()``/``_reconcile_keys``
+    for how already-persisted entries under the old plain
+    ``strip().casefold()`` key are migrated on read.
+    """
+    return company_identity_key(name)
 
 
 def record(company: str, careers_url: str, ats: str = "", status: str = "ok") -> None:
