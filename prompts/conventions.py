@@ -80,3 +80,24 @@ class DomainVocabulary:
 
 DEFAULT_CONVENTIONS = CvConventions()
 DEFAULT_VOCABULARY = DomainVocabulary()
+
+
+_NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
+
+
+def page_target_pages(conventions: CvConventions = DEFAULT_CONVENTIONS) -> int | None:
+    """Parse ``conventions.page_target`` into a numeric page limit.
+
+    Understands written number words ("one".."five") and digits (1-5),
+    optionally followed by "page"/"pages" (e.g. "one page", "2 pages", "1").
+    Returns None when the string can't be parsed this way (e.g. "as short
+    as possible"), so callers can skip any page-count check rather than
+    guess at the operator's intent.
+    """
+    text = conventions.page_target.strip().lower()
+    first_word = text.split()[0] if text.split() else ""
+    if first_word in _NUMBER_WORDS:
+        return _NUMBER_WORDS[first_word]
+    if first_word.isdigit():
+        return int(first_word)
+    return None

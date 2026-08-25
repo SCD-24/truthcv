@@ -51,6 +51,7 @@ graph TD
     llm-provider-layer -->|HTTPS| llm-provider-service
     llm-provider-layer -->|in-process| secret-store
     onboarding-store -->|file I/O| truth-data-volume
+    renderer -->|in-process| prompt-store
     renderer -->|file I/O| truth-data-volume
     screening-engine -->|in-process| agent-config
     screening-engine -->|in-process| application-tracker
@@ -119,6 +120,7 @@ graph TD
 - [llm-provider-layer → llm-provider-service](interactions/llm-provider-layer--llm-provider-service.md) via `HTTPS`
 - [llm-provider-layer → secret-store](interactions/llm-provider-layer--secret-store.md) via `in-process`
 - [onboarding-store → truth-data-volume](interactions/onboarding-store--truth-data-volume.md) via `file I/O`
+- [renderer → prompt-store](interactions/renderer--prompt-store.md) via `in-process`
 - [renderer → truth-data-volume](interactions/renderer--truth-data-volume.md) via `file I/O`
 - [screening-engine → agent-config](interactions/screening-engine--agent-config.md) via `in-process`
 - [screening-engine → application-tracker](interactions/screening-engine--application-tracker.md) via `in-process`
