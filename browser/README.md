@@ -49,6 +49,6 @@ This is documented in agent/RUNBOOK.md §5 "Browser tooling is whatever this env
 
 ## History
 
-This design replaces an earlier approach where the agent drove the operator's real, already-logged-in browser on the host via an interceptor daemon and a bind-mounted unix socket. That design was intended but **the interceptor MCP server was never implemented** — neither the TruthCV nor the retired Jobs repo contain it. So the earlier design had no working browser driver at all.
+An alternative driver, reaching the operator's real, already-logged-in browser on the host via a stdio MCP server dialing a bind-mounted unix socket to a host daemon, was previously offered as an opt-in Compose overlay. It has been removed, leaving the containerised browser as the only driver.
 
 The containerised browser is simpler (no host daemon to run), more reproducible (Chromium ships with the image), and achieves the isolation the separate-container architecture was meant to provide: a browser crash cannot take down the agent loop.

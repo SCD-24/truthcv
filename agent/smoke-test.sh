@@ -6,10 +6,6 @@
 # Run it against the built image:
 #   docker compose run --rm --entrypoint /app/agent/smoke-test.sh agent
 #
-# ...or, to exercise the opt-in Interceptor driver instead:
-#   docker compose -f docker-compose.yml -f docker-compose.interceptor.yml \
-#     run --rm --entrypoint /app/agent/smoke-test.sh agent
-#
 # Ported from the retiring Jobs project's docker/smoke-test.sh, but the checks
 # are necessarily different: that image contained its own Chrome under Xvfb and
 # its smoke test verified the browser stack. THIS image contains no browser at
@@ -17,21 +13,9 @@
 # outside it - so the equivalent question here is whether the browser the agent
 # has been pointed at, and the MCP tool surface, are reachable from inside.
 #
-# WHICH browser that is depends on AGENT_BROWSER_DRIVER, and the two are checked
-# differently because they fail differently:
-#
-#   browser     (default) the sibling `browser` compose service. Checked by
-#               dialling its in-network MCP endpoint over HTTP.
-#
-#   interceptor the operator's HOST Chrome. The `claude` CLI spawns
-#               `interceptor mcp serve` over stdio in-container; that subprocess
-#               shells to the real `interceptor <verb>` command (the bind-mounted
-#               Bun binary) to reach the host daemon over the bind-mounted unix
-#               socket, and the daemon reaches Chrome via native messaging. That
-#               chain has more ways to break and none of them are visible from
-#               the config alone: the binary may be missing, or built against a
-#               glibc newer than this image's, or the socket may be stale. They
-#               surface here, deliberately, rather than mid-run.
+# `browser` (the only supported AGENT_BROWSER_DRIVER value) is the sibling
+# `browser` compose service, checked by dialling its in-network MCP endpoint
+# over HTTP.
 set -uo pipefail
 
 pass=0; fail=0
@@ -42,11 +26,9 @@ AGENT_DIR="${AGENT_DIR:-/app/agent}"
 RUN_LOG_DIR="${RUN_LOG_DIR:-/app/runs}"
 BROWSER_MCP_URL="${BROWSER_MCP_URL:-http://browser:8931/mcp}"
 
-# Same defaults as agent/daily-apply.sh and agent/mcp.json, so the smoke test
+# Same default as agent/daily-apply.sh and agent/mcp.json, so the smoke test
 # cannot pass against a configuration the run path would reject.
 AGENT_BROWSER_DRIVER="${AGENT_BROWSER_DRIVER:-browser}"
-INTERCEPTOR_BIN="${INTERCEPTOR_BIN:-/opt/interceptor/bin/interceptor}"
-INTERCEPTOR_SOCKET="${INTERCEPTOR_SOCKET:-/tmp/interceptor.sock}"
 
 echo "== truthcv agent smoke test =="
 echo "   browser driver: $AGENT_BROWSER_DRIVER"
@@ -185,9 +167,8 @@ wait "$_SUPER_PID" 2>/dev/null
 # 405 or 406 - BY DESIGN, so a healthy server will never return 200 to this
 # probe. Only a connection error or a timeout means unreachable.
 #
-# Skipped under the interceptor driver: that deployment drives host Chrome and
-# need not run the `browser` service at all, so an unreachable one is not a
-# fault there.
+# `browser` is now the only valid AGENT_BROWSER_DRIVER value, so anything
+# else must fail this probe rather than be reported as an ok skip.
 if [[ "$AGENT_BROWSER_DRIVER" == "browser" ]]; then
   if node -e '
     const url = process.argv[1];
@@ -201,92 +182,17 @@ if [[ "$AGENT_BROWSER_DRIVER" == "browser" ]]; then
     bad "BROWSER_MCP_URL unreachable ($BROWSER_MCP_URL) - check docker compose ps browser / docker compose logs browser"
   fi
 else
-  ok "containerised browser not selected (AGENT_BROWSER_DRIVER=$AGENT_BROWSER_DRIVER) - skipping its probe"
-fi
-
-# --- Interceptor driver chain (opt-in) ---------------------------------------
-# Only meaningful when AGENT_BROWSER_DRIVER=interceptor. Under the default
-# `browser` driver none of this is mounted and none of it is used, so checking
-# it would fail the smoke test for a perfectly healthy default deployment.
-
-if [[ "$AGENT_BROWSER_DRIVER" == "interceptor" ]]; then
-  if [[ -x "$INTERCEPTOR_BIN" ]]; then
-    ok "interceptor binary exists and is executable ($INTERCEPTOR_BIN)"
-
-    # The binary is Bun-compiled on the HOST and has to run under THIS image's
-    # glibc. A mismatch fails in the dynamic loader with "version GLIBC_2.xx not
-    # found" - before main() ever runs - so it cannot be caught by any amount of
-    # config checking, only by executing it. `timeout` guards against a build
-    # that waits on stdin instead of printing usage.
-    binary_output="$(timeout 10 "$INTERCEPTOR_BIN" --version 2>&1 </dev/null | head -20 || true)"
-    if grep -q "version GLIBC_.*not found" <<<"$binary_output"; then
-      bad "interceptor binary is incompatible with this image's glibc: $(grep -o 'version GLIBC_[0-9.]*' <<<"$binary_output" | head -1)"
-      bad "  the host binary is linked against a newer glibc than node:22-bookworm-slim provides."
-      bad "  remedy: run the MCP server on the HOST and expose it to this container as an HTTP shim,"
-      bad "  or rebuild/obtain an interceptor binary linked against glibc <= bookworm's."
-    else
-      ok "interceptor binary loads and executes in this image (no loader/glibc error)"
-    fi
-
-    # Prove it actually speaks MCP, not merely that it runs. `mcp serve` holds
-    # stdio open by design, so it is expected to be killed by the timeout - the
-    # readiness line on stderr is the pass condition, not the exit status.
-    server_output="$(timeout 5 "$INTERCEPTOR_BIN" mcp serve </dev/null 2>&1 | head -40 || true)"
-    if grep -qi "serving over stdio" <<<"$server_output"; then
-      ok "\`interceptor mcp serve\` starts and announces 'serving over stdio'"
-    else
-      bad "\`interceptor mcp serve\` did not emit 'serving over stdio' within 5s"
-      [[ -n "$server_output" ]] && printf '        %s\n' "$server_output" | head -10
-    fi
-  else
-    bad "interceptor binary missing or not executable at $INTERCEPTOR_BIN"
-    bad "  is docker-compose.interceptor.yml in the -f list, and is INTERCEPTOR_BIN_HOST correct?"
-  fi
-
-  # The socket is the CLI-to-daemon hop. Unlike the run path (agent/daily-apply.sh,
-  # which only stats it, so as not to disturb the operator's live daemon before
-  # every scheduled run), the smoke test is deliberate and infrequent, so it dials
-  # for real: a stale socket file left by a dead daemon passes -S but fails here.
-  if [[ -S "$INTERCEPTOR_SOCKET" ]]; then
-    if node -e '
-      const net = require("net");
-      const s = net.connect(process.argv[1]);
-      s.on("connect", () => { s.destroy(); process.exit(0); });
-      s.on("error", () => process.exit(1));
-      setTimeout(() => { s.destroy(); process.exit(1); }, 5000);
-    ' "$INTERCEPTOR_SOCKET" 2>/dev/null; then
-      ok "interceptor socket accepts connections ($INTERCEPTOR_SOCKET)"
-    else
-      bad "interceptor socket exists but refuses connections ($INTERCEPTOR_SOCKET) - stale file from a dead daemon?"
-    fi
-  else
-    bad "no socket at $INTERCEPTOR_SOCKET - is the interceptor daemon running on the host?"
-  fi
-else
-  ok "interceptor driver not selected (AGENT_BROWSER_DRIVER=$AGENT_BROWSER_DRIVER) - skipping its checks"
+  bad "unknown AGENT_BROWSER_DRIVER '$AGENT_BROWSER_DRIVER' - expected 'browser'"
 fi
 
 # --- mcp.json sanity ---------------------------------------------------------
-# Config-only checks, so they are worth running under either driver.
 
 if jq -e . "$AGENT_DIR/mcp.json" >/dev/null 2>&1; then
   ok "mcp.json is valid JSON"
 
-  if [[ "$(jq -r '.mcpServers.interceptor.args | join(" ")' "$AGENT_DIR/mcp.json")" == "mcp serve" ]]; then
-    ok "mcp.json interceptor entry invokes the binary with [\"mcp\",\"serve\"]"
-  else
-    bad "mcp.json interceptor args are not [\"mcp\",\"serve\"] - the product has no --socket flag"
-  fi
-
-  if grep -q "interceptor-mcp" "$AGENT_DIR/mcp.json"; then
-    bad "mcp.json still contains the placeholder string 'interceptor-mcp'"
-  else
-    ok "mcp.json carries no 'interceptor-mcp' placeholder"
-  fi
-
-  # Both drivers must stay declared: daily-apply.sh's allow-list, not this file,
-  # is what selects between them, and it can only select what is declared here.
-  for srv in truthcv browser interceptor; do
+  # daily-apply.sh's allow-list, not this file, is what grants the browser
+  # server; it can only grant what is declared here.
+  for srv in truthcv browser; do
     if jq -e --arg s "$srv" '.mcpServers[$s]' "$AGENT_DIR/mcp.json" >/dev/null 2>&1; then
       ok "mcp.json declares the '$srv' server"
     else
