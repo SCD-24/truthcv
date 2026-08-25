@@ -33,6 +33,7 @@ import {
   bulkSetApproval,
   deleteScreening,
   generateScreeningLetter,
+  GuardrailBlockedError,
   getScreeningLetter,
   markScreeningApplied,
   listAppliedScreenings,
@@ -46,7 +47,13 @@ import {
   setScreeningPostingText,
   setScreeningUrl,
 } from "../api/client";
-import type { CoverLetterDraft, ScreeningRecord } from "../api/types";
+import type {
+  BlockedClaim,
+  CoverLetterApprovals,
+  CoverLetterDraft,
+  ScreeningRecord,
+} from "../api/types";
+import { approvalsFrom, BlockedClaimsPanel, type Decision } from "../components/BlockedClaimsPanel";
 
 /** The letter draft for one posting: fetches its own state on mount because
  * the list endpoint (GET /api/screenings) never carries drafts. Offers
@@ -69,6 +76,9 @@ function CoverLetterSection({
   const [showPosting, setShowPosting] = useState(false);
   const [postingText, setPostingText] = useState(record.postingText);
   const [postingTextDraft, setPostingTextDraft] = useState("");
+  const [blockedClaims, setBlockedClaims] = useState<BlockedClaim[]>([]);
+  const [blockedParagraphs, setBlockedParagraphs] = useState<unknown[]>([]);
+  const [decisions, setDecisions] = useState<Record<string, Decision>>({});
 
   useEffect(() => {
     let live = true;
@@ -85,19 +95,38 @@ function CoverLetterSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record.id]);
 
-  async function generate() {
+  async function generate(opts?: { approvals?: CoverLetterApprovals; paragraphs?: unknown[] }) {
     setBusy(true);
     setError("");
     try {
-      const d = await generateScreeningLetter(record.id);
+      const d = opts
+        ? await generateScreeningLetter(record.id, opts)
+        : await generateScreeningLetter(record.id);
       setDraft(d);
       setText(d.text);
+      setBlockedClaims([]);
+      setBlockedParagraphs([]);
+      setDecisions({});
       onDraftChange(record.id, d);
     } catch (e) {
-      setError(String(e));
+      if (e instanceof GuardrailBlockedError && e.claims.length > 0) {
+        setBlockedClaims(e.claims);
+        setBlockedParagraphs(e.paragraphs);
+        setDecisions({});
+      } else {
+        setError(String(e));
+      }
     } finally {
       setBusy(false);
     }
+  }
+
+  function decide(claimId: string, choice: Decision) {
+    setDecisions((prev) => ({ ...prev, [claimId]: choice }));
+  }
+
+  function recheck() {
+    generate({ approvals: approvalsFrom(blockedClaims, decisions), paragraphs: blockedParagraphs });
   }
 
   async function save() {
@@ -155,7 +184,18 @@ function CoverLetterSection({
         </>
       ) : null}
 
-      {error ? (
+      {blockedClaims.length > 0 ? (
+        <Box sx={{ mt: 1 }}>
+          <BlockedClaimsPanel
+            claims={blockedClaims}
+            decisions={decisions}
+            onDecide={decide}
+            onRecheck={recheck}
+            busy={busy}
+            ariaLabel="Blocked cover letter claims"
+          />
+        </Box>
+      ) : error ? (
         <Alert severity="error" sx={{ mt: 1 }}>
           {error}
         </Alert>
@@ -191,7 +231,7 @@ function CoverLetterSection({
           variant="outlined"
           size="small"
           disabled={busy || !postingText}
-          onClick={generate}
+          onClick={() => generate()}
         >
           Generate cover letter
         </Button>

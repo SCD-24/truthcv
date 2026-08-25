@@ -933,3 +933,23 @@ def test_get_company_findings_reports_open_contradictions(data_dir):
     report = tools_research.get_company_findings("Acme Co")
     assert len(report["findings"]) == 2
     assert len(report["open_contradictions"]) == 1
+
+
+def test_operator_letter_approvals_not_reachable_by_the_agent():
+    """generate_cover_letter_for_operator (which accepts approved_texts, letting
+    a caller widen the guardrail's allowed set for one generation) must never be
+    reachable through the agent tool surface: the registered generate_cover_letter
+    tool's signature must carry no approval-related parameter, and the operator
+    function itself must not be registered anywhere."""
+    import inspect
+
+    import agenttools.mcp_app as mcp_app
+    import agenttools.tools_letter as tools_letter
+
+    params = list(inspect.signature(tools_letter.generate_cover_letter).parameters)
+    assert not any("approv" in p.lower() for p in params)
+    assert "generate_cover_letter_for_operator" not in mcp_app._TOOL_REGISTRY
+    # _TOOL_REGISTRY maps tool name -> (callable, description); reach the callable.
+    for value in mcp_app._TOOL_REGISTRY.values():
+        fn = value[0] if isinstance(value, tuple) else value
+        assert getattr(fn, "__name__", "") != "generate_cover_letter_for_operator"

@@ -61,7 +61,7 @@ from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
 
 import coverletter.store as letter_store
-from agenttools.tools_letter import generate_cover_letter as _generate_letter
+from agenttools.letter_operator import generate_cover_letter_for_operator as _generate_letter_for_operator
 
 from .schemas import (
     AgentConfigModel,
@@ -426,6 +426,34 @@ def get_screening_letter(screening_id: str) -> CoverLetterDraftModel:
     return _draft_model(draft)
 
 
+def _screening_letter_approvals(
+    approvals: CoverLetterApprovals | None,
+    paragraphs: list[dict] | None,
+) -> tuple[set[str], set[str]]:
+    """Resolve blocked-claim ids to claim texts against the paragraphs SUPPLIED
+    IN THIS REQUEST, not the wizard's cached draft (_letter_approvals uses that
+    one; it is wrong here — a screening's letter is per-screening, not global).
+    Mirrors the wizard's id derivation exactly: LETTER_SCOPE_ID + _claim_id.
+    """
+    if not approvals or not paragraphs:
+        return set(), set()
+
+    from coverletter import LETTER_SCOPE_ID
+
+    approved_ids = set(approvals.approved_claim_ids)
+    denied_ids = set(approvals.denied_claim_ids)
+    approved: set[str] = set()
+    denied: set[str] = set()
+    for para in paragraphs:
+        for claim in para.get("claims", []):
+            cid = _claim_id(LETTER_SCOPE_ID, claim)
+            if cid in approved_ids:
+                approved.add(claim)
+            if cid in denied_ids:
+                denied.add(claim)
+    return approved, denied
+
+
 @router.post("/screenings/{screening_id}/letter", response_model=CoverLetterDraftModel)
 def generate_screening_letter(
     screening_id: str, body: LetterGenerateRequest
@@ -436,6 +464,9 @@ def generate_screening_letter(
     function the agent calls. A blocked generation writes nothing and reports
     the claims that blocked it, so the operator can fix the truth document
     rather than discovering the block at approval time.
+
+    The retry can carry `approvals` and the blocked attempt's `paragraphs` to
+    re-validate the SAME letter, mirroring `/api/cover-letter`.
     """
     screening = screening_store.get(screening_id)
     if screening is None:
@@ -451,10 +482,14 @@ def generate_screening_letter(
             status_code=409,
             detail="This letter was edited by you. Redrafting would discard those edits.",
         )
-    result = _generate_letter(
+    approved_texts, denied_texts = _screening_letter_approvals(body.approvals, body.paragraphs)
+    result = _generate_letter_for_operator(
         posting=screening.posting_text,
         tone=body.tone,
         length=body.length,
+        approved_texts=approved_texts,
+        denied_texts=denied_texts,
+        paragraphs=body.paragraphs,
         company=screening.company or None,
     )
     if result["blocked"]:
@@ -463,7 +498,16 @@ def generate_screening_letter(
             detail={
                 "message": "The letter was blocked by the truthfulness guardrail.",
                 "blockedReason": result.get("blocked_reason", ""),
-                "blockedClaims": result["blocked_claims"],
+                "blockedClaims": [
+                    {
+                        "claimId": _claim_id(c["scope_id"], c["text"]),
+                        "experienceId": c["scope_id"],
+                        "text": c["text"],
+                        "tokens": c["tokens"],
+                    }
+                    for c in result["blocked_claims"]
+                ],
+                "paragraphs": result["paragraphs"],
             },
         )
     draft = letter_store.CoverLetterDraft(
