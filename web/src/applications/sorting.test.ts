@@ -56,4 +56,16 @@ describe("sorting", () => {
   it("actions column is not sortable", () => {
     expect(COLUMN_DEFS[COLUMN_DEFS.length - 1].sortable).toBe(false);
   });
+  it("uses shortened header labels for URL, Type and Response", () => {
+    expect(COLUMN_DEFS.some((c) => c.label === "URL")).toBe(true);
+    expect(COLUMN_DEFS.some((c) => c.label === "Type")).toBe(true);
+    expect(COLUMN_DEFS.some((c) => c.label === "Response")).toBe(true);
+    expect(COLUMN_DEFS.some((c) => c.label === "Application URL")).toBe(false);
+    expect(COLUMN_DEFS.some((c) => c.label === "Submission Type")).toBe(false);
+    expect(COLUMN_DEFS.some((c) => c.label === "Response Received")).toBe(false);
+  });
+  it("all column labels are unique", () => {
+    const labels = COLUMN_DEFS.map((c) => c.label);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
 });

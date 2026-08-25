@@ -342,12 +342,20 @@ function ApplicationRow({
 }) {
   return (
     <TableRow hover>
-      <TableCell className="apps__company">{app.company || "—"}</TableCell>
+      <TableCell className="apps__company apps__clip" title={app.company || undefined}>
+        {app.company || "—"}
+      </TableCell>
       <TableCell>{app.applicationDate || "—"}</TableCell>
       <TableCell>
         {app.website ? (
-          <Link href={absoluteUrl(app.website)} target="_blank" rel="noreferrer">
-            {hostOf(app.website)}
+          <Link
+            href={absoluteUrl(app.website)}
+            target="_blank"
+            rel="noreferrer"
+            title={absoluteUrl(app.website)}
+            aria-label={`Open website: ${absoluteUrl(app.website)}`}
+          >
+            link
           </Link>
         ) : (
           "—"
@@ -382,11 +390,15 @@ function ApplicationRow({
       <TableCell>
         <Stamp on={app.reachedOut} yes="Yes" no="No" />
       </TableCell>
-      <TableCell>{app.toWho || "—"}</TableCell>
+      <TableCell className="apps__clip" title={app.toWho || undefined}>
+        {app.toWho || "—"}
+      </TableCell>
       <TableCell>
         <Stamp on={app.responseReceived} yes="Replied" no="Waiting" />
       </TableCell>
-      <TableCell>{app.method || "—"}</TableCell>
+      <TableCell className="apps__clip" title={app.method || undefined}>
+        {app.method || "—"}
+      </TableCell>
       <TableCell sx={{ maxWidth: 220 }}>
         <Box
           sx={{
@@ -485,6 +497,7 @@ function PostingCell({ app, onOpen }: { app: Application; onOpen: () => void }) 
     );
   }
   const firstLine = app.posting.split("\n").find((l) => l.trim()) ?? "Posting";
+  const peek = firstLine.slice(0, 40);
   return (
     <div className="apps__docline">
       <Link
@@ -496,9 +509,9 @@ function PostingCell({ app, onOpen }: { app: Application; onOpen: () => void }) 
       >
         Posting
       </Link>
-      <span className="apps__docmeta apps__postingpeek">
-        {firstLine.slice(0, 60)}
-        {firstLine.length > 60 ? "…" : ""}
+      <span className="apps__docmeta apps__postingpeek" title={firstLine}>
+        {peek}
+        {firstLine.length > peek.length ? "…" : ""}
       </span>
     </div>
   );
@@ -830,11 +843,3 @@ function absoluteUrl(url: string): string {
   return `https://${trimmed}`;
 }
 
-/** Show a website as its bare host so the ledger stays scannable. */
-function hostOf(url: string): string {
-  try {
-    return new URL(absoluteUrl(url)).host;
-  } catch {
-    return url;
-  }
-}
