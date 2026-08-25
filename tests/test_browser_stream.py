@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+import api.browser_stream as browser_stream
 from api.browser_stream import origin_allowed, peer_allowed
 from api.main import app
 
@@ -84,6 +85,53 @@ class TestPeerAllowed:
     def test_a_container_hostname_peer_is_refused(self):
         assert peer_allowed("agent") is False
 
+    def test_an_empty_peer_is_refused(self):
+        assert peer_allowed("") is False
+
+    def test_the_resolved_gateway_is_allowed(self, monkeypatch):
+        """Docker NATs a published port, so the operator's own browser arrives
+        with the bridge gateway as its source, never 127.0.0.1."""
+        monkeypatch.setattr(browser_stream, "_DEFAULT_GATEWAY", "172.18.0.1")
+        assert peer_allowed("172.18.0.1") is True
+
+    def test_a_sibling_container_that_is_not_the_gateway_is_refused(self, monkeypatch):
+        """A container on the same compose network (e.g. `agent`) keeps its own
+        address; only the gateway means "arrived from the host"."""
+        monkeypatch.setattr(browser_stream, "_DEFAULT_GATEWAY", "172.18.0.1")
+        assert peer_allowed("172.18.0.4") is False
+
+    def test_an_extra_allowed_peer_can_be_configured(self, monkeypatch):
+        monkeypatch.setenv("BROWSER_STREAM_ALLOWED_PEERS", "172.20.0.9")
+        assert peer_allowed("172.20.0.9") is True
+
+
+class TestDefaultGateway:
+    """Pinned against a fixture route table, not just the live machine's route,
+    so the little-endian byte order handling can't silently regress."""
+
+    def test_parses_a_fixture_route_table(self, tmp_path):
+        route_table = (
+            "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n"
+            "eth0\t00000000\t0100000A\t0003\t0\t0\t0\t00000000\t0\t0\t0\n"
+            "eth0\t0000000A\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n"
+        )
+        fixture = tmp_path / "route"
+        fixture.write_text(route_table)
+        # 0100000A little-endian -> bytes 0A 00 00 01 -> 10.0.0.1
+        assert browser_stream._default_gateway(str(fixture)) == "10.0.0.1"
+
+    def test_a_missing_route_file_resolves_to_empty(self, tmp_path):
+        assert browser_stream._default_gateway(str(tmp_path / "does-not-exist")) == ""
+
+    def test_no_default_route_resolves_to_empty(self, tmp_path):
+        route_table = (
+            "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n"
+            "eth0\t0000000A\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n"
+        )
+        fixture = tmp_path / "route"
+        fixture.write_text(route_table)
+        assert browser_stream._default_gateway(str(fixture)) == ""
+
 
 class TestRelayHandshake:
     def test_cross_origin_connection_is_rejected(self, client):
@@ -109,7 +157,6 @@ class TestRelayHandshake:
     def test_upstream_handshake_failure_closes_cleanly(self, client, monkeypatch):
         """A malformed upstream handshake (websockets.WebSocketException, not
         OSError) must not propagate out of the ASGI app as an unhandled error."""
-        import api.browser_stream as browser_stream
 
         def _peer_allowed(_peer: str) -> bool:
             return True

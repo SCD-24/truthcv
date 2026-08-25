@@ -6,21 +6,40 @@ guard rather than a second passwordless port on every interface.
 
 That guard is two checks, both run before `websocket.accept()`:
 
-- `peer_allowed` requires the TCP peer to be loopback. Origin and Host are
-  both set by the client, so a non-browser caller — including another
-  container on the compose network — can simply send whatever it wants for
-  either. The peer address is the one signal it cannot forge.
+- `peer_allowed` requires the TCP peer to be loopback, or the container's
+  default gateway (see `_default_gateway` — that is the address the
+  operator's own browser arrives as once Docker NATs a published port; a
+  sibling container keeps its own address). Origin and Host are both set by
+  the client, so a non-browser caller — including another container on the
+  compose network, such as `agent`, which runs LLM-driven code over
+  attacker-controlled job-posting text — can simply send whatever it wants
+  for either. The peer address is the one signal it cannot forge.
 - `origin_allowed` requires the Origin header to match Host and to be a
   loopback (or explicitly allowed) hostname, defending the browser-reachable
   path: WebSocket handshakes are exempt from the same-origin policy and the
   CORS middleware in `api/main.py` does not see them, so without this check
   any page the operator visits while a session is open could open this
   socket and drive a browser holding their live sessions.
+
+Two ways to defeat the peer check that are worth naming here, not just in
+review notes:
+
+- Setting `FORWARDED_ALLOW_IPS=*` makes uvicorn's `ProxyHeadersMiddleware`
+  rewrite `scope["client"]` from the client-supplied `X-Forwarded-For` header
+  for ANY peer, turning the one unforgeable signal this module relies on into
+  a forgeable one. Nothing in this repo sets it today; if that ever changes,
+  this gate is defeated.
+- Behind a reverse proxy, every request's peer is the proxy itself, so this
+  check degrades to "always true" and Origin/Host become the only remaining
+  defence. Do not deploy this behind a proxy that isn't also forwarding the
+  real client address through a mechanism this module has been updated to
+  trust.
 """
 
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import os
 from urllib.parse import urlparse
@@ -54,6 +73,37 @@ _LOOPBACK_PEERS = frozenset({"127.0.0.1", "::1", "::ffff:127.0.0.1"})
 _logged_extra_hosts = False
 
 
+def _default_gateway(path: str = "/proc/net/route") -> str:
+    """The address host traffic appears as inside a container.
+
+    Docker NATs a published port, so a request from the operator's own browser
+    reaches this process with the bridge gateway as its source — never
+    127.0.0.1. Sibling containers on the same network keep their own addresses,
+    so the gateway is precisely "arrived from the host" and does not admit the
+    agent or browser containers.
+
+    `path` is overridable so this can be pinned against a fixture route table
+    in tests, rather than only ever exercising whatever route the machine
+    running the tests happens to have.
+    """
+    try:
+        with open(path) as fh:
+            for line in fh.readlines()[1:]:
+                fields = line.split()
+                if len(fields) > 2 and fields[1] == "00000000":
+                    return str(ipaddress.IPv4Address(int(fields[2], 16).to_bytes(4, "little")))
+    except (OSError, ValueError):
+        pass
+    return ""
+
+
+# Resolved once at import: the default route cannot change during the
+# process's life. Outside a container /proc/net/route may be absent or name a
+# different route; "" from `_default_gateway` means "no extra peer allowed",
+# never "allow everything" (see `allowed_peers`).
+_DEFAULT_GATEWAY = _default_gateway()
+
+
 def allowed_origin_hostnames() -> frozenset[str]:
     """Loopback by default; extend via BROWSER_STREAM_ALLOWED_HOSTS (comma-separated)
     for a deployment that deliberately publishes the app beyond loopback.
@@ -75,14 +125,31 @@ def allowed_origin_hostnames() -> frozenset[str]:
     return frozenset(_LOOPBACK_HOSTNAMES | names)
 
 
+def allowed_peers() -> frozenset[str]:
+    """Loopback plus the container's default gateway (see `_default_gateway`),
+    extended via BROWSER_STREAM_ALLOWED_PEERS (comma-separated) for a
+    deployment this does not fit. An unresolved gateway ("") is dropped rather
+    than included, so a failure to resolve it never widens the allowlist.
+    """
+    extra = os.environ.get("BROWSER_STREAM_ALLOWED_PEERS", "")
+    peers = {p.strip() for p in extra.split(",") if p.strip()}
+    if _DEFAULT_GATEWAY:
+        peers.add(_DEFAULT_GATEWAY)
+    return frozenset(_LOOPBACK_PEERS | peers)
+
+
 def peer_allowed(peer: str) -> bool:
-    """True when `peer` (the TCP client address) is loopback.
+    """True when `peer` (the TCP client address) is loopback, the container's
+    default gateway, or explicitly allowed.
 
     Unlike Origin and Host, the client address is filled in by uvicorn from
     the accepted socket, not sent by the client, so it cannot be forged by a
-    script or another container that simply sets both headers itself.
+    script or another container that simply sets both headers itself — unless
+    FORWARDED_ALLOW_IPS is set, see the module docstring.
     """
-    return peer in _LOOPBACK_PEERS
+    if not peer:
+        return False
+    return peer in allowed_peers()
 
 
 def origin_allowed(origin: str, host: str) -> bool:
