@@ -162,15 +162,28 @@ function supervisorIdle() {
   });
 }
 
+// Parses `ps -eo stat=,comm=` output and reports whether any LIVE chromium
+// process is present. Zombies must not count: chromium exits when a run ends
+// but is never reaped — browser/entrypoint.sh is PID 1 and is a bash script,
+// so orphaned children accumulate as defunct entries for the life of the
+// container. Counting them (as a plain `pgrep -c chrome` does) would refuse
+// every attended session after the first run of the day. Exported so the
+// parsing logic is testable without spawning a real `ps`.
+function hasLiveChrome(psOutput) {
+  return psOutput.split("\n").some((line) => {
+    const [stat, comm] = line.trim().split(/\s+/);
+    return stat && comm && !stat.startsWith("Z") && comm.includes("chrome");
+  });
+}
+
 async function profileInUse() {
-  // Any chromium process at all in this container means the profile may be
+  // Any LIVE chromium process in this container means the profile may be
   // held. Cheaper and safer than interpreting SingletonLock a second time —
   // browser/entrypoint.sh already adjudicates that on startup.
   try {
-    const out = execFileSync("pgrep", ["-c", "chrome"], { encoding: "utf8" });
-    return parseInt(out.trim(), 10) > 0;
+    const out = execFileSync("ps", ["-eo", "stat=,comm="], { encoding: "utf8" });
+    return hasLiveChrome(out);
   } catch {
-    // pgrep exits non-zero when nothing matches.
     return false;
   }
 }
@@ -249,7 +262,7 @@ function createServer(manager) {
   });
 }
 
-module.exports = { createSessionManager, createServer, tokenOk };
+module.exports = { createSessionManager, createServer, tokenOk, hasLiveChrome };
 
 if (require.main === module) {
   const manager = createSessionManager({

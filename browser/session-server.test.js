@@ -3,7 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert");
 
-const { createSessionManager } = require("./session-server.js");
+const { createSessionManager, hasLiveChrome } = require("./session-server.js");
 
 function manager(overrides = {}) {
   return createSessionManager({
@@ -121,4 +121,26 @@ test("a browser that exits on its own clears the session", async () => {
   await m.open("https://example.com/login");
   m.onBrowserExit();
   assert.strictEqual(m.state().open, false);
+});
+
+// hasLiveChrome parses `ps -eo stat=,comm=` output directly, so these run
+// against representative ps output rather than a spawned process.
+test("hasLiveChrome ignores zombie-only chromium output", () => {
+  const ps = "Z  chrome\nZ  chrome_crashpad\n";
+  assert.strictEqual(hasLiveChrome(ps), false);
+});
+
+test("hasLiveChrome detects a live chromium", () => {
+  const ps = "S  chrome\n";
+  assert.strictEqual(hasLiveChrome(ps), true);
+});
+
+test("hasLiveChrome detects a live chromium mixed with zombies", () => {
+  const ps = "Z  chrome\nS  chrome\nZ  chrome_crashpad\n";
+  assert.strictEqual(hasLiveChrome(ps), true);
+});
+
+test("hasLiveChrome is false when no chrome process is present", () => {
+  const ps = "S  node\nS  Xvfb\n";
+  assert.strictEqual(hasLiveChrome(ps), false);
 });
