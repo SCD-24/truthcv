@@ -30,6 +30,7 @@ from applications.store import save_screening as _save_screening
 import applications.store as _apps_store
 import coverletter.store as _letter_store
 import screening.store as _screening_store
+from screening.company import company_identity_key as _company_identity_key
 from screening.company import validate_company_name as _validate_company_name
 from screening.cooldown import cooldown as _cooldown
 from screening.model import validate_verdict as _validate_verdict
@@ -392,12 +393,56 @@ def get_profile_answers(company: str = "") -> dict:
     wizard's profile route, and the CV/cover-letter contact lines all
     continue to see the real, un-aliased address. With ``company`` blank,
     the returned email is unchanged from what is stored.
+
+    Alias freezing: once an application already exists for a company (by
+    identity key — see ``screening.company.company_identity_key``), the alias
+    is computed from THAT application's stored ``company`` string, not the
+    company string passed in this call. This keeps the tracking address
+    stable for an employer already applied to even if a later call spells
+    the same company with a different (or no) legal-entity suffix — e.g. an
+    existing "RobCo GmbH" application keeps producing the same
+    "tcv_robco_gmbh" address whether this call passes "RobCo" or
+    "RobCo GmbH". Only a genuinely new company (no matching application row)
+    is aliased from its normalized identity key.
     """
     data = _load_answers().to_dict()
     email = data.get("email")
     if isinstance(email, str) and email:
-        data["email"] = _alias_email(email, company)
+        data["email"] = _alias_email(email, _resolve_alias_company(company))
     return data
+
+
+def _resolve_alias_company(company: str) -> str:
+    """Resolve the company string ``get_profile_answers`` should alias against.
+
+    If an application row already exists whose company matches ``company``'s
+    identity key, that row's stored ``company`` string is returned (the
+    earliest-created one wins, when several match) so the alias stays frozen
+    to the address already submitted to that employer. Otherwise the
+    identity key itself is returned, so a brand-new company is aliased from
+    its normalized slug rather than its raw, possibly differently-cased or
+    -suffixed, spelling. Never raises: a blank/non-str ``company``, or a
+    failure to load the applications store, falls back to ``company``
+    unchanged (aliasing degrades to today's plain per-call transform).
+    """
+    if not isinstance(company, str) or not company.strip():
+        return company
+    target_key = _company_identity_key(company)
+    if not target_key:
+        return company
+    try:
+        rows = _apps_store.load_all()
+    except Exception:
+        return company
+    candidates = [
+        row
+        for row in rows
+        if isinstance(row.company, str) and _company_identity_key(row.company) == target_key
+    ]
+    if not candidates:
+        return target_key
+    earliest = min(candidates, key=lambda row: row.created_at or "")
+    return earliest.company
 
 
 def get_job_profiles() -> list[dict]:

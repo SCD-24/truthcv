@@ -5,6 +5,10 @@ application has no explicit cooldown field, so one is derived from its
 ``application_date`` plus a configurable duration — having already applied is
 itself a reason to wait before reconsidering the same company/role. Whichever
 source yields the later expiry wins.
+
+Company matching is by identity key (``screening.company.company_identity_key``),
+not raw casefold equality, so a legal-entity suffix does not manufacture a
+second company: an application to "RobCo GmbH" puts "RobCo" in cooldown too.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from agentconfig.store import is_blocked as agent_config_is_blocked
 from agentconfig.store import load as agent_config_load
 from applications.store import load_all as load_applications
 
+from .company import company_identity_key
 from .store import load_all as load_screenings
 
 
@@ -92,13 +97,19 @@ class CooldownStatus:
 
 
 def _matches(company: str, role: str | None, rec_company: str, rec_role: str) -> bool:
-    """Case/whitespace-insensitive company match; role matched only if given.
+    """Identity-key company match; role matched (case/whitespace-insensitive) only if given.
 
-    Records with a non-string company/role never match (fail-safe skip).
+    Records with a non-string company/role never match (fail-safe skip). A
+    blank/whitespace-only ``company`` never matches anything, since
+    ``company_identity_key`` never returns "" for a non-empty input (so an
+    empty key here would otherwise risk matching a similarly-degenerate
+    record company).
     """
     if not isinstance(rec_company, str):
         return False
-    if company.strip().casefold() != rec_company.strip().casefold():
+    if not company.strip():
+        return False
+    if company_identity_key(company) != company_identity_key(rec_company):
         return False
     if role:
         if not isinstance(rec_role, str):
@@ -151,8 +162,10 @@ def _application_expiries(company: str, role: str | None) -> list[tuple[datetime
     for a in load_applications():
         if not isinstance(a.company, str):
             continue
-        company_matched = (
-            company.strip().casefold() == a.company.strip().casefold()
+        if not company.strip():
+            continue
+        company_matched = company_identity_key(company) == company_identity_key(
+            a.company
         )
         if not company_matched:
             continue

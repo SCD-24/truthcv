@@ -54,6 +54,7 @@ from providers import (
 )
 from providers.base import supports_effort_levels
 from screening import store as screening_store
+from screening.company import company_identity_key
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
 
@@ -1053,11 +1054,14 @@ def get_agent_config() -> AgentConfigModel:
     boards = board_store.load()
     board_store.prune(cfg.target_companies)
     
-    # Populate company_boards in response
+    # Populate company_boards in response. Matched by identity key (not raw
+    # casefold equality) so a legal-entity suffix on either side does not
+    # exclude a board that is really for a target company.
+    target_company_keys = {company_identity_key(name) for name in cfg.target_companies}
     data["company_boards"] = [
         {"company": board.company, "careers_url": board.careers_url, "ats": board.ats, "status": board.status, "resolved_at": board.resolved_at}
         for board in boards.values()
-        if board.company.strip().casefold() in {name.strip().casefold() for name in cfg.target_companies}
+        if company_identity_key(board.company) in target_company_keys
     ]
 
     # Populate search_queries in response. The freshness window is applied to

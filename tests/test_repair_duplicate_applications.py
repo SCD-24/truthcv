@@ -247,6 +247,70 @@ def test_duplicate_owning_a_document_is_held_back_as_manual_repair(
     assert "manual-repair" in out
 
 
+def test_suffix_equivalent_company_merges_but_unsubmitted_row_survives(
+    data_dir, monkeypatch
+):
+    """Four submitted 'RobCo' retries for one posting collapse to one row via
+    the company identity key; a separate not-submitted 'RobCo GmbH' row with
+    no confirmation evidence never looks like a submission, so it is left
+    strictly alone even though its normalized URL matches."""
+    base = "https://jobs.ashbyhq.com/robco/4d090169"
+    first = _create_at(
+        monkeypatch,
+        "2026-08-01T00:00:01+00:00",
+        {"company": "RobCo", "application_url": base + "/application", "submitted": True},
+    )
+    _create_at(
+        monkeypatch,
+        "2026-08-01T00:00:02+00:00",
+        {"company": "RobCo", "application_url": base + "/application", "submitted": True},
+    )
+    _create_at(
+        monkeypatch,
+        "2026-08-01T00:00:03+00:00",
+        {"company": "RobCo", "application_url": base + "/application", "submitted": True},
+    )
+    _create_at(
+        monkeypatch,
+        "2026-08-01T00:00:04+00:00",
+        {"company": "RobCo", "application_url": base, "submitted": True},
+    )
+    not_submitted = _create_at(
+        monkeypatch,
+        "2026-08-09T00:00:00+00:00",
+        {
+            "company": "RobCo GmbH",
+            "application_url": base,
+            "submitted": False,
+            "notes": "Not actually submitted yet.",
+        },
+    )
+    before_json = applications_store.applications_path().read_text(encoding="utf-8")
+    assert not_submitted.confirmation.text == ""
+    assert not_submitted.confirmation.confirmed_at == ""
+    assert not_submitted.confirmation.evidence == ""
+
+    main(["--apply"])
+
+    rows = applications_store.load_all()
+    assert len(rows) == 2
+    by_id = {r.id: r for r in rows}
+    assert first.id in by_id
+    assert by_id[first.id].company == "RobCo"
+    # The not-submitted RobCo GmbH row survives byte-identical: same id,
+    # notes, and (empty) attachments — never merged, never touched.
+    assert not_submitted.id in by_id
+    survivor = by_id[not_submitted.id]
+    assert survivor.notes == "Not actually submitted yet."
+    assert survivor.attachments == not_submitted.attachments
+    assert survivor.company == "RobCo GmbH"
+    assert survivor.submitted is False
+    # The unrelated row's own JSON entry is untouched by the merge.
+    after_json = applications_store.applications_path().read_text(encoding="utf-8")
+    assert not_submitted.id in before_json
+    assert not_submitted.id in after_json
+
+
 def test_unrelated_applications_are_untouched(data_dir, monkeypatch):
     """Two rows for genuinely different companies/URLs with no shared
     screening_id are both left exactly in place by --apply."""
