@@ -35,6 +35,13 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
+def _umask() -> int:
+    """The process umask. Readable only by temporarily setting it back."""
+    current = os.umask(0)
+    os.umask(current)
+    return current
+
+
 def atomic_write_text(path: Path, text: str) -> None:
     """Replace ``path`` with ``text`` via a temp file unique to this write.
 
@@ -52,6 +59,15 @@ def atomic_write_text(path: Path, text: str) -> None:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
+        # `os.replace` keeps the TEMP file's mode, and `mkstemp` deliberately
+        # creates at 0600. Without this the first write silently made the data
+        # file owner-only: these live on a bind mount shared with the host, and
+        # a 0600 root-owned file is unreadable to the user's own tooling.
+        # An existing file's mode is preserved; a new one gets 0644 less umask.
+        try:
+            os.chmod(tmp_name, os.stat(path).st_mode & 0o7777)
+        except FileNotFoundError:
+            os.chmod(tmp_name, 0o644 & ~_umask())
         os.replace(tmp_name, path)
     except BaseException:
         # Best-effort cleanup: the replace never happened, so `path` still holds

@@ -26,6 +26,28 @@ class TestAtomicWriteText:
         atomic_write_text(target, "x")
         assert target.read_text(encoding="utf-8") == "x"
 
+    def test_a_new_file_is_readable_by_others(self, tmp_path):
+        """`os.replace` keeps the temp file's mode and `mkstemp` uses 0600.
+
+        These files live on a bind mount shared with the host, so a 0600
+        root-owned data file is unreadable to the user's own tooling — which
+        is exactly what the first version of this helper produced.
+        """
+        import os
+
+        target = tmp_path / "records.json"
+        atomic_write_text(target, "x")
+        assert target.stat().st_mode & 0o044, oct(target.stat().st_mode & 0o777)
+
+    def test_an_existing_files_mode_is_preserved(self, tmp_path):
+        import os
+
+        target = tmp_path / "records.json"
+        target.write_text("first", encoding="utf-8")
+        os.chmod(target, 0o640)
+        atomic_write_text(target, "second")
+        assert target.stat().st_mode & 0o777 == 0o640
+
     def test_leaves_no_temp_files(self, tmp_path):
         target = tmp_path / "records.json"
         for i in range(20):
