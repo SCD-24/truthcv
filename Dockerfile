@@ -44,6 +44,7 @@ COPY companyboards/ ./companyboards/
 COPY connections/ ./connections/
 COPY modelrouting/ ./modelrouting/
 COPY agenttools/ ./agenttools/
+COPY onboarding/ ./onboarding/
 COPY api/ ./api/
 
 # Built frontend bundle from stage 1.
