@@ -577,3 +577,22 @@ export interface RoutingUpdate {
   agent?: RouteChoice | null;
   default?: RouteChoice | null;
 }
+
+/** One host the agent could not get past a sign-in wall on. */
+export type SigninQueueSite = {
+  host: string;
+  signinUrl: string;
+  waiting: number;
+  lastBlockedAt: string;
+  companies: string[];
+};
+
+export type SigninQueue = { sites: SigninQueueSite[] };
+
+/** State of the attended sign-in session, if one is open. */
+export type BrowserSession = {
+  open: boolean;
+  url: string | null;
+  startedAt: string | null;
+  evictDeadline: string | null;
+};

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, act } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import {
   getAgentConfig,
   getAgentStatus,
@@ -27,6 +28,7 @@ vi.mock("../api/client", () => ({
   updateAgentConfig: vi.fn(),
   saveProfileAnswers: vi.fn(),
   updateRouting: vi.fn(),
+  getSigninQueue: vi.fn().mockResolvedValue({ sites: [] }),
 }));
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
@@ -117,7 +119,7 @@ async function renderLoaded(connections: ConnectionList, routing: Routing, agent
   vi.mocked(getRouting).mockResolvedValue(routing);
   vi.mocked(listConnections).mockResolvedValue(connections);
   vi.mocked(listConnectionModels).mockResolvedValue([]);
-  render(<AgentsPage onBack={vi.fn()} />);
+  render(<MemoryRouter><AgentsPage onBack={vi.fn()} /></MemoryRouter>);
   await screen.findByRole("heading", { name: "Model" });
 }
 
@@ -192,7 +194,7 @@ describe("AgentsPage model section", () => {
     vi.mocked(getRouting).mockRejectedValue(new Error("routing unavailable"));
     vi.mocked(listConnections).mockResolvedValue({ encryptionAvailable: true, connections: [] });
 
-    render(<AgentsPage onBack={vi.fn()} />);
+    render(<MemoryRouter><AgentsPage onBack={vi.fn()} /></MemoryRouter>);
 
     expect(await screen.findByRole("slider", { name: "Agent autonomy" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Schedule" })).toBeTruthy();
@@ -256,7 +258,7 @@ describe("AgentsPage RunNowSection", () => {
 
     const clearSpy = vi.spyOn(globalThis, "clearInterval");
 
-    const { unmount } = render(<AgentsPage onBack={vi.fn()} />);
+    const { unmount } = render(<MemoryRouter><AgentsPage onBack={vi.fn()} /></MemoryRouter>);
 
     // Wait for the initial getAgentStatus call (and thus the setPoll setInterval) to resolve
     await screen.findByRole("button", { name: /run agent now/i });

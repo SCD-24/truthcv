@@ -33,6 +33,8 @@ import type {
   StartLoginResult,
   Routing,
   RoutingUpdate,
+  SigninQueue,
+  BrowserSession,
 } from "./types";
 import { errorDetailToMessage } from "./errorDetail";
 
@@ -552,4 +554,58 @@ export function updateRouting(body: RoutingUpdate): Promise<Routing> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+/** Sites the agent could not get past a sign-in wall on. */
+export function getSigninQueue(): Promise<SigninQueue> {
+  return request("/api/browser/signin-queue");
+}
+
+/** Whether an attended sign-in session is open, and at which URL. */
+export function getBrowserSession(): Promise<BrowserSession> {
+  return request("/api/browser/session");
+}
+
+/** Close the attended session and release the browser. */
+export function closeBrowserSession(): Promise<void> {
+  return request<void>("/api/browser/session", { method: "DELETE" });
+}
+
+/** Raised by openBrowserSession so the session page can tell the three
+ * outcomes apart. `request` collapses every failure into one message, which
+ * is right for the wizard but wrong here: "the agent is busy" and "the
+ * browser is broken" call for different words and different buttons. */
+export class BrowserSessionError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "BrowserSessionError";
+    this.status = status;
+  }
+}
+
+/** Open an attended sign-in session at a URL.
+ *
+ * Deliberately does not go through `request`: this is the one call whose
+ * status code the caller must branch on (409 = a run is in progress). */
+export async function openBrowserSession(url: string): Promise<BrowserSession> {
+  let res: Response;
+  try {
+    res = await fetch("/api/browser/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+  } catch {
+    throw new BrowserSessionError(0, "Can't reach the server. Check that TruthCV is running, then try again.");
+  }
+  if (!res.ok) {
+    const detail = await res
+      .json()
+      .then((b) => errorDetailToMessage(b))
+      .catch(() => "");
+    throw new BrowserSessionError(res.status, detail || `That didn't work (error ${res.status}).`);
+  }
+  return (await res.json()) as BrowserSession;
 }

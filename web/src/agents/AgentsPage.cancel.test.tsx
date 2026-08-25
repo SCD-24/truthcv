@@ -4,6 +4,7 @@
  * Mocking follows AgentsPage.mode.test.tsx. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import {
   cancelAgentRun,
   getAgentConfig,
@@ -28,6 +29,7 @@ vi.mock("../api/client", () => ({
   updateAgentConfig: vi.fn(),
   saveProfileAnswers: vi.fn(),
   updateRouting: vi.fn(),
+  getSigninQueue: vi.fn().mockResolvedValue({ sites: [] }),
 }));
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
@@ -99,7 +101,11 @@ async function renderWithStatus(status: AgentStatus) {
   vi.mocked(getRouting).mockResolvedValue(makeRouting());
   vi.mocked(listConnections).mockResolvedValue({ connections: [] } as never);
   vi.mocked(listConnectionModels).mockResolvedValue([]);
-  render(<AgentsPage onBack={vi.fn()} />);
+  render(
+    <MemoryRouter>
+      <AgentsPage onBack={vi.fn()} />
+    </MemoryRouter>,
+  );
   await screen.findByRole("slider", { name: "Agent autonomy" });
 }
 
@@ -198,7 +204,11 @@ describe("polling lifecycle", () => {
       vi.mocked(listConnections).mockResolvedValue({ connections: [] } as never);
       vi.mocked(listConnectionModels).mockResolvedValue([]);
 
-      const { unmount } = render(<AgentsPage onBack={vi.fn()} />);
+      const { unmount } = render(
+        <MemoryRouter>
+          <AgentsPage onBack={vi.fn()} />
+        </MemoryRouter>,
+      );
       await vi.waitFor(() =>
         expect(screen.getByRole("button", { name: "Cancel agent run" })).toBeTruthy(),
       );

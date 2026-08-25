@@ -32,6 +32,7 @@ import { ButtonSpinner } from "../components/ButtonSpinner";
 import { ModelRoutePicker } from "../settings/ModelRoutePicker";
 import { SettingsModal } from "../settings/SettingsModal";
 import { isValidRunTime, WEEKDAYS } from "./schedule";
+import { SigninSection } from "./SigninSection";
 import type {
   AgentConfig,
   AgentStatus,
@@ -201,6 +202,15 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
             config={config}
             onChange={setConfig}
             onOpenSettings={() => setSettingsSection("job-search-policy")}
+          />
+          <SigninSection
+            sources={Array.from(
+              new Set(
+                config.profiles
+                  .filter((p) => p.enabled)
+                  .flatMap((p) => p.preferredSources),
+              ),
+            )}
           />
           <BlocklistSection config={config} onChange={setConfig} />
           {settingsSection && (
