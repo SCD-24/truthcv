@@ -7,6 +7,7 @@ node snippet from daily-apply.sh against a real server.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import threading
@@ -60,7 +61,14 @@ def _run(port: int) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["node", "-e", snippet, "GET", "/session"],
         capture_output=True,
-        env={"PATH": "/usr/bin:/bin", "SESSION_SERVER_PORT": str(port), "AGENT_API_TOKEN": "t"},
+        # Inherit the caller's PATH rather than hard-coding one: node is at
+        # /usr/local/bin on the CI runner and in the toolcache under
+        # actions/setup-node, so "/usr/bin:/bin" would not find it.
+        env={
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "SESSION_SERVER_PORT": str(port),
+            "AGENT_API_TOKEN": "t",
+        },
     )
 
 
