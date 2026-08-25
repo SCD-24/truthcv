@@ -4,7 +4,7 @@ The `browser` service's noVNC port is not published: the operator reaches the
 viewport through this route instead, so there is one address and one place to
 guard rather than a second passwordless port on every interface.
 
-That guard is two checks, both run before `websocket.accept()`:
+That guard is three checks, all run before `websocket.accept()`:
 
 - `peer_allowed` requires the TCP peer to be loopback, or — only when this
   process is actually running inside a container (`_running_in_container`) —
@@ -23,6 +23,14 @@ That guard is two checks, both run before `websocket.accept()`:
   CORS middleware in `api/main.py` does not see them, so without this check
   any page the operator visits while a session is open could open this
   socket and drive a browser holding their live sessions.
+- `session_is_open` requires the browser container's session server to report
+  an attended session actually open. Without it the two header/peer checks
+  above still admit anything already on host loopback at ANY time — including
+  mid-run, when the browser is being driven by `@playwright/mcp` through the
+  operator's live ATS and email sessions, with x11vnc running `-nopw` and not
+  view-only. This is the clause that bounds the exposure window to "while the
+  operator has deliberately opened a session". An unreachable or unreadable
+  session server refuses, like every other precondition in this design.
 
 Two ways to defeat the peer check that are worth naming here, not just in
 review notes:
@@ -43,8 +51,11 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import json
 import logging
 import os
+import urllib.error
+import urllib.request
 from urllib.parse import urlparse
 
 import websockets
@@ -221,6 +232,45 @@ def origin_allowed(origin: str, host: str) -> bool:
     return True
 
 
+# One short request per handshake, not per frame: the check gates the accept
+# and nothing after it. Kept well under the 10s `api/routes.py` allows itself,
+# because a viewer socket waiting on it is a page that has not rendered yet.
+_SESSION_QUERY_TIMEOUT = 3
+
+
+def session_control_url() -> str:
+    """The session server's own `GET /session`, same address `api/routes.py` uses."""
+    port = os.environ.get("SESSION_SERVER_PORT", "8932")
+    return f"http://browser:{port}/session"
+
+
+def _fetch_session_open() -> bool:
+    """True only when the session server positively reports an open session.
+
+    Every other outcome — unreachable container, 403 on a missing or mismatched
+    X-Agent-Token, unparseable body — returns False. A relay that cannot
+    establish that a session is open must refuse: an error is not evidence the
+    operator asked for this socket.
+    """
+    req = urllib.request.Request(
+        session_control_url(),
+        method="GET",
+        headers={"X-Agent-Token": os.environ.get("AGENT_API_TOKEN", "")},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_SESSION_QUERY_TIMEOUT) as resp:
+            return json.loads(resp.read()).get("open") is True
+    except (OSError, ValueError) as exc:
+        # urllib.error.HTTPError and URLError are both OSError subclasses.
+        logger.warning("browser-stream session check failed, refusing relay: %s", exc)
+        return False
+
+
+async def session_is_open() -> bool:
+    """`_fetch_session_open` off the event loop — urllib is blocking."""
+    return await asyncio.to_thread(_fetch_session_open)
+
+
 def novnc_url() -> str:
     """The in-network websockify endpoint the browser container serves."""
     port = os.environ.get("BROWSER_NOVNC_PORT", "7900")
@@ -239,6 +289,14 @@ async def relay(websocket: WebSocket) -> None:
     host = websocket.headers.get("host", "")
     if not origin_allowed(origin, host):
         # 1008 = policy violation. Closed before accept, so nothing is relayed.
+        await websocket.close(code=1008)
+        return
+
+    if not await session_is_open():
+        # No attended session — so there is nothing here the operator asked to
+        # see, and relaying would hand out control of whatever the agent is
+        # doing on the profile right now. Refused before accept, like the two
+        # checks above, and refused when the session server cannot be reached.
         await websocket.close(code=1008)
         return
 

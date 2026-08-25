@@ -226,6 +226,7 @@ class TestRelayHandshake:
             return _FailingConnect()
 
         monkeypatch.setattr(browser_stream, "peer_allowed", _peer_allowed)
+        monkeypatch.setattr(browser_stream, "session_is_open", _session_open(True))
         monkeypatch.setattr(browser_stream.websockets, "connect", _connect)
 
         with pytest.raises(WebSocketDisconnect) as exc_info:
@@ -237,3 +238,133 @@ class TestRelayHandshake:
                 # close arrives as a message rather than at entry; read it.
                 ws.receive_bytes()
         assert exc_info.value.code == 1011
+
+
+def _session_open(answer: bool, calls: list | None = None):
+    """Stand-in for `browser_stream.session_is_open`, recording that it was asked."""
+
+    async def _stub() -> bool:
+        if calls is not None:
+            calls.append(answer)
+        return answer
+
+    return _stub
+
+
+class _Response:
+    """Minimal stand-in for urlopen's context manager."""
+
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc_info):
+        return False
+
+    def read(self) -> bytes:
+        return self._body
+
+
+class TestFetchSessionOpen:
+    """The relay may only proceed on a positive answer. Everything else — an
+    unreachable container, a 403 on a bad token, an unreadable body — is
+    refused: an error is not evidence the operator opened a session."""
+
+    def _urlopen(self, monkeypatch, result):
+        def _stub(_req, timeout=None):
+            if isinstance(result, Exception):
+                raise result
+            return _Response(result)
+
+        monkeypatch.setattr(browser_stream.urllib.request, "urlopen", _stub)
+
+    def test_an_open_session_reads_as_open(self, monkeypatch):
+        self._urlopen(monkeypatch, b'{"open":true,"url":"https://example.com/login"}')
+        assert browser_stream._fetch_session_open() is True
+
+    def test_a_closed_session_reads_as_not_open(self, monkeypatch):
+        self._urlopen(monkeypatch, b'{"open":false,"url":null}')
+        assert browser_stream._fetch_session_open() is False
+
+    def test_an_unreachable_session_server_reads_as_not_open(self, monkeypatch):
+        self._urlopen(monkeypatch, browser_stream.urllib.error.URLError("refused"))
+        assert browser_stream._fetch_session_open() is False
+
+    def test_a_rejected_token_reads_as_not_open(self, monkeypatch):
+        self._urlopen(
+            monkeypatch,
+            browser_stream.urllib.error.HTTPError("http://browser:8932/session", 403, "no", {}, None),
+        )
+        assert browser_stream._fetch_session_open() is False
+
+    def test_an_unparseable_body_reads_as_not_open(self, monkeypatch):
+        self._urlopen(monkeypatch, b"<html>not json</html>")
+        assert browser_stream._fetch_session_open() is False
+
+    def test_the_port_comes_from_the_environment(self, monkeypatch):
+        monkeypatch.setenv("SESSION_SERVER_PORT", "9999")
+        assert browser_stream.session_control_url() == "http://browser:9999/session"
+
+
+class TestRelayRequiresAnOpenSession:
+    """Spec, security measure 3: the relay "refuses to relay when no session is
+    open". Without this the peer and Origin checks alone admit any process on
+    host loopback at any time, including mid-run against the agent's browser."""
+
+    def test_no_open_session_is_refused_before_accept(self, client, monkeypatch):
+        monkeypatch.setattr(browser_stream, "peer_allowed", lambda _peer: True)
+        monkeypatch.setattr(browser_stream, "session_is_open", _session_open(False))
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect(
+                "/api/browser/session/stream",
+                headers={"Origin": "http://localhost:5627", "Host": "localhost:5627"},
+            ):
+                pass
+        assert exc_info.value.code == 1008
+
+    def test_an_unreachable_session_server_is_refused(self, client, monkeypatch):
+        """Fails closed: no answer is not permission."""
+        monkeypatch.setattr(browser_stream, "peer_allowed", lambda _peer: True)
+
+        def _boom(_req, timeout=None):
+            raise browser_stream.urllib.error.URLError("connection refused")
+
+        monkeypatch.setattr(browser_stream.urllib.request, "urlopen", _boom)
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect(
+                "/api/browser/session/stream",
+                headers={"Origin": "http://localhost:5627", "Host": "localhost:5627"},
+            ):
+                pass
+        assert exc_info.value.code == 1008
+
+    def test_an_open_session_reaches_the_upstream_connect(self, client, monkeypatch):
+        """The gate must not refuse the case it exists to permit. Asserting the
+        check ran (not just the outcome) is what makes this fail against a
+        relay that has no session gate at all."""
+        calls: list = []
+        monkeypatch.setattr(browser_stream, "peer_allowed", lambda _peer: True)
+        monkeypatch.setattr(browser_stream, "session_is_open", _session_open(True, calls))
+
+        class _FailingConnect:
+            async def __aenter__(self):
+                raise OSError("browser container down")
+
+            async def __aexit__(self, *_exc_info):
+                return False
+
+        monkeypatch.setattr(
+            browser_stream.websockets, "connect", lambda *_a, **_k: _FailingConnect()
+        )
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect(
+                "/api/browser/session/stream",
+                headers={"Origin": "http://localhost:5627", "Host": "localhost:5627"},
+            ) as ws:
+                # Accepted, so the close arrives as a message rather than at entry.
+                ws.receive_bytes()
+        # 1011, not 1008: it got past the gate and failed upstream instead.
+        assert exc_info.value.code == 1011
+        assert calls == [True]
