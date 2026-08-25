@@ -347,3 +347,41 @@ def test_truth_put_persists_summary_edit(client):
     client.put("/api/truth", json={**base, "profile": {"summary": "First"}})
     client.put("/api/truth", json={**base, "profile": {"summary": "Second"}})
     assert client.get("/api/truth").json()["profile"]["summary"] == "Second"
+
+
+def test_render_merges_pdf_verification_findings_into_ats_warnings(client, monkeypatch):
+    """PDF-verification findings ride the existing atsWarnings array and never
+    block the render."""
+    from pathlib import Path
+
+    _seed_truth_with_summary("Engineer at Acme, strong in Python")
+    monkeypatch.setattr(routes, "render_pdf", lambda html, name: Path("/fake/cv.pdf"))
+    monkeypatch.setattr(
+        routes, "verify_pdf", lambda *a, **k: [{"code": "pdf-split-word", "message": "x"}]
+    )
+
+    r = client.post("/api/render")
+    assert r.status_code == 200
+    rr = r.json()
+    assert rr["blocked"] is False
+    codes = {w["code"] for w in rr["atsWarnings"]}
+    assert "pdf-split-word" in codes
+
+
+def test_render_survives_a_broken_verifier(client, monkeypatch):
+    """A verify_pdf failure must never cost the user their render."""
+    from pathlib import Path
+
+    _seed_truth_with_summary("Engineer at Acme, strong in Python")
+    monkeypatch.setattr(routes, "render_pdf", lambda html, name: Path("/fake/cv.pdf"))
+
+    def _boom(*a, **k):
+        raise RuntimeError("verification exploded")
+
+    monkeypatch.setattr(routes, "verify_pdf", _boom)
+
+    r = client.post("/api/render")
+    assert r.status_code == 200
+    rr = r.json()
+    assert rr["blocked"] is False
+    assert rr["pdfUrl"] == "/api/download/cv.pdf"

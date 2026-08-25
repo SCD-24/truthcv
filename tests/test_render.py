@@ -130,6 +130,17 @@ def test_pdf_smoke_or_skip(data_dir):
         pytest.skip("WeasyPrint not installed in this environment")
     assert out.exists() and out.stat().st_size > 0
 
+    from pypdf import PdfReader
+
+    reader = PdfReader(str(out))
+    assert len(reader.pages) == 1
+    text = " ".join((page.extract_text() or "") for page in reader.pages)
+    normalized = " ".join(text.split()).lower()
+    assert "ada" in normalized or "ada@example.com" in normalized
+    assert "senior software engineer" in normalized
+    assert "acme corp" in normalized
+    assert "python" in normalized
+
 
 def test_docx_smoke_or_skip(data_dir):
     html = render_html(DRAFT, name="Ada", contact="ada@example.com")

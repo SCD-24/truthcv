@@ -8,5 +8,6 @@ from .html import render_html
 from .ats import lint
 from .pdf import render_pdf
 from .docx import render_docx
+from .verify import verify_pdf
 
-__all__ = ["render_html", "lint", "render_pdf", "render_docx"]
+__all__ = ["render_html", "lint", "render_pdf", "render_docx", "verify_pdf"]

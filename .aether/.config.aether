@@ -1694,6 +1694,11 @@
       "from": "api",
       "protocol": "in-process",
       "to": "onboarding-store"
+    },
+    {
+      "from": "renderer",
+      "protocol": "in-process",
+      "to": "prompt-store"
     }
   ],
   "definitions": [

@@ -20,8 +20,9 @@ from fastapi.responses import StreamingResponse
 import tailor as tailor_engine
 from guardrail import Scope, validate
 from providers import ProviderError, get_provider
-from render import lint, render_docx, render_html, render_pdf
+from render import lint, render_docx, render_html, render_pdf, verify_pdf
 from render.pdf import RenderUnavailable
+from render.verify import default_max_pages
 from truth import load, persist_source_hash, save
 from truth.answers import Answers
 from truth.answers import load as load_answers
@@ -664,6 +665,10 @@ def render_route(body: RenderRequest | None = None) -> RenderResult:
     try:
         pdf_path = render_pdf(html, pdf_name)
         pdf_url = f"/api/download/{pdf_path.name}"
+        try:
+            ats.extend(AtsWarning(**w) for w in verify_pdf(pdf_path, html, default_max_pages()))
+        except Exception:  # noqa: BLE001 — verification must never cost the render
+            pass
     except RenderUnavailable:
         pass
     try:
