@@ -3,21 +3,21 @@
 # dependency: bump its pin here, run the full test suite (`pytest`), and
 # commit the change as its own reviewed step — never let an upgrade land as
 # a side effect of an unrelated change.
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
 # Used directly by api/browser_stream.py as a WebSocket *client*, to relay the
 # browser container's noVNC socket. uvicorn[standard] happens to pull this in
 # as a server transport, but relying on that would make a direct dependency
 # invisible.
-websockets==13.1
-python-multipart==0.0.9
-pypdf==4.3.1
-python-docx==1.1.2
-PyYAML==6.0.2
-Jinja2==3.1.4
-weasyprint==62.3
-httpx==0.27.2
-cryptography==43.0.1
-anthropic==0.34.2
-openai==1.47.0
-mcp==1.9.0
+websockets==17.0.1
+python-multipart==0.0.32
+pypdf==6.16.2
+python-docx==1.2.0
+PyYAML==6.0.3
+Jinja2==3.1.6
+weasyprint==69.0
+httpx==0.28.1
+cryptography==50.0.1
+anthropic==1.0.0
+openai==3.3.1
+mcp==2.1.1

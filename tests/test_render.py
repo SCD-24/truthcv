@@ -220,3 +220,20 @@ def test_ats_go_is_not_a_substring_of_django():
     warnings = lint(html, keywords=["Go"])
     codes = {w["code"] for w in warnings}
     assert "missing-keyword" in codes
+
+
+def test_ats_does_not_read_css_or_script_bodies_as_document_text():
+    """Regression: stripping tags alone leaves <style>/<script> bodies and
+    comment text behind, so CSS words counted as visible CV text. A keyword
+    that appears only inside those regions is genuinely absent."""
+    html = (
+        "<html><head><style>/* python, single-column: ats-safe. */"
+        "body { font-family: python; }</style></head><body>"
+        "<script>var python = 1;</script>"
+        "<!-- python -->"
+        "<p>Built services in Django. Contact: ada@example.com</p>"
+        "</body></html>"
+    )
+    warnings = lint(html, keywords=["Python"])
+    codes = {w["code"] for w in warnings}
+    assert "missing-keyword" in codes

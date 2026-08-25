@@ -70,8 +70,15 @@ def _headings(html: str) -> list[str]:
     return [h.strip().lower() for h in re.findall(r"<h2[^>]*>(.*?)</h2>", html, re.I | re.S)]
 
 
+# <style>/<script> bodies and comments sit between tags, so stripping tags
+# alone leaves their contents behind and they read as document text.
+_NON_TEXT_ELEMENTS = re.compile(r"<(style|script)\b[^>]*>.*?</\1\s*>", re.I | re.S)
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+
+
 def _visible_text(html: str) -> str:
-    return re.sub(r"<[^>]+>", " ", html).lower()
+    without_non_text = _HTML_COMMENT.sub(" ", _NON_TEXT_ELEMENTS.sub(" ", html))
+    return re.sub(r"<[^>]+>", " ", without_non_text).lower()
 
 
 def _keyword_warning(kw: str, verdict: str) -> dict[str, str] | None:
