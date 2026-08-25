@@ -3,16 +3,108 @@ For the friends I made along the way.
 
 Tailor your CV and cover letter to a job posting — **without inventing anything**.
 
-TruthCV extracts a structured "truth file" from your LinkedIn PDF (every role,
+TruthCV extracts a structured "truth file" from an uploaded CV (every role,
 date, bullet and skill tagged to its source), then tailors, reorders and rephrases
 **only** facts that already exist. A deterministic guardrail diffs every generated
 draft against the truth file: any claim it can't trace back to a real fact is
 surfaced for your approval or blocked outright. Nothing unverified reaches the
 output.
 
-The flow is a browser wizard: **Upload LinkedIn PDF → Review extracted truth →
-Paste job posting → Confirm inferences → Download PDF/DOCX** (plus an optional
-guardrailed cover letter).
+You can upload your CV as a PDF, DOCX, TXT or Markdown file — a LinkedIn PDF
+export is simply the easiest source, since it's already dated and tagged by
+section.
+
+## Run it
+
+Double-click a launcher in `scripts/launch` — that's the whole install:
+
+| OS | File |
+|---|---|
+| macOS | `scripts/launch/truthcv.command` |
+| Windows | `scripts/launch/truthcv.bat` |
+| Linux | `scripts/launch/truthcv.sh` |
+
+If double-clicking opens the file in a text editor instead of running it
+(mostly a Linux file-manager quirk), right-click it and choose "Run as a
+Program" (some file managers call this "Execute").
+
+The only prerequisite is [Docker Desktop](https://docs.docker.com/get-docker/),
+installed and running (wait for its whale icon to settle before you launch).
+
+The first start takes about ten minutes, because your computer is building
+TruthCV — that happens once. Every start after it takes a few seconds. When
+it's ready, your browser opens at <http://localhost:5627>.
+
+There is no `.env` to write and no command to type. The rest of setup —
+connecting a model provider, uploading your CV, filling in your details —
+happens in the browser via onboarding. [`SETUP.md`](SETUP.md) is the same
+instructions written for a non-technical user, if you're sending this to
+someone else to run.
+
+What the launcher actually does, each time you double-click it:
+
+1. Creates `.env` from [`.env.example`](.env.example) if it doesn't exist yet.
+2. Fills in `ENCRYPTION_KEY` and `AGENT_API_TOKEN` if they're blank — never
+   overwriting a value already set — backing up any `.env` it modifies.
+3. Sets `APP_PORT` (default `5627`); if Docker reports that port already
+   allocated, it advances to the next candidate and rewrites `.env`, retrying
+   up to 10 times.
+4. Runs `docker compose up -d --build`, which starts the app, browser and
+   agent containers together.
+5. Polls the app until it answers, then opens it in your browser.
+
+**Stopping it:** quit Docker Desktop, or run `docker compose down`. Your data
+stays in `./data` either way.
+
+## Connecting a model provider
+
+TruthCV needs an LLM provider to extract, tailor and guardrail your CV, but it
+does not require you to bring your own API key. Connect one from **Settings →
+Accounts** (or during onboarding, see below) — TruthCV supports four:
+
+- **Claude (Anthropic)** — sign in with a Claude Pro/Max subscription (OAuth,
+  no API key needed), or paste an Anthropic API key.
+- **ChatGPT (OpenAI)** — an OpenAI API key.
+- **OpenRouter** — an OpenRouter API key.
+- **Ollama** — no credential; point it at a local (or remote) Ollama URL.
+
+Connected credentials are encrypted at rest into `./data/secrets.enc`. The
+`LLM_PROVIDER` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` variables in `.env`
+are a **fallback only**, used when no connection has been made — whatever is
+connected in the app always takes precedence.
+
+Per-task model routing is available in **Settings → Task models**, where you
+can override the default provider and model for specific operations: truth
+extraction, keywords, tailoring, inference, and cover letter generation.
+Cleared tasks use the default model.
+
+### Onboarding
+
+The first time you open TruthCV, a guided onboarding flow (rather than the
+main app) greets you: it walks you through connecting a provider and
+uploading/reviewing your CV, skipping any step you've already completed, then
+hands off into a short guided tour of the app. You only see it until those
+steps are satisfied.
+
+## What's in the app
+
+TruthCV is a multi-page app, not a single linear wizard:
+
+- **Analytics** — the landing page, with side navigation to everything else.
+- **Applications** — the job-application ledger (see below).
+- **Screenings & Approvals** — screened postings awaiting your decision,
+  including cover-letter approvals and cooldowns before an already-skipped
+  company is reconsidered.
+- **Company research** — background TruthCV has gathered on a company, with
+  its source recorded alongside each fact.
+- **Agents** — the unattended agent's run history, schedule, target companies
+  and job boards, and site sign-ins.
+
+Documents are checked twice: the guardrail approves the *content* before
+rendering, and a separate verification pass (`render/verify.py`) extracts text
+back out of the *produced PDF* and compares it against what was meant to be
+there — a font/kerning defect that glues or drops words in the PDF surfaces as
+an ATS warning, even though the source HTML was fine.
 
 ## Application tracker
 
@@ -38,11 +130,20 @@ screens each posting against your filters, generates the CV and cover letter
 through the same guardrailed engine the wizard uses, submits the form, and
 writes the result back into the ledger.
 
+The agent holds no provider credential of its own: when `AGENT_API_TOKEN` is
+set, it fetches the routed LLM credentials from the app at run start over a
+guarded endpoint, so it always uses whatever provider you've connected.
+
+Job boards, target companies and search profiles are configured on the
+**Agents page** (`companyboards/`, `agentconfig/`), not in a file you edit by
+hand.
+
 It is a **separate container from the wizard, and the browser is a third**, so
-a browser crash can never take either of them down. All three start together:
+a browser crash can never take either of them down. All three start together
+(the launcher runs this for you):
 
 ```bash
-docker compose up -d              # app, browser, agent
+docker compose up -d --build      # app, browser, agent
 ```
 
 Schedule is configured on the Agents page (default **09:00 and 15:00** weekdays); `RUN_AT`/`RUN_DAYS` are fallback only, used when the agent config API is unreachable. Every
@@ -63,7 +164,7 @@ does not mount the data volume.
 > the run rather than proceeding blind.
 
 Configuration, the schedule, the browser precondition and the smoke test are
-documented in [`agent/README.md`](agent/README.md). [`agent/targets.md`](agent/targets.md) is the operator's research scratchpad and is never read by the agent; the operative queue is `targetCompanies`, `companyBoards`, and `profiles` in the agent config. What has actually been applied to, screened out or put in cooldown lives in the ledger and screening store on the data volume, not in that file.
+documented in [`agent/README.md`](agent/README.md). [`agent/targets.example.md`](agent/targets.example.md) is a tracked example of the operator's research scratchpad and is never read by the agent; the operative queue is `targetCompanies`, `companyBoards`, and `profiles` in the agent config, edited from the Agents page. What has actually been applied to, screened out or put in cooldown lives in the ledger and screening store on the data volume, not in that file.
 
 ### The plain-text application log
 
@@ -81,31 +182,41 @@ complete. It is written one directory below the data volume root on purpose:
 `GET /api/download/{name}` serves that root by bare filename without
 authentication, and the log carries the same personal data the records do.
 
-## Requirements
+## Running it by hand
 
-- [Docker](https://docs.docker.com/get-docker/) and Docker Compose (recommended), **or** Python 3.11+ and Node 20+ for local dev.
-- An LLM provider:
-  - **Anthropic** or **OpenAI** — bring your own API key, or
-  - **Ollama** — fully local/offline (no key needed), via the optional compose profile.
-
-## Quick start (Docker)
+The launcher is the recommended path; this is the manual/advanced equivalent,
+for anyone who wants to run compose directly.
 
 ```bash
 # 1. Create your config from the template
 cp .env.example .env
 
-# 2. Edit .env — set LLM_PROVIDER and paste the matching API key
-#    e.g. LLM_PROVIDER=anthropic  and  ANTHROPIC_API_KEY=sk-ant-...
-#    and set AGENT_API_TOKEN (required):  openssl rand -hex 32
+# 2. Set ENCRYPTION_KEY and AGENT_API_TOKEN (both required, both non-empty —
+#    an empty AGENT_API_TOKEN aborts every scheduled run with
+#    "session server unreachable at browser:8932"). Generate each with:
+openssl rand -hex 32
+# or, dependency-free:
+python -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
 
 # 3. Build and run
-docker compose up --build
+docker compose up -d --build
+```
+
+This is exactly what the launcher automates: it runs the same `.env`
+preparation via `python -m launcher`, which you can also invoke directly
+without the per-OS scripts —
+
+```bash
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work \
+  python:3-alpine python -m launcher --repo /work
 ```
 
 5627 is only the default — the actual URL depends on `APP_PORT` in your
 `.env`. The app now prints its real URL at startup, so `docker compose logs
 app` (or `docker compose ps`, whose PORTS column shows
-`0.0.0.0:<host>->8080/tcp`) is the reliable way to find it.
+`0.0.0.0:<host>->8080/tcp`) is the reliable way to find it. The app binds to
+loopback only (`docker-compose.yml` maps `127.0.0.1:<host>->8080`), so it's
+never reachable from another machine on your network.
 
 Generated CVs and your truth file are persisted in `./data` (mounted into the
 container), so they survive restarts.
@@ -114,10 +225,11 @@ container), so they survive restarts.
 with no built-in identity — every ATS screening answer (name, email, phone,
 work authorisation, ...) defaults to an empty string, and
 the [unattended application agent](#unattended-application-agent) refuses to
-submit while those fields are blank (`agent/RUNBOOK.md` §5). Copy the tracked
-template, fill in your own details, then write them into the data volume from
-inside a container — the volume is root-owned, so running this directly on
-the host fails with a `PermissionError`:
+submit while those fields are blank (`agent/RUNBOOK.md` §5). The normal route
+is the web UI's **Settings** modal (`PUT /api/profile/answers`). Alternatively,
+copy the tracked template, fill in your own details, then write them into the
+data volume from inside a container — the volume is root-owned, so running
+this directly on the host fails with a `PermissionError`:
 
 ```bash
 cp answers.example.yaml answers.local.yaml
@@ -126,9 +238,8 @@ docker compose run --rm -v "$(pwd)/answers.local.yaml:/app/answers.local.yaml" a
   python -m truth.answers --answers /app/answers.local.yaml
 ```
 
-You can also fill these in later from the web UI's **Settings** modal (same
-file, via `PUT /api/profile/answers`) — but until one route or the other has
-run, the agent has no identity to submit with.
+Until one route or the other has run, the agent has no identity to submit
+with.
 
 ### Upgrading
 
@@ -144,10 +255,11 @@ This version needs two things an older setup may not have:
 
 ### Run fully offline with Ollama
 
-No cloud API key required — TruthCV talks to a local Ollama container instead:
+No cloud API key required — TruthCV talks to a local Ollama container instead.
+Select **Ollama** in **Settings → Accounts** (or set `LLM_PROVIDER=ollama` in
+`.env` as a fallback), then:
 
 ```bash
-# In .env set:  LLM_PROVIDER=ollama
 docker compose --profile ollama up --build
 
 # First run only — pull a model into the ollama container:
@@ -156,33 +268,33 @@ docker compose exec ollama ollama pull llama3.1
 
 ## Configuration
 
-All settings live in `.env` (copied from [`.env.example`](.env.example)):
+All settings live in `.env` (copied from [`.env.example`](.env.example)). Most
+of these are fallback defaults — the app-side connections above take
+precedence once configured.
 
 | Variable | What it does |
 |---|---|
-| `LLM_PROVIDER` | `anthropic` \| `openai` \| `ollama` — can also be set in Settings → Default model |
-| `LLM_MODEL` | Optional model id override; blank uses each provider's default — can also be set in Settings → Default model |
-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Credential for the selected provider; env vars remain as fallback |
-| `OLLAMA_HOST` | Ollama endpoint (compose sets this automatically) |
-| `ENCRYPTION_KEY` | Optional — unlocks the in-app Settings → Accounts modal (provider credentials saved encrypted at rest) |
-| `DATA_DIR` | Host path for persisted data (default `./data`) |
+| `APP_PORT` | Host port the app is published on (default `5627`); the launcher advances this automatically if it's taken. |
+| `ENCRYPTION_KEY` | Required — encrypts saved provider credentials at rest (`./data/secrets.enc`). The launcher generates it for you. |
+| `AGENT_API_TOKEN` | Required, non-empty — shared secret the agent, app and browser containers authenticate to each other with. The launcher generates it for you. |
+| `DATA_DIR` | Host path for persisted data (default `./data`). |
+| `LLM_PROVIDER` | `anthropic` \| `openai` \| `ollama` — fallback only; overridden by whatever is connected in Settings → Accounts. |
+| `LLM_MODEL` | Optional model id override; blank uses each provider's default — fallback only, also settable in Settings → Task models. |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Fallback credential for the selected provider, used only when nothing is connected in the app. |
+| `OLLAMA_HOST` | Ollama endpoint (compose sets this automatically). |
+| `RUN_AT` / `RUN_DAYS` | Fallback agent schedule, used only when the Agents page's schedule is unreachable. |
+| `TZ` | Timezone the agent's schedule and logs are interpreted in (default `UTC`). |
 
-Provider accounts can be configured in the in-app **Settings → Accounts** modal (if `ENCRYPTION_KEY` is set), and env-var credentials remain as fallback. You can leave API keys blank in `.env` and set them from the app instead — the app encrypts them into `./data/secrets.enc`.
+Generate `ENCRYPTION_KEY` or `AGENT_API_TOKEN` with either of the following:
 
-Per-task model routing is available in **Settings → Task models**, where you can override the default provider and model for specific operations: truth extraction, keywords, tailoring, inference, and cover letter generation. Cleared tasks use the default model.
-
-Generate a key with either of the following and copy the printed value into
-`ENCRYPTION_KEY`:
+```bash
+openssl rand -hex 32
+```
 
 ```bash
 # No dependencies — works with any Python 3 install, before you build anything:
 python -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
-
-# Or, once the app's dependencies are installed (local dev, or after `docker compose up --build`):
-python -m api.genkey
 ```
-
-Saved keys are encrypted (Fernet) into `./data/secrets.enc`.
 
 ### Operator vocabulary (`data/vocabulary/`)
 
@@ -214,12 +326,14 @@ CI/CD = Continuous Integration and Continuous Delivery
 
 ## Local development (without Docker)
 
+Requires Python 3.11+ and Node 20+ (CI runs Python 3.12 / Node 22).
+
 Backend:
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env        # then set your provider + key
+cp .env.example .env        # then set your provider + key, or connect one in Settings
 python -m api.main          # serves on http://localhost:8080
 ```
 
@@ -252,9 +366,17 @@ which the API serves in production.
 
 ## Tests
 
+Backend:
+
 ```bash
 pip install -r requirements-dev.txt
 pytest
+```
+
+Frontend:
+
+```bash
+cd web && npm install && npm test
 ```
 
 ## How the guardrail works
