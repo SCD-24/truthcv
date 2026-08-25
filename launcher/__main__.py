@@ -42,7 +42,6 @@ def main(argv: list[str] | None = None) -> int:
         "ENCRYPTION_KEY": envfile.generate_encryption_key(),
         "AGENT_API_TOKEN": envfile.generate_agent_token(),
         "APP_PORT": str(ports.default_for("APP_PORT")),
-        "NOVNC_HOST_PORT": str(ports.default_for("NOVNC_HOST_PORT")),
     }
     try:
         result = envfile.ensure(env_path, repo / ".env.example", required)

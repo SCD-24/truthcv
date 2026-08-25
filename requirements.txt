@@ -1,5 +1,10 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
+# Used directly by api/browser_stream.py as a WebSocket *client*, to relay the
+# browser container's noVNC socket. uvicorn[standard] happens to pull this in
+# as a server transport, but relying on that would make a direct dependency
+# invisible.
+websockets>=12
 python-multipart>=0.0.9
 pypdf>=4.0
 python-docx>=1.1

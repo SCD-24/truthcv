@@ -67,6 +67,13 @@ class Screening:
     approval: str = ""
     apply_attempts: int = 0
     apply_error: str = ""
+    # Why the application could not be completed, when the reason is one the
+    # app can act on rather than only display. Empty, or "login_required" when
+    # the form sat behind a sign-in or registration wall. `apply_error` stays
+    # the human-readable detail; this is what the sign-in queue filters on.
+    apply_blocker: str = ""
+    # The page the operator should sign in at, recorded alongside the blocker.
+    signin_url: str = ""
     created_at: str = ""
     updated_at: str = ""
 

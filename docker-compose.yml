@@ -6,7 +6,13 @@ services:
       # `ENV PORT=8080`), which is what the agent reaches over the compose
       # network as http://app:8080/mcp — changing the left side cannot affect
       # it. Named APP_PORT, not PORT: PORT is the container-internal variable.
-      - "${APP_PORT:-5627}:8080"
+      # Loopback only. The app has NO user authentication — the sole guard in
+      # api/routes.py is AGENT_API_TOKEN, and it protects one agent-facing
+      # endpoint — and it now proxies a remote-control view of a browser
+      # holding the operator's live sessions. Listening on every interface
+      # would put both on the local network. The launcher opens localhost, so
+      # this matches how it is actually reached.
+      - "127.0.0.1:${APP_PORT:-5627}:8080"
     environment:
       - LLM_PROVIDER=${LLM_PROVIDER:-anthropic}
       - LLM_MODEL=${LLM_MODEL:-}
@@ -21,6 +27,8 @@ services:
       # In-container path the app writes to — must equal the volume mount target
       # below. Do NOT derive this from the host's .env DATA_DIR (that's a host path).
       - DATA_DIR=/app/data
+      - SESSION_SERVER_PORT=${SESSION_SERVER_PORT:-8932}
+      - BROWSER_NOVNC_PORT=${BROWSER_NOVNC_PORT:-7900}
       # Host-side port from the `ports:` mapping above, passed in purely so
       # the app can print a reachable URL at startup for people who run
       # `docker compose up` directly instead of scripts/launch/truthcv.sh.
@@ -46,21 +54,19 @@ services:
   # Containerised headful Chromium MCP server, reached by the agent over HTTP.
   # Started on a bare `docker compose up` (no profiles) so the agent can drive
   # it immediately without manual setup. The browser runs headful under Xvfb
-  # with a noVNC viewport at http://localhost:5628 for observation or manual
-  # one-time login (CAPTCHA, SMS MFA, etc.). The persistent /browser-profile
-  # named volume preserves sessions across restarts.
+  # with a noVNC viewport, reached only through the app's origin-checked
+  # relay at Agents page → Site sign-ins, for observation or manual one-time
+  # login (CAPTCHA, SMS MFA, etc.). The persistent /browser-profile named
+  # volume preserves sessions across restarts.
   browser:
     build:
       context: .
       dockerfile: browser/Dockerfile
     restart: unless-stopped
-    ports:
-      # noVNC web viewer (public; use this to watch or debug a run)
-      # Host side only. NOVNC_HOST_PORT, deliberately NOT NOVNC_PORT —
-      # browser/entrypoint.sh:20 already reads NOVNC_PORT for the port inside
-      # the container, and reusing the name would move the internal port and
-      # leave this mapping pointing at nothing.
-      - "${NOVNC_HOST_PORT:-5628}:7900"
+    # No published ports. noVNC (7900) and the session control server (8932)
+    # are reached only from the `app` service over the compose network:
+    # /api/browser/session/stream relays the viewport with an Origin check,
+    # which a published passwordless VNC port would render pointless.
     volumes:
       # Persistent Chromium profile (survives container restarts)
       - browser-profile:/browser-profile
@@ -72,6 +78,16 @@ services:
       - BROWSER_MCP_PORT=8931
       - BROWSER_PROFILE_DIR=/browser-profile
       - TZ=${TZ:-UTC}
+      - SESSION_SERVER_PORT=${SESSION_SERVER_PORT:-8932}
+      - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
+      - AGENT_CONTROL_PORT=${AGENT_CONTROL_PORT:-9099}
+      # How long an attended sign-in session gets after a run asks for the
+      # browser back, before the session server closes it. MUST stay below
+      # the agent service's SESSION_EVICT_TIMEOUT (below) by more than one
+      # 5s tick plus the 10s close grace — daily-apply.sh gives up waiting
+      # at that timeout and ABORTS THE RUN, blaming the session rather than
+      # this setting. Raise both together or neither.
+      - SESSION_GRACE_MS=${SESSION_GRACE_MS:-180000}
     healthcheck:
       # Probe the MCP HTTP port with a simple GET. The base image ships node,
       # so this is a cheap, safe check.
@@ -162,6 +178,16 @@ services:
       # deliberately as a validating seam so a second driver can be added
       # later without touching every call site that reads it.
       - AGENT_BROWSER_DRIVER=${AGENT_BROWSER_DRIVER:-browser}
+      # Where session-server.js listens, used by daily-apply.sh to reclaim the
+      # browser from an attended sign-in session before a run.
+      - SESSION_SERVER_PORT=${SESSION_SERVER_PORT:-8932}
+      # How long daily-apply.sh waits for an evicted sign-in session to
+      # release the browser before aborting the run. MUST exceed the browser
+      # service's SESSION_GRACE_MS (default 180s) plus one 5s poll tick and
+      # the 10s close grace — 240s against 180s leaves ~35s of margin. Raise
+      # SESSION_GRACE_MS without raising this and every run that meets an
+      # open session aborts.
+      - SESSION_EVICT_TIMEOUT=${SESSION_EVICT_TIMEOUT:-240}
     volumes:
       # Per-run logs written by agent/daily-apply.sh (RUN_LOG_DIR, default
       # /app/runs). Its own named volume, NOT the app's data volume: these are

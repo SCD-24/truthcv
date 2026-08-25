@@ -3,6 +3,7 @@
  * and sends it on save. Mocking follows AgentsPage.mode.test.tsx. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import {
   getAgentConfig,
   getAgentStatus,
@@ -27,6 +28,7 @@ vi.mock("../api/client", () => ({
   updateAgentConfig: vi.fn(),
   saveProfileAnswers: vi.fn(),
   updateRouting: vi.fn(),
+  getSigninQueue: vi.fn().mockResolvedValue({ sites: [] }),
 }));
 
 const LABEL = "Only postings from the last (days)";
@@ -79,7 +81,11 @@ async function renderWith(config: AgentConfig) {
   vi.mocked(getRouting).mockResolvedValue(makeRouting());
   vi.mocked(listConnections).mockResolvedValue({ connections: [] } as never);
   vi.mocked(listConnectionModels).mockResolvedValue([]);
-  render(<AgentsPage onBack={vi.fn()} />);
+  render(
+    <MemoryRouter>
+      <AgentsPage onBack={vi.fn()} />
+    </MemoryRouter>,
+  );
   await screen.findByRole("slider", { name: "Agent autonomy" });
 }
 

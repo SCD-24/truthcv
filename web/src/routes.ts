@@ -11,9 +11,15 @@ export const ROUTES = {
   uploadCv: "/cv",
   manual: "/manual",
   documentEdit: "/documents/edit",
+  browserSession: "/browser-session",
 } as const;
 
 /** Builds the URL path for an application's filled-form evidence page. */
 export function filledFormPath(id: string): string {
   return `/applications/${id}/filled-form`;
+}
+
+/** Builds the URL for signing in to a site in the in-app browser session. */
+export function browserSessionPath(url: string): string {
+  return `/browser-session?url=${encodeURIComponent(url)}`;
 }

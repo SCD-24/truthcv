@@ -79,6 +79,88 @@ probe_browser() {
 case "$AGENT_BROWSER_DRIVER" in
   browser)
     probe_browser || abort "browser MCP server unreachable at $BROWSER_MCP_URL - is the \`browser\` service up? (docker compose ps browser; docker compose logs browser)"
+
+    # An attended sign-in session holds the same profile this run needs, so ask
+    # for it back and wait out the grace period before proceeding. The session
+    # server closes the session itself when its deadline passes; this loop only
+    # waits for that to happen.
+    #
+    # Both halves of the interlock are required. session-server.js refuses to
+    # OPEN a session while a run is in progress, but that is a moment-in-time
+    # check — a run can start straight afterwards. Without this, both would
+    # drive one profile, which is the "Browser is already in use" failure
+    # browser/entrypoint.sh exists to clean up after.
+    SESSION_EVICT_TIMEOUT="${SESSION_EVICT_TIMEOUT:-240}"
+
+    session_request() {
+      node -e '
+        const http = require("http");
+        const [method, path] = [process.argv[1], process.argv[2]];
+        const req = http.request(
+          { host: "browser", port: process.env.SESSION_SERVER_PORT || 8932, path, method,
+            timeout: 5000, headers: { "X-Agent-Token": process.env.AGENT_API_TOKEN || "" } },
+          (res) => {
+            let body = "";
+            res.on("data", (c) => (body += c));
+            res.on("end", () => {
+              // A response is not a success. The session server answers 403 to a
+              // missing or mismatched X-Agent-Token — including when its own
+              // AGENT_API_TOKEN is empty, which compose permits — and a 403 body
+              // does not contain "open":true, so treating it as a reply would be
+              // indistinguishable from "no session is open" and would silently
+              // skip the eviction this interlock exists to perform.
+              if (res.statusCode < 200 || res.statusCode > 299) {
+                process.exit(1);
+              }
+              process.stdout.write(body);
+              process.exit(0);
+            });
+          }
+        );
+        req.on("timeout", () => { req.destroy(); process.exit(1); });
+        req.on("error", () => process.exit(1));
+        req.end(method === "POST" ? "{}" : undefined);
+      ' "$1" "$2" 2>/dev/null
+    }
+
+    wait_for_session_release() {
+      local waited=0
+      while (( waited < SESSION_EVICT_TIMEOUT )); do
+        local state
+        state="$(session_request GET /session)" || return 1
+        if ! grep -q '"open":true' <<<"$state"; then
+          return 0
+        fi
+        # Re-issue the eviction on every pass, not once before the loop. A
+        # session in its reservation window (open() has taken the slot but the
+        # browser has not launched yet) reports open:true while refusing the
+        # evict, so a single request can be dropped and the run would then wait
+        # out the whole timeout and abort. session-server.js also carries a
+        # pending-evict flag across that window; this is the other half, and it
+        # heals any refusal that flag does not cover. evict() never extends an
+        # existing deadline, so repeating it cannot push the browser further
+        # out of the run's reach.
+        session_request POST /session/evict >/dev/null || return 1
+        sleep 5
+        waited=$((waited + 5))
+      done
+      return 2
+    }
+
+    session_state="$(session_request GET /session)" \
+      || abort "session server unreachable at browser:${SESSION_SERVER_PORT:-8932} - cannot tell whether a sign-in session holds the browser (unreachable, or rejected the agent's X-Agent-Token — check AGENT_API_TOKEN matches in the agent and browser services) (docker compose logs browser)"
+
+    if grep -q '"open":true' <<<"$session_state"; then
+      log "an attended sign-in session is open - requesting the browser back"
+      session_request POST /session/evict >/dev/null \
+        || abort "session server unreachable while evicting the sign-in session"
+      wait_for_session_release
+      case $? in
+        0) log "sign-in session released the browser" ;;
+        1) abort "session server unreachable while waiting for the sign-in session to close" ;;
+        2) abort "sign-in session did not release the browser within ${SESSION_EVICT_TIMEOUT}s" ;;
+      esac
+    fi
     ;;
 
   *)

@@ -55,6 +55,18 @@ if ! kill -0 "$X11VNC_PID" 2>/dev/null; then
 fi
 log "x11vnc running on PID $X11VNC_PID"
 
+# Start the window manager. Chromium's windows are unmanaged without one, and
+# an SSO popup then cannot be raised, moved or closed from the viewport.
+log "starting openbox on $DISPLAY..."
+openbox &
+OPENBOX_PID=$!
+sleep 1
+
+if ! kill -0 "$OPENBOX_PID" 2>/dev/null; then
+  abort "openbox failed to start (PID $OPENBOX_PID)"
+fi
+log "openbox running on PID $OPENBOX_PID"
+
 # Start noVNC / websockify (web-based VNC at http://localhost:7900)
 log "starting noVNC on port $NOVNC_PORT..."
 # Ubuntu's novnc package ships only the web assets (/usr/share/novnc),
@@ -108,6 +120,20 @@ if [[ -L "$lock_path" ]]; then
     log "SingletonLock ($lock_target) looks live — leaving it alone"
   fi
 fi
+
+# Start the attended session control server (see browser/session-server.js).
+# Started here, after the SingletonLock adjudication above rather than before
+# it: a POST /session arriving in that window would launch Chromium against a
+# lock the entrypoint was about to clear.
+log "starting session server on port ${SESSION_SERVER_PORT:-8932}..."
+node /browser/session-server.js &
+SESSION_PID=$!
+sleep 1
+
+if ! kill -0 "$SESSION_PID" 2>/dev/null; then
+  abort "session server failed to start (PID $SESSION_PID)"
+fi
+log "session server running on PID $SESSION_PID"
 
 log "starting @playwright/mcp on port $BROWSER_MCP_PORT..."
 exec env DISPLAY="$DISPLAY" \

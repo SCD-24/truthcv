@@ -13,13 +13,12 @@ import pytest
 from launcher import ports
 
 
-def test_defaults_are_5627_and_5628():
-    assert ports.DEFAULTS == {"APP_PORT": 5627, "NOVNC_HOST_PORT": 5628}
+def test_defaults_are_5627():
+    assert ports.DEFAULTS == {"APP_PORT": 5627}
 
 
 def test_default_for_returns_the_configured_port():
     assert ports.default_for("APP_PORT") == 5627
-    assert ports.default_for("NOVNC_HOST_PORT") == 5628
 
 
 def test_bump_advances_by_one():
@@ -27,7 +26,7 @@ def test_bump_advances_by_one():
 
 
 def test_bump_skips_reserved_ports():
-    """An app port advancing past 5627 must not land on the noVNC default."""
+    """A port advancing past 5627 must not land on one already claimed."""
     assert ports.bump(5627, {5628}) == 5629
 
 

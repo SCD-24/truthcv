@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -21,8 +21,22 @@ import { ManualPage } from "./manual/ManualPage";
 import { DocumentEditPage } from "./documents/DocumentEditPage";
 import { OnboardingPage } from "./onboarding/OnboardingPage";
 import { Tour } from "./tour/Tour";
-import { getOnboarding, listPendingApprovals, updateOnboarding } from "./api/client";
+import {
+  getOnboarding,
+  getSigninQueue,
+  listPendingApprovals,
+  updateOnboarding,
+} from "./api/client";
 import { ROUTES } from "./routes";
+
+// Lazy: pulls in @novnc/novnc's RFB client, which uses top-level await and
+// is otherwise the only reason the whole bundle needs an es2022 build
+// target (see vite.config.ts). Splitting it into its own chunk keeps that
+// requirement — and the ~1MB noVNC payload — off every other route, and
+// keeps it out of tests that render <App/> without visiting this route.
+const BrowserSessionPage = lazy(() =>
+  import("./browser/BrowserSessionPage").then((m) => ({ default: m.BrowserSessionPage })),
+);
 
 /**
  * A request to open a saved document for re-editing — fired when the user
@@ -93,6 +107,25 @@ function usePendingApprovalsBadge(pathname: string): number {
   return pendingApprovals;
 }
 
+/** Hook: sign-in-queue badge count, refreshed on every navigation. Same
+ * shape as the pending-approvals badge above; the count is sites the agent
+ * could not get past a sign-in wall on. */
+function useSigninQueueBadge(pathname: string): number {
+  const [signinSites, setSigninSites] = useState(0);
+
+  const refresh = useCallback(() => {
+    getSigninQueue()
+      .then((queue) => setSigninSites(queue.sites.length))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh, pathname]);
+
+  return signinSites;
+}
+
 /** The app's top-level page routes. */
 function TopLevelRoutes({ onOnboardingComplete }: { onOnboardingComplete: () => void }) {
   const navigate = useNavigate();
@@ -129,6 +162,14 @@ function TopLevelRoutes({ onOnboardingComplete }: { onOnboardingComplete: () => 
       />
       <Route path={ROUTES.documentEdit} element={<DocumentEditPage />} />
       <Route path={ROUTES.manual} element={<ManualPage />} />
+      <Route
+        path={ROUTES.browserSession}
+        element={
+          <Suspense fallback={null}>
+            <BrowserSessionPage />
+          </Suspense>
+        }
+      />
       <Route path="*" element={<Navigate to={ROUTES.analytics} replace />} />
     </Routes>
   );
@@ -144,6 +185,7 @@ export function App() {
   const location = useLocation();
   const navigate = useNavigate();
   const pendingApprovals = usePendingApprovalsBadge(location.pathname);
+  const signinSites = useSigninQueueBadge(location.pathname);
 
   if (bootstrap === "pending") return <BootSplash />;
   if (bootstrap === "error") return <BootError onRetry={retryBootstrap} />;
@@ -194,6 +236,7 @@ export function App() {
         onNavigate={navigate}
         onOpenSettings={() => setSettingsOpen(true)}
         pendingApprovals={pendingApprovals}
+        signinSites={signinSites}
       />
       <main className="stage">
         <div className="stage__inner stage__inner--wide">

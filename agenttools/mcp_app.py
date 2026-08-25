@@ -73,7 +73,11 @@ _TOOL_REGISTRY = {
     ),
     "report_apply_failure": (
         _report_apply_failure,
-        "Records why an approved application could not be completed. The item stays queued for the next run.",
+        "Records why an approved application could not be completed. The item "
+        "stays queued for the next run. When the form sat behind a sign-in or "
+        "registration wall, also pass blocker='login_required' and signin_url "
+        "(the login page URL) — that is what tells the operator which site to "
+        "sign in to. Never create an account yourself.",
     ),
     "record_company_board": (
         _record_company_board,

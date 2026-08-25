@@ -29,10 +29,20 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Install additional tools:
 #   xvfb:       Virtual X11 display server (Chromium runs headful here)
 #   x11vnc:     VNC server over the X11 display (observe running tests)
-#   novnc:      Browser-based VNC client (accessible as http://localhost:5628)
+#   novnc:      Browser-based VNC client (reached only through the app's
+#               origin-checked WebSocket relay at
+#               /api/browser/session/stream; deliberately NOT published to
+#               the host — see docker-compose.yml)
 #   websockify: WebSocket-to-socket bridge, required by noVNC
+#   openbox:    Window manager. Without one, Chromium's windows are unmanaged:
+#               no title bar, no move, resize, raise or close. SSO flows open a
+#               second top-level window for the identity provider, which lands
+#               stacked over or under the first with no way to switch — so a
+#               manual sign-in through the viewport is unusable without this.
+#   procps:     ps, used by session-server.js (`ps -eo stat=,comm=`) to check
+#               whether a live Chromium already holds the profile.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      xvfb x11vnc novnc websockify \
+      xvfb x11vnc novnc websockify openbox procps \
  && rm -rf /var/lib/apt/lists/*
 
 # Install @playwright/mcp globally — the Playwright image ships node,
@@ -67,11 +77,13 @@ RUN mkdir -p /browser-profile /app/data
 
 # Expose ports:
 #   8931: @playwright/mcp HTTP server (internal to compose network)
-#   7900: noVNC (web-based VNC viewer, useful for debugging/manual login)
-EXPOSE 8931 7900
+#   8932: attended session control server (internal to compose network)
+#   7900: noVNC (proxied by the app; not published to the host)
+EXPOSE 8931 8932 7900
 
 # Entrypoint: starts Xvfb, x11vnc, noVNC and @playwright/mcp.
 COPY browser/entrypoint.sh /browser/entrypoint.sh
+COPY browser/session-server.js /browser/session-server.js
 RUN chmod +x /browser/entrypoint.sh
 
 ENTRYPOINT ["/browser/entrypoint.sh"]

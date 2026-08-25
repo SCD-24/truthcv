@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import {
   getAgentConfig,
   getProfileAnswers,
@@ -25,6 +26,7 @@ vi.mock("../api/client", () => ({
   getRouting: vi.fn(),
   listConnections: vi.fn(),
   listConnectionModels: vi.fn(),
+  getSigninQueue: vi.fn().mockResolvedValue({ sites: [] }),
 }));
 
 function makeConfig(): AgentConfig {
@@ -88,7 +90,11 @@ async function renderLoaded(answers: ProfileAnswers) {
   vi.mocked(getRouting).mockResolvedValue(makeRouting());
   vi.mocked(listConnections).mockResolvedValue(connections);
   vi.mocked(listConnectionModels).mockResolvedValue([]);
-  render(<AgentsPage onBack={vi.fn()} />);
+  render(
+    <MemoryRouter>
+      <AgentsPage onBack={vi.fn()} />
+    </MemoryRouter>,
+  );
   await screen.findByRole("heading", { name: "Job profiles" });
 }
 

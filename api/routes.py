@@ -13,6 +13,7 @@ import os
 from datetime import date
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -116,6 +117,11 @@ from .schemas import (
     ScreeningModel,
     SettingsStatus,
     SettingsUpdate,
+    SigninQueue,
+    SigninQueueSite,
+    BrowserSession,
+    BrowserSessionClosed,
+    BrowserSessionRequest,
     StartLoginResult,
     TailorRequest,
     TailorResult,
@@ -1328,6 +1334,135 @@ def post_agent_cancel() -> AgentCancelResult:
     return AgentCancelResult(
         cancelled=data.get("cancelled", False),
         running=data.get("running", False),
+    )
+
+
+def _host_of(url: str) -> str:
+    """The full host of an absolute http(s) URL, or "" if it is not one.
+
+    Anything without a scheme and a netloc is not addressable, so it cannot be
+    a sign-in destination — returning "" drops it rather than grouping several
+    unrelated records under a blank host.
+    """
+    try:
+        parsed = urlparse(url or "")
+    except ValueError:
+        return ""
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return ""
+    return parsed.netloc.casefold()
+
+
+@router.get("/browser/signin-queue", response_model=SigninQueue)
+def get_signin_queue() -> SigninQueue:
+    """Sites the agent hit a sign-in wall on, grouped by host.
+
+    Derived from the screening store on every call rather than kept as its own
+    state: the agent's experience is the only source of truth here, so an entry
+    exists exactly as long as a posting is still waiting behind that sign-in.
+    """
+    grouped: dict[str, dict] = {}
+    for s in screening_store.load_all():
+        if s.apply_blocker != "login_required":
+            continue
+        # Only items still queued to be applied to. Applied or rejected means
+        # nothing is waiting on this sign-in any more.
+        if s.approval not in ("pending", "approved"):
+            continue
+        url = s.signin_url or s.url
+        host = _host_of(url)
+        if not host:
+            continue
+        entry = grouped.setdefault(
+            host,
+            {"host": host, "signin_url": url, "waiting": 0, "last_blocked_at": "", "companies": []},
+        )
+        entry["waiting"] += 1
+        if s.updated_at > entry["last_blocked_at"]:
+            entry["last_blocked_at"] = s.updated_at
+        if s.company and s.company not in entry["companies"]:
+            entry["companies"].append(s.company)
+    sites = [SigninQueueSite(**e) for e in grouped.values()]
+    sites.sort(key=lambda s: (-s.waiting, s.host))
+    return SigninQueue(sites=sites)
+
+
+def _browser_control_url(path: str) -> str:
+    """Build the session-server control URL from env, defaulting port 8932."""
+    port = os.environ.get("SESSION_SERVER_PORT", "8932")
+    return f"http://browser:{port}{path}"
+
+
+def _forward_to_session_server(path: str, method: str = "GET", body: dict | None = None) -> dict:
+    """Forward a request to browser/session-server.js.
+
+    Distinguishes three outcomes the UI must tell apart: a normal answer, a
+    refusal the session server made deliberately (4xx/503 — forwarded with its
+    own status so "the agent is applying right now" does not read as "the
+    browser is broken"), and the container being unreachable (503).
+    """
+    token = os.environ.get("AGENT_API_TOKEN", "")
+    data = json.dumps(body or {}).encode() if method == "POST" else None
+    req = urllib.request.Request(
+        _browser_control_url(path),
+        method=method,
+        headers={"X-Agent-Token": token, "Content-Type": "application/json"},
+        data=data,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        # Forward the session server's own refusal payload. It distinguishes
+        # session_open (which carries the already-open session's URL, so the UI
+        # can offer to return to it) from agent_running and profile_busy — all
+        # three are 409s that call for different words on screen.
+        try:
+            detail = json.loads(exc.read())
+        except (ValueError, OSError):
+            detail = {"reason": "refused"}
+        raise HTTPException(status_code=exc.code, detail=detail) from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=503, detail="Browser service unreachable") from exc
+
+
+def _session_from(data: dict) -> BrowserSession:
+    return BrowserSession(
+        open=data.get("open", False),
+        url=data.get("url"),
+        started_at=data.get("startedAt"),
+        evict_deadline=data.get("evictDeadline"),
+    )
+
+
+@router.get("/browser/session", response_model=BrowserSession)
+def get_browser_session() -> BrowserSession:
+    """Whether an attended sign-in session is open, and at which URL."""
+    return _session_from(_forward_to_session_server("/session", method="GET"))
+
+
+@router.post("/browser/session", response_model=BrowserSession)
+def post_browser_session(payload: BrowserSessionRequest) -> BrowserSession:
+    """Open an attended sign-in session at a URL.
+
+    Refused with 409 while a run is in progress: unattended runs win, and the
+    operator is told to try again shortly rather than the run being disturbed.
+    """
+    if _host_of(payload.url) == "":
+        raise HTTPException(status_code=422, detail="An http(s) URL is required")
+    return _session_from(
+        _forward_to_session_server("/session", method="POST", body={"url": payload.url})
+    )
+
+
+@router.delete("/browser/session", response_model=BrowserSessionClosed)
+def delete_browser_session() -> BrowserSessionClosed:
+    """Close the attended session and release the browser."""
+    data = _forward_to_session_server("/session/close", method="POST")
+    return BrowserSessionClosed(
+        closed=data.get("closed", False),
+        closing=data.get("closing", False),
+        reserving=data.get("reserving", False),
     )
 
 
