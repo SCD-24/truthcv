@@ -8,6 +8,7 @@ way, because the cost of getting this wrong is mailing colleagues an API key.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import zipfile
 from pathlib import Path
@@ -16,6 +17,22 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / "scripts" / "release.sh"
+
+
+def _forbidden_patterns() -> list[str]:
+    """Parse the FORBIDDEN_PATTERNS bash array out of release.sh.
+
+    Parsed rather than duplicated so this test guards the actual patterns the
+    script runs, not a copy that could silently drift from them.
+    """
+    text = SCRIPT.read_text()
+    match = re.search(r"FORBIDDEN_PATTERNS=\((.*?)^\)", text, re.DOTALL | re.MULTILINE)
+    assert match, "FORBIDDEN_PATTERNS array not found in release.sh"
+    return re.findall(r"'([^']*)'", match.group(1))
+
+
+def _matches_any(pattern_strings: list[str], path: str) -> bool:
+    return any(re.search(p, path) for p in pattern_strings)
 
 
 @pytest.fixture(scope="module")
@@ -39,6 +56,26 @@ def test_zip_excludes_the_data_directory(built_zip):
 
 def test_zip_excludes_personal_answers(built_zip):
     assert not [n for n in built_zip.namelist() if n.endswith("answers.local.yaml")]
+
+
+@pytest.mark.parametrize(
+    "path,should_match",
+    [
+        ("truthcv-abc/.env", True),
+        ("truthcv-abc/.env.backup-20260825T093000Z", True),
+        ("truthcv-abc/data/applications.json", True),
+        ("truthcv-abc/answers.local.yaml", True),
+        ("truthcv-abc/.env.example", False),
+        ("truthcv-abc/xenv", False),
+        ("truthcv-abc/mydata/x", False),
+    ],
+)
+def test_forbidden_patterns_match_exactly_what_they_should(path, should_match):
+    patterns = _forbidden_patterns()
+    assert _matches_any(patterns, path) is should_match, (
+        f"{path!r} should {'match' if should_match else 'not match'} "
+        f"one of {patterns}"
+    )
 
 
 def test_zip_contains_what_a_colleague_needs(built_zip):

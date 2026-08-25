@@ -6,6 +6,9 @@ __pycache__/
 node_modules
 *.pyc
 .env
+# Same live secrets as .env — the launcher writes one of these beside it
+# whenever it backs up an existing .env before overwriting it.
+.env.backup-*
 .aether/debug/runs/*
 # The canonical CV is personal data. It lives on the shared data volume
 # (data/canonical_cv.pdf, registered via `python -m truth.answers <path>`),

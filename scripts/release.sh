@@ -29,10 +29,20 @@ git archive --format=zip --prefix="truthcv-$SHORT/" -o "$ARCHIVE" "$REF"
 
 # git archive should make these impossible. Assert anyway: this is the one
 # failure in the project that cannot be walked back once the zip is sent.
-for forbidden in '.env' 'data/' 'answers.local.yaml'; do
-  if unzip -Z1 "$ARCHIVE" | grep -qE "(^|/)${forbidden%/}(/|$)"; then
+#
+# Extended regexes matched against the archive's path listing. `.env.example`
+# must NOT match — it is meant to ship. `.env.backup-*` must match: the
+# launcher writes those beside .env and they carry the same live secrets.
+FORBIDDEN_PATTERNS=(
+  '(^|/)\.env(/|$)'
+  '(^|/)\.env\.backup-'
+  '(^|/)data(/|$)'
+  '(^|/)answers\.local\.yaml(/|$)'
+)
+for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
+  if unzip -Z1 "$ARCHIVE" | grep -qE "$pattern"; then
     rm -f "$ARCHIVE"
-    echo "ABORT: $forbidden found in the archive. Not shipping it." >&2
+    echo "ABORT: archive matched forbidden pattern $pattern. Not shipping it." >&2
     exit 1
   fi
 done
