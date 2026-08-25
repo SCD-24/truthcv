@@ -95,12 +95,21 @@ maintainer's own or a colleague's. The rules are absolute:
    `AGENT_API_TOKEN` filled in.
 2. **Present, both keys set and non-blank** — read it, write nothing,
    proceed. The file is not opened for writing.
-3. **Present, one or both missing or blank** — copy to
-   `.env.backup-<UTC timestamp>`, then **append** only the missing keys
-   in a marked block at the end of the file.
-4. **Never** overwrite, reorder, rewrite or delete. No existing line is
-   modified, so comments and formatting survive byte-for-byte. Backups
-   are never removed.
+3. **Present, key absent entirely** — copy to
+   `.env.backup-<UTC timestamp>`, then **append** the missing key in a
+   marked block at the end of the file.
+4. **Present, key there but blank** (`ENCRYPTION_KEY=` with no value, as
+   `.env.example` ships it) — back up, then fill that line in place. A
+   blank assignment carries no information, so nothing is destroyed, and
+   filling it avoids emitting a duplicate key.
+5. **Never** touch a line that has a value. Never reorder, never delete.
+   Comments, ordering and formatting survive byte-for-byte. Backups are
+   never removed.
+
+Rule 4 exists because appending to a file that already has a blank
+`ENCRYPTION_KEY=` would produce the key twice and make correctness
+depend on compose resolving duplicates last-wins. Filling in place keeps
+each key appearing exactly once.
 
 Bootstrap prints exactly which keys it added and where the backup went.
 Re-running it on a complete `.env` is a no-op.
@@ -138,7 +147,7 @@ to run.
 |---|---|---|
 | `ENCRYPTION_KEY` | Bootstrap, generated | Before first `compose up` |
 | `AGENT_API_TOKEN` | Bootstrap, generated | Before first `compose up` |
-| `APP_PORT` | Bootstrap, probed | Before first `compose up` |
+| `APP_PORT` | Bootstrap, default or bumped on conflict | Before first `compose up` |
 | Claude credential | Colleague, Connections UI | After launch, in the browser |
 | Identity answers | Colleague, Settings UI | After launch, in the browser |
 
@@ -198,23 +207,31 @@ nothing. The host-side variables are therefore `APP_PORT` and
 
 ### Port selection
 
-1. If `APP_PORT` is present in `.env`, reuse it. Sticky, so bookmarks
-   keep working. Never re-probe merely because it is busy.
-2. When unset, probe upward from 5627. The first free port wins and is
-   appended to `.env` under the rules above.
-3. Before treating a busy stored port as a conflict, check whether this
-   project's own compose stack holds it (`docker compose ps`). Our own
-   running container is the normal case, not a collision.
-4. A stored port genuinely held by something else stops the launch with
-   an explanation and an offered alternative. A bookmarked port is never
-   silently moved.
+Bootstrap does **not** probe for free ports. It cannot: it runs inside a
+container, where binding a socket tests the container's network
+namespace rather than the host's, and `--network host` does not exist on
+Docker Desktop for macOS or Windows. A probe from in there would report
+ports free that the host has bound.
 
-`NOVNC_HOST_PORT` follows the same rules, probing upward from 5628.
+Docker's own bind attempt is the only authoritative signal, so the
+launcher uses it directly:
 
-Ports are allocated in order — app first, then noVNC — and each probe
-skips ports already allocated in this run as well as those already
-bound. Without that, an app falling back to 5628 would collide with the
-noVNC default.
+1. If `APP_PORT` is present in `.env`, use it. Sticky, so bookmarks keep
+   working.
+2. When unset, bootstrap writes the default — 5627 for `APP_PORT`, 5628
+   for `NOVNC_HOST_PORT` — under the `.env` rules above.
+3. The launcher runs `docker compose up -d`. On success, done.
+4. If compose fails with a port-allocation error, the launcher re-runs
+   bootstrap with `--bump <VAR>`, which advances that variable to the
+   next candidate, and retries. Bounded at 10 attempts, after which it
+   stops and reports the conflict rather than looping.
+5. Bumping skips any port already assigned to the other variable, so an
+   app port advancing to 5628 cannot collide with the noVNC default.
+
+This needs no host-side probing, behaves identically on all three
+platforms, and asks the only component whose answer is authoritative.
+A port already recorded in `.env` is only ever advanced after Docker
+itself refuses it — a bookmarked port is never moved speculatively.
 
 ## First-run wizard
 
@@ -288,8 +305,8 @@ bug destroys a real file:
 - comments and formatting preserved byte-for-byte
 - backup created before any append
 - idempotent on re-run
-- port sticky when stored, probed when absent
-- own-stack detection distinguished from a foreign port holder
+- port sticky when stored, defaulted when absent
+- `--bump` advances a port and skips the other variable's value
 
 The launcher scripts get a manual smoke check per platform. A
 double-click on three operating systems is not meaningfully automated
