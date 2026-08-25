@@ -73,6 +73,11 @@ profiles — there are no built-in defaults. A profile-specific requirements
 block is rendered into your run prompt from `get_job_profiles`' data; match
 each posting against it and apply only when every non-waived criterion passes.
 
+Before screening a company, call `get_company_findings`. If it returns a
+non-empty `open_contradictions`, **stop for that company and report it** — do
+not apply, and do not attempt to adjudicate which side is right yourself; that
+is the operator's call.
+
 Judge each posting by the matched profile's own fields:
 
 - **`remoteModel`** — the working arrangement the operator will accept (e.g.
@@ -83,7 +88,8 @@ Judge each posting by the matched profile's own fields:
   verification, an Employer-of-Record placement does not satisfy it; check the
   operator's stored work authorisation (`get_profile_answers`) for what their
   situation actually allows. Watch for the tell: "you'll be hired via <EOR
-  provider> / our global employer partner."
+  provider> / our global employer partner." When you establish the employing
+  entity or EOR fact, record it with `record_company_finding` — see below.
 - **`salaryFloor` / `salaryAskMin` / `salaryAskMax` + `currency`** — the pay
   band, in the currency the operator chose. A posted band that tops out below
   the floor fails. If no band is posted, it passes this filter — see §3 for
@@ -95,9 +101,31 @@ Judge each posting by the matched profile's own fields:
   plus" phrasing does not.
 - **`glassdoorMin` / `glassdoorMinReviews`** — the employer-review threshold,
   and the review count under which it is waived. Record the rating and review
-  count you found.
+  count you found with `record_company_finding`, source_class `review_site`.
 - **`acceptedRoleTypes` / `rejectedRoleTypes`** — which kinds of roles this
   profile targets and which it excludes.
+
+### Recording company research — `record_company_finding`
+
+A claim about a *company* (its employing entity, an employer-review figure,
+anything that isn't specific to one posting) is recorded with
+`record_company_finding`, never left implicit in a screening verdict. Every
+argument is required except `as_of` and `note`:
+
+- `source_url` must be the page the claim was **actually read from** — not a
+  search-results snippet, not a memory of having seen it once.
+- `source_class` is one of the ranked classes, strongest first:
+  `audited_accounts` > `regulatory_filing` > `listed_bond_price` >
+  `company_statement` > `press` > `review_site`. Use the strongest source
+  actually available to you, not the first one found.
+- `as_of` is the date the **source** is dated. Leave it empty when the source
+  carries no date — exactly the discipline §3 uses for a posting's own
+  `posted_date`: empty means unknown and is **never inferred**, never set to
+  today's date.
+
+If `record_company_finding` reports a `warning` (it contradicts an existing
+finding), that company now has an open contradiction — treat it exactly like
+the `get_company_findings` check above: stop and report it.
 
 ### The posting freshness window
 
@@ -294,12 +322,16 @@ likelier to be silently blocked by ATS bot detection.
      actually typed — the per-company `tcv_` address returned by
      `get_profile_answers` — with `source: "canonical"`, since that is what
      the form contains.
-   - `screening`: the §2 filter verdicts — `entity` (the employment-entity /
-     EOR finding), `remote`, `salary` (how the band was handled — the posted
-     number, or the exact string `recommend_salary` returned when the posting
-     had none, per §3), `language`, `role_type`, and `glassdoor` as
-     `{rating, reviews, waiver_applied}`, where `waiver_applied` is `true`
-     only when you invoked the review-count waiver and `false` otherwise.
+   - `screening`: the §2 filter verdicts for this **posting** only —
+     `remote`, `salary` (how the band was handled — the posted number, or the
+     exact string `recommend_salary` returned when the posting had none, per
+     §3), `language`, and `role_type`. The `screening` object no longer
+     accepts `entity` or `glassdoor` — those are **company**-level claims, not
+     posting-level verdicts. The employing entity / EOR finding and any
+     employer-review figure are recorded separately with
+     `record_company_finding` (see §2), because a claim about a company must
+     carry a source and an as-of date and must not be silently overwritten by
+     the next run — a screening verdict has neither.
    - `profile`: the name of the matched profile that drove this application
      (§3, §2), recorded on every screening.
    - `gaps_disclosed`: every gap you disclosed in the cover letter, one entry

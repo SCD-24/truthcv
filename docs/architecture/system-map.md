@@ -7,6 +7,7 @@ graph TD
     api["API <br/> <small>(BACKEND)</small>"]
     application-agent["Application Agent <br/> <small>(BACKEND)</small>"]
     application-tracker["Application Tracker <br/> <small>(BACKEND)</small>"]
+    company-research["Company Research <br/> <small>(BACKEND)</small>"]
     connections["Connections <br/> <small>(BACKEND)</small>"]
     cover-letter-engine["Cover Letter Engine <br/> <small>(BACKEND)</small>"]
     gmail-api["Gmail / Google OAuth API <br/> <small>(CUSTOM)</small>"]
@@ -25,6 +26,7 @@ graph TD
     agent-config -->|file I/O| truth-data-volume
     api -->|in-process| agent-config
     api -->|in-process| application-tracker
+    api -->|in-process| company-research
     api -->|in-process| connections
     api -->|in-process| cover-letter-engine
     api -->|HTTPS| gmail-api
@@ -37,8 +39,10 @@ graph TD
     api -->|in-process| truth-store
     application-agent -->|HTTP/REST| agent-config
     application-agent -->|HTTP/MCP (streamable HTTP JSON-RPC)| api
+    application-tracker -->|in-process| company-research
     application-tracker -->|in-process| renderer
     application-tracker -->|file I/O| truth-data-volume
+    company-research -->|file I/O| truth-data-volume
     connections -->|HTTPS| gmail-api
     connections -->|in-process| secret-store
     cover-letter-engine -->|in-process| guardrail-validator
@@ -51,9 +55,11 @@ graph TD
     llm-provider-layer -->|HTTPS| llm-provider-service
     llm-provider-layer -->|in-process| secret-store
     onboarding-store -->|file I/O| truth-data-volume
+    renderer -->|in-process| prompt-store
     renderer -->|file I/O| truth-data-volume
     screening-engine -->|in-process| agent-config
     screening-engine -->|in-process| application-tracker
+    screening-engine -->|in-process| company-research
     screening-engine -->|file I/O| truth-data-volume
     secret-store -->|file I/O| truth-data-volume
     tailor-engine -->|in-process| llm-provider-layer
@@ -72,6 +78,7 @@ graph TD
 - [API](overview.md) (`api`, backend)
 - [Application Agent](overview.md) (`application-agent`, backend)
 - [Application Tracker](overview.md) (`application-tracker`, backend)
+- [Company Research](overview.md) (`company-research`, backend)
 - [Connections](overview.md) (`connections`, backend)
 - [Cover Letter Engine](overview.md) (`cover-letter-engine`, backend)
 - [Gmail / Google OAuth API](overview.md) (`gmail-api`, custom)
@@ -93,6 +100,7 @@ graph TD
 - [agent-config → truth-data-volume](interactions/agent-config--truth-data-volume.md) via `file I/O`
 - [api → agent-config](interactions/api--agent-config.md) via `in-process`
 - [api → application-tracker](interactions/api--application-tracker.md) via `in-process`
+- [api → company-research](interactions/api--company-research.md) via `in-process`
 - [api → connections](interactions/api--connections.md) via `in-process`
 - [api → cover-letter-engine](interactions/api--cover-letter-engine.md) via `in-process`
 - [api → gmail-api](interactions/api--gmail-api.md) via `HTTPS`
@@ -105,8 +113,10 @@ graph TD
 - [api → truth-store](interactions/api--truth-store.md) via `in-process`
 - [application-agent → agent-config](interactions/application-agent--agent-config.md) via `HTTP/REST`
 - [application-agent → api](interactions/application-agent--api.md) via `HTTP/MCP (streamable HTTP JSON-RPC)`
+- [application-tracker → company-research](interactions/application-tracker--company-research.md) via `in-process`
 - [application-tracker → renderer](interactions/application-tracker--renderer.md) via `in-process`
 - [application-tracker → truth-data-volume](interactions/application-tracker--truth-data-volume.md) via `file I/O`
+- [company-research → truth-data-volume](interactions/company-research--truth-data-volume.md) via `file I/O`
 - [connections → gmail-api](interactions/connections--gmail-api.md) via `HTTPS`
 - [connections → secret-store](interactions/connections--secret-store.md) via `in-process`
 - [cover-letter-engine → guardrail-validator](interactions/cover-letter-engine--guardrail-validator.md) via `in-process`
@@ -119,9 +129,11 @@ graph TD
 - [llm-provider-layer → llm-provider-service](interactions/llm-provider-layer--llm-provider-service.md) via `HTTPS`
 - [llm-provider-layer → secret-store](interactions/llm-provider-layer--secret-store.md) via `in-process`
 - [onboarding-store → truth-data-volume](interactions/onboarding-store--truth-data-volume.md) via `file I/O`
+- [renderer → prompt-store](interactions/renderer--prompt-store.md) via `in-process`
 - [renderer → truth-data-volume](interactions/renderer--truth-data-volume.md) via `file I/O`
 - [screening-engine → agent-config](interactions/screening-engine--agent-config.md) via `in-process`
 - [screening-engine → application-tracker](interactions/screening-engine--application-tracker.md) via `in-process`
+- [screening-engine → company-research](interactions/screening-engine--company-research.md) via `in-process`
 - [screening-engine → truth-data-volume](interactions/screening-engine--truth-data-volume.md) via `file I/O`
 - [secret-store → truth-data-volume](interactions/secret-store--truth-data-volume.md) via `file I/O`
 - [tailor-engine → llm-provider-layer](interactions/tailor-engine--llm-provider-layer.md) via `in-process`
@@ -135,5 +147,5 @@ graph TD
 
 ## Groups
 
-- [TruthCV Container (single Docker image)](groups/truthcv-container-single-docker-image.md) (`truthcv-container-single-docker-image`, 10 member(s))
+- [TruthCV Container (single Docker image)](groups/truthcv-container-single-docker-image.md) (`truthcv-container-single-docker-image`, 11 member(s))
 <!-- generated:end file:system-map -->

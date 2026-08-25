@@ -22,7 +22,8 @@ from fastapi.testclient import TestClient
 from api.main import app
 from applications.store import load_all as load_applications
 from agenttools import server as mcp_server
-from agenttools import tools_ledger, tools_letter, tools_boards
+from agenttools import tools_ledger, tools_letter, tools_boards, tools_research
+from companyresearch import store as company_findings_store
 from providers.fake import FakeProvider
 from truth.answers import register_canonical_cv
 from truth.model import Bullet, Experience, Skill, Truth
@@ -61,6 +62,8 @@ def test_no_registered_tool_accepts_an_approval_parameter():
         "record_company_board",
         "get_job_profiles",
         "recommend_salary",
+        "record_company_finding",
+        "get_company_findings",
     }
     offenses = []
     for name, fn in mcp_server.TOOLS.items():
@@ -95,6 +98,7 @@ def test_no_tool_module_reaches_the_guardrail_allow_list():
         tools_letter.__name__: tools_letter,
         tools_ledger.__name__: tools_ledger,
         tools_boards.__name__: tools_boards,
+        tools_research.__name__: tools_research,
     }
     assert module_names <= modules.keys(), (
         f"unknown tool module(s), extend this test's module map: {module_names - modules.keys()}"
@@ -724,7 +728,14 @@ def test_get_profile_answers_without_company_returns_stored_email_verbatim(data_
 
 def test_get_profile_answers_with_company_aliases_only_the_email(data_dir):
     """Passing `company` rewrites `email` to the per-company tracking
-    address; every other field stays byte-identical to the un-aliased call."""
+    address; every other field stays byte-identical to the un-aliased call.
+
+    "Acme Co." has no existing application row, so it is a genuinely new
+    company: the alias is built from its normalized identity key ("acme" —
+    "Co." is a stripped legal-entity suffix), not from the raw incoming
+    spelling. See test_get_profile_answers_freezes_alias_to_existing_application
+    for the case where a matching application row exists instead.
+    """
     from truth.answers import Answers, save as save_answers
 
     save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com", phone="+49 1"))
@@ -732,7 +743,7 @@ def test_get_profile_answers_with_company_aliases_only_the_email(data_dir):
     plain = tools_ledger.get_profile_answers()
     aliased = tools_ledger.get_profile_answers(company="Acme Co.")
 
-    assert aliased["email"] == "jane.rivera+tcv_acme_co@example.com"
+    assert aliased["email"] == "jane.rivera+tcv_acme@example.com"
     for field in plain:
         if field == "email":
             continue
@@ -760,3 +771,165 @@ def test_get_profile_answers_input_schema_advertises_optional_company():
     schema = _input_schema(tools_ledger.get_profile_answers)
     assert schema["properties"]["company"]["type"] == "string"
     assert "company" not in schema["required"]
+
+
+def _create_application_at(monkeypatch, ts, fields):
+    """Create an application with a controlled ``created_at`` (see
+    tests/test_repair_duplicate_applications.py for the same pattern)."""
+    import applications.store as applications_store
+
+    monkeypatch.setattr("applications.store._now", lambda: ts)
+    return applications_store.create(fields)
+
+
+def test_get_profile_answers_freezes_alias_to_existing_application(data_dir, monkeypatch):
+    """An existing application row freezes the alias to the address already
+    submitted, even when this call spells the company differently."""
+    from truth.answers import Answers, save as save_answers
+
+    save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com"))
+    _create_application_at(
+        monkeypatch,
+        "2026-08-01T00:00:00+00:00",
+        {"company": "RobCo GmbH", "application_url": "https://jobs.example.com/robco"},
+    )
+
+    aliased = tools_ledger.get_profile_answers(company="RobCo")
+
+    assert aliased["email"] == "jane.rivera+tcv_robco_gmbh@example.com"
+
+
+def test_get_profile_answers_new_company_normalizes_from_identity_key(data_dir):
+    """With no existing application row, a brand-new company is aliased from
+    its normalized identity key rather than its raw incoming spelling."""
+    from truth.answers import Answers, save as save_answers
+
+    save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com"))
+
+    aliased = tools_ledger.get_profile_answers(company="Acme GmbH")
+
+    assert aliased["email"] == "jane.rivera+tcv_acme@example.com"
+
+
+def test_get_profile_answers_alias_freeze_earliest_row_wins(data_dir, monkeypatch):
+    """When two application rows are suffix-equivalent, the EARLIEST-created
+    row's stored company string is the one the alias is frozen to."""
+    from truth.answers import Answers, save as save_answers
+
+    save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com"))
+    _create_application_at(
+        monkeypatch,
+        "2026-08-01T00:00:00+00:00",
+        {"company": "RobCo", "application_url": "https://jobs.example.com/robco/first"},
+    )
+    _create_application_at(
+        monkeypatch,
+        "2026-08-09T00:00:00+00:00",
+        {"company": "RobCo GmbH", "application_url": "https://jobs.example.com/robco/second"},
+    )
+
+    aliased = tools_ledger.get_profile_answers(company="RobCo GmbH")
+
+    # Frozen to the EARLIEST row's stored spelling ("RobCo"), not the later
+    # "RobCo GmbH" row and not the incoming "RobCo GmbH" call argument.
+    assert aliased["email"] == "jane.rivera+tcv_robco@example.com"
+
+
+def test_get_profile_answers_alias_freeze_only_email_field_changes(data_dir, monkeypatch):
+    """Alias freezing changes only `email`; every other field, and the
+    persisted answers, stay exactly as the un-aliased call sees them."""
+    from truth.answers import Answers, load as load_answers, save as save_answers
+
+    save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com", phone="+49 1"))
+    _create_application_at(
+        monkeypatch,
+        "2026-08-01T00:00:00+00:00",
+        {"company": "RobCo GmbH", "application_url": "https://jobs.example.com/robco"},
+    )
+
+    plain = tools_ledger.get_profile_answers()
+    aliased = tools_ledger.get_profile_answers(company="RobCo")
+
+    for field in plain:
+        if field == "email":
+            continue
+        assert aliased[field] == plain[field], f"field diverged: {field}"
+
+    reloaded = load_answers()
+    assert reloaded.email == "jane.rivera@example.com"
+
+
+def test_get_profile_answers_alias_falls_back_when_applications_store_broken(
+    data_dir, monkeypatch
+):
+    """A broken/unreadable applications store falls back to the incoming
+    company string rather than raising."""
+    from truth.answers import Answers, save as save_answers
+
+    save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com"))
+
+    def _broken_load_all():
+        raise OSError("applications.json is unreadable")
+
+    monkeypatch.setattr("applications.store.load_all", _broken_load_all)
+
+    aliased = tools_ledger.get_profile_answers(company="RobCo GmbH")
+
+    # Falls back to aliasing from the raw incoming string, unchanged.
+    assert aliased["email"] == "jane.rivera+tcv_robco_gmbh@example.com"
+
+
+# --- record_company_finding / get_company_findings -------------------------
+
+
+def test_company_research_tools_registered_with_full_input_schema(data_dir):
+    from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
+
+    assert "record_company_finding" in _TOOL_REGISTRY
+    assert "get_company_findings" in _TOOL_REGISTRY
+
+    fn, _ = _TOOL_REGISTRY["record_company_finding"]
+    schema = _input_schema(fn)
+    for name in ("company", "claim", "value", "source_url", "source_class", "as_of", "note"):
+        assert name in schema["properties"], name
+    assert set(schema["required"]) == {"company", "claim", "value", "source_url", "source_class"}
+
+    fn2, _ = _TOOL_REGISTRY["get_company_findings"]
+    schema2 = _input_schema(fn2)
+    assert "company" in schema2["properties"]
+    assert schema2["required"] == ["company"]
+
+
+def test_record_company_finding_rejects_empty_source_url_and_stores_nothing(data_dir):
+    with pytest.raises(ValueError):
+        tools_research.record_company_finding(
+            company="Acme Co",
+            claim="employment_entity",
+            value="Acme Ireland Ltd",
+            source_url="",
+            source_class="press",
+        )
+    assert company_findings_store.for_company("Acme Co") == []
+
+
+def test_get_company_findings_reports_open_contradictions(data_dir):
+    tools_research.record_company_finding(
+        company="Acme Co",
+        claim="employer_rating",
+        value="4.5",
+        source_url="https://a.example/x",
+        source_class="press",
+    )
+    result = tools_research.record_company_finding(
+        company="Acme Co",
+        claim="employer_rating",
+        value="3.0",
+        source_url="https://b.example/y",
+        source_class="review_site",
+    )
+    assert result["contradicts"]
+    assert "warning" in result
+
+    report = tools_research.get_company_findings("Acme Co")
+    assert len(report["findings"]) == 2
+    assert len(report["open_contradictions"]) == 1

@@ -14,6 +14,7 @@ import { FilledFormPage } from "./applications/FilledFormPage";
 import { AnalyticsPage } from "./analytics/AnalyticsPage";
 import { AgentsPage } from "./agents/AgentsPage";
 import { ScreeningsPage } from "./screenings/ScreeningsPage";
+import { CompanyResearchPage } from "./companyresearch/CompanyResearchPage";
 import { ApprovalsPage } from "./approvals/ApprovalsPage";
 import { UploadCvPage } from "./cv/UploadCvPage";
 import { ManualPage } from "./manual/ManualPage";
@@ -150,6 +151,10 @@ function TopLevelRoutes({ onOnboardingComplete }: { onOnboardingComplete: () => 
       />
       <Route path={ROUTES.agents} element={<AgentsPage onBack={onBack} />} />
       <Route path={ROUTES.screenings} element={<ScreeningsPage onBack={onBack} />} />
+      <Route
+        path={ROUTES.companyResearch}
+        element={<CompanyResearchPage onBack={onBack} />}
+      />
       <Route path={ROUTES.approvals} element={<ApprovalsPage onBack={onBack} />} />
       <Route
         path={ROUTES.uploadCv}

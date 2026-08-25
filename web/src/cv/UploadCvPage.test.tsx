@@ -8,7 +8,7 @@ import {
   getTruth,
   saveTruth,
   updateOnboarding,
-  uploadPdf,
+  uploadCv,
 } from "../api/client";
 import type { TruthDoc } from "../api/types";
 import { WizardProvider } from "../wizard/store";
@@ -21,7 +21,7 @@ vi.mock("../api/client", () => ({
   getTruth: vi.fn(),
   saveTruth: vi.fn(),
   updateOnboarding: vi.fn(),
-  uploadPdf: vi.fn(),
+  uploadCv: vi.fn(),
 }));
 
 function emptyTruth(): TruthDoc {
@@ -58,16 +58,45 @@ describe("UploadCvPage", () => {
   it("opens on Upload", async () => {
     vi.mocked(getProfile).mockResolvedValue({ hasProfile: false });
     renderPage();
-    expect(await screen.findByText("Drop your LinkedIn PDF here")).toBeTruthy();
+    expect(await screen.findByText("Drop your CV here")).toBeTruthy();
+  });
+
+  it("accepts a DOCX file with no error", async () => {
+    vi.mocked(getProfile).mockResolvedValue({ hasProfile: false });
+    renderPage();
+    await screen.findByText("Drop your CV here");
+
+    const file = new File(["docx bytes"], "cv.docx", {
+      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText("cv.docx")).toBeTruthy();
+  });
+
+  it("rejects an unsupported extension with the four-format error", async () => {
+    vi.mocked(getProfile).mockResolvedValue({ hasProfile: false });
+    renderPage();
+    await screen.findByText("Drop your CV here");
+
+    const file = new File(["rtf bytes"], "cv.rtf", { type: "application/rtf" });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+
+    expect(
+      await screen.findByText("Unsupported file type. Upload your CV as PDF, DOCX, TXT, or MD."),
+    ).toBeTruthy();
   });
 
   it("shows Review after a successful upload", async () => {
     vi.mocked(getProfile).mockResolvedValue({ hasProfile: false });
-    vi.mocked(uploadPdf).mockResolvedValue(undefined);
+    vi.mocked(uploadCv).mockResolvedValue(undefined);
     vi.mocked(extractTruth).mockResolvedValue(emptyTruth());
     vi.mocked(getTruth).mockResolvedValue(emptyTruth());
     renderPage();
-    await screen.findByText("Drop your LinkedIn PDF here");
+    await screen.findByText("Drop your CV here");
 
     const file = new File(["%PDF"], "profile.pdf", { type: "application/pdf" });
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -79,7 +108,7 @@ describe("UploadCvPage", () => {
 
   it("marks the CV reviewed and calls onDone when Review is saved", async () => {
     vi.mocked(getProfile).mockResolvedValue({ hasProfile: false });
-    vi.mocked(uploadPdf).mockResolvedValue(undefined);
+    vi.mocked(uploadCv).mockResolvedValue(undefined);
     vi.mocked(extractTruth).mockResolvedValue(emptyTruth());
     vi.mocked(saveTruth).mockResolvedValue(undefined);
     vi.mocked(updateOnboarding).mockResolvedValue({
@@ -91,7 +120,7 @@ describe("UploadCvPage", () => {
     });
     const onDone = vi.fn();
     renderPage(onDone);
-    await screen.findByText("Drop your LinkedIn PDF here");
+    await screen.findByText("Drop your CV here");
 
     const file = new File(["%PDF"], "profile.pdf", { type: "application/pdf" });
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;

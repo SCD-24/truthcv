@@ -22,6 +22,10 @@ from agenttools.tools_ledger import (
     record_screening as _record_screening,
 )
 from agenttools.tools_letter import generate_cover_letter as _generate_cover_letter
+from agenttools.tools_research import (
+    get_company_findings as _get_company_findings,
+    record_company_finding as _record_company_finding,
+)
 
 
 _TOOL_REGISTRY = {
@@ -78,6 +82,21 @@ _TOOL_REGISTRY = {
     "record_company_board": (
         _record_company_board,
         "Records a target company's careers URL and ATS once verified on the employer's own site.",
+    ),
+    "record_company_finding": (
+        _record_company_finding,
+        "Records one sourced, dated company research finding (e.g. employment entity, employer rating). "
+        "Every field is required except as_of and note. source_url must be the page the claim was actually "
+        "read from — a company-level claim must be traceable. source_class is one of the ranked classes, "
+        "strongest first: audited_accounts, regulatory_filing, listed_bond_price, company_statement, press, "
+        "review_site, unattributed — pick the strongest source actually available, not the first one found. "
+        "as_of is the date the SOURCE is dated and must be left empty when the source carries no date — "
+        "never inferred, never today's date.",
+    ),
+    "get_company_findings": (
+        _get_company_findings,
+        "Returns every finding recorded for a company and its open contradictions. A non-empty "
+        "open_contradictions means the company must NOT be applied to until the operator resolves it.",
     ),
 }
 

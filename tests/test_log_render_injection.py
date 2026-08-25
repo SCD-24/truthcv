@@ -19,6 +19,7 @@ from applications.model import (
     FieldSubmitted,
     Screening,
 )
+from companyresearch.model import CompanyFinding
 
 MARKER = "<!-- record: aaa111aaa111 -->"
 
@@ -49,15 +50,26 @@ def test_no_plain_field_can_forge_a_marker(field, value):
 
 
 def test_nested_evidence_cannot_forge_a_marker():
-    """The same holds for the nested evidence trail."""
+    """The same holds for the nested evidence trail, including a findings-table cell."""
     app = _app()
     app.confirmation = Confirmation(text=f"Received {MARKER}")
     app.fields_submitted = [FieldSubmitted(label=MARKER, value=MARKER, source=MARKER)]
     app.attachments = [Attachment(kind="cv", path=f"cv{MARKER}.pdf")]
     app.gaps_disclosed = [f"gap {MARKER}"]
-    app.screening = Screening(entity=MARKER, remote=MARKER)
+    app.screening = Screening(remote=MARKER)
+    finding = CompanyFinding(
+        id="f1",
+        company="Acme GmbH",
+        claim=MARKER,
+        value=MARKER,
+        source_url="https://x.example/y",
+        source_class="press",
+        observed_at="2026-01-01T00:00:00+00:00",
+        recorded_by="agent",
+    )
 
-    assert render_log([app]).count(MARKER) == 1
+    text = render_log([app], {"Acme GmbH": [finding]})
+    assert text.count(MARKER) == 1
 
 
 def test_a_forging_record_does_not_make_the_log_unwritable(tmp_path):
@@ -82,6 +94,6 @@ def test_a_genuinely_dropped_record_is_still_refused(tmp_path, monkeypatch):
     """Escaping must not weaken the guard it protects."""
     import applications.log_render as module
 
-    monkeypatch.setattr(module, "render_log", lambda apps: module.HEADER)
+    monkeypatch.setattr(module, "render_log", lambda apps, findings=None: module.HEADER)
     with pytest.raises(RenderRefused):
         module.write_log([_app()], tmp_path / "APPLICATION_LOG.md")

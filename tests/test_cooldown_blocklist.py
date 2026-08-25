@@ -206,3 +206,74 @@ def test_window_field_reported_for_each_case(data_dir, monkeypatch):
     clear = cooldown("NeverApplied")
     assert clear.in_cooldown is False
     assert clear.window is None
+
+
+# --- Company identity key: legal-entity suffixes match each other -----------
+
+
+def test_application_to_bare_name_puts_suffixed_name_in_cooldown(data_dir, monkeypatch):
+    """An application row for 'RobCo' also cools down 'RobCo GmbH'."""
+    monkeypatch.delenv("APPLICATION_COOLDOWN_DAYS", raising=False)
+    cfg = agent_config_store.load()
+    cfg.cooldown_days = 30
+    agent_config_store.save(cfg)
+
+    _seed_application(data_dir, "RobCo", "Engineer", days_ago=5)
+
+    status = cooldown("RobCo GmbH")
+    assert status.in_cooldown is True
+    assert status.blocked is False
+
+
+def test_application_to_suffixed_name_puts_bare_name_in_cooldown(data_dir, monkeypatch):
+    """An application row for 'RobCo GmbH' also cools down 'RobCo' (and vice versa)."""
+    monkeypatch.delenv("APPLICATION_COOLDOWN_DAYS", raising=False)
+    cfg = agent_config_store.load()
+    cfg.cooldown_days = 30
+    agent_config_store.save(cfg)
+
+    _seed_application(data_dir, "RobCo GmbH", "Engineer", days_ago=5)
+
+    status = cooldown("RobCo")
+    assert status.in_cooldown is True
+    assert status.blocked is False
+
+
+def test_same_role_vs_same_company_window_selection_unaffected_by_suffix(
+    data_dir, monkeypatch
+):
+    """Suffix-equivalence changes WHICH rows match, not which window wins."""
+    monkeypatch.delenv("APPLICATION_COOLDOWN_DAYS", raising=False)
+    cfg = agent_config_store.load()
+    cfg.cooldown_days = 100
+    cfg.cooldown_days_same_role = 7
+    cfg.cooldown_days_same_company = 40
+    agent_config_store.save(cfg)
+
+    _seed_application(data_dir, "RobCo GmbH", "Engineer", days_ago=20)
+
+    # Exact role match via the suffix-equivalent company: same-role window
+    # (7 days) has lapsed but same-company (40 days) still blocks it.
+    role_match = cooldown("RobCo", role="engineer")
+    assert role_match.in_cooldown is True
+    assert role_match.window == "same_company"
+
+    # A different role at the suffix-equivalent company: same-company window.
+    other_role = cooldown("RobCo", role="Designer")
+    assert other_role.in_cooldown is True
+    assert other_role.window == "same_company"
+
+
+def test_blank_company_still_reports_no_cooldown_with_suffix_matching(data_dir):
+    """A blank/whitespace company never matches anything, suffix key or not."""
+    _seed_application(data_dir, "RobCo GmbH", "Engineer", days_ago=1)
+    assert cooldown("").in_cooldown is False
+    assert cooldown("   ").in_cooldown is False
+
+
+def test_non_str_record_company_still_skipped_with_suffix_matching(data_dir):
+    """A record with a non-str company is still skipped by the identity-key match."""
+    from screening.cooldown import _matches
+
+    assert _matches("RobCo GmbH", None, None, "Engineer") is False
+    assert _matches("RobCo GmbH", None, 12345, "Engineer") is False

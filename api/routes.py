@@ -21,17 +21,18 @@ from fastapi.responses import StreamingResponse
 import tailor as tailor_engine
 from guardrail import Scope, validate
 from providers import ProviderError, get_provider
-from render import lint, render_docx, render_html, render_pdf
+from render import lint, render_docx, render_html, render_pdf, verify_pdf
 from render.pdf import RenderUnavailable
+from render.verify import default_max_pages
 from truth import load, persist_source_hash, save
 from truth.answers import Answers
 from truth.answers import load as load_answers
 from truth.answers import save as save_answers
+from truth.document import extract_document_text, extension_for
 from truth.extract import build_truth_from_text, write_confirmed
 from truth.model import Truth
 from truth.pdf import (
-    PdfExtractError,
-    extract_text,
+    DocumentExtractError,
     has_profile,
     load_source_text,
     persist_profile,
@@ -53,7 +54,9 @@ from providers import (
     reset_provider,
 )
 from providers.base import supports_effort_levels
+from companyresearch import store as company_findings_store
 from screening import store as screening_store
+from screening.company import company_identity_key
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
 
@@ -88,6 +91,10 @@ from .schemas import (
     ConnectionList,
     ConnectionStatus,
     ConnectionTestRequest,
+    CompanyFindingCreate,
+    CompanyFindingModel,
+    CompanyFindingResolve,
+    ContradictionGroupModel,
     CoverLetterApprovals,
     CoverLetterRequest,
     CooldownResult,
@@ -224,6 +231,16 @@ def mark_screening_applied(screening_id: str) -> ApplicationModel:
     # screening with no row (visible, fixable) rather than a duplicate row.
     screening = screening_store.claim_for_apply(screening_id)
     if screening is None:
+        refused = screening_store.get(screening_id)
+        reason = screening_store._apply_refusal(refused) if refused else "already_applied"
+        if reason == "contradictory_research":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"{refused.company} has an open company-research contradiction — "
+                    "resolve it at /api/company-findings/contradictions before applying."
+                ),
+            )
         raise HTTPException(
             status_code=409, detail="This screening has already been applied to."
         )
@@ -312,6 +329,88 @@ def set_screening_approval(screening_id: str, body: ApprovalUpdate) -> Screening
             raise HTTPException(status_code=404, detail="Screening not found.")
 
     return _screening_model(screening)
+
+
+def _company_finding_model(f) -> CompanyFindingModel:
+    """Map a stored CompanyFinding to its wire model."""
+    return CompanyFindingModel(**f.to_dict())
+
+
+@router.get("/company-findings", response_model=list[CompanyFindingModel])
+def list_company_findings() -> list[CompanyFindingModel]:
+    """Every company research finding, newest observed_at first."""
+    findings = sorted(
+        company_findings_store.load_all(), key=lambda f: f.observed_at, reverse=True
+    )
+    return [_company_finding_model(f) for f in findings]
+
+
+# Declared BEFORE /company-findings/{company}: otherwise the router binds
+# "contradictions" as a company name and this route is unreachable.
+@router.get(
+    "/company-findings/contradictions", response_model=list[ContradictionGroupModel]
+)
+def list_company_finding_contradictions(
+    company: str | None = None,
+) -> list[ContradictionGroupModel]:
+    """Open contradiction groups; narrowed to one company, or across all of them."""
+    if company is not None:
+        groups = company_findings_store.open_contradictions(company)
+    else:
+        companies = {f.company for f in company_findings_store.load_all()}
+        groups = []
+        for c in companies:
+            groups.extend(company_findings_store.open_contradictions(c))
+    return [
+        ContradictionGroupModel(
+            claim=g["claim"],
+            findings=[_company_finding_model(f) for f in g["findings"]],
+        )
+        for g in groups
+    ]
+
+
+@router.get("/company-findings/{company}", response_model=list[CompanyFindingModel])
+def list_company_findings_for(company: str) -> list[CompanyFindingModel]:
+    """Every finding recorded for one company."""
+    return [
+        _company_finding_model(f) for f in company_findings_store.for_company(company)
+    ]
+
+
+@router.post("/company-findings", response_model=CompanyFindingModel, status_code=201)
+def create_company_finding(body: CompanyFindingCreate) -> CompanyFindingModel:
+    """Record an operator-sourced company finding. Never overwrites an existing one."""
+    try:
+        finding = company_findings_store.record(
+            company=body.company,
+            claim=body.claim,
+            value=body.value,
+            source_url=body.source_url,
+            source_class=body.source_class,
+            as_of=body.as_of,
+            recorded_by="operator",
+            note=body.note,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _company_finding_model(finding)
+
+
+@router.patch("/company-findings/{finding_id}", response_model=CompanyFindingModel)
+def resolve_company_finding(
+    finding_id: str, body: CompanyFindingResolve
+) -> CompanyFindingModel:
+    """Accept or reject an existing finding. Cannot change its factual fields."""
+    try:
+        finding = company_findings_store.resolve(
+            finding_id, body.resolution, body.note
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if finding is None:
+        raise HTTPException(status_code=404, detail="Finding not found.")
+    return _company_finding_model(finding)
 
 
 def _draft_model(draft: letter_store.CoverLetterDraft) -> CoverLetterDraftModel:
@@ -430,20 +529,21 @@ def _truth_doc(truth: Truth) -> TruthDoc:
 @router.post("/upload", status_code=204)
 async def upload(file: UploadFile = File(...)) -> None:
     data = await file.read()
+    ext = extension_for(file.filename or "")
     try:
-        text = extract_text(data)
-    except PdfExtractError as e:
+        text = extract_document_text(file.filename or "", data)
+    except DocumentExtractError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     persist_source_text(text)
     persist_source_hash(text)  # keyed cache: lets /extract skip a repeat LLM pass
-    persist_profile(data)
+    persist_profile(data, ext)
 
 
 @router.post("/extract", response_model=TruthDoc)
 def extract() -> TruthDoc:
     text = load_source_text()
     if not text.strip():
-        raise HTTPException(status_code=400, detail="Upload a PDF before extracting.")
+        raise HTTPException(status_code=400, detail="Upload your CV before extracting.")
     try:
         truth = build_truth_from_text(text, get_provider("truth_extract"))
     except ProviderError as e:
@@ -670,6 +770,10 @@ def render_route(body: RenderRequest | None = None) -> RenderResult:
     try:
         pdf_path = render_pdf(html, pdf_name)
         pdf_url = f"/api/download/{pdf_path.name}"
+        try:
+            ats.extend(AtsWarning(**w) for w in verify_pdf(pdf_path, html, default_max_pages()))
+        except Exception:  # noqa: BLE001 — verification must never cost the render
+            pass
     except RenderUnavailable:
         pass
     try:
@@ -1007,12 +1111,14 @@ def _onboarding_state() -> OnboardingState:
 @router.get("/onboarding", response_model=OnboardingState)
 def onboarding() -> OnboardingState:
     """First-run onboarding progress: provider setup, profile, CV review, tour."""
+    onboarding_store.ensure_initialized()
     return _onboarding_state()
 
 
 @router.put("/onboarding", response_model=OnboardingState)
 def put_onboarding(body: OnboardingUpdate) -> OnboardingState:
     """Merge only the fields the client actually sent onto the stored state."""
+    onboarding_store.ensure_initialized()
     merged = onboarding_store.load().to_dict()
     merged.update(body.model_dump(exclude_unset=True, by_alias=False))
     onboarding_store.save(onboarding_store.OnboardingState.from_dict(merged))
@@ -1054,11 +1160,14 @@ def get_agent_config() -> AgentConfigModel:
     boards = board_store.load()
     board_store.prune(cfg.target_companies)
     
-    # Populate company_boards in response
+    # Populate company_boards in response. Matched by identity key (not raw
+    # casefold equality) so a legal-entity suffix on either side does not
+    # exclude a board that is really for a target company.
+    target_company_keys = {company_identity_key(name) for name in cfg.target_companies}
     data["company_boards"] = [
         {"company": board.company, "careers_url": board.careers_url, "ats": board.ats, "status": board.status, "resolved_at": board.resolved_at}
         for board in boards.values()
-        if board.company.strip().casefold() in {name.strip().casefold() for name in cfg.target_companies}
+        if company_identity_key(board.company) in target_company_keys
     ]
 
     # Populate search_queries in response. The freshness window is applied to

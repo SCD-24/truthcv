@@ -616,8 +616,8 @@ function CvSection({
             <Alert severity="warning" sx={{ mb: 3 }}>
               <AlertTitle>ATS review</AlertTitle>
               <ul className="notice__list">
-                {result.atsWarnings.map((w) => (
-                  <li key={w.code}>{w.message}</li>
+                {result.atsWarnings.map((w, i) => (
+                  <li key={`${w.code}-${i}`}>{w.message}</li>
                 ))}
               </ul>
             </Alert>

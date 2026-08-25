@@ -21,6 +21,7 @@ import json
 import agentconfig.store as _agentconfig_store
 from agentconfig.salary import clamp_ask as _clamp_ask
 from agentconfig.salary import format_ask as _format_ask
+from companyresearch.store import open_contradictions as _open_contradictions
 from applications.model import Attachment, Confirmation, FieldSubmitted, Screening
 from applications.store import create as create_application
 from applications.store import save_attachments as _save_attachments
@@ -30,6 +31,7 @@ from applications.store import save_screening as _save_screening
 import applications.store as _apps_store
 import coverletter.store as _letter_store
 import screening.store as _screening_store
+from screening.company import company_identity_key as _company_identity_key
 from screening.company import validate_company_name as _validate_company_name
 from screening.cooldown import cooldown as _cooldown
 from screening.model import validate_verdict as _validate_verdict
@@ -392,12 +394,56 @@ def get_profile_answers(company: str = "") -> dict:
     wizard's profile route, and the CV/cover-letter contact lines all
     continue to see the real, un-aliased address. With ``company`` blank,
     the returned email is unchanged from what is stored.
+
+    Alias freezing: once an application already exists for a company (by
+    identity key — see ``screening.company.company_identity_key``), the alias
+    is computed from THAT application's stored ``company`` string, not the
+    company string passed in this call. This keeps the tracking address
+    stable for an employer already applied to even if a later call spells
+    the same company with a different (or no) legal-entity suffix — e.g. an
+    existing "RobCo GmbH" application keeps producing the same
+    "tcv_robco_gmbh" address whether this call passes "RobCo" or
+    "RobCo GmbH". Only a genuinely new company (no matching application row)
+    is aliased from its normalized identity key.
     """
     data = _load_answers().to_dict()
     email = data.get("email")
     if isinstance(email, str) and email:
-        data["email"] = _alias_email(email, company)
+        data["email"] = _alias_email(email, _resolve_alias_company(company))
     return data
+
+
+def _resolve_alias_company(company: str) -> str:
+    """Resolve the company string ``get_profile_answers`` should alias against.
+
+    If an application row already exists whose company matches ``company``'s
+    identity key, that row's stored ``company`` string is returned (the
+    earliest-created one wins, when several match) so the alias stays frozen
+    to the address already submitted to that employer. Otherwise the
+    identity key itself is returned, so a brand-new company is aliased from
+    its normalized slug rather than its raw, possibly differently-cased or
+    -suffixed, spelling. Never raises: a blank/non-str ``company``, or a
+    failure to load the applications store, falls back to ``company``
+    unchanged (aliasing degrades to today's plain per-call transform).
+    """
+    if not isinstance(company, str) or not company.strip():
+        return company
+    target_key = _company_identity_key(company)
+    if not target_key:
+        return company
+    try:
+        rows = _apps_store.load_all()
+    except Exception:
+        return company
+    candidates = [
+        row
+        for row in rows
+        if isinstance(row.company, str) and _company_identity_key(row.company) == target_key
+    ]
+    if not candidates:
+        return target_key
+    earliest = min(candidates, key=lambda row: row.created_at or "")
+    return earliest.company
 
 
 def get_job_profiles() -> list[dict]:
@@ -459,6 +505,13 @@ def get_approved_applications() -> list[dict]:
       those hid a legitimately approved item from every run — silently, since
       this guard used to drop the item instead of flagging it, so the operator
       saw a queued item stuck at zero attempts with no reason recorded.
+    - An item whose company has an unresolved company-research contradiction
+      comes back with ``blocked_reason`` set to "contradictory_research"
+      rather than hidden. The agent must not apply to a company whose own
+      research disagrees with itself, so this ranks directly after
+      already_applied: like that guard it describes an item that must not go
+      out at all, not one that cannot go out yet. It is flagged rather than
+      hidden so the run report can say why it did not go out.
     - An item whose company is in cooldown comes back with ``blocked_reason``
       set instead of being hidden, so the run report can say why it did not go
       out rather than the posting silently vanishing.
@@ -490,10 +543,17 @@ def get_approved_applications() -> list[dict]:
             continue
         draft = _letter_store.load(s.id)
         status = _cooldown(s.company, s.role or None)
-        # already_applied outranks the rest: the others describe an item that
-        # cannot go out yet, this one an item that must not go out at all.
+        contradictions = [
+            {"claim": g["claim"], "findings": [f.to_dict() for f in g["findings"]]}
+            for g in _open_contradictions(s.company)
+        ]
+        # already_applied and contradictory_research outrank the rest: those
+        # two describe an item that must not go out at all, the others one
+        # that cannot go out yet.
         if s.id in applied_screening_ids or (s.url and _normalize_application_url(s.url) in applied_urls):
             blocked_reason = "already_applied"
+        elif contradictions:
+            blocked_reason = "contradictory_research"
         elif status.blocked:
             blocked_reason = "cooldown"
         elif not s.url.strip():
@@ -510,6 +570,7 @@ def get_approved_applications() -> list[dict]:
                 "url": s.url,
                 "attempts": s.apply_attempts,
                 "blocked_reason": blocked_reason,
+                "contradictions": contradictions,
                 "cover_letter": draft.text if draft else "",
                 "letter_source": draft.source if draft else "",
             }

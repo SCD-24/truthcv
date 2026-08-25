@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from applications import store as app_store  # noqa: E402
 from applications.log_render import RenderRefused, render_log, write_log  # noqa: E402
+from companyresearch import store as findings_store  # noqa: E402
 from truth.store import data_dir  # noqa: E402
 
 
@@ -90,13 +91,17 @@ def main(argv: list[str] | None = None) -> int:
     applications = app_store.load_all()
     target = Path(args.output) if args.output else default_log_path()
 
+    findings_by_company: dict[str, list] = {}
+    for finding in findings_store.load_all():
+        findings_by_company.setdefault(finding.company, []).append(finding)
+
     try:
         check_ledger_loaded_whole(applications)
         if args.dry_run:
-            rendered = render_log(applications)
+            rendered = render_log(applications, findings_by_company)
             print(f"{len(applications)} applications -> {len(rendered)} chars (not written)")
             return 0
-        written = write_log(applications, target)
+        written = write_log(applications, target, findings_by_company)
     except RenderRefused as refusal:
         print(f"REFUSED: {refusal}", file=sys.stderr)
         return 1

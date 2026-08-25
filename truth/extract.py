@@ -2,7 +2,7 @@
 
 The provider only *proposes* structure — it groups the profile into experiences
 (role/company/dates/bullets), education, and skills. Every fact is tagged
-source='linkedin-pdf'; nothing is trusted until it flows back through the store
+source='uploaded-cv'; nothing is trusted until it flows back through the store
 and, at render time, the guardrail (which now checks a fact against the specific
 experience it belongs to).
 """
@@ -106,13 +106,13 @@ def _cached_for(text: str) -> Truth | None:
 
 
 def build_truth_from_text(text: str, provider: LLMProvider) -> Truth:
-    """Extract a structured Truth from `text`, tag source='linkedin-pdf', persist,
+    """Extract a structured Truth from `text`, tag source='uploaded-cv', persist,
     and return it. Ids are stable and unique across the whole document.
 
     Reuses the already-persisted truth when it was produced from this exact source
     text (whitespace-normalized): a returning user re-visiting a saved profile
     skips the LLM pass entirely, so re-extraction costs no tokens. A different
-    source (a new PDF) has a different hash and re-extracts as normal.
+    source (a new upload) has a different hash and re-extracts as normal.
     """
     cached = _cached_for(text)
     if cached is not None:
@@ -143,11 +143,11 @@ def build_truth_from_text(text: str, provider: LLMProvider) -> Truth:
             seen_b.add(value.lower())
             bid = make_id(f"{eid}-b", value, taken)
             taken.add(bid)
-            bullets.append(Bullet(id=bid, value=value, source="linkedin-pdf"))
+            bullets.append(Bullet(id=bid, value=value, source="uploaded-cv"))
         experiences.append(
             Experience(
                 id=eid, role=role, company=company, start=start, end=end,
-                source="linkedin-pdf", bullets=bullets,
+                source="uploaded-cv", bullets=bullets,
             )
         )
 
@@ -164,7 +164,7 @@ def build_truth_from_text(text: str, provider: LLMProvider) -> Truth:
                 id=edid, degree=degree, school=school,
                 start=str(row.get("start", "")).strip(),
                 end=str(row.get("end", "")).strip(),
-                source="linkedin-pdf",
+                source="uploaded-cv",
             )
         )
 
@@ -177,7 +177,7 @@ def build_truth_from_text(text: str, provider: LLMProvider) -> Truth:
         seen_s.add(value.lower())
         sid = make_id("sk", value, taken)
         taken.add(sid)
-        skills.append(Skill(id=sid, value=value, source="linkedin-pdf"))
+        skills.append(Skill(id=sid, value=value, source="uploaded-cv"))
 
     truth = Truth(
         experiences=experiences,

@@ -1,4 +1,4 @@
-"""Prompt served for the Truth Store: profile → structured truth extraction.
+"""Prompt served for the Truth Store: CV/profile → structured truth extraction.
 
 This system prompt only asks the provider to *group* verifiable facts by the
 experience they belong to and to copy them verbatim — never to infer or add.
@@ -10,10 +10,11 @@ from __future__ import annotations
 
 
 def extract_system() -> str:
-    """System prompt: extract verifiable facts from LinkedIn profile text, grouped
-    by experience, copying everything verbatim (no inference)."""
+    """System prompt: extract verifiable facts from CV or professional profile
+    text, grouped by experience, copying everything verbatim (no inference)."""
     return (
-        "You extract verifiable facts from a person's LinkedIn profile text and group "
+        "You extract verifiable facts from a person's CV or professional profile "
+        "text and group "
         "them by the experience they belong to. Return ONLY facts literally present in "
         "the text — never infer, embellish, or add anything. "
         "For each job produce an experience with its role title, company, start and end "

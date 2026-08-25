@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-19 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+20 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -23,9 +23,9 @@ FastAPI backend (api/) that serves the static React bundle and exposes the wizar
 <!-- generated:start comp:truth-store -->
 ## Truth Store (`truth-store`, BACKEND)
 
-Owns truth.yaml, the single origin of all facts (truth/). Extracts text from the uploaded LinkedIn PDF via pypdf, uses a provider to build a structured truth file (every role/company/date/bullet/skill tagged source:linkedin-pdf with a stable id), and builds/validates/persists it. User-confirmed inferences are written back tagged source:user-confirmed.
+Owns truth.yaml, the single origin of all facts (truth/). Extracts text from an uploaded CV in any supported format — PDF (pypdf), DOCX (python-docx), TXT or Markdown — uses a provider to build a structured truth file (every role/company/date/bullet/skill tagged source:uploaded-cv with a stable id), and builds/validates/persists it. Legacy entries tagged linkedin-pdf remain valid. User-confirmed inferences are tagged user-confirmed.
 
-**Tech:** Python, pypdf, PyYAML
+**Tech:** Python, pypdf, PyYAML, python-docx
 <!-- generated:end comp:truth-store -->
 
 <!-- generated:start comp:tailor-engine -->
@@ -156,3 +156,7 @@ Provider connection layer (connections/): a static catalog of provider connectio
 <!-- generated:start comp:onboarding-store -->
 ## Onboarding Store (`onboarding-store`, BACKEND)
 <!-- generated:end comp:onboarding-store -->
+
+<!-- generated:start comp:company-research -->
+## Company Research (`company-research`, BACKEND)
+<!-- generated:end comp:company-research -->

@@ -12,9 +12,19 @@ import applications
 from coverletter.store import CoverLetterDraft
 from coverletter.store import save as save_letter_draft
 from coverletter.store import draft_path as letter_draft_path
+from companyresearch import store as findings_store
 from screening.cooldown import cooldown
 from screening.model import VERDICT_VALUES
-from screening.store import create, delete, delete_many, load_all, screenings_path
+from screening.store import (
+    claim_for_apply,
+    create,
+    delete,
+    delete_many,
+    load_all,
+    mark_applied,
+    screenings_path,
+    set_approval,
+)
 
 
 def test_empty_when_no_file(data_dir):
@@ -348,3 +358,42 @@ def test_a_concurrent_create_does_not_undo_a_concurrent_approval(data_dir):
     reloaded = store.get(target.id)
     assert reloaded is not None
     assert reloaded.approval == "approved"
+
+
+def test_claim_for_apply_and_mark_applied_refuse_open_contradiction(data_dir):
+    """A company with an unresolved research contradiction blocks both apply paths."""
+    findings_store.record(
+        "Acme Co", "employer_rating", "4.5", "https://a.example/x", "press", "", "agent"
+    )
+    findings_store.record(
+        "Acme Co", "employer_rating", "3.0", "https://b.example/y", "review_site", "", "agent"
+    )
+
+    target = create({"company": "Acme Co", "role": "Engineer", "url": "https://e.com/a"})
+    set_approval(target.id, "approved")
+
+    assert claim_for_apply(target.id) is None
+    reloaded = next(s for s in load_all() if s.id == target.id)
+    assert reloaded.approval == "approved"
+
+    assert mark_applied(target.id) is None
+    reloaded = next(s for s in load_all() if s.id == target.id)
+    assert reloaded.approval == "approved"
+
+
+def test_claim_for_apply_and_mark_applied_succeed_once_contradiction_resolved(data_dir):
+    """Resolving one side clears the guard for both apply paths."""
+    first = findings_store.record(
+        "Beta Inc", "employer_rating", "4.5", "https://a.example/x", "press", "", "agent"
+    )
+    findings_store.record(
+        "Beta Inc", "employer_rating", "3.0", "https://b.example/y", "review_site", "", "agent"
+    )
+    findings_store.resolve(first.id, "rejected")
+
+    target = create({"company": "Beta Inc", "role": "Engineer", "url": "https://e.com/b"})
+    set_approval(target.id, "approved")
+
+    claimed = claim_for_apply(target.id)
+    assert claimed is not None
+    assert claimed.approval == "applied"

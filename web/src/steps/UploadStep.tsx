@@ -4,7 +4,7 @@ import Button from "@mui/material/Button";
 import Alert from "@mui/material/Alert";
 import Typography from "@mui/material/Typography";
 import { useWizard } from "../wizard/store";
-import { extractTruth, uploadPdf } from "../api/client";
+import { extractTruth, uploadCv } from "../api/client";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import "../styles/step.css";
 
@@ -20,10 +20,13 @@ export function UploadStep({ onNext }: UploadStepProps) {
   const [localError, setLocalError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const SUPPORTED_EXTENSIONS = [".pdf", ".docx", ".txt", ".md"];
+
   const choose = (picked: File | undefined) => {
     if (!picked) return;
-    if (picked.type !== "application/pdf" && !picked.name.endsWith(".pdf")) {
-      setLocalError("That isn't a PDF. Export your LinkedIn profile as PDF and try again.");
+    const name = picked.name.toLowerCase();
+    if (!SUPPORTED_EXTENSIONS.some((ext) => name.endsWith(ext))) {
+      setLocalError("Unsupported file type. Upload your CV as PDF, DOCX, TXT, or MD.");
       return;
     }
     setLocalError(null);
@@ -33,7 +36,7 @@ export function UploadStep({ onNext }: UploadStepProps) {
   const submit = async () => {
     if (!file) return;
     const ok = await run(async () => {
-      await uploadPdf(file);
+      await uploadCv(file);
       setTruth(await extractTruth());
       return true;
     });
@@ -46,9 +49,9 @@ export function UploadStep({ onNext }: UploadStepProps) {
         <Typography variant="overline" className="eyebrow">Step 1 of 2</Typography>
         <h1 className="hero__title">Every line, traceable.</h1>
         <p className="stage__lede">
-          Upload your LinkedIn profile as a PDF. We read it into your truth
-          file — the one record your CV can draw from. Every claim keeps a link
-          back to where it came from.
+          Upload your CV — PDF, Word, text or Markdown. We read it into your
+          truth file — the one record your CV can draw from. Every claim keeps
+          a link back to where it came from.
         </p>
       </div>
 
@@ -59,15 +62,15 @@ export function UploadStep({ onNext }: UploadStepProps) {
         <ul className="trace__list">
           <li className="trace__root">
             <span className="trace__doc">▤</span>
-            <span className="trace__source">LinkedIn.pdf</span>
+            <span className="trace__source">CV.pdf</span>
           </li>
           <li className="claim claim--attested">
             <span className="claim__text">Senior Engineer · Acme</span>
-            <span className="stamp stamp--attested">Attested · linkedin</span>
+            <span className="stamp stamp--attested">Attested · CV</span>
           </li>
           <li className="claim claim--attested">
             <span className="claim__text">Led the Kubernetes migration</span>
-            <span className="stamp stamp--attested">Attested · linkedin</span>
+            <span className="stamp stamp--attested">Attested · CV</span>
           </li>
           <li className="claim claim--inferred">
             <span className="claim__text">“Grew the team 3×”</span>
@@ -90,7 +93,7 @@ export function UploadStep({ onNext }: UploadStepProps) {
         data-drag={dragging}
         role="button"
         tabIndex={0}
-        aria-label="Upload a PDF"
+        aria-label="Upload your CV"
         onClick={() => inputRef.current?.click()}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -109,13 +112,13 @@ export function UploadStep({ onNext }: UploadStepProps) {
           choose(e.dataTransfer.files[0]);
         }}
       >
-        <strong>Drop your LinkedIn PDF here</strong>
+        <strong>Drop your CV here</strong>
         <p className="dropzone__hint">or click to choose a file</p>
         {file && <p className="dropzone__file">{file.name}</p>}
         <input
           ref={inputRef}
           type="file"
-          accept="application/pdf,.pdf"
+          accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown"
           className="sr-only"
           onChange={(e) => choose(e.target.files?.[0])}
         />
