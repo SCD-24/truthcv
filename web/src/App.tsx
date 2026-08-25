@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import Typography from "@mui/material/Typography";
 import "./styles/shell.css";
@@ -46,6 +47,30 @@ function BootSplash() {
       <Typography variant="body1" sx={{ color: "text.secondary" }}>
         Looking for your saved profile…
       </Typography>
+    </Box>
+  );
+}
+
+/** Blocking screen shown when the startup onboarding check fails. */
+function BootError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <Box
+      className="shell shell--booting"
+      role="alert"
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 2,
+      }}
+    >
+      <Typography variant="body1" sx={{ color: "text.secondary" }}>
+        Can't reach the backend, so we can't tell whether setup is finished.
+      </Typography>
+      <Button variant="outlined" onClick={onRetry}>
+        Retry
+      </Button>
     </Box>
   );
 }
@@ -109,13 +134,14 @@ function TopLevelRoutes({ onOnboardingComplete }: { onOnboardingComplete: () => 
  * same page. A flat side nav replaces the old numbered wizard rail.
  */
 export function App() {
-  const { bootstrap, onboarding, setOnboarding } = useWizard();
+  const { bootstrap, onboarding, setOnboarding, retryBootstrap } = useWizard();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const pendingApprovals = usePendingApprovalsBadge(location.pathname);
 
   if (bootstrap === "pending") return <BootSplash />;
+  if (bootstrap === "error") return <BootError onRetry={retryBootstrap} />;
 
   // Gate every route but Onboarding itself until onboarding is complete.
   const onboardingIncomplete = onboarding !== null && !onboarding.complete;

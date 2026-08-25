@@ -409,6 +409,40 @@ def test_cover_letter_attaches_to_application(client, monkeypatch):
         assert app["coverLetterDocument"]["source"].startswith("Built a payments")
 
 
+def test_cover_letter_rejects_unknown_application_id(client, monkeypatch):
+    """An unknown applicationId must 404 before any provider call is made."""
+    from truth.store import data_dir
+
+    _seed_truth()
+    (data_dir() / "posting.txt").write_text("Senior Engineer", encoding="utf-8")
+
+    def _boom(*a, **k):
+        raise AssertionError("build_letter must not be called for an unknown applicationId")
+
+    monkeypatch.setattr("coverletter.build_letter", _boom)
+
+    r = client.post(
+        "/api/cover-letter",
+        json={"applicationId": "does-not-exist", "tone": "Professional", "length": "Short"},
+    )
+    assert r.status_code == 404
+    assert r.json()["detail"] == "Application not found."
+
+
+def test_render_rejects_unknown_application_id(client):
+    """An unknown applicationId must 404 and write no files."""
+    from truth.store import data_dir
+
+    before = {p.name for p in data_dir().glob("cv.*")}
+
+    r = client.post("/api/render", json={"applicationId": "does-not-exist"})
+    assert r.status_code == 404
+    assert r.json()["detail"] == "Application not found."
+
+    after = {p.name for p in data_dir().glob("cv.*")}
+    assert after == before
+
+
 def test_evidence_round_trips_on_list(client):
     """Evidence the agent persisted via applications.store must surface on
     GET /api/applications under its camelCase wire keys."""

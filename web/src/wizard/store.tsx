@@ -28,9 +28,10 @@ import { extractTruth, getOnboarding } from "../api/client";
 /**
  * Startup gate for the app shell.
  * - "pending": still checking onboarding state (show a splash, not the shell)
- * - "ready": onboarding state resolved (or defaulted) — render the shell.
+ * - "ready": onboarding state resolved — render the shell.
+ * - "error": the onboarding check failed — show a retry screen, never guess.
  */
-export type Bootstrap = "pending" | "ready";
+export type Bootstrap = "pending" | "ready" | "error";
 
 /**
  * Shared wizard state. Holds the truth file and the current posting draft
@@ -100,6 +101,8 @@ interface WizardApi extends WizardState {
   setOnboarding: (onboarding: OnboardingState | null) => void;
   /** Run an async task, driving loading/error and returning its result or null. */
   run: <T>(fn: () => Promise<T>) => Promise<T | null>;
+  /** Re-run the startup onboarding check after it failed (bootstrap === "error"). */
+  retryBootstrap: () => void;
 }
 
 const WizardContext = createContext<WizardApi | null>(null);
@@ -122,15 +125,17 @@ export function WizardProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // On load, resolve onboarding state — this gates the boot splash. A backend
-  // hiccup must never strand the user on the splash or force onboarding, so a
-  // failed fetch falls back to a COMPLETE onboarding state and still flips to
-  // "ready". When a profile already exists we populate truth in the background:
-  // the extract is free when the source is unchanged, so returning users skip
-  // re-upload without re-spending tokens, and a slow/failed extract surfaces on
-  // the page it feeds (never as a stuck splash).
-  useEffect(() => {
+  // On load, resolve onboarding state — this gates the boot splash. Whether
+  // onboarding is complete is a fact only the backend has, so a failed check
+  // must never be guessed at: it flips to "error" and shows a retry screen
+  // instead of the shell. When a profile already exists we populate truth in
+  // the background: the extract is free when the source is unchanged, so
+  // returning users skip re-upload without re-spending tokens, and a
+  // slow/failed extract surfaces on the page it feeds (never as a stuck
+  // splash).
+  const loadBootstrap = useCallback(() => {
     let alive = true;
+    dispatch({ type: "setBootstrap", bootstrap: "pending" });
     const settle = (onboarding: OnboardingState) => {
       if (!alive) return;
       dispatch({ type: "setOnboarding", onboarding });
@@ -146,19 +151,16 @@ export function WizardProvider({ children }: { children: ReactNode }) {
     };
     getOnboarding()
       .then(settle)
-      .catch(() =>
-        settle({
-          providerDone: true,
-          hasProfile: true,
-          cvReviewedAt: new Date().toISOString(),
-          tourSeenAt: new Date().toISOString(),
-          complete: true,
-        }),
-      );
+      .catch(() => {
+        if (!alive) return;
+        dispatch({ type: "setBootstrap", bootstrap: "error" });
+      });
     return () => {
       alive = false;
     };
   }, []);
+
+  useEffect(() => loadBootstrap(), [loadBootstrap]);
 
   const api = useMemo<WizardApi>(
     () => ({
@@ -167,8 +169,9 @@ export function WizardProvider({ children }: { children: ReactNode }) {
       setPosting: (posting) => dispatch({ type: "setPosting", posting }),
       setOnboarding: (onboarding) => dispatch({ type: "setOnboarding", onboarding }),
       run,
+      retryBootstrap: () => loadBootstrap(),
     }),
-    [state, run],
+    [state, run, loadBootstrap],
   );
 
   return <WizardContext.Provider value={api}>{children}</WizardContext.Provider>;

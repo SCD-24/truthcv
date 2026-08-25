@@ -582,8 +582,24 @@ def _filter_denied_draft(draft, denied: set[str]):
     return out
 
 
+def _require_application(app_id: str | None) -> str | None:
+    """Validate an optional application id at an entry point.
+
+    Returns None unchanged for a falsy id (the unattached-preview case), and
+    the id unchanged once confirmed to exist. Raises 404 for a non-empty id
+    that does not resolve to a real application, so a stale/typo'd id fails
+    loudly instead of silently falling back to a shared scratch preview.
+    """
+    if not app_id:
+        return None
+    if app_store.get(app_id) is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    return app_id
+
+
 @router.post("/render", response_model=RenderResult)
 def render_route(body: RenderRequest | None = None) -> RenderResult:
+    _require_application(body.application_id if body else None)
     draft = tailor_engine.load_draft()
     if draft is None:
         raise HTTPException(status_code=400, detail="Tailor a posting before rendering.")
@@ -631,12 +647,12 @@ def render_route(body: RenderRequest | None = None) -> RenderResult:
 
     # Attach to an application when asked: render to that application's own files
     # (retained + traceable) and persist the CV document; otherwise use the
-    # shared scratch filenames (today's preview behavior).
+    # shared scratch filenames (today's preview behavior). The id was already
+    # validated at entry, so a truthy app_id here is known to exist.
     app_id = body.application_id if body else None
-    if app_id and app_store.get(app_id) is not None:
+    if app_id:
         pdf_name, docx_name = app_store.cv_filenames(app_id)
     else:
-        app_id = None
         pdf_name, docx_name = "cv.pdf", "cv.docx"
 
     # When attaching to an application, record the CV FIRST so the link always
@@ -1242,6 +1258,7 @@ def _letter_approvals(
 
 @router.post("/cover-letter", response_model=CoverLetterResult)
 def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
+    _require_application(body.application_id)
     from truth.store import data_dir
 
     posting_file = data_dir() / "posting.txt"
@@ -1307,12 +1324,12 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
     )
 
     # Attach to an application when asked (per-application files + persisted
-    # document); otherwise render to the shared scratch filenames.
+    # document); otherwise render to the shared scratch filenames. The id was
+    # already validated at entry, so a truthy app_id here is known to exist.
     app_id = body.application_id if body.application_id else None
-    if app_id and app_store.get(app_id) is not None:
+    if app_id:
         pdf_name, docx_name = app_store.cover_letter_filenames(app_id)
     else:
-        app_id = None
         pdf_name, docx_name = "cover_letter.pdf", "cover_letter.docx"
 
     # Record the cover letter FIRST when attaching, so its link always
