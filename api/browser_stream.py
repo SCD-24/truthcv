@@ -143,17 +143,31 @@ def allowed_origin_hostnames() -> frozenset[str]:
     return frozenset(_LOOPBACK_HOSTNAMES | names)
 
 
+_logged_extra_peers = False
+
+
 def allowed_peers() -> frozenset[str]:
     """Loopback plus, when running inside a container, the default gateway
     (see `_default_gateway` and `_running_in_container`), extended via
     BROWSER_STREAM_ALLOWED_PEERS (comma-separated) for a deployment this does
-    not fit. An unresolved gateway ("") is dropped rather than included, so a
-    failure to resolve it never widens the allowlist — and outside a
-    container the gateway is never trusted at all, since there it is just the
-    LAN router.
+    not fit — e.g. Podman, containerd, or Kubernetes, where the gateway is not
+    trusted and this is the escape hatch that lets the operator's own browser
+    through instead. An unresolved gateway ("") is dropped rather than
+    included, so a failure to resolve it never widens the allowlist — and
+    outside a container the gateway is never trusted at all, since there it
+    is just the LAN router.
     """
+    global _logged_extra_peers
     extra = os.environ.get("BROWSER_STREAM_ALLOWED_PEERS", "")
     peers = {p.strip() for p in extra.split(",") if p.strip()}
+    if peers and not _logged_extra_peers:
+        # This is the one unforgeable signal in the module; widening it is
+        # logged just as loudly as widening the (weaker) Origin allowlist.
+        logger.warning(
+            "BROWSER_STREAM_ALLOWED_PEERS widens the browser-stream peer allowlist: %s",
+            sorted(peers),
+        )
+        _logged_extra_peers = True
     if _DEFAULT_GATEWAY and _running_in_container():
         peers.add(_DEFAULT_GATEWAY)
     return frozenset(_LOOPBACK_PEERS | peers)
@@ -190,6 +204,11 @@ def origin_allowed(origin: str, host: str) -> bool:
         return False
     try:
         parsed = urlparse(origin)
+        # .port raises ValueError on a malformed authority such as
+        # "localhost:5627.evil.example" — urlparse only splits at the first
+        # colon, so .hostname would silently be "localhost" (in the allowlist)
+        # with the bogus port never examined, unless this is checked.
+        parsed.port
     except ValueError:
         return False
     if parsed.scheme not in ("http", "https") or not parsed.netloc:

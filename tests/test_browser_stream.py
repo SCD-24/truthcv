@@ -66,6 +66,17 @@ class TestOriginAllowed:
     def test_expanded_ipv6_loopback_is_allowed(self):
         assert origin_allowed("http://[::ffff:127.0.0.1]:5627", "[::ffff:127.0.0.1]:5627") is True
 
+    def test_a_malformed_authority_with_a_dotted_port_is_refused(self):
+        """urlparse splits the authority at the first colon, so a malformed
+        port like "5627.evil.example" would otherwise leave hostname
+        "localhost" (allowlisted) with the bogus port never examined."""
+        assert (
+            origin_allowed(
+                "http://localhost:5627.evil.example", "localhost:5627.evil.example"
+            )
+            is False
+        )
+
 
 class TestPeerAllowed:
     """The one signal Origin/Host cannot forge: the actual TCP peer address."""
@@ -121,6 +132,17 @@ class TestPeerAllowed:
     def test_an_extra_allowed_peer_can_be_configured(self, monkeypatch):
         monkeypatch.setenv("BROWSER_STREAM_ALLOWED_PEERS", "172.20.0.9")
         assert peer_allowed("172.20.0.9") is True
+
+    def test_widening_the_peer_allowlist_is_logged(self, monkeypatch, caplog):
+        """The peer allowlist is the strongest gate in this module; widening it
+        must be at least as visible as widening the (weaker) Origin allowlist."""
+        monkeypatch.setattr(browser_stream, "_logged_extra_peers", False)
+        monkeypatch.setenv("BROWSER_STREAM_ALLOWED_PEERS", "172.20.0.9")
+        with caplog.at_level("WARNING", logger="api.browser_stream"):
+            peer_allowed("172.20.0.9")
+        assert any(
+            "BROWSER_STREAM_ALLOWED_PEERS" in record.getMessage() for record in caplog.records
+        )
 
 
 class TestRunningInContainer:
