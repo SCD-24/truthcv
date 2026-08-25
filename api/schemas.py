@@ -990,9 +990,17 @@ class BrowserSessionRequest(_Camel):
 
 
 class BrowserSessionClosed(_Camel):
-    """DELETE /api/browser/session."""
+    """DELETE /api/browser/session.
+
+    `closed` and `closing` are not opposites of the same bit: the session
+    server confirms a browser actually exited before reporting `closed`, so an
+    ordinary close reports `closed=false, closing=true` while it waits — see
+    browser/session-server.js's close(). Both false only for a request that
+    named no session to close.
+    """
 
     closed: bool
+    closing: bool = False
 
 
 class AgentRunResult(_Camel):

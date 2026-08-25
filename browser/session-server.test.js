@@ -3,8 +3,14 @@
 const test = require("node:test");
 const assert = require("node:assert");
 const { EventEmitter } = require("node:events");
+const http = require("node:http");
 
-const { createSessionManager, hasLiveChrome } = require("./session-server.js");
+// Must be set before requiring session-server.js: TOKEN is captured once at
+// module load from process.env.AGENT_API_TOKEN, for the handler-level test
+// below that drives createServer() over a real HTTP request.
+process.env.AGENT_API_TOKEN = "test-token-for-handler-tests";
+
+const { createSessionManager, hasLiveChrome, createServer } = require("./session-server.js");
 
 // A launch() double that behaves like a real ChildProcess: an EventEmitter
 // with pid/kill/killed, so tests can exercise the 'error'/'exit' handling
@@ -271,4 +277,110 @@ test("a broken profile probe refuses the session (fails closed)", async () => {
   const result = await m.open("https://example.com/login");
   assert.strictEqual(result.ok, false);
   assert.strictEqual(result.reason, "probe_failed");
+});
+
+// --- Fix round 3: N1 — close()/evict() during open()'s reservation window ---
+
+test("close() during the open() reservation window is refused, not applied", async () => {
+  let resolveIdle;
+  const idlePromise = new Promise((resolve) => {
+    resolveIdle = resolve;
+  });
+  let launchCount = 0;
+  const proc = { pid: 4242, kill() { this.killed = true; }, killed: false };
+  const m = manager({
+    supervisorIdle: () => idlePromise,
+    launch: () => {
+      launchCount += 1;
+      return proc;
+    },
+  });
+
+  // open() is now suspended awaiting supervisorIdle, with only a reservation
+  // (session.proc === null) in place.
+  const openPromise = m.open("https://example.com/login");
+
+  const closeResult = m.close();
+  assert.notStrictEqual(closeResult.closed, true);
+  assert.strictEqual(closeResult.reserving, true);
+
+  resolveIdle(true);
+  const openResult = await openPromise; // must not reject
+
+  assert.strictEqual(openResult.ok, true);
+  assert.strictEqual(launchCount, 1);
+  assert.strictEqual(m.state().open, true);
+  assert.strictEqual(m.state().url, "https://example.com/login");
+});
+
+test("evict() during the open() reservation window is refused, not applied", async () => {
+  let resolveIdle;
+  const idlePromise = new Promise((resolve) => {
+    resolveIdle = resolve;
+  });
+  let launchCount = 0;
+  const proc = { pid: 4242, kill() { this.killed = true; }, killed: false };
+  const m = manager({
+    supervisorIdle: () => idlePromise,
+    launch: () => {
+      launchCount += 1;
+      return proc;
+    },
+  });
+
+  const openPromise = m.open("https://example.com/login");
+
+  const evictResult = m.evict();
+  assert.strictEqual(evictResult.evicting, false);
+  assert.strictEqual(evictResult.reserving, true);
+  // No deadline was stamped on the reservation.
+  assert.strictEqual(m.state().evictDeadline, null);
+
+  resolveIdle(true);
+  const openResult = await openPromise; // must not reject
+
+  assert.strictEqual(openResult.ok, true);
+  assert.strictEqual(launchCount, 1);
+  assert.strictEqual(m.state().open, true);
+});
+
+test("an unexpected error inside open() produces a 500 instead of crashing the handler", async () => {
+  const brokenManager = {
+    state: () => ({ open: false, url: null, startedAt: null, evictDeadline: null }),
+    open: async () => {
+      throw new Error("boom");
+    },
+    close: () => ({ closed: false }),
+    evict: () => ({ evicting: false }),
+    tick: () => {},
+  };
+  const server = createServer(brokenManager);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+
+  try {
+    const status = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port,
+          path: "/session",
+          method: "POST",
+          headers: {
+            "X-Agent-Token": process.env.AGENT_API_TOKEN,
+            "Content-Type": "application/json",
+          },
+        },
+        (res) => {
+          res.resume();
+          res.on("end", () => resolve(res.statusCode));
+        }
+      );
+      req.on("error", reject);
+      req.end(JSON.stringify({ url: "https://example.com" }));
+    });
+    assert.strictEqual(status, 500);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });

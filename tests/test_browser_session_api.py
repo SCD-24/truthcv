@@ -138,3 +138,21 @@ class TestDeleteSession:
             r = client.delete("/api/browser/session")
         assert r.status_code == 200
         assert r.json()["closed"] is True
+
+    def test_a_close_still_waiting_for_the_browser_to_exit_is_not_reported_as_closed(
+        self, client, monkeypatch
+    ):
+        """The session server confirms death before reporting closed=true (see
+        browser/session-server.js close()); the ordinary response while it
+        waits is closed=false, closing=true, and that distinction must survive
+        the API layer rather than collapsing to a bare closed=false."""
+        monkeypatch.setenv("AGENT_API_TOKEN", "t")
+        with patch(
+            "urllib.request.urlopen",
+            return_value=_response({"closed": False, "closing": True}),
+        ):
+            r = client.delete("/api/browser/session")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["closed"] is False
+        assert body["closing"] is True

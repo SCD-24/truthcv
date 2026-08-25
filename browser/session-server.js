@@ -48,7 +48,15 @@ function resolveChromeBin() {
     const build = fs
       .readdirSync(root)
       .filter((name) => name.startsWith("chromium-"))
-      .sort()
+      // Numeric, not lexicographic: build numbers grow by roughly ~90/year,
+      // so a 5-digit build sharing this directory with a 4-digit one is a
+      // when-not-if ("chromium-9999" would sort after "chromium-10001" as
+      // strings, picking the OLDER build).
+      .sort((a, b) => {
+        const na = parseInt(a.slice("chromium-".length), 10);
+        const nb = parseInt(b.slice("chromium-".length), 10);
+        return na - nb;
+      })
       .pop();
     if (build) return path.join(root, build, "chrome-linux64", "chrome");
   } catch (err) {
@@ -179,7 +187,20 @@ function createSessionManager(deps) {
     // would overwrite `session`, orphaning the first process: untracked,
     // unkillable by /session/close or /session/evict, holding the profile
     // forever.
-    session = { url, proc: null, startedAt: null, evictDeadline: null };
+    const reservation = { url, proc: null, startedAt: null, evictDeadline: null };
+    session = reservation;
+
+    // `close()`/`evict()` refuse a proc-less (reserved-but-not-launched)
+    // session rather than clearing it — see close()'s own comment — so
+    // nothing in the current design can replace `session` while this
+    // reservation is live. This check is the difference between relying on
+    // that invariant and enforcing it: getting it wrong orphans a live
+    // Chromium untracked AND throws a TypeError mutating a null session
+    // (which, uncaught, used to take the whole server down) — bad enough to
+    // verify explicitly at every mutation point rather than trust.
+    function stillReserved() {
+      return session === reservation;
+    }
 
     let idle;
     try {
@@ -188,9 +209,10 @@ function createSessionManager(deps) {
       // Fail closed. daily-apply.sh already treats an unreachable config API
       // as "do not run" rather than assuming a safe state; the same rule
       // applies here, in the other direction.
-      session = null;
+      if (stillReserved()) session = null;
       return { ok: false, reason: "agent_unreachable" };
     }
+    if (!stillReserved()) return { ok: false, reason: "cancelled" };
     if (!idle) {
       session = null;
       return { ok: false, reason: "agent_running" };
@@ -205,16 +227,30 @@ function createSessionManager(deps) {
       // missing, /proc unmounted, exec failure) — and reading it as "free"
       // would launch a second Chromium onto a profile that may already be
       // held.
-      session = null;
+      if (stillReserved()) session = null;
       log(`profile probe failed: ${err.message}`);
       return { ok: false, reason: "probe_failed" };
     }
+    if (!stillReserved()) return { ok: false, reason: "cancelled" };
     if (busy) {
       session = null;
       return { ok: false, reason: "profile_busy" };
     }
 
     const result = await launchAndConfirm(url);
+    if (!stillReserved()) {
+      // The reservation is gone. Nothing is tracking whatever just happened,
+      // so a successful launch here must not be left running untracked —
+      // that is the exact orphan this whole check exists to prevent.
+      if (result.ok && result.proc && typeof result.proc.kill === "function") {
+        try {
+          result.proc.kill("SIGTERM");
+        } catch (err) {
+          log(`kill of an abandoned launch failed: ${err.message}`);
+        }
+      }
+      return { ok: false, reason: "cancelled" };
+    }
     if (!result.ok) {
       session = null;
       return result;
@@ -228,6 +264,14 @@ function createSessionManager(deps) {
 
   function close() {
     if (!session) return { closed: false };
+    if (!session.proc) {
+      // Still in open()'s reservation window — nothing has launched yet to
+      // signal. Clearing `session` here would let open() resume and attach
+      // a just-launched Chromium to session === null: untracked, unkillable,
+      // and (pre-fix) a TypeError that took the whole server down. Refuse;
+      // the caller can close it once the launch actually completes.
+      return { closed: false, reserving: true };
+    }
     if (session.closing) {
       // Already signalled and waiting (or escalating) — a repeat close must
       // not fire a second SIGTERM/SIGKILL escalation racing the first.
@@ -236,12 +280,12 @@ function createSessionManager(deps) {
 
     const proc = session.proc;
     try {
-      if (proc) proc.kill("SIGTERM");
+      proc.kill("SIGTERM");
     } catch (err) {
       log(`kill failed: ${err.message}`);
     }
 
-    if (proc && typeof proc.on === "function") {
+    if (typeof proc.on === "function") {
       // Wait for the 'exit' event (attachExitHandler's listener, attached at
       // launch time, clears the session when it fires) instead of trusting
       // SIGTERM was enough: a hung renderer or a beforeunload dialog can
@@ -261,6 +305,12 @@ function createSessionManager(deps) {
 
   function evict() {
     if (!session) return { evicting: false };
+    if (!session.proc) {
+      // Same reservation-window hazard as close(): stamping a deadline here
+      // would let tick() call close() against a still-reserving session once
+      // the grace period passed, reaching the same orphan by a longer route.
+      return { evicting: false, reserving: true };
+    }
     // Never extend an existing deadline: a run that asks twice must not push
     // the browser further out of its own reach.
     if (session.evictDeadline) {
@@ -412,31 +462,46 @@ const REFUSAL_STATUS = {
   profile_busy: 409,
   probe_failed: 503,
   launch_failed: 500,
+  cancelled: 409,
 };
 
 function createServer(manager) {
   return http.createServer(async (req, res) => {
-    if (!tokenOk(req.headers["x-agent-token"] || "")) {
-      return jsonReply(res, 403, { detail: "Forbidden" });
-    }
-    if (req.method === "GET" && req.url === "/session") {
-      return jsonReply(res, 200, manager.state());
-    }
-    if (req.method === "POST" && req.url === "/session") {
-      const body = await readJson(req);
-      const result = await manager.open(body.url);
-      if (!result.ok) {
-        return jsonReply(res, REFUSAL_STATUS[result.reason] || 409, result);
+    // Every route below runs inside this try: an async listener with no
+    // catch is a single bug away from an unhandled rejection killing the
+    // whole process (see the task-4 review's N1 finding — a rejection from
+    // manager.open() once did exactly that), and nothing about the routes
+    // added later is guaranteed to stay exception-free either.
+    try {
+      if (!tokenOk(req.headers["x-agent-token"] || "")) {
+        return jsonReply(res, 403, { detail: "Forbidden" });
       }
-      return jsonReply(res, 200, { ...result, ...manager.state() });
+      if (req.method === "GET" && req.url === "/session") {
+        return jsonReply(res, 200, manager.state());
+      }
+      if (req.method === "POST" && req.url === "/session") {
+        const body = await readJson(req);
+        const result = await manager.open(body.url);
+        if (!result.ok) {
+          return jsonReply(res, REFUSAL_STATUS[result.reason] || 409, result);
+        }
+        return jsonReply(res, 200, { ...result, ...manager.state() });
+      }
+      if (req.method === "POST" && req.url === "/session/close") {
+        return jsonReply(res, 200, manager.close());
+      }
+      if (req.method === "POST" && req.url === "/session/evict") {
+        return jsonReply(res, 200, manager.evict());
+      }
+      jsonReply(res, 404, { detail: "Not found" });
+    } catch (err) {
+      log(`unhandled error in request handler: ${err.message}`);
+      try {
+        jsonReply(res, 500, { detail: "Internal error" });
+      } catch {
+        // Response may already be partially sent; nothing more to do.
+      }
     }
-    if (req.method === "POST" && req.url === "/session/close") {
-      return jsonReply(res, 200, manager.close());
-    }
-    if (req.method === "POST" && req.url === "/session/evict") {
-      return jsonReply(res, 200, manager.evict());
-    }
-    jsonReply(res, 404, { detail: "Not found" });
   });
 }
 
