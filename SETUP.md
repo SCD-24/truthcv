@@ -22,12 +22,9 @@ Open the `scripts/launch` folder inside it and double-click:
 
 - **macOS** — `truthcv.command`
 - **Windows** — `truthcv.bat`
-- **Linux** — `truthcv.desktop` — first open it in a text editor and
-  replace `/path/to/truthcv` on the `Exec=` and `Path=` lines with the
-  full path to the folder you unzipped (for example
-  `/home/yourname/Documents/truthcv`), then save it and double-click it.
-  This one-time edit is needed because a `.desktop` file cannot find its
-  own location on its own.
+- **Linux** — `truthcv.sh`. If double-clicking opens it in a text editor
+  instead of running it, right-click it and choose "Run as a Program"
+  (some file managers call this "Execute").
 
 The first start takes about ten minutes, because your computer is
 building TruthCV. That happens once. Every start after it takes a few

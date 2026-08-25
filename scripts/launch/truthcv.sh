@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
-# Shared launcher for macOS and Linux. truthcv.command and truthcv.desktop
-# both delegate here so there is one implementation, not three.
+# Shared launcher for macOS and Linux. truthcv.command delegates here so
+# there is one implementation, not two; Linux users run this file directly.
+#
+# There is deliberately no .desktop entry. A .desktop file cannot locate
+# itself — its %k field code is empty unless a file manager passes the file
+# as an opened document, which is not the case from an applications menu —
+# so it would have to carry a hard-coded absolute path that every user edits
+# by hand before anything works. This script finds its own directory, so
+# double-clicking it needs no edit. Do not reintroduce a .desktop entry
+# without solving the self-location problem first.
 #
 # All real logic lives in `python -m launcher`, run inside a container: macOS
 # and Linux ship Python 3 but Windows does not, and Docker is already a hard

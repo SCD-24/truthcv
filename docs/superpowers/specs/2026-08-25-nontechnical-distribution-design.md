@@ -53,9 +53,26 @@ compose port mappings.
 
 | Artifact | Purpose |
 |---|---|
-| `scripts/launch/truthcv.command` (macOS), `truthcv.bat` (Windows), `truthcv.sh` + `truthcv.desktop` (Linux) | Double-clickable entry point. Preflight, bootstrap, `docker compose up -d`, wait, open browser. |
+| `scripts/launch/truthcv.command` (macOS), `truthcv.bat` (Windows), `truthcv.sh` (Linux, run directly) | Double-clickable entry point. Preflight, bootstrap, `docker compose up -d`, wait, open browser. |
 | `scripts/launch/bootstrap.py` | Secret generation, `.env` management, port selection. One implementation, run in a container. |
 | `/setup` route in `web/` | Guided first-run wizard over existing endpoints. |
+
+### No `.desktop` entry on Linux
+
+Linux users run `truthcv.sh` directly rather than through a `.desktop`
+application entry. A `.desktop` file cannot locate itself: its `%k` field
+code is empty unless a file manager passes the file as an opened document,
+which is not the case when it is launched from an applications menu, so
+`dirname "%k"` resolves to `.` and the launcher runs against an arbitrary
+working directory. The only alternative is a hard-coded absolute `Exec` path
+that every user edits by hand before anything works — a text-editing step in
+a design whose whole purpose is that nobody edits a file.
+
+`truthcv.sh` resolves its own directory, so double-clicking it works
+unedited. The cost is that some file managers open `.sh` files in an editor,
+and there is no applications-menu entry; `SETUP.md` tells Linux users to
+choose "Run as a Program" if that happens. Do not reintroduce a `.desktop`
+entry without first solving the self-location problem.
 
 ### Bootstrap runs in a container
 
