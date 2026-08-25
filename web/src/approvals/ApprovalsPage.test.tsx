@@ -603,6 +603,41 @@ describe("ApprovalsPage applied tab", () => {
     expect(screen.queryAllByRole("button", { name: "Move to approvals" }).length).toBe(0);
     expect(screen.queryByRole("button", { name: /save url/i })).toBeNull();
   });
+
+  it("renders a normal https applied URL as a clickable link", async () => {
+    await renderPage([], [], {
+      applied: [
+        makeRecord({
+          id: "ap1",
+          company: "Fernwood",
+          approval: "applied",
+          url: "https://fernwood.example/jobs/1",
+        }),
+      ],
+    });
+    clickTab(/applied/i);
+    const link = (await screen.findByText("https://fernwood.example/jobs/1")) as HTMLElement;
+    expect(link.closest("a")).toBeTruthy();
+    expect(link.closest("a")?.getAttribute("href")).toBe("https://fernwood.example/jobs/1");
+  });
+
+  it("does not render a javascript: applied URL as a clickable link", async () => {
+    await renderPage([], [], {
+      applied: [
+        makeRecord({
+          id: "ap1",
+          company: "Fernwood",
+          approval: "applied",
+          url: "javascript:alert(1)",
+        }),
+      ],
+    });
+    clickTab(/applied/i);
+    const text = (await screen.findByText("javascript:alert(1)")) as HTMLElement;
+    expect(text.closest("a")).toBeNull();
+    const anchors = Array.from(document.querySelectorAll("a"));
+    expect(anchors.some((a) => (a.getAttribute("href") ?? "").startsWith("javascript:"))).toBe(false);
+  });
 });
 
 describe("ApprovalsPage rejected tab delete", () => {

@@ -136,6 +136,32 @@ describe("CompanyResearchPage", () => {
     );
   });
 
+  it("renders a normal https source URL as a clickable link", async () => {
+    vi.mocked(listCompanyFindings).mockResolvedValue([
+      makeFinding({ id: "f1", sourceUrl: "https://acme.example/about" }),
+    ]);
+
+    render(<CompanyResearchPage />);
+
+    const link = (await screen.findByText("https://acme.example/about")) as HTMLElement;
+    expect(link.closest("a")).toBeTruthy();
+    expect(link.closest("a")?.getAttribute("href")).toBe("https://acme.example/about");
+  });
+
+  it("does not render a javascript: source URL as a clickable link", async () => {
+    vi.mocked(listCompanyFindings).mockResolvedValue([
+      makeFinding({ id: "f1", sourceUrl: "javascript:alert(1)" }),
+    ]);
+
+    render(<CompanyResearchPage />);
+
+    // The raw text still shows, but as inert text, not an anchor.
+    const text = (await screen.findByText("javascript:alert(1)")) as HTMLElement;
+    expect(text.closest("a")).toBeNull();
+    const anchors = Array.from(document.querySelectorAll("a"));
+    expect(anchors.some((a) => (a.getAttribute("href") ?? "").startsWith("javascript:"))).toBe(false);
+  });
+
   it("renders the literal 'unknown' when a finding's as-of is empty", async () => {
     vi.mocked(listCompanyFindings).mockResolvedValue([
       makeFinding({ id: "f1", asOf: "", observedAt: "2024-06-01T12:00:00+00:00" }),

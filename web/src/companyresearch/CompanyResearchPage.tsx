@@ -19,6 +19,7 @@ import {
   resolveCompanyFinding,
 } from "../api/client";
 import type { CompanyFinding, ContradictionGroup } from "../api/types";
+import { safeHref } from "../utils/safeUrl";
 
 /** Source classes, strongest evidence first. The select is populated from this
  * list in order, and the ranking below is just its index. */
@@ -122,6 +123,9 @@ function FindingRow({
   busy: boolean;
   onResolve: (id: string, resolution: "accepted" | "rejected") => void;
 }) {
+  // A finding's source URL is agent-scraped, so a disallowed scheme
+  // (javascript:, …) must render as inert text, never a clickable href.
+  const safeSourceHref = safeHref(finding.sourceUrl);
   return (
     <Paper variant="outlined" sx={{ p: 1.5 }}>
       <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -136,15 +140,21 @@ function FindingRow({
           >
             <Chip size="small" label={sourceClassLabel(finding.sourceClass)} />
             {finding.sourceUrl ? (
-              <Link
-                href={finding.sourceUrl}
-                target="_blank"
-                rel="noreferrer noopener"
-                variant="body2"
-                sx={{ overflowWrap: "anywhere" }}
-              >
-                {finding.sourceUrl}
-              </Link>
+              safeSourceHref ? (
+                <Link
+                  href={safeSourceHref}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  variant="body2"
+                  sx={{ overflowWrap: "anywhere" }}
+                >
+                  {finding.sourceUrl}
+                </Link>
+              ) : (
+                <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>
+                  {finding.sourceUrl}
+                </Typography>
+              )
             ) : (
               <Typography variant="body2" sx={{ color: "text.secondary" }}>
                 no source link
