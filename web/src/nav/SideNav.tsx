@@ -24,6 +24,7 @@ interface Props {
   onNavigate: (path: string) => void;
   onOpenSettings: () => void;
   pendingApprovals?: number;
+  signinSites?: number;
 }
 
 /**
@@ -31,7 +32,13 @@ interface Props {
  * app's pages. Structure/layout stays in shell.css; the interactive marks are
  * MUI so they inherit the ledger theme.
  */
-export function SideNav({ pathname, onNavigate, onOpenSettings, pendingApprovals = 0 }: Props) {
+export function SideNav({
+  pathname,
+  onNavigate,
+  onOpenSettings,
+  pendingApprovals = 0,
+  signinSites = 0,
+}: Props) {
   const items: NavItem[] = [
     {
       path: ROUTES.uploadCv,
@@ -60,7 +67,17 @@ export function SideNav({ pathname, onNavigate, onOpenSettings, pendingApprovals
     {
       path: ROUTES.agents,
       label: "Agents",
-      icon: <SmartToyOutlinedIcon fontSize="small" />,
+      // Sites the agent hit a sign-in wall on and cannot get past without
+      // the operator. The Site sign-ins list is empty most of the time, so
+      // without this the one moment it is not is invisible until someone
+      // happens to open the page. A count of sites the agent was BLOCKED on
+      // is the agent's own experience — this is not, and must not become, an
+      // indicator of which sites are signed in.
+      icon: (
+        <Badge badgeContent={signinSites} color="primary">
+          <SmartToyOutlinedIcon fontSize="small" />
+        </Badge>
+      ),
       dataTour: "nav-agents",
     },
     {

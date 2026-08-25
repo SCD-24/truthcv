@@ -36,6 +36,20 @@ describe("SideNav", () => {
     expect(within(button).getByText("3")).toBeTruthy();
   });
 
+  it("shows the number of sites waiting on a sign-in", () => {
+    render(<SideNav {...props} signinSites={2} />);
+    const button = screen.getByRole("button", { name: /^agents$/i });
+    expect(within(button).getByText("2")).toBeTruthy();
+  });
+
+  it("shows nothing on Agents when no site is waiting", () => {
+    render(<SideNav {...props} />);
+    const button = screen.getByRole("button", { name: /^agents$/i });
+    // A count of zero is not news, and an empty badge on a permanent nav item
+    // reads as an alert that never clears.
+    expect(within(button).queryByText("0")).toBeNull();
+  });
+
   it("has no numbered step markers", () => {
     render(<SideNav {...props} />);
     expect(document.querySelector(".rail__marker")).toBeNull();
