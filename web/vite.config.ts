@@ -9,6 +9,12 @@ export default defineConfig({
   build: {
     outDir: "../api/static",
     emptyOutDir: true,
+    // @novnc/novnc's RFB (web/src/browser/BrowserSessionPage.tsx) uses
+    // top-level await, which Vite's default baseline (chrome87/es2020/…)
+    // rejects at transpile time — `npm run build` fails outright, though
+    // `test` and `typecheck` pass because neither applies this target.
+    // Do not lower this below a level that supports top-level await.
+    target: "es2022",
   },
   server: {
     port: 5173,

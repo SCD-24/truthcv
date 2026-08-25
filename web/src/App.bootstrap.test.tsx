@@ -6,17 +6,6 @@ import { App } from "./App";
 import { WizardProvider } from "./wizard/store";
 import { getOnboarding } from "./api/client";
 
-// App.tsx statically imports BrowserSessionPage, which loads @novnc/novnc's
-// RFB client — an ESM module with top-level await that vitest's CJS
-// transform for jsdom can't require. Stub it; nothing here exercises the
-// browser-session route.
-vi.mock("@novnc/novnc/lib/rfb", () => ({
-  default: class {
-    addEventListener() {}
-    disconnect() {}
-  },
-}));
-
 vi.mock("./api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./api/client")>();
   return {

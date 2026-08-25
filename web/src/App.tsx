@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -19,10 +19,18 @@ import { UploadCvPage } from "./cv/UploadCvPage";
 import { ManualPage } from "./manual/ManualPage";
 import { DocumentEditPage } from "./documents/DocumentEditPage";
 import { OnboardingPage } from "./onboarding/OnboardingPage";
-import { BrowserSessionPage } from "./browser/BrowserSessionPage";
 import { Tour } from "./tour/Tour";
 import { getOnboarding, listPendingApprovals, updateOnboarding } from "./api/client";
 import { ROUTES } from "./routes";
+
+// Lazy: pulls in @novnc/novnc's RFB client, which uses top-level await and
+// is otherwise the only reason the whole bundle needs an es2022 build
+// target (see vite.config.ts). Splitting it into its own chunk keeps that
+// requirement — and the ~1MB noVNC payload — off every other route, and
+// keeps it out of tests that render <App/> without visiting this route.
+const BrowserSessionPage = lazy(() =>
+  import("./browser/BrowserSessionPage").then((m) => ({ default: m.BrowserSessionPage })),
+);
 
 /**
  * A request to open a saved document for re-editing — fired when the user
@@ -125,7 +133,14 @@ function TopLevelRoutes({ onOnboardingComplete }: { onOnboardingComplete: () => 
       />
       <Route path={ROUTES.documentEdit} element={<DocumentEditPage />} />
       <Route path={ROUTES.manual} element={<ManualPage />} />
-      <Route path={ROUTES.browserSession} element={<BrowserSessionPage />} />
+      <Route
+        path={ROUTES.browserSession}
+        element={
+          <Suspense fallback={null}>
+            <BrowserSessionPage />
+          </Suspense>
+        }
+      />
       <Route path="*" element={<Navigate to={ROUTES.analytics} replace />} />
     </Routes>
   );
