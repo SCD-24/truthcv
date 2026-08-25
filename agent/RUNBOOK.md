@@ -261,7 +261,7 @@ surfaces, and you can tell which by what appears in your tool list:
   `interceptor://help/{verb}` for one verb's arguments, before first use.
 
 Every rule here applies identically regardless of which surface you have —
-especially §5.5, which matters *more* on the containerised browser, because it
+especially §5.8, which matters *more* on the containerised browser, because it
 is likelier to be silently blocked by ATS bot detection.
 
 4. Fill every field from the `get_profile_answers` result (§3), calling it
