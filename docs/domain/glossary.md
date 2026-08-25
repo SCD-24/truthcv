@@ -127,3 +127,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:start comp:company-research -->
 - **Company Research** (`company-research`) — backend component.
 <!-- generated:end comp:company-research -->
+
+<!-- generated:start comp:keyword-vocabulary -->
+- **Keyword Vocabulary** (`keyword-vocabulary`) — backend component.
+<!-- generated:end comp:keyword-vocabulary -->

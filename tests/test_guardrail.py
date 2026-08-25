@@ -81,3 +81,149 @@ def test_token_from_another_scope_is_unverifiable():
     result = validate(scopes, global_values=[])
     assert not result.ok
     assert "acme" in result.unverifiable
+
+
+# --- Operator synonym map (data/vocabulary/synonyms.txt) traceability -------
+#
+# A term attested in one accepted form is traceable in any of its registered
+# equivalent forms. The map only ever WIDENS a scope's own allowed set — it never
+# grants blanket permission across scopes or for forms nothing in scope attests.
+
+
+def test_acronym_in_truth_expansion_in_draft_passes(data_dir):
+    """Truth attests the acronym; a draft using the registered expansion passes."""
+    import vocabulary.synonyms as vs
+
+    vocab = data_dir / "vocabulary"
+    vocab.mkdir()
+    (vocab / "synonyms.txt").write_text(
+        "CI/CD = Continuous Integration and Continuous Delivery\n", encoding="utf-8"
+    )
+    vs._synonyms_cache = None  # reset the per-data_dir cache after writing the file
+
+    result = validate(
+        [
+            Scope(
+                id="exp-1",
+                texts=["Continuous Integration and Continuous Delivery"],
+                allowed=["CI/CD"],
+            )
+        ]
+    )
+    assert result.ok, result.unverifiable
+    assert result.unverifiable == []
+
+    vs._synonyms_cache = None
+
+
+def test_expansion_in_truth_acronym_in_draft_passes(data_dir):
+    """Reverse direction: truth attests the expansion; a draft acronym passes."""
+    import vocabulary.synonyms as vs
+
+    vocab = data_dir / "vocabulary"
+    vocab.mkdir()
+    (vocab / "synonyms.txt").write_text(
+        "CI/CD = Continuous Integration and Continuous Delivery\n", encoding="utf-8"
+    )
+    vs._synonyms_cache = None
+
+    result = validate(
+        [
+            Scope(
+                id="exp-1",
+                texts=["CI/CD"],
+                allowed=["Continuous Integration and Continuous Delivery"],
+            )
+        ]
+    )
+    assert result.ok, result.unverifiable
+    assert result.unverifiable == []
+
+    vs._synonyms_cache = None
+
+
+def test_unattested_synonym_group_grants_no_permission(data_dir):
+    """A group present in the file but attested by nothing in scope rescues nothing."""
+    import vocabulary.synonyms as vs
+
+    vocab = data_dir / "vocabulary"
+    vocab.mkdir()
+    # Neither "AWS" nor "Amazon Web Services" appears in this scope's truth.
+    (vocab / "synonyms.txt").write_text(
+        "AWS = Amazon Web Services\n", encoding="utf-8"
+    )
+    vs._synonyms_cache = None
+
+    result = validate(
+        [
+            Scope(
+                id="exp-1",
+                texts=["Amazon Web Services"],
+                allowed=["Built a payments API in Python"],
+            )
+        ]
+    )
+    assert not result.ok
+    for tok in ("amazon", "web", "services"):
+        assert tok in result.unverifiable
+
+    vs._synonyms_cache = None
+
+
+def test_synonym_expansion_is_per_scope(data_dir):
+    """A form attested only in scope A does not unblock the phrase in scope B."""
+    import vocabulary.synonyms as vs
+
+    vocab = data_dir / "vocabulary"
+    vocab.mkdir()
+    (vocab / "synonyms.txt").write_text(
+        "CI/CD = Continuous Integration and Continuous Delivery\n", encoding="utf-8"
+    )
+    vs._synonyms_cache = None
+
+    scope_a = Scope(
+        id="job-a",
+        texts=["Continuous Integration and Continuous Delivery"],
+        allowed=["CI/CD"],  # attests the acronym form
+    )
+    scope_b = Scope(
+        id="job-b",
+        texts=["Continuous Integration and Continuous Delivery"],
+        allowed=["Python"],  # attests neither form
+    )
+    result = validate([scope_a, scope_b])
+
+    assert not result.ok
+    # Scope A resolves via its own attested acronym; scope B does not.
+    assert not any(c.scope_id == "job-a" for c in result.blocked_claims)
+    assert any(c.scope_id == "job-b" for c in result.blocked_claims)
+    for tok in ("continuous", "integration", "delivery"):
+        assert tok in result.unverifiable
+
+    vs._synonyms_cache = None
+
+
+def test_no_synonyms_file_leaves_verdicts_unchanged(data_dir):
+    """Canary: with no synonyms file, verdicts match today's exact behaviour."""
+    import vocabulary.synonyms as vs
+    import guardrail.validate as gv
+
+    # No data/vocabulary/synonyms.txt written on this fresh volume.
+    vs._synonyms_cache = None
+    gv._stopwords_cache = None
+
+    passing = validate(
+        [_scope("Senior Software Engineer at Acme Corp")],
+        global_values=GLOBAL_SKILLS,
+    )
+    assert passing.ok, passing.unverifiable
+
+    blocked = validate(
+        [_scope("Built a payments API in Python and Kubernetes")],
+        global_values=GLOBAL_SKILLS,
+    )
+    assert not blocked.ok
+    assert "kubernetes" in blocked.unverifiable
+
+    vs._synonyms_cache = None
+    gv._stopwords_cache = None

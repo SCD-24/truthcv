@@ -749,7 +749,7 @@ def render_route(body: RenderRequest | None = None) -> RenderResult:
         location=truth.profile.location,
         links=[{"label": link.label, "url": link.url} for link in truth.profile.links],
     )
-    ats = [AtsWarning(**w) for w in lint(html, draft.keywords)]
+    ats = [AtsWarning(**w) for w in lint(html, draft.keywords, draft.keyword_aliases)]
 
     # Attach to an application when asked: render to that application's own files
     # (retained + traceable) and persist the CV document; otherwise use the

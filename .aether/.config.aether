@@ -1496,6 +1496,14 @@
       "id": "company-research",
       "name": "Company Research",
       "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "id": "keyword-vocabulary",
+      "name": "Keyword Vocabulary",
+      "type": "backend"
     }
   ],
   "connections": [
@@ -1733,6 +1741,26 @@
       "from": "screening-engine",
       "protocol": "in-process",
       "to": "company-research"
+    },
+    {
+      "from": "keyword-vocabulary",
+      "protocol": "file I/O",
+      "to": "truth-data-volume"
+    },
+    {
+      "from": "tailor-engine",
+      "protocol": "in-process",
+      "to": "keyword-vocabulary"
+    },
+    {
+      "from": "guardrail-validator",
+      "protocol": "in-process",
+      "to": "keyword-vocabulary"
+    },
+    {
+      "from": "renderer",
+      "protocol": "in-process",
+      "to": "keyword-vocabulary"
     }
   ],
   "definitions": [
@@ -1839,7 +1867,8 @@
         "prompt-store",
         "application-tracker",
         "agent-config",
-        "company-research"
+        "company-research",
+        "keyword-vocabulary"
       ],
       "name": "TruthCV Container (single Docker image)",
       "w": 1861.8301559792023,
@@ -1886,6 +1915,10 @@
     "guardrail-validator": {
       "x": 1028,
       "y": 284
+    },
+    "keyword-vocabulary": {
+      "x": 1500,
+      "y": 380
     },
     "llm-provider-layer": {
       "x": 1620,

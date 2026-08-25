@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-20 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+21 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -160,3 +160,7 @@ Provider connection layer (connections/): a static catalog of provider connectio
 <!-- generated:start comp:company-research -->
 ## Company Research (`company-research`, BACKEND)
 <!-- generated:end comp:company-research -->
+
+<!-- generated:start comp:keyword-vocabulary -->
+## Keyword Vocabulary (`keyword-vocabulary`, BACKEND)
+<!-- generated:end comp:keyword-vocabulary -->

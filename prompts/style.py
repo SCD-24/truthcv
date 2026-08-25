@@ -19,7 +19,9 @@ from .conventions import CvConventions, DEFAULT_CONVENTIONS, DEFAULT_VOCABULARY
 CV_STYLE = (
     " STYLE (phrasing and ordering only, add no facts): write to express, not "
     "impress: specific and fact-based, never flowery, no narrative prose, no "
-    "abbreviations or slang. Use active voice and strong action verbs (Led, "
+    "slang and no ad-hoc or invented abbreviations, though established industry "
+    "acronyms are fine when accompanied by their spelled-out form. Use active "
+    "voice and strong action verbs (Led, "
     "Built, Designed, Engineered, Analyzed, Implemented, Optimized, Streamlined, "
     "Improved, Increased, Shipped, Owned); no personal pronouns; never start a line "
     "with a date. Shape each bullet as action -> contribution/scope -> "
@@ -73,7 +75,9 @@ def cv_style(conventions: CvConventions = DEFAULT_CONVENTIONS) -> str:
     return (
         " STYLE (phrasing and ordering only, add no facts): write to express, not "
         "impress: specific and fact-based, never flowery, no narrative prose, no "
-        "abbreviations or slang. Use active voice and strong action verbs ("
+        "slang and no ad-hoc or invented abbreviations, though established industry "
+        "acronyms are fine when accompanied by their spelled-out form. Use active "
+        "voice and strong action verbs ("
         + DEFAULT_VOCABULARY.style_action_verbs
         + "); "
         + _pronoun_clause(conventions)
