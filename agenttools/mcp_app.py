@@ -49,7 +49,10 @@ _TOOL_REGISTRY = {
     ),
     "get_profile_answers": (
         _get_profile_answers,
-        "Returns the operator's canonical screening answers from the answers store. Never assume or hard-code any of these — always call this tool.",
+        "Returns the operator's canonical screening answers from the answers store. Never assume or hard-code any of these — always call this tool. "
+        "Pass company — the employing entity for the application currently being filled in — so the returned email is the per-company tracking address for that employer. "
+        "Type the returned email verbatim; never construct, edit, or 'correct' an address yourself. "
+        "Omitting company returns the plain address, which is correct only when no specific application is being filled in.",
     ),
     "get_job_profiles": (
         _get_job_profiles,
