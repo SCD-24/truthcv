@@ -47,12 +47,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tzdata jq \
  && rm -rf /var/lib/apt/lists/*
 
-# The claude CLI — install command carried over unchanged from the Jobs
-# project's docker/Dockerfile. @playwright/mcp is deliberately NOT installed
-# here: it runs in the `browser` service (browser/Dockerfile), and this image
-# only needs to TALK to it over HTTP, which the claude CLI does from
-# agent/mcp.json's `browser` server entry. See the BROWSER STRATEGY note above.
-RUN npm install -g @anthropic-ai/claude-code
+# The claude CLI — pinned to an exact version (not @latest) so a rebuild
+# today vs. next month cannot silently change CLI behavior/flags out from
+# under agent/daily-apply.sh's --allowedTools / --dangerously-skip-permissions
+# invocation. There is no CI here to catch such a break before an unattended
+# run applies to real jobs, so the version is frozen deliberately rather than
+# floated. To bump it: change the version below, run the agent smoke test
+# (agent/smoke-test.sh) against the rebuilt image, and re-validate that
+# daily-apply.sh's flags still behave the same under the new version before
+# shipping. @playwright/mcp is deliberately NOT installed here: it runs in the
+# `browser` service (browser/Dockerfile), and this image only needs to TALK to
+# it over HTTP, which the claude CLI does from agent/mcp.json's `browser`
+# server entry. See the BROWSER STRATEGY note above.
+RUN npm install -g @anthropic-ai/claude-code@1.0.88
 
 # node:22-bookworm-slim already ships a `node` user at UID 1000 — reuse it
 # rather than create a second UID-1000 account, which fails (same reasoning

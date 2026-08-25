@@ -39,6 +39,7 @@ import { DocumentAttachModal } from "./DocumentAttachModal";
 import { COLUMN_DEFS, compareApplications } from "./sorting";
 import type { ColumnDef, SortDirection } from "./sorting";
 import { filledFormPath } from "../routes";
+import { safeHref } from "../utils/safeUrl";
 import "../styles/applications.css";
 
 type PreviewKind = "cv" | "cover-letter";
@@ -342,6 +343,10 @@ function ApplicationRow({
   onAttach: (kind: PreviewKind) => void;
   onOpenPosting: () => void;
 }) {
+  // Website/application URLs can be agent-scraped, so a disallowed scheme
+  // (javascript:, …) must render as inert text, never a clickable href.
+  const websiteHref = safeHref(app.website);
+  const applicationHref = safeHref(app.applicationUrl);
   return (
     <TableRow hover>
       <TableCell className="apps__company apps__clip" title={app.company || undefined}>
@@ -350,24 +355,32 @@ function ApplicationRow({
       <TableCell>{app.applicationDate || "—"}</TableCell>
       <TableCell>
         {app.website ? (
-          <Link
-            href={absoluteUrl(app.website)}
-            target="_blank"
-            rel="noreferrer"
-            title={absoluteUrl(app.website)}
-            aria-label={`Open website: ${absoluteUrl(app.website)}`}
-          >
-            link
-          </Link>
+          websiteHref ? (
+            <Link
+              href={websiteHref}
+              target="_blank"
+              rel="noreferrer"
+              title={websiteHref}
+              aria-label={`Open website: ${websiteHref}`}
+            >
+              link
+            </Link>
+          ) : (
+            <Typography component="span">{app.website}</Typography>
+          )
         ) : (
           "—"
         )}
       </TableCell>
       <TableCell>
         {app.applicationUrl && app.applicationUrl !== "N/A" ? (
-          <Link href={absoluteUrl(app.applicationUrl)} target="_blank" rel="noreferrer">
-            link
-          </Link>
+          applicationHref ? (
+            <Link href={applicationHref} target="_blank" rel="noreferrer">
+              link
+            </Link>
+          ) : (
+            <Typography component="span">{app.applicationUrl}</Typography>
+          )
         ) : (
           app.applicationUrl || "—"
         )}
@@ -862,17 +875,4 @@ function ApplicationForm({
   );
 }
 
-/**
- * Make a user-entered link safe to use as an href.
- *
- * Users type bare hosts like "vandelay.example"; a scheme-less value is a RELATIVE
- * URL, so the browser would navigate inside the app instead of opening the
- * external site. Prepend https:// when there is no scheme, leaving already-
- * absolute URLs (and mailto:/tel:) untouched.
- */
-function absoluteUrl(url: string): string {
-  const trimmed = url.trim();
-  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return trimmed; // http(s):, mailto:, tel:, …
-  return `https://${trimmed}`;
-}
 

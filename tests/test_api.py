@@ -143,6 +143,24 @@ def test_upload_rejects_unsupported_extension(client):
     assert r.status_code == 400
 
 
+def test_upload_rejects_oversized_file(client):
+    oversized = b"a" * (routes.MAX_UPLOAD_BYTES + 1)
+    r = client.post(
+        "/api/upload",
+        files={"file": ("cv.txt", io.BytesIO(oversized), "text/plain")},
+    )
+    assert r.status_code == 413, r.text
+
+
+def test_upload_accepts_at_size_limit(client):
+    # A valid file comfortably under the cap still succeeds.
+    r = client.post(
+        "/api/upload",
+        files={"file": ("cv.txt", io.BytesIO(b"Jane Doe\nSoftware Engineer"), "text/plain")},
+    )
+    assert r.status_code == 204, r.text
+
+
 def test_confirm_writes_edited_claim(client):
     """A user-edited claim (not the original) is persisted as a user-confirmed
     bullet on the target experience."""
