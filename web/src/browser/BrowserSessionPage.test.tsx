@@ -138,6 +138,92 @@ describe("BrowserSessionPage", () => {
     renderPage();
     const goTo = await screen.findByRole("button", { name: /go to the open session/i });
     expect(goTo).toBeTruthy();
+    expect(screen.getByText(/other\.example\.com/)).toBeTruthy();
+  });
+
+  it("attaches to the session when the refusal names the URL this page wants", async () => {
+    // The operator left this page without pressing Done and came back. The
+    // POST is refused with the SAME url — which is not a refusal to show
+    // them anything, it is the session they asked for. Before this, the page
+    // showed a refusal whose only button navigated to the page it was
+    // already on, stranding them until a run evicted the session.
+    const url = "https://example.com/login";
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({ detail: { reason: "session_open", url } }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ open: true, url, startedAt: "x", evictDeadline: null }),
+      };
+    }));
+    renderPage(url);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /done/i })).toBeTruthy();
+    });
+    expect(screen.queryByText(/already open/i)).toBeNull();
+  });
+
+  it("closes the session that is in the way and starts this one", async () => {
+    const url = "https://example.com/login";
+    let sessionOpen = true;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        sessionOpen = false;
+        return { ok: true, status: 200, json: async () => ({ closed: true }) };
+      }
+      if (init?.method === "POST") {
+        if (sessionOpen) {
+          return {
+            ok: false,
+            status: 409,
+            json: async () => ({
+              detail: { reason: "session_open", url: "https://other.example.com/login" },
+            }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ open: true, url, startedAt: "x", evictDeadline: null }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ open: sessionOpen, url, startedAt: "x", evictDeadline: null }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(url);
+
+    const closeIt = await screen.findByRole("button", { name: /close it and start here/i });
+    fireEvent.click(closeIt);
+
+    // Ends up live on THIS url, having actually closed the other session.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /done/i })).toBeTruthy();
+    });
+    expect(
+      fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "DELETE"),
+    ).toBe(true);
+  });
+
+  it("gives a 503 agent_unreachable its own words", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: false,
+      status: 503,
+      json: async () => ({ detail: { reason: "agent_unreachable" } }),
+    })));
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/agent could not be reached/i)).toBeTruthy();
+    });
   });
 
   it("distinguishes a launch failure from the agent being busy", async () => {
