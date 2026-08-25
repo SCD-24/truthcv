@@ -164,3 +164,7 @@ Provider connection layer (connections/): a static catalog of provider connectio
 <!-- generated:start comp:run-store -->
 ## Run Store (`run-store`, BACKEND)
 <!-- generated:end comp:run-store -->
+
+<!-- generated:start comp:keyword-vocabulary -->
+## Keyword Vocabulary (`keyword-vocabulary`, BACKEND)
+<!-- generated:end comp:keyword-vocabulary -->

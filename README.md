@@ -184,6 +184,34 @@ python -m api.genkey
 
 Saved keys are encrypted (Fernet) into `./data/secrets.enc`.
 
+### Operator vocabulary (`data/vocabulary/`)
+
+Four optional plain-text files under `data/vocabulary/` (inside your `DATA_DIR`)
+let an operator extend the pipeline's built-in word lists without a code change.
+In every file, a line whose first character is `#` is a comment and is skipped,
+as are blank lines. Any file that is missing means the built-in values are used
+on their own — its absence is never an error.
+
+| File | What it does |
+|---|---|
+| `arrangement_words.txt` | Extra work-arrangement "junk" words (e.g. remote/hybrid/onsite markers), one word per line, merged with a built-in set to filter non-skill keywords out of ATS keyword extraction. |
+| `seniority_prefixes.txt` | Extra job-title seniority prefixes (e.g. `Senior`, `Lead`), one per line, merged with a built-in ladder to filter bare job titles out of extracted keywords. |
+| `ats_headings.txt` | Extra standard CV section headings recognized by the ATS lint, one per line. |
+| `synonyms.txt` | Acronym/expansion equivalence groups, one group per line, with the interchangeable forms separated by `=`. |
+
+An example `synonyms.txt` line:
+
+```
+CI/CD = Continuous Integration and Continuous Delivery
+```
+
+> **`synonyms.txt` is trusted by the guardrail as truth.** Entries here are
+> treated as truth-equivalent: if a candidate's truth data attests one form
+> (say the acronym), the guardrail will also accept the other form (the
+> expansion) as truthful in a rendered CV. Because of that, add only genuine
+> equivalences — never loose or approximate synonyms. A false equivalence here
+> would let an unattested claim pass the guardrail.
+
 ## Local development (without Docker)
 
 Backend:

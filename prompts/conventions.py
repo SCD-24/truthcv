@@ -8,7 +8,13 @@ object with today's behaviour as its defaults. Callers render prompt fragments
 from these objects; supplying an alternative changes only those fragments.
 
 The defaults exist so an operator who configures nothing gets byte-for-byte
-the prompts this project has always produced.
+the prompts this project has always produced — with one deliberate exception:
+the ``acronym_policy`` and ``phrase_repetition_policy`` fields on
+``DomainVocabulary`` are new, and their non-empty defaults intentionally CHANGE
+the default prompt output because they did not exist before. An operator who
+wants the old byte-for-byte prompts back can construct
+``DomainVocabulary(acronym_policy="", phrase_repetition_policy="")`` to blank
+them out.
 """
 
 from __future__ import annotations
@@ -44,6 +50,11 @@ class DomainVocabulary:
     project's first operator searched for — not because the craft rules below
     are SE-specific. A nurse's or lawyer's profile supplies its own profile so
     their screenable skills match the extraction and grouping rules.
+
+    The ``acronym_policy`` and ``phrase_repetition_policy`` fields belong to the
+    same screenable-vocabulary concern: they govern ATS-matching *phrasing* (how
+    a supported fact should be worded so a keyword scanner registers it), not the
+    facts themselves.
     """
 
     # What counts as a screenable keyword, rendered into the extraction prompt.
@@ -75,6 +86,22 @@ class DomainVocabulary:
         "'ETL' and 'Data transformation'; building checks on input data supports "
         "'Data validation'; tuning a system for speed supports 'Performance "
         "optimization'"
+    )
+    # Carry both an acronym and its expansion when the facts support both.
+    acronym_policy: str = (
+        "When an established industry acronym and its full spelled-out form are both "
+        "supported by the candidate's own facts, write the expansion once followed by "
+        "the acronym in parentheses (e.g. 'Continuous Integration and Continuous "
+        "Delivery (CI/CD)') so an applicant-tracking system matching either form as a "
+        "literal phrase can find it, since ATS keyword taxonomies treat an acronym and "
+        "its expansion as unrelated entries."
+    )
+    # Never elide a repeated head noun across a conjunction.
+    phrase_repetition_policy: str = (
+        "Never share a head noun across a conjunction: write 'unit tests and "
+        "integration tests', not 'unit and integration tests', because a scanner "
+        "that matches contiguous phrases cannot see the elided form and the shortened "
+        "phrasing will not register as a keyword match."
     )
 
 

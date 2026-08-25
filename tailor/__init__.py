@@ -17,7 +17,7 @@ from truth.model import Truth
 from truth.store import data_dir
 
 from .infer import detect_inferences
-from .keywords import extract_keywords
+from .keywords import extract_keywords_with_aliases
 from .model import Draft, DraftEducation, DraftExperience, Inference
 from .select import select_and_rephrase
 
@@ -90,17 +90,18 @@ def tailor(
     Returns a dict matching the frontend's TailorResult ({keywords, inferences}),
     plus the draft for internal render use.
     """
-    keywords = extract_keywords(posting, provider_for("keywords"))
+    keywords, aliases = extract_keywords_with_aliases(posting, provider_for("keywords"))
     experiences, education, skills = select_and_rephrase(
         posting, keywords, truth, provider_for("tailor")
     )
-    inferences = detect_inferences(keywords, truth, provider_for("infer"))
+    inferences = detect_inferences(keywords, truth, provider_for("infer"), aliases)
 
     draft = Draft(
         experiences=experiences,
         education=education,
         skills=skills,
         keywords=keywords,
+        keyword_aliases=aliases,
         inferences=inferences,
     )
     save_draft(draft)

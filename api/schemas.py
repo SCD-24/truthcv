@@ -854,11 +854,20 @@ class LetterGenerateRequest(_Camel):
 
     `force` is the operator's explicit "discard my edits and redraft"; without
     it, regenerating over text a human wrote is refused.
+
+    `approvals` carries generation-scoped decisions on claims a previous
+    attempt blocked (mirrors CoverLetterApprovals on /api/cover-letter):
+    approved claims are allowed for this one generation only and are never
+    written to truth.yaml. `paragraphs` echoes back the paragraphs from a
+    blocked attempt so the retry re-validates that SAME letter instead of
+    paying for a second LLM call; omitted, a fresh letter is generated.
     """
 
     force: bool = False
     tone: str = "Professional"
     length: str = "Standard"
+    approvals: CoverLetterApprovals | None = None
+    paragraphs: list[dict] | None = None
 
 
 class LetterSaveRequest(_Camel):

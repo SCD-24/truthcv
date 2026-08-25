@@ -107,6 +107,7 @@ class Draft:
     education: list[DraftEducation] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
     keywords: list[str] = field(default_factory=list)
+    keyword_aliases: dict[str, list[str]] = field(default_factory=dict)
     inferences: list[Inference] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -115,6 +116,7 @@ class Draft:
             "education": [e.to_dict() for e in self.education],
             "skills": list(self.skills),
             "keywords": list(self.keywords),
+            "keywordAliases": {k: list(v) for k, v in self.keyword_aliases.items()},
             "inferences": [i.to_dict() for i in self.inferences],
         }
 
@@ -125,5 +127,6 @@ class Draft:
             education=[DraftEducation.from_dict(x) for x in d.get("education", []) or []],
             skills=[str(s) for s in d.get("skills", []) or []],
             keywords=list(d.get("keywords", [])),
+            keyword_aliases=d.get("keywordAliases", {}) or {},
             inferences=[Inference.from_dict(x) for x in d.get("inferences", []) or []],
         )

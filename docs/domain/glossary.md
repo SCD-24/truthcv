@@ -131,3 +131,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:start comp:run-store -->
 - **Run Store** (`run-store`) — backend component.
 <!-- generated:end comp:run-store -->
+
+<!-- generated:start comp:keyword-vocabulary -->
+- **Keyword Vocabulary** (`keyword-vocabulary`) — backend component.
+<!-- generated:end comp:keyword-vocabulary -->

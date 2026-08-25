@@ -12,6 +12,7 @@ graph TD
     cover-letter-engine["Cover Letter Engine <br/> <small>(BACKEND)</small>"]
     gmail-api["Gmail / Google OAuth API <br/> <small>(CUSTOM)</small>"]
     guardrail-validator["Guardrail Validator <br/> <small>(BACKEND)</small>"]
+    keyword-vocabulary["Keyword Vocabulary <br/> <small>(BACKEND)</small>"]
     llm-provider-layer["LLM Provider Layer <br/> <small>(BACKEND)</small>"]
     llm-provider-service["LLM Provider Service <br/> <small>(CUSTOM)</small>"]
     onboarding-store["Onboarding Store <br/> <small>(BACKEND)</small>"]
@@ -53,11 +54,14 @@ graph TD
     cover-letter-engine -->|in-process| prompt-store
     cover-letter-engine -->|in-process| renderer
     cover-letter-engine -->|in-process| truth-store
+    guardrail-validator -->|in-process| keyword-vocabulary
     guardrail-validator -->|file I/O| truth-data-volume
     guardrail-validator -->|in-process| truth-store
+    keyword-vocabulary -->|file I/O| truth-data-volume
     llm-provider-layer -->|HTTPS| llm-provider-service
     llm-provider-layer -->|in-process| secret-store
     onboarding-store -->|file I/O| truth-data-volume
+    renderer -->|in-process| keyword-vocabulary
     renderer -->|in-process| prompt-store
     renderer -->|file I/O| truth-data-volume
     run-store -->|file I/O| truth-data-volume
@@ -66,6 +70,7 @@ graph TD
     screening-engine -->|in-process| company-research
     screening-engine -->|file I/O| truth-data-volume
     secret-store -->|file I/O| truth-data-volume
+    tailor-engine -->|in-process| keyword-vocabulary
     tailor-engine -->|in-process| llm-provider-layer
     tailor-engine -->|in-process| prompt-store
     tailor-engine -->|file I/O| truth-data-volume
@@ -87,6 +92,7 @@ graph TD
 - [Cover Letter Engine](overview.md) (`cover-letter-engine`, backend)
 - [Gmail / Google OAuth API](overview.md) (`gmail-api`, custom)
 - [Guardrail Validator](overview.md) (`guardrail-validator`, backend)
+- [Keyword Vocabulary](overview.md) (`keyword-vocabulary`, backend)
 - [LLM Provider Layer](overview.md) (`llm-provider-layer`, backend)
 - [LLM Provider Service](overview.md) (`llm-provider-service`, custom)
 - [Onboarding Store](overview.md) (`onboarding-store`, backend)
@@ -131,11 +137,14 @@ graph TD
 - [cover-letter-engine → prompt-store](interactions/cover-letter-engine--prompt-store.md) via `in-process`
 - [cover-letter-engine → renderer](interactions/cover-letter-engine--renderer.md) via `in-process`
 - [cover-letter-engine → truth-store](interactions/cover-letter-engine--truth-store.md) via `in-process`
+- [guardrail-validator → keyword-vocabulary](interactions/guardrail-validator--keyword-vocabulary.md) via `in-process`
 - [guardrail-validator → truth-data-volume](interactions/guardrail-validator--truth-data-volume.md) via `file I/O`
 - [guardrail-validator → truth-store](interactions/guardrail-validator--truth-store.md) via `in-process`
+- [keyword-vocabulary → truth-data-volume](interactions/keyword-vocabulary--truth-data-volume.md) via `file I/O`
 - [llm-provider-layer → llm-provider-service](interactions/llm-provider-layer--llm-provider-service.md) via `HTTPS`
 - [llm-provider-layer → secret-store](interactions/llm-provider-layer--secret-store.md) via `in-process`
 - [onboarding-store → truth-data-volume](interactions/onboarding-store--truth-data-volume.md) via `file I/O`
+- [renderer → keyword-vocabulary](interactions/renderer--keyword-vocabulary.md) via `in-process`
 - [renderer → prompt-store](interactions/renderer--prompt-store.md) via `in-process`
 - [renderer → truth-data-volume](interactions/renderer--truth-data-volume.md) via `file I/O`
 - [run-store → truth-data-volume](interactions/run-store--truth-data-volume.md) via `file I/O`
@@ -144,6 +153,7 @@ graph TD
 - [screening-engine → company-research](interactions/screening-engine--company-research.md) via `in-process`
 - [screening-engine → truth-data-volume](interactions/screening-engine--truth-data-volume.md) via `file I/O`
 - [secret-store → truth-data-volume](interactions/secret-store--truth-data-volume.md) via `file I/O`
+- [tailor-engine → keyword-vocabulary](interactions/tailor-engine--keyword-vocabulary.md) via `in-process`
 - [tailor-engine → llm-provider-layer](interactions/tailor-engine--llm-provider-layer.md) via `in-process`
 - [tailor-engine → prompt-store](interactions/tailor-engine--prompt-store.md) via `in-process`
 - [tailor-engine → truth-data-volume](interactions/tailor-engine--truth-data-volume.md) via `file I/O`

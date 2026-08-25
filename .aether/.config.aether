@@ -1504,6 +1504,14 @@
       "id": "run-store",
       "name": "Run Store",
       "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "id": "keyword-vocabulary",
+      "name": "Keyword Vocabulary",
+      "type": "backend"
     }
   ],
   "connections": [
@@ -1748,6 +1756,11 @@
       "to": "truth-data-volume"
     },
     {
+      "from": "keyword-vocabulary",
+      "protocol": "file I/O",
+      "to": "truth-data-volume"
+    },
+    {
       "from": "api",
       "protocol": "in-process",
       "to": "run-store"
@@ -1756,6 +1769,21 @@
       "from": "application-agent",
       "protocol": "HTTP/MCP (streamable HTTP JSON-RPC)",
       "to": "run-store"
+    },
+    {
+      "from": "tailor-engine",
+      "protocol": "in-process",
+      "to": "keyword-vocabulary"
+    },
+    {
+      "from": "guardrail-validator",
+      "protocol": "in-process",
+      "to": "keyword-vocabulary"
+    },
+    {
+      "from": "renderer",
+      "protocol": "in-process",
+      "to": "keyword-vocabulary"
     }
   ],
   "definitions": [
@@ -1863,7 +1891,8 @@
         "application-tracker",
         "agent-config",
         "company-research",
-        "run-store"
+        "run-store",
+        "keyword-vocabulary"
       ],
       "name": "TruthCV Container (single Docker image)",
       "w": 1861.8301559792023,
@@ -1910,6 +1939,10 @@
     "guardrail-validator": {
       "x": 1028,
       "y": 284
+    },
+    "keyword-vocabulary": {
+      "x": 1500,
+      "y": 380
     },
     "llm-provider-layer": {
       "x": 1620,

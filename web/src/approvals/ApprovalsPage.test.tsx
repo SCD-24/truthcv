@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 /** Approvals page: the operator's queue. Stubbing follows ScreeningsPage.test.tsx. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import {
   bulkDeleteScreenings,
   bulkSetApproval,
   deleteScreening,
   generateScreeningLetter,
   getScreeningLetter,
+  GuardrailBlockedError,
   listAppliedScreenings,
   markScreeningApplied,
   listApprovedApplications,
@@ -38,6 +39,18 @@ vi.mock("../api/client", () => ({
   setScreeningPostingText: vi.fn(),
   getScreeningLetter: vi.fn(),
   generateScreeningLetter: vi.fn(),
+  GuardrailBlockedError: class GuardrailBlockedError extends Error {
+    claims: unknown[];
+    paragraphs: unknown[];
+    blockedReason: string;
+    constructor(message: string, claims: unknown[], paragraphs: unknown[], blockedReason: string) {
+      super(message);
+      this.name = "GuardrailBlockedError";
+      this.claims = claims;
+      this.paragraphs = paragraphs;
+      this.blockedReason = blockedReason;
+    }
+  },
   markScreeningApplied: vi.fn(),
   saveScreeningLetter: vi.fn(),
 }));
@@ -389,6 +402,131 @@ describe("ApprovalsPage cover letter", () => {
     await renderPage([makeRecord()]);
     expect(await screen.findByText(/Posted 2026-08-20/)).toBeTruthy();
     expect(screen.getByText(/Found 2026-08-23/)).toBeTruthy();
+  });
+
+  // The blocked-cover-letter approve/deny flow. The mocked "../api/client"
+  // provides a stand-in GuardrailBlockedError whose class identity is shared
+  // with ApprovalsPage's own import (both resolve to the same mock), so the
+  // `instanceof GuardrailBlockedError` gate in generate()'s catch fires here.
+  function blockedLetterError() {
+    return new GuardrailBlockedError(
+      "The letter was blocked by the truthfulness guardrail. Blocked: invented Kubernetes; ran a Mars mission",
+      [
+        { claimId: "c1", experienceId: "letter", text: "invented Kubernetes", tokens: ["Kubernetes"] },
+        { claimId: "c2", experienceId: "letter", text: "ran a Mars mission", tokens: ["Mars", "mission"] },
+      ],
+      [{ text: "para", claims: ["invented Kubernetes", "ran a Mars mission"] }],
+      "",
+    );
+  }
+
+  const claimDivs = () => Array.from(document.querySelectorAll<HTMLElement>(".claim"));
+
+  it("a guardrail block renders the claims panel, not the raw error alert", async () => {
+    vi.mocked(getScreeningLetter).mockResolvedValue(null);
+    vi.mocked(generateScreeningLetter).mockRejectedValue(blockedLetterError());
+    await renderPage([makeRecord()]);
+    fireEvent.click(await screen.findByRole("button", { name: /Generate cover letter/ }));
+
+    await waitFor(() => expect(screen.getByText("invented Kubernetes")).toBeTruthy());
+    expect(screen.getByText("ran a Mars mission")).toBeTruthy();
+    // Each claim's traced-back tokens are rendered.
+    expect(screen.getByText("Kubernetes")).toBeTruthy();
+    expect(screen.getByText("Mars")).toBeTruthy();
+    expect(screen.getByText("mission")).toBeTruthy();
+    // Approve/Deny buttons exist within each of the two claim containers.
+    const claims = claimDivs();
+    expect(claims).toHaveLength(2);
+    for (const claim of claims) {
+      expect(within(claim).getByRole("button", { name: "Approve" })).toBeTruthy();
+      expect(within(claim).getByRole("button", { name: "Deny" })).toBeTruthy();
+    }
+    // The raw error message never lands in an alert — the panel replaces it.
+    expect(screen.queryByText(/blocked by the truthfulness guardrail/)).toBeNull();
+  });
+
+  it("keeps Re-check & continue disabled until every blocked claim is decided", async () => {
+    vi.mocked(getScreeningLetter).mockResolvedValue(null);
+    vi.mocked(generateScreeningLetter).mockRejectedValue(blockedLetterError());
+    await renderPage([makeRecord()]);
+    fireEvent.click(await screen.findByRole("button", { name: /Generate cover letter/ }));
+    await waitFor(() => expect(claimDivs()).toHaveLength(2));
+
+    // Undecided: the button reads its "decide everything" label and is disabled.
+    expect(
+      screen.getByRole("button", { name: "Decide every claim to continue" }).hasAttribute("disabled"),
+    ).toBe(true);
+
+    const claims = claimDivs();
+    fireEvent.click(within(claims[0]).getByRole("button", { name: "Approve" }));
+    expect(
+      screen.getByRole("button", { name: "Decide every claim to continue" }).hasAttribute("disabled"),
+    ).toBe(true);
+
+    fireEvent.click(within(claims[1]).getByRole("button", { name: "Deny" }));
+    expect(
+      screen.getByRole("button", { name: "Re-check & continue" }).hasAttribute("disabled"),
+    ).toBe(false);
+  });
+
+  it("re-checks with the per-claim decisions and the echoed-back paragraphs", async () => {
+    vi.mocked(getScreeningLetter).mockResolvedValue(null);
+    vi.mocked(generateScreeningLetter).mockRejectedValue(blockedLetterError());
+    await renderPage([makeRecord()]);
+    fireEvent.click(await screen.findByRole("button", { name: /Generate cover letter/ }));
+    await waitFor(() => expect(claimDivs()).toHaveLength(2));
+
+    const claims = claimDivs();
+    fireEvent.click(within(claims[0]).getByRole("button", { name: "Approve" }));
+    fireEvent.click(within(claims[1]).getByRole("button", { name: "Deny" }));
+    fireEvent.click(screen.getByRole("button", { name: "Re-check & continue" }));
+
+    await waitFor(() =>
+      expect(generateScreeningLetter).toHaveBeenLastCalledWith("s1", {
+        approvals: { approvedClaimIds: ["c1"], deniedClaimIds: ["c2"] },
+        paragraphs: [{ text: "para", claims: ["invented Kubernetes", "ran a Mars mission"] }],
+      }),
+    );
+  });
+
+  it("a successful re-check shows the returned draft and clears the panel", async () => {
+    vi.mocked(getScreeningLetter).mockResolvedValue(null);
+    vi.mocked(generateScreeningLetter)
+      .mockRejectedValueOnce(blockedLetterError())
+      .mockResolvedValueOnce({
+        text: "Final letter text",
+        paragraphs: [],
+        source: "generated",
+        updatedAt: "2026-08-24T11:00:00Z",
+      });
+    await renderPage([makeRecord()]);
+    fireEvent.click(await screen.findByRole("button", { name: /Generate cover letter/ }));
+    await waitFor(() => expect(claimDivs()).toHaveLength(2));
+
+    const claims = claimDivs();
+    fireEvent.click(within(claims[0]).getByRole("button", { name: "Approve" }));
+    fireEvent.click(within(claims[1]).getByRole("button", { name: "Deny" }));
+    fireEvent.click(screen.getByRole("button", { name: "Re-check & continue" }));
+
+    expect(await screen.findByDisplayValue("Final letter text")).toBeTruthy();
+    expect(claimDivs()).toHaveLength(0);
+  });
+
+  it("a guardrail block with no claims stays in the plain alert, not the panel", async () => {
+    vi.mocked(getScreeningLetter).mockResolvedValue(null);
+    vi.mocked(generateScreeningLetter).mockRejectedValue(
+      new GuardrailBlockedError(
+        "The letter was blocked by the truthfulness guardrail. Blocked by company policy.",
+        [],
+        [],
+        "company_blocked",
+      ),
+    );
+    await renderPage([makeRecord()]);
+    fireEvent.click(await screen.findByRole("button", { name: /Generate cover letter/ }));
+
+    expect(await screen.findByText(/Blocked by company policy\./)).toBeTruthy();
+    expect(claimDivs()).toHaveLength(0);
   });
 });
 

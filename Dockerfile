@@ -35,6 +35,7 @@ COPY providers/ ./providers/
 COPY truth/ ./truth/
 COPY tailor/ ./tailor/
 COPY guardrail/ ./guardrail/
+COPY vocabulary/ ./vocabulary/
 COPY render/ ./render/
 COPY coverletter/ ./coverletter/
 COPY applications/ ./applications/
