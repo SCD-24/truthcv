@@ -972,6 +972,29 @@ class SigninQueue(_Camel):
     sites: list[SigninQueueSite]
 
 
+class BrowserSession(_Camel):
+    """GET/POST /api/browser/session — forwarded from browser/session-server.js."""
+
+    open: bool
+    url: str | None = None
+    started_at: str | None = None
+    # Set once a run has asked for the browser back. The session page counts
+    # down to this and the session server closes the session when it passes.
+    evict_deadline: str | None = None
+
+
+class BrowserSessionRequest(_Camel):
+    """POST /api/browser/session body."""
+
+    url: str
+
+
+class BrowserSessionClosed(_Camel):
+    """DELETE /api/browser/session."""
+
+    closed: bool
+
+
 class AgentRunResult(_Camel):
     """POST /api/agent/run — forwarded from the supervisor.js control server."""
 

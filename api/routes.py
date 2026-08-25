@@ -112,6 +112,9 @@ from .schemas import (
     SettingsUpdate,
     SigninQueue,
     SigninQueueSite,
+    BrowserSession,
+    BrowserSessionClosed,
+    BrowserSessionRequest,
     StartLoginResult,
     TailorRequest,
     TailorResult,
@@ -1273,6 +1276,73 @@ def get_signin_queue() -> SigninQueue:
     sites = [SigninQueueSite(**e) for e in grouped.values()]
     sites.sort(key=lambda s: (-s.waiting, s.host))
     return SigninQueue(sites=sites)
+
+
+def _browser_control_url(path: str) -> str:
+    """Build the session-server control URL from env, defaulting port 8932."""
+    port = os.environ.get("SESSION_SERVER_PORT", "8932")
+    return f"http://browser:{port}{path}"
+
+
+def _forward_to_session_server(path: str, method: str = "GET", body: dict | None = None) -> dict:
+    """Forward a request to browser/session-server.js.
+
+    Distinguishes three outcomes the UI must tell apart: a normal answer, a
+    refusal the session server made deliberately (4xx/503 — forwarded with its
+    own status so "the agent is applying right now" does not read as "the
+    browser is broken"), and the container being unreachable (503).
+    """
+    token = os.environ.get("AGENT_API_TOKEN", "")
+    data = json.dumps(body or {}).encode() if method == "POST" else None
+    req = urllib.request.Request(
+        _browser_control_url(path),
+        method=method,
+        headers={"X-Agent-Token": token, "Content-Type": "application/json"},
+        data=data,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=exc.code, detail="Session refused") from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=503, detail="Browser service unreachable") from exc
+
+
+def _session_from(data: dict) -> BrowserSession:
+    return BrowserSession(
+        open=data.get("open", False),
+        url=data.get("url"),
+        started_at=data.get("startedAt"),
+        evict_deadline=data.get("evictDeadline"),
+    )
+
+
+@router.get("/browser/session", response_model=BrowserSession)
+def get_browser_session() -> BrowserSession:
+    """Whether an attended sign-in session is open, and at which URL."""
+    return _session_from(_forward_to_session_server("/session", method="GET"))
+
+
+@router.post("/browser/session", response_model=BrowserSession)
+def post_browser_session(payload: BrowserSessionRequest) -> BrowserSession:
+    """Open an attended sign-in session at a URL.
+
+    Refused with 409 while a run is in progress: unattended runs win, and the
+    operator is told to try again shortly rather than the run being disturbed.
+    """
+    if _host_of(payload.url) == "":
+        raise HTTPException(status_code=422, detail="An http(s) URL is required")
+    return _session_from(
+        _forward_to_session_server("/session", method="POST", body={"url": payload.url})
+    )
+
+
+@router.delete("/browser/session", response_model=BrowserSessionClosed)
+def delete_browser_session() -> BrowserSessionClosed:
+    """Close the attended session and release the browser."""
+    data = _forward_to_session_server("/session/close", method="POST")
+    return BrowserSessionClosed(closed=data.get("closed", False))
 
 
 def _letter_approvals(
