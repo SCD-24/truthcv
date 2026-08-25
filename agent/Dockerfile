@@ -24,7 +24,7 @@
 # logins, and unattended applying depends on live ATS/SSO sessions. That is
 # answered by the browser service, not by the host: its Chromium profile lives
 # on the persistent `browser-profile` volume, and the operator establishes those
-# sessions once by hand through the noVNC viewport at http://localhost:7900,
+# sessions once by hand through the noVNC viewport at http://localhost:5628,
 # after which they survive restarts.
 #
 # OPT-IN — `interceptor`: the operator's real, already-logged-in Chrome on the

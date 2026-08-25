@@ -2,7 +2,11 @@ services:
   app:
     build: .
     ports:
-      - "8080:8080"
+      # Host side only. The container keeps listening on 8080 (Dockerfile
+      # `ENV PORT=8080`), which is what the agent reaches over the compose
+      # network as http://app:8080/mcp — changing the left side cannot affect
+      # it. Named APP_PORT, not PORT: PORT is the container-internal variable.
+      - "${APP_PORT:-5627}:8080"
     environment:
       - LLM_PROVIDER=${LLM_PROVIDER:-anthropic}
       - LLM_MODEL=${LLM_MODEL:-}
@@ -34,7 +38,7 @@ services:
   # Containerised headful Chromium MCP server, reached by the agent over HTTP.
   # Started on a bare `docker compose up` (no profiles) so the agent can drive
   # it immediately without manual setup. The browser runs headful under Xvfb
-  # with a noVNC viewport at http://localhost:7900 for observation or manual
+  # with a noVNC viewport at http://localhost:5628 for observation or manual
   # one-time login (CAPTCHA, SMS MFA, etc.). The persistent /browser-profile
   # named volume preserves sessions across restarts.
   browser:
@@ -44,7 +48,11 @@ services:
     restart: unless-stopped
     ports:
       # noVNC web viewer (public; use this to watch or debug a run)
-      - "7900:7900"
+      # Host side only. NOVNC_HOST_PORT, deliberately NOT NOVNC_PORT —
+      # browser/entrypoint.sh:20 already reads NOVNC_PORT for the port inside
+      # the container, and reusing the name would move the internal port and
+      # leave this mapping pointing at nothing.
+      - "${NOVNC_HOST_PORT:-5628}:7900"
     volumes:
       # Persistent Chromium profile (survives container restarts)
       - browser-profile:/browser-profile

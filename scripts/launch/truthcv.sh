@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Shared launcher for macOS and Linux. truthcv.command delegates here so
+# there is one implementation, not two; Linux users run this file directly.
+#
+# There is deliberately no .desktop entry. A .desktop file cannot locate
+# itself — its %k field code is empty unless a file manager passes the file
+# as an opened document, which is not the case from an applications menu —
+# so it would have to carry a hard-coded absolute path that every user edits
+# by hand before anything works. This script finds its own directory, so
+# double-clicking it needs no edit. Do not reintroduce a .desktop entry
+# without solving the self-location problem first.
+#
+# All real logic lives in `python -m launcher`, run inside a container: macOS
+# and Linux ship Python 3 but Windows does not, and Docker is already a hard
+# requirement, so it is the one interpreter guaranteed present everywhere.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$REPO"
+
+BOOTSTRAP_IMAGE="python:3-alpine"
+MAX_PORT_ATTEMPTS=10
+
+fail() { printf '\n%s\n' "$1" >&2; read -r -p "Press Enter to close." _; exit 1; }
+
+if ! command -v docker >/dev/null 2>&1; then
+  fail "TruthCV needs Docker Desktop, which isn't installed.
+Download it from https://docs.docker.com/get-docker/ then run this again."
+fi
+
+if ! docker info >/dev/null 2>&1; then
+  fail "Docker Desktop isn't running. Start it, wait for the whale icon to
+settle, then run this again."
+fi
+
+# Files the container creates must belong to the user, not root — otherwise
+# the generated .env reproduces the PermissionError the README documents for
+# the data volume.
+run_bootstrap() {
+  docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    -v "$REPO:/work" -w /work \
+    "$BOOTSTRAP_IMAGE" python -m launcher --repo /work "$@"
+}
+
+# Under `set -e`, a bare `APP_PORT="$(run_bootstrap | cut -d= -f2)"` would
+# abort the whole script the instant run_bootstrap fails, bypassing fail()
+# entirely — a double-clicked .command window would just vanish. Capture
+# through an `if` so a failure is handled, not just fatal.
+read_port() {
+  local out
+  if ! out="$("$@")"; then
+    fail "TruthCV could not prepare its configuration. Make sure Docker Desktop is running, then try again."
+  fi
+  out="$(printf '%s' "$out" | cut -d= -f2)"
+  case "$out" in
+    ''|*[!0-9]*) fail "TruthCV could not work out which port to use. Please report this." ;;
+  esac
+  printf '%s' "$out"
+}
+
+APP_PORT="$(read_port run_bootstrap)"
+
+if ! docker compose images -q app 2>/dev/null | grep -q .; then
+  printf '%s\n' "Setting up TruthCV for the first time.
+This takes about 10 minutes and only happens once."
+fi
+
+attempt=1
+until docker compose up -d --build 2>compose.err; do
+  if ! grep -qiE 'port is already allocated|address already in use|bind for' compose.err; then
+    if [ -s compose.err ]; then cat compose.err >&2; fi
+    fail "TruthCV couldn't start. The log above says why; compose.err has the full text."
+  fi
+  if [ "$attempt" -ge "$MAX_PORT_ATTEMPTS" ]; then
+    fail "Tried $MAX_PORT_ATTEMPTS ports and every one was busy. Something
+unusual is holding them — restart the machine and try again."
+  fi
+  APP_PORT="$(read_port run_bootstrap --bump APP_PORT)"
+  attempt=$((attempt + 1))
+done
+rm -f compose.err
+
+URL="http://localhost:${APP_PORT}"
+printf '%s\n' "TruthCV is starting at $URL"
+
+for _ in $(seq 1 60); do
+  if curl -fsS -o /dev/null "$URL"; then break; fi
+  sleep 2
+done
+
+if command -v open >/dev/null 2>&1; then open "$URL"
+elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$URL"
+else printf '%s\n' "Open $URL in your browser."
+fi

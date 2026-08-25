@@ -7,7 +7,7 @@ The `browser` service in docker-compose.yml runs a headful Chromium instance und
 While a run is in progress, observe what Chromium is doing at:
 
 ```
-http://localhost:7900
+http://localhost:5628
 ```
 
 This is useful for:
@@ -43,7 +43,7 @@ This is why the browser container mounts the data volume, but the agent containe
 A containerised browser presents a datacenter IP address and a fresh Chromium fingerprint that differs from your personal machine. Some ATS platforms and application sites use bot-detection logic (Cloudflare, Perimeter X, etc.) and may silently block or challenge a containerised browser more aggressively than they would your own.
 
 This is documented in agent/RUNBOOK.md §5.5 ("Bot detection is more likely in containerised environments"). Mitigations:
-- Use the noVNC viewport (http://localhost:7900) to watch runs in real time and spot when a site challenges or blocks the browser
+- Use the noVNC viewport (http://localhost:5628) to watch runs in real time and spot when a site challenges or blocks the browser
 - Manually complete any one-time login or CAPTCHA in the viewport (it persists to the profile volume)
 - Monitor your email for any "Verify this login" challenges and complete them as they arrive
 
