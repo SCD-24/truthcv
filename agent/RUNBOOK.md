@@ -189,8 +189,8 @@ When an ATS field asks for a salary expectation, figure, or range:
    configured salary band — leave the field blank, do not guess, and raise
    the posting as an open issue in the §9 report for the operator to review.
 5. **Record the matched profile's name on the screening** for every posting
-   you screen, whether it is applied to, rejected, or skipped — see §5.6's
-   `screening` block.
+   you screen, whether it is applied to, rejected, or skipped — see the
+   `screening` block in §5 "Record what the form contains, before submitting".
 
 ---
 
@@ -236,10 +236,10 @@ still the employer's own site, per item 1 below.
    `asset_id` and `path` both `None`, no canonical CV is registered — stop,
    do not fabricate or substitute another file, and raise it as an open issue
    in the §9 report instead of applying.
-3. Call `generate_cover_letter` with the posting text, a tone, and a length to
-   get a per-role letter grounded in the operator's actual work. See §6 for
-   what to do when it comes back blocked. Never write a cover letter free-hand outside
-   this tool — a hand-written letter has no guardrail behind it at all. Always
+3. **Never write a cover letter free-hand.** Call `generate_cover_letter` with
+   the posting text, a tone, and a length to get a per-role letter grounded in
+   the operator's actual work — outside this tool, a letter has no guardrail
+   behind it at all. See §6 for what to do when it comes back blocked. Always
    pass `company` (the name as posted) to `generate_cover_letter` so the
    blocklist can refuse before any text is generated.
 
@@ -261,8 +261,9 @@ surfaces, and you can tell which by what appears in your tool list:
   `interceptor://help/{verb}` for one verb's arguments, before first use.
 
 Every rule here applies identically regardless of which surface you have —
-especially §5.8, which matters *more* on the containerised browser, because it
-is likelier to be silently blocked by ATS bot detection.
+especially §5 "Verify the submission actually landed", which matters *more* on
+the containerised browser, because it is likelier to be silently blocked by ATS
+bot detection.
 
 4. Fill every field from the `get_profile_answers` result (§3), calling it
    with `company` for this application so the email returned is the

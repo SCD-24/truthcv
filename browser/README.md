@@ -42,7 +42,7 @@ This is why the browser container mounts the data volume, but the agent containe
 
 A containerised browser presents a datacenter IP address and a fresh Chromium fingerprint that differs from your personal machine. Some ATS platforms and application sites use bot-detection logic (Cloudflare, Perimeter X, etc.) and may silently block or challenge a containerised browser more aggressively than they would your own.
 
-This is documented in agent/RUNBOOK.md §5, under "Browser tooling is whatever this environment provides", which flags that §5.8 ("Verify the submission actually landed") matters more here for exactly this reason. Mitigations:
+This is documented in agent/RUNBOOK.md §5 "Browser tooling is whatever this environment provides", which flags that §5 "Verify the submission actually landed" matters more here for exactly this reason. Mitigations:
 - Use the noVNC viewport (http://localhost:5628) to watch runs in real time and spot when a site challenges or blocks the browser
 - Manually complete any one-time login or CAPTCHA in the viewport (it persists to the profile volume)
 - Monitor your email for any "Verify this login" challenges and complete them as they arrive
