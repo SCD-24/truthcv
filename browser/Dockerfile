@@ -29,7 +29,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Install additional tools:
 #   xvfb:       Virtual X11 display server (Chromium runs headful here)
 #   x11vnc:     VNC server over the X11 display (observe running tests)
-#   novnc:      Browser-based VNC client (accessible as http://localhost:5628)
+#   novnc:      Browser-based VNC client (reached only through the app's
+#               origin-checked WebSocket relay at
+#               /api/browser/session/stream; deliberately NOT published to
+#               the host — see docker-compose.yml)
 #   websockify: WebSocket-to-socket bridge, required by noVNC
 #   openbox:    Window manager. Without one, Chromium's windows are unmanaged:
 #               no title bar, no move, resize, raise or close. SSO flows open a
