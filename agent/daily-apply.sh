@@ -102,7 +102,19 @@ case "$AGENT_BROWSER_DRIVER" in
           (res) => {
             let body = "";
             res.on("data", (c) => (body += c));
-            res.on("end", () => { process.stdout.write(body); process.exit(0); });
+            res.on("end", () => {
+              // A response is not a success. The session server answers 403 to a
+              // missing or mismatched X-Agent-Token — including when its own
+              // AGENT_API_TOKEN is empty, which compose permits — and a 403 body
+              // does not contain "open":true, so treating it as a reply would be
+              // indistinguishable from "no session is open" and would silently
+              // skip the eviction this interlock exists to perform.
+              if (res.statusCode < 200 || res.statusCode > 299) {
+                process.exit(1);
+              }
+              process.stdout.write(body);
+              process.exit(0);
+            });
           }
         );
         req.on("timeout", () => { req.destroy(); process.exit(1); });
@@ -126,7 +138,7 @@ case "$AGENT_BROWSER_DRIVER" in
     }
 
     session_state="$(session_request GET /session)" \
-      || abort "session server unreachable at browser:${SESSION_SERVER_PORT:-8932} - cannot tell whether a sign-in session holds the browser (docker compose logs browser)"
+      || abort "session server unreachable at browser:${SESSION_SERVER_PORT:-8932} - cannot tell whether a sign-in session holds the browser (unreachable, or rejected the agent's X-Agent-Token — check AGENT_API_TOKEN matches in the agent and browser services) (docker compose logs browser)"
 
     if grep -q '"open":true' <<<"$session_state"; then
       log "an attended sign-in session is open - requesting the browser back"
