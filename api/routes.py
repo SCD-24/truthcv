@@ -56,6 +56,7 @@ from providers import (
 from providers.base import supports_effort_levels
 from companyresearch import store as company_findings_store
 from screening import store as screening_store
+from runs import store as runs_store
 from screening.company import company_identity_key
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
@@ -108,6 +109,8 @@ from .schemas import (
     RenderRequest,
     RenderResult,
     RouteModel,
+    RunListResponse,
+    RunModel,
     RoutingModel,
     RoutingUpdate,
     SaveCoverLetterRequest,
@@ -146,6 +149,8 @@ def _screening_model(screening: Screening) -> ScreeningModel:
         approval=screening.approval,
         apply_attempts=screening.apply_attempts,
         apply_error=screening.apply_error,
+        claimed_by_run=screening.claimed_by_run,
+        claim_expires_at=screening.claim_expires_at,
         **data,
     )
 
@@ -159,6 +164,27 @@ def list_screenings(approval: str | None = None) -> list[ScreeningModel]:
     if approval is not None:
         screenings = [s for s in screenings if s.approval == approval]
     return [_screening_model(s) for s in screenings]
+
+
+@router.get("/runs", response_model=RunListResponse)
+def list_runs(limit: int = 50) -> RunListResponse:
+    """The most recently started agent runs, newest first.
+
+    Reads the shared data volume in-process via runs.store — this does NOT
+    proxy to the supervisor, unlike the /agent/* routes, because the run
+    records live on the volume the API already has access to.
+    """
+    records = runs_store.list_recent(limit=limit)
+    return RunListResponse(runs=[RunModel(**r.to_dict()) for r in records])
+
+
+@router.get("/runs/{run_id}", response_model=RunModel)
+def get_run(run_id: str) -> RunModel:
+    """A single run record, or 404 if no run with this id has been recorded."""
+    record = runs_store.get(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    return RunModel(**record.to_dict())
 
 
 @router.post("/screenings", response_model=ScreeningModel, status_code=201)
@@ -1303,6 +1329,10 @@ def get_agent_status() -> AgentStatus:
         last_finished_at=data.get("lastFinishedAt"),
         last_exit_code=data.get("lastExitCode"),
         last_cancelled=data.get("lastCancelled", False),
+        # Absent on an older supervisor image — .get() defaults to None rather
+        # than raising, so this route does not 500 against one.
+        current_run_id=data.get("currentRunId"),
+        last_run_id=data.get("lastRunId"),
     )
 
 

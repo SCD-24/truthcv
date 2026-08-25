@@ -787,6 +787,12 @@ class ScreeningModel(_Camel):
     approval: str = ""
     apply_attempts: int = 0
     apply_error: str = ""
+    screening_blocker: str = ""
+    # Lease state granted by get_approved_applications' hand-out, not by the
+    # agent patching a record — never in Screening.EDITABLE. claim_expires_at
+    # empty or in the past means the item is unclaimed / reclaimable.
+    claimed_by_run: str = ""
+    claim_expires_at: str = ""
     created_at: str = ""
     updated_at: str = ""
 
@@ -1014,6 +1020,36 @@ class AgentStatus(_Camel):
     # own. Its non-zero exit code is expected in that case, so the UI must not
     # report it as a failure.
     last_cancelled: bool = False
+    # The in-progress run's id (None once it finishes), and the most recent
+    # run's id (retained after it ends). Both default to None so an older
+    # supervisor image that doesn't send them does not fail this response.
+    current_run_id: str | None = None
+    last_run_id: str | None = None
+
+
+class RunModel(_Camel):
+    """One agent run record — the wire shape for GET /api/runs and
+    GET /api/runs/{run_id}. Mirrors runs.model.RunRecord field-for-field."""
+
+    id: str = ""
+    started_at: str = ""
+    finished_at: str = ""
+    status: str = ""
+    trigger: str = ""
+    apply_cap: int = 0
+    postings_seen: int = 0
+    screenings_recorded: int = 0
+    blocked_count: int = 0
+    applications_submitted: int = 0
+    over_cap_writes: int = 0
+    stopped_reason: str = ""
+    note: str = ""
+
+
+class RunListResponse(_Camel):
+    """GET /api/runs."""
+
+    runs: list[RunModel]
 
 
 class SigninQueueSite(_Camel):

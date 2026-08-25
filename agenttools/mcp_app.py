@@ -26,6 +26,11 @@ from agenttools.tools_research import (
     get_company_findings as _get_company_findings,
     record_company_finding as _record_company_finding,
 )
+from agenttools.tools_runs import (
+    finish_run as _finish_run,
+    record_run_note as _record_run_note,
+    start_run as _start_run,
+)
 
 
 _TOOL_REGISTRY = {
@@ -39,8 +44,11 @@ _TOOL_REGISTRY = {
     ),
     "record_screening": (
         _record_screening,
-        "Records one screening verdict. company, verdict, role and url are ALL required and the call is rejected, storing nothing, without a usable value for each: "
-        "company is the employing entity (never a placeholder like \"Unknown\"), verdict is exactly rejected, passed or deferred, role is the job title as posted, url is the posting's own URL. "
+        "Records one screening verdict. company, role and url are ALL required and the call is rejected, storing nothing, without a usable value for each: "
+        "company is the employing entity (never a placeholder like \"Unknown\"), role is the job title as posted, url is the posting's own URL. "
+        "verdict is required and must be exactly rejected, passed or deferred — UNLESS the posting could not be read at all (403, login wall, dead link, expired listing), "
+        "in which case leave verdict empty and pass screening_blocker instead, set to one of: login_required, unreadable, not_found, expired. "
+        "Never guess a verdict for a posting you could not read — that fabricates an evaluation that never happened. "
         "You must also pass posting_text — the posting exactly as you read it — because the operator will draft the cover letter from it days later, on a page the agent never sees.",
     ),
     "check_cooldown": (
@@ -68,8 +76,12 @@ _TOOL_REGISTRY = {
     ),
     "get_approved_applications": (
         _get_approved_applications,
-        "Returns the postings the operator approved for this run to apply to. "
-        "An entry with a non-empty blocked_reason must NOT be applied to — report it instead.",
+        "Returns the postings the operator approved for this run to apply to. Pass your run_id "
+        "(from start_run) so the list is capped for this run and every returned item is claimed "
+        "by it — a shorter list than you expected means the per-run cap was reached, not that "
+        "work was lost; call it again on a later run for the rest. "
+        "An entry with a non-empty blocked_reason must NOT be applied to — report it instead, "
+        "and it never counts against the cap.",
     ),
     "report_apply_failure": (
         _report_apply_failure,
@@ -97,6 +109,25 @@ _TOOL_REGISTRY = {
         _get_company_findings,
         "Returns every finding recorded for a company and its open contradictions. A non-empty "
         "open_contradictions means the company must NOT be applied to until the operator resolves it.",
+    ),
+    "start_run": (
+        _start_run,
+        "Call this ONCE, at the very start of a run, with the run_id given in your prompt. "
+        "Keep passing that same run_id on every subsequent tool call that accepts one. "
+        "Safe to call again with the same run_id if you are unsure whether you already did — "
+        "it will not reset your coverage counters.",
+    ),
+    "finish_run": (
+        _finish_run,
+        "Call this before exiting — including when you are stopping EARLY, not only on a normal "
+        "finish. Pass an honest stopped_reason describing where you stopped (e.g. 'apply cap "
+        "reached', 'browser session died', 'no more postings found'). A run that ends without "
+        "calling this is indistinguishable from one that crashed.",
+    ),
+    "record_run_note": (
+        _record_run_note,
+        "Leaves a free-text note on the run record for context that does not fit the coverage "
+        "counters (postings seen, screenings recorded, applications submitted, etc).",
     ),
 }
 

@@ -1496,6 +1496,14 @@
       "id": "company-research",
       "name": "Company Research",
       "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "id": "run-store",
+      "name": "Run Store",
+      "type": "backend"
     }
   ],
   "connections": [
@@ -1733,6 +1741,21 @@
       "from": "screening-engine",
       "protocol": "in-process",
       "to": "company-research"
+    },
+    {
+      "from": "run-store",
+      "protocol": "file I/O",
+      "to": "truth-data-volume"
+    },
+    {
+      "from": "api",
+      "protocol": "in-process",
+      "to": "run-store"
+    },
+    {
+      "from": "application-agent",
+      "protocol": "HTTP/MCP (streamable HTTP JSON-RPC)",
+      "to": "run-store"
     }
   ],
   "definitions": [
@@ -1839,7 +1862,8 @@
         "prompt-store",
         "application-tracker",
         "agent-config",
-        "company-research"
+        "company-research",
+        "run-store"
       ],
       "name": "TruthCV Container (single Docker image)",
       "w": 1861.8301559792023,
@@ -1906,6 +1930,10 @@
     "renderer": {
       "x": 1324,
       "y": 356
+    },
+    "run-store": {
+      "x": 1500,
+      "y": 380
     },
     "screening-engine": {
       "x": 396,

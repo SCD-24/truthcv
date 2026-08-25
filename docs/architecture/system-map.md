@@ -17,6 +17,7 @@ graph TD
     onboarding-store["Onboarding Store <br/> <small>(BACKEND)</small>"]
     prompt-store["Prompt Store <br/> <small>(BACKEND)</small>"]
     renderer["Renderer <br/> <small>(BACKEND)</small>"]
+    run-store["Run Store <br/> <small>(BACKEND)</small>"]
     screening-engine["Screening Engine <br/> <small>(BACKEND)</small>"]
     secret-store["Secret Store <br/> <small>(BACKEND)</small>"]
     tailor-engine["Tailor Engine <br/> <small>(BACKEND)</small>"]
@@ -33,12 +34,14 @@ graph TD
     api -->|in-process| guardrail-validator
     api -->|in-process| onboarding-store
     api -->|in-process| renderer
+    api -->|in-process| run-store
     api -->|in-process| screening-engine
     api -->|in-process| secret-store
     api -->|in-process| tailor-engine
     api -->|in-process| truth-store
     application-agent -->|HTTP/REST| agent-config
     application-agent -->|HTTP/MCP (streamable HTTP JSON-RPC)| api
+    application-agent -->|HTTP/MCP (streamable HTTP JSON-RPC)| run-store
     application-tracker -->|in-process| company-research
     application-tracker -->|in-process| renderer
     application-tracker -->|file I/O| truth-data-volume
@@ -57,6 +60,7 @@ graph TD
     onboarding-store -->|file I/O| truth-data-volume
     renderer -->|in-process| prompt-store
     renderer -->|file I/O| truth-data-volume
+    run-store -->|file I/O| truth-data-volume
     screening-engine -->|in-process| agent-config
     screening-engine -->|in-process| application-tracker
     screening-engine -->|in-process| company-research
@@ -88,6 +92,7 @@ graph TD
 - [Onboarding Store](overview.md) (`onboarding-store`, backend)
 - [Prompt Store](overview.md) (`prompt-store`, backend)
 - [Renderer](overview.md) (`renderer`, backend)
+- [Run Store](overview.md) (`run-store`, backend)
 - [Screening Engine](overview.md) (`screening-engine`, backend)
 - [Secret Store](overview.md) (`secret-store`, backend)
 - [Tailor Engine](overview.md) (`tailor-engine`, backend)
@@ -107,12 +112,14 @@ graph TD
 - [api → guardrail-validator](interactions/api--guardrail-validator.md) via `in-process`
 - [api → onboarding-store](interactions/api--onboarding-store.md) via `in-process`
 - [api → renderer](interactions/api--renderer.md) via `in-process`
+- [api → run-store](interactions/api--run-store.md) via `in-process`
 - [api → screening-engine](interactions/api--screening-engine.md) via `in-process`
 - [api → secret-store](interactions/api--secret-store.md) via `in-process`
 - [api → tailor-engine](interactions/api--tailor-engine.md) via `in-process`
 - [api → truth-store](interactions/api--truth-store.md) via `in-process`
 - [application-agent → agent-config](interactions/application-agent--agent-config.md) via `HTTP/REST`
 - [application-agent → api](interactions/application-agent--api.md) via `HTTP/MCP (streamable HTTP JSON-RPC)`
+- [application-agent → run-store](interactions/application-agent--run-store.md) via `HTTP/MCP (streamable HTTP JSON-RPC)`
 - [application-tracker → company-research](interactions/application-tracker--company-research.md) via `in-process`
 - [application-tracker → renderer](interactions/application-tracker--renderer.md) via `in-process`
 - [application-tracker → truth-data-volume](interactions/application-tracker--truth-data-volume.md) via `file I/O`
@@ -131,6 +138,7 @@ graph TD
 - [onboarding-store → truth-data-volume](interactions/onboarding-store--truth-data-volume.md) via `file I/O`
 - [renderer → prompt-store](interactions/renderer--prompt-store.md) via `in-process`
 - [renderer → truth-data-volume](interactions/renderer--truth-data-volume.md) via `file I/O`
+- [run-store → truth-data-volume](interactions/run-store--truth-data-volume.md) via `file I/O`
 - [screening-engine → agent-config](interactions/screening-engine--agent-config.md) via `in-process`
 - [screening-engine → application-tracker](interactions/screening-engine--application-tracker.md) via `in-process`
 - [screening-engine → company-research](interactions/screening-engine--company-research.md) via `in-process`
@@ -147,5 +155,5 @@ graph TD
 
 ## Groups
 
-- [TruthCV Container (single Docker image)](groups/truthcv-container-single-docker-image.md) (`truthcv-container-single-docker-image`, 11 member(s))
+- [TruthCV Container (single Docker image)](groups/truthcv-container-single-docker-image.md) (`truthcv-container-single-docker-image`, 12 member(s))
 <!-- generated:end file:system-map -->

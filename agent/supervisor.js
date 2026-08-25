@@ -32,7 +32,7 @@ const RUN_DAYS_DEFAULT = (process.env.RUN_DAYS || "1,2,3,4,5").trim();
 // ---------------------------------------------------------------------------
 // Running state
 // ---------------------------------------------------------------------------
-/** @type {{ running: boolean, cancelling: boolean, lastStartedAt: string|null, lastFinishedAt: string|null, lastExitCode: number|null, lastCancelled: boolean }} */
+/** @type {{ running: boolean, cancelling: boolean, lastStartedAt: string|null, lastFinishedAt: string|null, lastExitCode: number|null, lastCancelled: boolean, currentRunId: string|null, lastRunId: string|null }} */
 const runState = {
   running: false,
   cancelling: false,
@@ -40,6 +40,14 @@ const runState = {
   lastFinishedAt: null,
   lastExitCode: null,
   lastCancelled: false,
+  // The run id of the run in progress, threaded to the child via
+  // TRUTHCV_RUN_ID so it can call start_run/finish_run with it. Durable
+  // accounting for the run lives in the run store (runs/store.py), reached
+  // over the API — this is in-memory only, for the status route.
+  currentRunId: null,
+  // The run id of the most recently started run, kept after it ends so a
+  // client can still correlate the last completed run with its record.
+  lastRunId: null,
 };
 
 // Shell convention for a signalled process: 128 + signal number. Node gives the
@@ -107,11 +115,15 @@ function doRun() {
     .replace(/\.\d{3}Z$/, "")
     .replace(/:/g, "");
 
-  log(`=== run ${stamp} starting ===`);
+  const runId = crypto.randomUUID();
+
+  log(`=== run ${stamp} starting (run_id=${runId}) ===`);
   runState.running = true;
   runState.cancelling = false;
   runState.lastCancelled = false;
   runState.lastStartedAt = new Date().toISOString();
+  runState.currentRunId = runId;
+  runState.lastRunId = runId;
 
   // detached: the run is a tree — daily-apply.sh, the claude CLI it spawns, and
   // the stdio MCP servers under it. Its own process group is what lets cancel
@@ -124,7 +136,7 @@ function doRun() {
   // container's page state survives until it restarts.
   const child = spawn(DAILY_APPLY, [], {
     stdio: "inherit",
-    env: { ...process.env },
+    env: { ...process.env, TRUTHCV_RUN_ID: runId },
     detached: true,
   });
   currentChild = child;
@@ -141,6 +153,10 @@ function doRun() {
     runState.cancelling = false;
     runState.lastFinishedAt = new Date().toISOString();
     runState.lastExitCode = rc;
+    // lastRunId is retained so a client can still correlate this finished run
+    // with its durable record; only currentRunId (the "a run is active" flag)
+    // is cleared.
+    runState.currentRunId = null;
   }
 
   child.on("close", (code, signal) => {

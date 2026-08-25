@@ -127,3 +127,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:start comp:company-research -->
 - **Company Research** (`company-research`) — backend component.
 <!-- generated:end comp:company-research -->
+
+<!-- generated:start comp:run-store -->
+- **Run Store** (`run-store`) — backend component.
+<!-- generated:end comp:run-store -->

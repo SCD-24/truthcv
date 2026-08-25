@@ -13,7 +13,7 @@ dropped. See ``datafile`` for what each half of that guarantee buys.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from agentconfig.store import load as _agent_config_load
@@ -21,7 +21,7 @@ from companyresearch.store import open_contradictions as _open_contradictions
 from datafile import atomic_write_text, locked
 from truth.store import data_dir
 
-from .model import APPROVAL_VALUES, Screening, new_id
+from .model import APPROVAL_VALUES, Screening, new_id, validate_blocker
 
 
 def screenings_path() -> Path:
@@ -74,12 +74,20 @@ def create(fields: dict) -> Screening:
     now = _now()
     screening = Screening(id=new_id(), created_at=now, updated_at=now)
     _apply_editable(screening, fields)
+    if screening.screening_blocker:
+        # Strict here even though the store is otherwise lenient for the legacy
+        # importer: this field is new and has no legacy data to tolerate, and an
+        # unrecognised blocker would silently strand the record.
+        screening.screening_blocker = validate_blocker(screening.screening_blocker)
     # A deferred screening is an unresolved decision, so it enters the operator's
     # approval queue. In semi-auto a *passing* one does too: the operator, not
-    # the agent, decides whether to apply. Set here rather than accepted from
-    # `fields`: the agent's record_screening reaches this function directly, and
-    # approval is not its to grant.
-    if screening.verdict == "deferred":
+    # the agent, decides whether to apply. A screening_blocker means the agent
+    # could not even read the posting to reach a verdict — that is equally an
+    # unresolved decision only the operator can settle, so it queues the same
+    # way. Set here rather than accepted from `fields`: the agent's
+    # record_screening reaches this function directly, and approval is not its
+    # to grant.
+    if screening.verdict == "deferred" or screening.screening_blocker:
         screening.approval = "pending"
     elif screening.verdict == "passed" and _agent_config_load().mode == "semi":
         screening.approval = "pending"
@@ -206,12 +214,15 @@ def _apply_refusal(screening: Screening) -> str:
     return ""
 
 
-def mark_applied(screening_id: str) -> Screening | None:
-    """Retire an approved item once its application is confirmed.
+def _retire(screening_id: str) -> Screening | None:
+    """Shared body for mark_applied/claim_for_apply: retire a screening if it
+    may be applied to, clearing any run lease it was holding since a retired
+    item is no longer anyone's work to do.
 
-    No longer unconditional: an item whose company has an open research
-    contradiction is refused here too, since the agent's own path must not
-    be able to route around the same guard the REST route enforces.
+    Runs under one lock, which is what makes this a claim rather than a
+    request when called via `claim_for_apply`: two concurrent callers cannot
+    both succeed, so the caller that wins is the only one that may create the
+    application row.
     """
     with locked(screenings_path()):
         screenings = load_all()
@@ -219,9 +230,29 @@ def mark_applied(screening_id: str) -> Screening | None:
         if screening is None or _apply_refusal(screening):
             return None
         screening.approval = "applied"
+        screening.claimed_by_run = ""
+        screening.claim_expires_at = ""
         screening.updated_at = _now()
         _write_all(screenings)
         return screening
+
+
+def mark_applied(screening_id: str) -> Screening | None:
+    """Retire an approved item once its application is confirmed.
+
+    No longer unconditional: an item whose company has an open research
+    contradiction is refused here too, since the agent's own path must not
+    be able to route around the same guard the REST route enforces. It
+    remains unconditional with respect to *claims*: this never refuses an
+    item because a different run (or no run) claimed it, because it is
+    called after the ledger row is already written
+    (agenttools/tools_ledger.py's record_application) — refusing here would
+    lose a real submission that has already happened in the world.
+
+    Shares its implementation with `claim_for_apply` (see `_retire`) so the
+    two call paths cannot silently fork.
+    """
+    return _retire(screening_id)
 
 
 def claim_for_apply(screening_id: str) -> Screening | None:
@@ -233,13 +264,57 @@ def claim_for_apply(screening_id: str) -> Screening | None:
     is what makes it a claim rather than a request: two concurrent callers
     cannot both succeed, so the caller that wins is the only one that may
     create the application row.
+
+    Shares its implementation with `mark_applied` (see `_retire`) so the two
+    call paths cannot silently fork.
+    """
+    return _retire(screening_id)
+
+
+def _claim_is_live(screening: Screening, now: str) -> bool:
+    """True when `screening` is currently held by a run whose lease has not
+    expired yet. An empty claimed_by_run, or a claim_expires_at at or before
+    `now`, is not live — it is unclaimed and reclaimable."""
+    if not screening.claimed_by_run or not screening.claim_expires_at:
+        return False
+    return screening.claim_expires_at > now
+
+
+def claim_for_run(screening_id: str, run_id: str, lease_seconds: int) -> Screening | None:
+    """Hand a screening's work to `run_id` for `lease_seconds`.
+
+    Refuses (returns None) only when the item is currently, live-leased to a
+    DIFFERENT run — an expired claim is reclaimable, which is what lets a
+    crashed run's work return to the queue for the next run rather than
+    being stranded forever. Claiming the same item again for the same
+    run_id simply refreshes the lease.
     """
     with locked(screenings_path()):
         screenings = load_all()
         screening = next((s for s in screenings if s.id == screening_id), None)
-        if screening is None or _apply_refusal(screening):
+        if screening is None:
             return None
-        screening.approval = "applied"
+        now = _now()
+        if _claim_is_live(screening, now) and screening.claimed_by_run != run_id:
+            return None
+        screening.claimed_by_run = run_id
+        screening.claim_expires_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
+        ).isoformat()
+        screening.updated_at = now
+        _write_all(screenings)
+        return screening
+
+
+def release_claim(screening_id: str) -> Screening | None:
+    """Give up a run's lease on a screening, e.g. after deciding not to apply."""
+    with locked(screenings_path()):
+        screenings = load_all()
+        screening = next((s for s in screenings if s.id == screening_id), None)
+        if screening is None:
+            return None
+        screening.claimed_by_run = ""
+        screening.claim_expires_at = ""
         screening.updated_at = _now()
         _write_all(screenings)
         return screening
