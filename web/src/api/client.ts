@@ -81,8 +81,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
 }
 
-/** Step 1 — upload the LinkedIn PDF for text extraction. */
-export async function uploadPdf(file: File): Promise<void> {
+/** Step 1 — upload the CV file for text extraction. */
+export async function uploadCv(file: File): Promise<void> {
   const body = new FormData();
   body.append("file", file);
   await request<void>("/api/upload", { method: "POST", body });

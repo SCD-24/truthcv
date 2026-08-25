@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-SOURCE_VALUES = ("linkedin-pdf", "user-confirmed")
+SOURCE_VALUES = ("uploaded-cv", "linkedin-pdf", "user-confirmed")
 
 
 def _slug(value: str) -> str:
@@ -60,7 +60,7 @@ class Bullet:
         return cls(
             id=str(d["id"]),
             value=str(d["value"]),
-            source=str(d.get("source", "linkedin-pdf")),
+            source=str(d.get("source", "uploaded-cv")),
         )
 
 
@@ -95,7 +95,7 @@ class Experience:
             company=str(d.get("company", "")),
             start=str(d.get("start", "")),
             end=str(d.get("end", "")),
-            source=str(d.get("source", "linkedin-pdf")),
+            source=str(d.get("source", "uploaded-cv")),
             bullets=[Bullet.from_dict(b) for b in d.get("bullets", []) or []],
         )
 
@@ -129,7 +129,7 @@ class Education:
             school=str(d.get("school", "")),
             start=str(d.get("start", "")),
             end=str(d.get("end", "")),
-            source=str(d.get("source", "linkedin-pdf")),
+            source=str(d.get("source", "uploaded-cv")),
         )
 
 
@@ -149,7 +149,7 @@ class Skill:
         return cls(
             id=str(d["id"]),
             value=str(d["value"]),
-            source=str(d.get("source", "linkedin-pdf")),
+            source=str(d.get("source", "uploaded-cv")),
         )
 
 

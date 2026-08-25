@@ -15,7 +15,6 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **DELETE** | `/api/applications/{id}` | Delete an application and its owned document files. |
 | **PUT** | `/api/applications/{id}/cv` | Save edited CV content for an application and re-render its pdf/docx (guardrail-checked). |
 | **PUT** | `/api/applications/{id}/cover-letter` | Save edited cover-letter content for an application and re-render its pdf/docx. |
-| **POST** | `/api/upload` | Upload LinkedIn PDF (multipart); backend extracts text with pypdf. |
 | **POST** | `/api/extract` | LLM extracts structured truth.yaml from the uploaded PDF text. |
 | **GET** | `/api/truth` | Return the current truth.yaml for the Review step. |
 | **PUT** | `/api/truth` | Save user corrections to truth.yaml (Review step); after this it is trusted. |
@@ -28,6 +27,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **GET** | `/api/profile/answers` | Return the canonical ATS screening answers stored in truth.answers. |
 | **PUT** | `/api/profile/answers` | Partially update the canonical ATS screening answers in truth.answers; returns the merged answers. |
 | **POST** | `/api/screenings/deletions` | Delete many screenings in one call; reports per-id outcomes. Operator-only — not an agent route and not an MCP tool. |
+| **POST** | `/api/upload` | Upload a CV as PDF, DOCX, TXT or Markdown (multipart); backend extracts text per format and stores the file under its own extension. |
 | **GET** | `/api/settings` | Provider settings status (encryptionAvailable, activeProvider, model, *KeySet booleans, ollamaHost). Never returns raw secrets. |
 | **POST** | `/api/settings` | Save provider selection + API key/model/host; encrypts to ./data/secrets.enc via ENCRYPTION_KEY. Empty apiKey leaves the stored key unchanged. |
 | **POST** | `/api/settings/test` | Test connection: a tiny live provider call with saved/submitted credentials. Returns {ok, detail}. |

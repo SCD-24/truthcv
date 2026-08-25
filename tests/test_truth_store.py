@@ -144,7 +144,7 @@ def test_extraction_tags_source_and_persists(data_dir):
     truth = extract.build_truth_from_text("profile text", provider)
     assert [b.value for e in truth.experiences for b in e.bullets] == ["Led migration"]
     assert [s.value for s in truth.skills] == ["Python"]
-    assert all(e.source == "linkedin-pdf" for e in truth.experiences)
+    assert all(e.source == "uploaded-cv" for e in truth.experiences)
     # profile extracted verbatim
     assert truth.profile.name == "Jane Doe"
     assert truth.profile.email == "jane@example.com"
