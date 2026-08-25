@@ -407,3 +407,46 @@ def test_cover_letter_attaches_to_application(client, monkeypatch):
         app = next(a for a in client.get("/api/applications").json() if a["id"] == app_id)
         assert app["coverLetterDocument"] is not None
         assert app["coverLetterDocument"]["source"].startswith("Built a payments")
+
+
+def test_evidence_round_trips_on_list(client):
+    """Evidence the agent persisted via applications.store must surface on
+    GET /api/applications under its camelCase wire keys."""
+    import applications.store as app_store
+
+    app_id = client.post("/api/applications", json={"company": "Acme"}).json()["id"]
+
+    app_store.save_fields_submitted(
+        app_id,
+        [{"label": "Full name", "value": "Jane Doe", "source": "profile"}],
+    )
+    app_store.save_confirmation(
+        app_id,
+        {"text": "Application submitted", "confirmed_at": "2026-07-01T00:00:00Z", "evidence": "confirmation-page"},
+    )
+    app_store.save_attachments(app_id, [{"kind": "resume", "path": "cv_x.pdf"}])
+
+    listed = client.get("/api/applications").json()
+    saved = next(a for a in listed if a["id"] == app_id)
+
+    assert saved["fieldsSubmitted"] == [{"label": "Full name", "value": "Jane Doe", "source": "profile"}]
+    assert saved["confirmation"]["text"] == "Application submitted"
+    assert saved["confirmation"]["confirmedAt"] == "2026-07-01T00:00:00Z"
+    assert saved["attachments"] == [{"kind": "resume", "path": "cv_x.pdf"}]
+
+
+def test_put_does_not_clobber_evidence(client):
+    """A generic PUT of an editable field (notes) must leave agent-recorded
+    evidence intact — evidence is not in Application.EDITABLE."""
+    import applications.store as app_store
+
+    app_id = client.post("/api/applications", json={"company": "Acme"}).json()["id"]
+    app_store.save_fields_submitted(
+        app_id,
+        [{"label": "Full name", "value": "Jane Doe", "source": "profile"}],
+    )
+
+    r = client.put(f"/api/applications/{app_id}", json={"notes": "Follow up next week"})
+    assert r.status_code == 200
+    assert r.json()["notes"] == "Follow up next week"
+    assert r.json()["fieldsSubmitted"] == [{"label": "Full name", "value": "Jane Doe", "source": "profile"}]

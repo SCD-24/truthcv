@@ -80,6 +80,10 @@ def record_application(
     profile: str = "",
     notes: str = "",
     submitted: bool = True,
+    fields_submitted: list | None = None,
+    confirmation: dict | None = None,
+    screening: dict | None = None,
+    attachments: list | None = None,
     **fields,
 ) -> dict:
     """Persist one tracked application with its full evidence trail.
@@ -106,6 +110,12 @@ def record_application(
     writers of ``applications.json`` (via the store's atomic ``_write_all``);
     nothing here touches the file directly. ``applied_date`` is accepted as
     the agent-facing alias for the record's ``application_date`` field.
+
+    These four evidence fields are now named parameters too, not left to
+    ``**fields``, for the same inputSchema-visibility reason given for the
+    identity fields above: an agent reading the schema needs to see that the
+    tool accepts this evidence, not just the identity fields. They still fall
+    back to ``**fields`` for any caller routing them that way.
     """
     fields = dict(fields)
     if company:
@@ -137,10 +147,14 @@ def record_application(
     # True because that is this tool's contract — it records an application that
     # was submitted; a caller recording anything else passes submitted=False.
     fields["submitted"] = bool(submitted)
-    fields_submitted = fields.pop("fields_submitted", None)
-    confirmation = fields.pop("confirmation", None)
-    screening = fields.pop("screening", None)
-    attachments = fields.pop("attachments", None)
+    if fields_submitted is None:
+        fields_submitted = fields.pop("fields_submitted", None)
+    if confirmation is None:
+        confirmation = fields.pop("confirmation", None)
+    if screening is None:
+        screening = fields.pop("screening", None)
+    if attachments is None:
+        attachments = fields.pop("attachments", None)
 
     app = create_application(_backfill_from_screening(fields, screening_id))
 

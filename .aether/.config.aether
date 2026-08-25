@@ -1134,6 +1134,30 @@
                   "name": "notes",
                   "notes": "Free-text notes the user attaches to the application record.",
                   "type": "string"
+                },
+                {
+                  "flags": "",
+                  "name": "fields_submitted",
+                  "notes": "Every form field the agent actually submitted, with its provenance (observed | canonical). Written only by the agent via MCP; read-only to the client.",
+                  "type": "list<{label,value,source}>"
+                },
+                {
+                  "flags": "",
+                  "name": "confirmation",
+                  "notes": "Verbatim success message proving the submission went through.",
+                  "type": "{text, confirmed_at, evidence}"
+                },
+                {
+                  "flags": "",
+                  "name": "attachments",
+                  "notes": "The files actually uploaded with the application.",
+                  "type": "list<{kind,path}>"
+                },
+                {
+                  "flags": "",
+                  "name": "screening",
+                  "notes": "The pre-application filter verdicts recorded against this application.",
+                  "type": "{entity, remote, salary, language, role_type, glassdoor}"
                 }
               ]
             },

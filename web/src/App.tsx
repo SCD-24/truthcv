@@ -16,6 +16,7 @@ import { ConfirmStep } from "./steps/ConfirmStep";
 import { DownloadStep } from "./steps/DownloadStep";
 import { SettingsModal } from "./settings/SettingsModal";
 import { ApplicationsPage } from "./applications/ApplicationsPage";
+import { FilledFormPage } from "./applications/FilledFormPage";
 import { AnalyticsPage } from "./analytics/AnalyticsPage";
 import { AgentsPage } from "./agents/AgentsPage";
 import { ScreeningsPage } from "./screenings/ScreeningsPage";
@@ -144,6 +145,10 @@ function TopLevelRoutes({ bootstrap }: { bootstrap: "upload" | "posting" }) {
       <Route
         path={ROUTES.applications}
         element={<ApplicationsPage onBack={onBack} onEditDocument={onEditDocument} />}
+      />
+      <Route
+        path={ROUTES.filledForm}
+        element={<FilledFormPage onBack={() => navigate(ROUTES.applications)} />}
       />
       <Route path={ROUTES.agents} element={<AgentsPage onBack={onBack} />} />
       <Route path={ROUTES.screenings} element={<ScreeningsPage onBack={onBack} />} />

@@ -535,6 +535,53 @@ class ApplicationDocument(_Camel):
     updated_at: str = ""
 
 
+class FieldSubmittedModel(_Camel):
+    """One form field as it was actually submitted, with its provenance."""
+
+    label: str = ""
+    value: str = ""
+    source: str = ""
+
+
+class ConfirmationModel(_Camel):
+    """Evidence that a submission actually went through."""
+
+    text: str = ""
+    confirmed_at: str = ""
+    evidence: str = ""
+
+
+class GlassdoorModel(_Camel):
+    """The Glassdoor check within a screening verdict."""
+
+    rating: str | float = ""
+    reviews: str | int = ""
+    waiver_applied: bool = False
+    note: str = ""
+
+
+class ApplicationScreeningModel(_Camel):
+    """The pre-application filter verdicts recorded on a tracked application.
+
+    Distinct from ScreeningModel further down this file, which is the wire
+    shape for the separate screenings-queue record (GET/POST /screenings).
+    """
+
+    entity: str = ""
+    remote: str = ""
+    salary: str = ""
+    language: str = ""
+    role_type: str = ""
+    glassdoor: GlassdoorModel = Field(default_factory=GlassdoorModel)
+
+
+class AttachmentModel(_Camel):
+    """One file actually uploaded with the application."""
+
+    kind: str = ""
+    path: str = ""
+
+
 class ApplicationModel(_Camel):
     """A tracked job application. `posting` is empty for General submissions;
     the document fields are absent until something has been generated for it."""
@@ -556,6 +603,10 @@ class ApplicationModel(_Camel):
     role: str = ""
     ats: str = ""
     capture_method: str = ""
+    fields_submitted: list[FieldSubmittedModel] = Field(default_factory=list)
+    confirmation: ConfirmationModel = Field(default_factory=ConfirmationModel)
+    screening: ApplicationScreeningModel = Field(default_factory=ApplicationScreeningModel)
+    attachments: list[AttachmentModel] = Field(default_factory=list)
     gaps_disclosed: list[str] = Field(default_factory=list)
     profile: str = ""
     cv_document: ApplicationDocument | None = None
