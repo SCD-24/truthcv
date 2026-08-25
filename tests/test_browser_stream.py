@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from api.browser_stream import origin_allowed
+from api.browser_stream import origin_allowed, peer_allowed
 from api.main import app
 
 
@@ -59,6 +59,31 @@ class TestOriginAllowed:
         monkeypatch.setenv("BROWSER_STREAM_ALLOWED_HOSTS", "truthcv.local")
         assert origin_allowed("http://truthcv.local:9999", "truthcv.local:5627") is False
 
+    def test_a_trailing_dot_loopback_hostname_is_allowed(self):
+        assert origin_allowed("http://localhost.:5627", "localhost.:5627") is True
+
+    def test_expanded_ipv6_loopback_is_allowed(self):
+        assert origin_allowed("http://[::ffff:127.0.0.1]:5627", "[::ffff:127.0.0.1]:5627") is True
+
+
+class TestPeerAllowed:
+    """The one signal Origin/Host cannot forge: the actual TCP peer address."""
+
+    def test_loopback_ipv4_is_allowed(self):
+        assert peer_allowed("127.0.0.1") is True
+
+    def test_loopback_ipv6_is_allowed(self):
+        assert peer_allowed("::1") is True
+
+    def test_mapped_loopback_ipv6_is_allowed(self):
+        assert peer_allowed("::ffff:127.0.0.1") is True
+
+    def test_a_non_loopback_peer_is_refused(self):
+        assert peer_allowed("10.0.0.5") is False
+
+    def test_a_container_hostname_peer_is_refused(self):
+        assert peer_allowed("agent") is False
+
 
 class TestRelayHandshake:
     def test_cross_origin_connection_is_rejected(self, client):
@@ -68,3 +93,50 @@ class TestRelayHandshake:
                 headers={"Origin": "http://evil.example"},
             ):
                 pass
+
+    def test_non_loopback_peer_is_rejected_even_with_a_matching_origin(self, client):
+        """TestClient's synthetic peer ("testclient", not loopback) must be refused
+        even when Origin and Host are set to agree on a loopback identity — proving
+        the peer check, not just the origin check, is doing work here."""
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect(
+                "/api/browser/session/stream",
+                headers={"Origin": "http://localhost:5627", "Host": "localhost:5627"},
+            ):
+                pass
+        assert exc_info.value.code == 1008
+
+    def test_upstream_handshake_failure_closes_cleanly(self, client, monkeypatch):
+        """A malformed upstream handshake (websockets.WebSocketException, not
+        OSError) must not propagate out of the ASGI app as an unhandled error."""
+        import api.browser_stream as browser_stream
+
+        def _peer_allowed(_peer: str) -> bool:
+            return True
+
+        class _FailingConnect:
+            """Stands in for `websockets.connect(...)`'s async context manager,
+            failing on __aenter__ the way a bad handshake (wrong service on the
+            port, no "binary" subprotocol offered, ...) would."""
+
+            async def __aenter__(self):
+                raise browser_stream.websockets.InvalidURI("ws://bad", "not a valid uri")
+
+            async def __aexit__(self, *_exc_info):
+                return False
+
+        def _connect(*_args, **_kwargs):
+            return _FailingConnect()
+
+        monkeypatch.setattr(browser_stream, "peer_allowed", _peer_allowed)
+        monkeypatch.setattr(browser_stream.websockets, "connect", _connect)
+
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect(
+                "/api/browser/session/stream",
+                headers={"Origin": "http://localhost:5627", "Host": "localhost:5627"},
+            ) as ws:
+                # The accept happens before the upstream connect fails, so the
+                # close arrives as a message rather than at entry; read it.
+                ws.receive_bytes()
+        assert exc_info.value.code == 1011
