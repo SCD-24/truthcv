@@ -45,9 +45,9 @@ class _StubProvider:
 
 @pytest.fixture()
 def stub_provider(monkeypatch):
-    import agenttools.tools_letter as tools_letter
+    import agenttools.letter_operator as letter_operator
 
-    monkeypatch.setattr(tools_letter, "get_provider", lambda _name: _StubProvider())
+    monkeypatch.setattr(letter_operator, "get_provider", lambda _name: _StubProvider())
     return _StubProvider()
 
 
@@ -135,7 +135,7 @@ def test_blocked_generation_writes_nothing_and_names_the_claims(client, monkeypa
     """The guardrail still binds on generation. A blocked letter must not be
     stored: a draft on disk is what unlocks Approve, so storing a blocked one
     would let an ungrounded claim through the one gate that catches it."""
-    import agenttools.tools_letter as tools_letter
+    import agenttools.letter_operator as letter_operator
 
     class _Overclaiming:
         def extract_json(self, system, messages, schema=None):
@@ -148,7 +148,7 @@ def test_blocked_generation_writes_nothing_and_names_the_claims(client, monkeypa
                 ]
             }
 
-    monkeypatch.setattr(tools_letter, "get_provider", lambda _name: _Overclaiming())
+    monkeypatch.setattr(letter_operator, "get_provider", lambda _name: _Overclaiming())
     s = _queued()
     r = client.post(f"/api/screenings/{s.id}/letter", json={})
     assert r.status_code == 422
@@ -179,3 +179,134 @@ def test_letter_routes_are_outside_the_agent_prefix(client):
     may write a letter the operator is meant to own."""
     for path in app.openapi()["paths"]:
         assert not (path.startswith("/api/agent/") and path.endswith("/letter"))
+
+
+def test_blocked_generation_exposes_claim_ids_and_paragraphs(client, monkeypatch):
+    """The 422 detail must carry everything the UI needs to offer approve/deny:
+    a stable claimId per blocked claim, its experienceId, text and tokens, and
+    the paragraphs actually generated (so a retry can re-validate them without
+    a second LLM call)."""
+    import agenttools.letter_operator as letter_operator
+
+    class _Overclaiming:
+        def extract_json(self, system, messages, schema=None):
+            return {
+                "paragraphs": [
+                    {
+                        "text": "I personally invented Kubernetes at Contoso Labs.",
+                        "claims": ["invented Kubernetes"],
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(letter_operator, "get_provider", lambda _name: _Overclaiming())
+    s = _queued()
+    r = client.post(f"/api/screenings/{s.id}/letter", json={})
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert detail["message"] == "The letter was blocked by the truthfulness guardrail."
+    claims = detail["blockedClaims"]
+    assert len(claims) == 1
+    claim = claims[0]
+    assert claim["claimId"]
+    assert claim["experienceId"] == "letter"
+    assert claim["text"] == "invented Kubernetes"
+    assert claim["tokens"]
+    assert detail["paragraphs"] == [
+        {"text": "I personally invented Kubernetes at Contoso Labs.", "claims": ["invented Kubernetes"]}
+    ]
+    assert letters.load(s.id) is None
+
+
+def _blocked_response(client, monkeypatch, call_counter):
+    import agenttools.letter_operator as letter_operator
+
+    class _Overclaiming:
+        def extract_json(self, system, messages, schema=None):
+            call_counter["n"] += 1
+            return {
+                "paragraphs": [
+                    {
+                        "text": "I personally invented Kubernetes at Contoso Labs.",
+                        "claims": ["invented Kubernetes"],
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(letter_operator, "get_provider", lambda _name: _Overclaiming())
+    s = _queued()
+    r = client.post(f"/api/screenings/{s.id}/letter", json={})
+    return s, r.json()["detail"]
+
+
+def test_approving_the_blocked_claim_saves_and_does_not_call_the_provider_again(client, monkeypatch):
+    call_counter = {"n": 0}
+    s, detail = _blocked_response(client, monkeypatch, call_counter)
+    assert call_counter["n"] == 1
+    claim_id = detail["blockedClaims"][0]["claimId"]
+
+    r = client.post(
+        f"/api/screenings/{s.id}/letter",
+        json={
+            "approvals": {"approvedClaimIds": [claim_id], "deniedClaimIds": []},
+            "paragraphs": detail["paragraphs"],
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["source"] == "generated"
+    assert call_counter["n"] == 1  # no second LLM call: the given paragraphs were reused
+    assert letters.load(s.id) is not None
+    assert letters.load(s.id).source == "generated"
+
+
+def test_approving_the_blocked_claim_writes_nothing_to_truth(client, monkeypatch):
+    from truth import load as load_truth
+
+    call_counter = {"n": 0}
+    s, detail = _blocked_response(client, monkeypatch, call_counter)
+    claim_id = detail["blockedClaims"][0]["claimId"]
+    before = load_truth()
+
+    r = client.post(
+        f"/api/screenings/{s.id}/letter",
+        json={
+            "approvals": {"approvedClaimIds": [claim_id], "deniedClaimIds": []},
+            "paragraphs": detail["paragraphs"],
+        },
+    )
+    assert r.status_code == 200, r.text
+    after = load_truth()
+    assert before == after
+
+
+def test_denying_the_blocked_claim_drops_it(client, monkeypatch):
+    call_counter = {"n": 0}
+    s, detail = _blocked_response(client, monkeypatch, call_counter)
+    claim_id = detail["blockedClaims"][0]["claimId"]
+
+    r = client.post(
+        f"/api/screenings/{s.id}/letter",
+        json={
+            "approvals": {"approvedClaimIds": [], "deniedClaimIds": [claim_id]},
+            "paragraphs": detail["paragraphs"],
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["source"] == "generated"
+
+
+def test_company_blocked_letter_has_no_claims_and_blocked_reason(client):
+    """The blocklist refusal keeps its distinct shape: no claims, a named reason."""
+    import agentconfig.store as agent_config_store
+
+    cfg = agent_config_store.load()
+    cfg.blocked_companies = ["Contoso Labs"]
+    agent_config_store.save(cfg)
+
+    s = _queued()
+    r = client.post(f"/api/screenings/{s.id}/letter", json={})
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert detail["blockedReason"] == "company_blocked"
+    assert detail["blockedClaims"] == []
+    assert letters.load(s.id) is None

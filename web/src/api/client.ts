@@ -16,6 +16,7 @@ import type {
   ProfileAnswersUpdate,
   CoverLetterResult,
   CoverLetterApprovals,
+  BlockedClaim,
   Application,
   ApplicationCreate,
   ApplicationUpdate,
@@ -53,6 +54,26 @@ import { errorDetailToMessage } from "./errorDetail";
  * but healthy call aborts and is misreported as an unreachable server. */
 const REQUEST_TIMEOUT_MS = 120_000;
 
+/** Thrown by request() instead of a plain Error when a 422's detail carries
+ * blockedClaims — i.e. the truthfulness guardrail blocked a generation. Carries
+ * the structured data (claims, the paragraphs that were validated, and the
+ * block reason) a caller needs to offer an approve/deny UI, while `message`
+ * stays exactly what a plain Error would have said, so any caller that only
+ * reads `.message` is unaffected by this type existing. */
+export class GuardrailBlockedError extends Error {
+  claims: BlockedClaim[];
+  paragraphs: unknown[];
+  blockedReason: string;
+
+  constructor(message: string, claims: BlockedClaim[], paragraphs: unknown[], blockedReason: string) {
+    super(message);
+    this.name = "GuardrailBlockedError";
+    this.claims = claims;
+    this.paragraphs = paragraphs;
+    this.blockedReason = blockedReason;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -72,11 +93,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     clearTimeout(timer);
   }
   if (!res.ok) {
-    const detail = await res
-      .json()
-      .then((b) => errorDetailToMessage(b))
-      .catch(() => "");
-    throw new Error(detail || `That didn't work (error ${res.status}). Try again.`);
+    const body: unknown = await res.json().catch(() => undefined);
+    const message = errorDetailToMessage(body) || `That didn't work (error ${res.status}). Try again.`;
+    const detail =
+      body !== null && typeof body === "object" && "detail" in body
+        ? (body as { detail: unknown }).detail
+        : undefined;
+    if (
+      detail !== null &&
+      typeof detail === "object" &&
+      Array.isArray((detail as { blockedClaims?: unknown }).blockedClaims) &&
+      (detail as { blockedClaims: unknown[] }).blockedClaims.length > 0
+    ) {
+      const d = detail as {
+        blockedClaims: BlockedClaim[];
+        paragraphs?: unknown[];
+        blockedReason?: string;
+      };
+      throw new GuardrailBlockedError(message, d.blockedClaims, d.paragraphs ?? [], d.blockedReason ?? "");
+    }
+    throw new Error(message);
   }
   // Some routes (render download links) still return JSON; callers that expect
   // no body pass T = void and ignore the result.
@@ -456,12 +492,25 @@ export async function getScreeningLetter(id: string): Promise<CoverLetterDraft |
 }
 
 /** Draft the letter from the stored posting text. `force` discards an edit of
- * yours; without it the server refuses to overwrite your own words. */
-export function generateScreeningLetter(id: string, force = false): Promise<CoverLetterDraft> {
+ * yours; without it the server refuses to overwrite your own words.
+ *
+ * `approvals` carries generation-scoped decisions on claims a previous attempt
+ * blocked (never persisted to truth), and `paragraphs` echoes back that
+ * attempt's paragraphs so the retry re-validates the SAME letter instead of
+ * paying for a second LLM call. Both are optional; omit them for a fresh
+ * generation. */
+export function generateScreeningLetter(
+  id: string,
+  opts?: { force?: boolean; approvals?: CoverLetterApprovals; paragraphs?: unknown[] },
+): Promise<CoverLetterDraft> {
   return request("/api/screenings/" + encodeURIComponent(id) + "/letter", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ force }),
+    body: JSON.stringify({
+      force: opts?.force ?? false,
+      approvals: opts?.approvals,
+      paragraphs: opts?.paragraphs,
+    }),
   });
 }
 
