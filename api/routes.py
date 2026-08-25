@@ -13,6 +13,7 @@ import os
 from datetime import date
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -109,6 +110,8 @@ from .schemas import (
     ScreeningModel,
     SettingsStatus,
     SettingsUpdate,
+    SigninQueue,
+    SigninQueueSite,
     StartLoginResult,
     TailorRequest,
     TailorResult,
@@ -1220,6 +1223,56 @@ def post_agent_cancel() -> AgentCancelResult:
         cancelled=data.get("cancelled", False),
         running=data.get("running", False),
     )
+
+
+def _host_of(url: str) -> str:
+    """The full host of an absolute http(s) URL, or "" if it is not one.
+
+    Anything without a scheme and a netloc is not addressable, so it cannot be
+    a sign-in destination — returning "" drops it rather than grouping several
+    unrelated records under a blank host.
+    """
+    try:
+        parsed = urlparse(url or "")
+    except ValueError:
+        return ""
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return ""
+    return parsed.netloc.casefold()
+
+
+@router.get("/browser/signin-queue", response_model=SigninQueue)
+def get_signin_queue() -> SigninQueue:
+    """Sites the agent hit a sign-in wall on, grouped by host.
+
+    Derived from the screening store on every call rather than kept as its own
+    state: the agent's experience is the only source of truth here, so an entry
+    exists exactly as long as a posting is still waiting behind that sign-in.
+    """
+    grouped: dict[str, dict] = {}
+    for s in screening_store.load_all():
+        if s.apply_blocker != "login_required":
+            continue
+        # Only items still queued to be applied to. Applied or rejected means
+        # nothing is waiting on this sign-in any more.
+        if s.approval not in ("pending", "approved"):
+            continue
+        url = s.signin_url or s.url
+        host = _host_of(url)
+        if not host:
+            continue
+        entry = grouped.setdefault(
+            host,
+            {"host": host, "signin_url": url, "waiting": 0, "last_blocked_at": "", "companies": []},
+        )
+        entry["waiting"] += 1
+        if s.updated_at > entry["last_blocked_at"]:
+            entry["last_blocked_at"] = s.updated_at
+        if s.company and s.company not in entry["companies"]:
+            entry["companies"].append(s.company)
+    sites = [SigninQueueSite(**e) for e in grouped.values()]
+    sites.sort(key=lambda s: (-s.waiting, s.host))
+    return SigninQueue(sites=sites)
 
 
 def _letter_approvals(

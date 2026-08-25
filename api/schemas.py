@@ -952,6 +952,26 @@ class AgentStatus(_Camel):
     last_cancelled: bool = False
 
 
+class SigninQueueSite(_Camel):
+    """One host the agent could not get past a sign-in wall on."""
+
+    # The full host, e.g. "acme.wd3.myworkdayjobs.com". Deliberately not the
+    # registrable domain: each Workday tenant is a separate account, so
+    # collapsing to "myworkdayjobs.com" would merge unrelated sign-ins.
+    host: str
+    signin_url: str
+    # How many approved postings are stuck behind this one sign-in.
+    waiting: int
+    last_blocked_at: str
+    companies: list[str]
+
+
+class SigninQueue(_Camel):
+    """GET /api/browser/signin-queue — sites needing the operator to sign in."""
+
+    sites: list[SigninQueueSite]
+
+
 class AgentRunResult(_Camel):
     """POST /api/agent/run — forwarded from the supervisor.js control server."""
 
