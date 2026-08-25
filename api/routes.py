@@ -1304,7 +1304,15 @@ def _forward_to_session_server(path: str, method: str = "GET", body: dict | None
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as exc:
-        raise HTTPException(status_code=exc.code, detail="Session refused") from exc
+        # Forward the session server's own refusal payload. It distinguishes
+        # session_open (which carries the already-open session's URL, so the UI
+        # can offer to return to it) from agent_running and profile_busy — all
+        # three are 409s that call for different words on screen.
+        try:
+            detail = json.loads(exc.read())
+        except (ValueError, OSError):
+            detail = {"reason": "refused"}
+        raise HTTPException(status_code=exc.code, detail=detail) from exc
     except urllib.error.URLError as exc:
         raise HTTPException(status_code=503, detail="Browser service unreachable") from exc
 

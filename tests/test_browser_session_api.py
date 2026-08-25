@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import urllib.error
 from unittest.mock import MagicMock, patch
@@ -33,6 +34,17 @@ def _http_error(status: int, payload: dict):
         msg="refused",
         hdrs=None,
         fp=None,
+    )
+
+
+def _http_error_with_body(status: int, payload: dict):
+    body = io.BytesIO(json.dumps(payload).encode())
+    return urllib.error.HTTPError(
+        url="http://browser:8932/session",
+        code=status,
+        msg="refused",
+        hdrs=None,
+        fp=body,
     )
 
 
@@ -93,6 +105,30 @@ class TestPostSession:
             r = client.post("/api/browser/session", json={"url": "file:///etc/passwd"})
         assert r.status_code == 422
         assert urlopen.call_count == 0
+
+    def test_session_open_refusal_carries_the_open_url(self, client, monkeypatch):
+        """So the UI can offer 'go back to your session at <url>' instead of a bare refusal."""
+        monkeypatch.setenv("AGENT_API_TOKEN", "t")
+        error = _http_error_with_body(409, {"reason": "session_open", "url": "https://example.com/login"})
+        with patch("urllib.request.urlopen", side_effect=error):
+            r = client.post("/api/browser/session", json={"url": "https://other.example.com"})
+        assert r.status_code == 409
+        assert r.json()["detail"] == {"reason": "session_open", "url": "https://example.com/login"}
+
+    def test_agent_running_refusal_carries_its_reason(self, client, monkeypatch):
+        monkeypatch.setenv("AGENT_API_TOKEN", "t")
+        error = _http_error_with_body(409, {"reason": "agent_running"})
+        with patch("urllib.request.urlopen", side_effect=error):
+            r = client.post("/api/browser/session", json={"url": "https://example.com/login"})
+        assert r.status_code == 409
+        assert r.json()["detail"] == {"reason": "agent_running"}
+
+    def test_a_refusal_with_no_body_still_forwards_the_status(self, client, monkeypatch):
+        monkeypatch.setenv("AGENT_API_TOKEN", "t")
+        with patch("urllib.request.urlopen", side_effect=_http_error(409, {"reason": "agent_running"})):
+            r = client.post("/api/browser/session", json={"url": "https://example.com/login"})
+        assert r.status_code == 409
+        assert r.json()["detail"] == {"reason": "refused"}
 
 
 class TestDeleteSession:
