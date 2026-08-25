@@ -257,16 +257,25 @@ Every rule here applies to that surface — especially §5 "Verify the
 submission actually landed", which matters because a containerised browser is
 likelier to be silently blocked by ATS bot detection.
 
-4. Fill every field from the `get_profile_answers` result (§3), calling it
+4. **A sign-in or registration wall stops this application — it does not start
+   a detour.** If reaching the form needs an account, a login, an SSO
+   challenge, or an emailed verification code you do not already have a
+   session for: do not create an account, do not invent a password, do not
+   reuse the operator's address as a login unless the site already recognises
+   it. Call `report_apply_failure` with `blocker="login_required"`, `error`
+   describing what you saw, and `signin_url` set to the login page's URL, then
+   move to the next posting. The operator signs in once, on the Agents page,
+   and the item is retried on a later run.
+5. Fill every field from the `get_profile_answers` result (§3), calling it
    with `company` for this application so the email returned is the
    per-company tracking address. If `name`, `email`, or
    `work_authorisation` comes back blank, no identity is seeded — stop, do
    not fill the form with blanks or submit it, and raise it as an open
    issue in the §9 report instead of applying.
-5. **Verify before submitting**: re-read the form state. Toggle buttons often
+6. **Verify before submitting**: re-read the form state. Toggle buttons often
    don't expose a pressed state in the accessibility tree — check their CSS
    classes for an `active` marker.
-6. **Record what the form contains, before submitting.** Read the live form
+7. **Record what the form contains, before submitting.** Read the live form
    state back out of the page and prepare a `record_application` call. Every
    field below is required, not optional detail — this record is the only
    evidence that the application happened and what was actually in it:
@@ -298,14 +307,14 @@ likelier to be silently blocked by ATS bot detection.
    - `attachments`: one entry per file actually uploaded, as `{kind, path}`.
    - `notes`: any open issue raised with the employer under §7, and any flag
      on the application itself.
-7. Submit.
-8. **Verify the submission actually landed.** Read the page after submitting
+8. Submit.
+9. **Verify the submission actually landed.** Read the page after submitting
    and confirm an explicit success message. A click is not a submission —
    Ashby has silently rejected a submit while the DOM showed every field
    filled. If you see a validation error, fix the named fields and resubmit.
    React-controlled inputs sometimes need click-then-type rather than a direct
    value set.
-9. **Call `record_application`.** Set `confirmation.text` to the **exact,
+10. **Call `record_application`.** Set `confirmation.text` to the **exact,
    verbatim success message you read off the page** and `confirmation.confirmed_at`
    to the current timestamp — never call it, or set a confirmed-looking
    `status`, without that exact text. The text is the only evidence the

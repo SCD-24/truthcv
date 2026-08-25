@@ -517,13 +517,24 @@ def get_approved_applications() -> list[dict]:
     return items
 
 
-def report_apply_failure(screening_id: str, error: str) -> dict:
+def report_apply_failure(
+    screening_id: str,
+    error: str,
+    blocker: str = "",
+    signin_url: str = "",
+) -> dict:
     """Record why an approved application could not be completed this run.
 
     Leaves the item approved and queued: the operator chose retry-on-next-run,
     and this tool cannot change an approval either way.
+
+    `blocker="login_required"` with `signin_url` set is what puts the site in
+    the operator's sign-in queue. Without them the failure is recorded but the
+    operator is never told which site to go and authorise.
     """
-    updated = _screening_store.record_apply_failure(screening_id, error)
+    updated = _screening_store.record_apply_failure(
+        screening_id, error, blocker=blocker, signin_url=signin_url
+    )
     if updated is None:
         return {"ok": False, "reason": "unknown screening id"}
     return {"ok": True, "attempts": updated.apply_attempts}
