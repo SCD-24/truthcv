@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-21 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+22 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -147,6 +147,8 @@ Provider connection layer (connections/): a static catalog of provider connectio
 
 <!-- generated:start comp:agent-config -->
 ## Agent Config (`agent-config`, BACKEND)
+
+Owns the unattended agent's configuration (agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed. Also composes the deterministic dork-style search queries handed to each run.
 <!-- generated:end comp:agent-config -->
 
 <!-- generated:start comp:screening-engine -->

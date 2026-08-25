@@ -1,7 +1,7 @@
 <!-- generated:start group:truthcv-container-single-docker-image -->
 # Logical Group: TruthCV Container (single Docker image)
 - **Identifier**: `truthcv-container-single-docker-image`
-- **Members**: 12
+- **Members**: 13
 
 > A logical grouping of components (deployment boundary, bounded context, or scope marker). Groups have no connections of their own.
 

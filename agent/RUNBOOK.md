@@ -179,8 +179,9 @@ A single profile passing all its criteria drives an application
 (single-profile-passes rule); each profile waives criteria independently.
 Record which profile drove each application in the screening report.
 
-The profile's `keywords`, `locations` and `preferredSources` are not
-screening criteria — they drive discovery instead; see §5's Discovery
+The profile's `keywords` and `locations` are not screening criteria — they
+drive discovery instead, alongside the global job boards list on the Agents
+page (which always includes the default boards); see §5's Discovery
 subsection.
 
 **Verify entity and remote policy on the employer's own posting.** Never
@@ -271,8 +272,8 @@ deliberately does not duplicate its values.
 ### Discovery
 
 Your run prompt may carry a list of composed search queries, built
-deterministically from each enabled profile's `keywords`, `locations` and
-`preferredSources`. Work them as entry points into discovery. They are a
+deterministically from each enabled profile's `keywords` and `locations`,
+plus the configured job boards. Work them as entry points into discovery. They are a
 starting point, not a boundary — free-form search remains permitted
 alongside them. A composed query never changes *where* you apply, which is
 still the employer's own site, per item 1 below.

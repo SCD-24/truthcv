@@ -73,3 +73,25 @@ Projected from `schema` widgets on the architecture canvas.
 | `email` | string | - | Account address read from the Gmail profile endpoint at login. |
 | `reauthRequired` | bool | - | Set by mark_reconnect_required when refresh is rejected. |
 <!-- generated:end comp:connections -->
+
+<!-- generated:start comp:agent-config -->
+## Agent Config (`agent-config`)
+
+### Schema
+
+| Field | Type | Flags | Notes |
+|---|---|---|---|
+| `job_boards` | list[JobBoard] |  | The operator's OWN boards. The four default boards are unioned in at resolve time and are not stored here unless carrying a signin_url override. |
+| `job_boards[].source` | string |  | A catalog key (linkedin, ashby, greenhouse, lever, personio, workday) or a raw domain. |
+| `job_boards[].signin_url` | string | optional | Operator-supplied sign-in URL; blank for a known board, which resolves from the catalog. |
+<!-- generated:end comp:agent-config -->
+
+<!-- generated:start comp:api -->
+## API (`api`)
+
+### Schema
+
+| Field | Type | Flags | Notes |
+|---|---|---|---|
+| `jobBoards` | JobBoardModel[] |  | On GET/PUT /api/agent/config. Each entry: source, signinUrl, plus response-only domain, effectiveSigninUrl and isDefault resolved server-side. GET returns the resolved list, defaults first. |
+<!-- generated:end comp:api -->

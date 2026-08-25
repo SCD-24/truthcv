@@ -285,7 +285,6 @@ class JobProfileModel(_Camel):
     enabled: bool = True
     keywords: list[str] = Field(default_factory=list)
     locations: list[str] = Field(default_factory=list)
-    preferred_sources: list[str] = Field(default_factory=list)
     remote_model: str | None = None
     employment_country: str | None = None
     eor_allowed: bool | None = None
@@ -323,7 +322,7 @@ class JobProfileModel(_Camel):
             raise ValueError("glassdoor_min_reviews must be >= 0")
         return v
 
-    @field_validator("keywords", "locations", "preferred_sources", "accepted_role_types", "rejected_role_types", mode="before")
+    @field_validator("keywords", "locations", "accepted_role_types", "rejected_role_types", mode="before")
     @classmethod
     def _split_comma_delimited_lists(cls, v):
         if isinstance(v, str):
@@ -331,6 +330,23 @@ class JobProfileModel(_Camel):
         if isinstance(v, list):
             return [s.strip() for s in v if isinstance(s, str) and s.strip()]
         return v
+
+
+class JobBoardModel(_Camel):
+    """One job board the agent searches AND a site the operator signs in to.
+
+    ``source``/``signin_url`` are the operator's stored input. ``domain``,
+    ``effective_signin_url`` and ``is_default`` are response-only, resolved
+    server-side by the routes from agentconfig/boards.py and stripped on a
+    PUT — ``is_default`` marks a board that is always searched and cannot be
+    removed.
+    """
+
+    source: str = ""
+    signin_url: str = ""
+    domain: str = ""
+    effective_signin_url: str = ""
+    is_default: bool = False
 
 
 class CompanyBoardModel(_Camel):
@@ -364,6 +380,7 @@ class AgentConfigModel(_Camel):
         default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"]
     )
     profiles: list[JobProfileModel] = Field(default_factory=list)
+    job_boards: list[JobBoardModel] = Field(default_factory=list)
     target_companies: list[str] = Field(default_factory=list)
     cooldown_days: int | None = None
     cooldown_days_same_role: int | None = None
@@ -389,6 +406,7 @@ class AgentConfigUpdate(_Camel):
     run_at: list[str] | None = None
     run_days: list[str] | None = None
     profiles: list[JobProfileModel] | None = None
+    job_boards: list[JobBoardModel] | None = None
     target_companies: list[str] | None = None
     cooldown_days: int | None = None
     cooldown_days_same_role: int | None = None

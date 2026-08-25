@@ -465,6 +465,25 @@
             "w": 440,
             "x": 220,
             "y": 220
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "",
+                  "name": "jobBoards",
+                  "notes": "On GET/PUT /api/agent/config. Each entry: source, signinUrl, plus response-only domain, effectiveSigninUrl and isDefault resolved server-side. GET returns the resolved list, defaults first.",
+                  "type": "JobBoardModel[]"
+                }
+              ]
+            },
+            "h": 200,
+            "id": "widget-schema-api",
+            "title": "Schema",
+            "type": "schema",
+            "w": 350,
+            "x": 0,
+            "y": 0
           }
         ]
       },
@@ -1467,7 +1486,51 @@
     },
     {
       "canvas": {
-        "widgets": []
+        "widgets": [
+          {
+            "data": {
+              "text": "Owns the unattended agent's configuration (agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed. Also composes the deterministic dork-style search queries handed to each run."
+            },
+            "h": 200,
+            "id": "widget-text-agent-config",
+            "title": "Intent & Scope",
+            "type": "text",
+            "w": 350,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "",
+                  "name": "job_boards",
+                  "notes": "The operator's OWN boards. The four default boards are unioned in at resolve time and are not stored here unless carrying a signin_url override.",
+                  "type": "list[JobBoard]"
+                },
+                {
+                  "flags": "",
+                  "name": "job_boards[].source",
+                  "notes": "A catalog key (linkedin, ashby, greenhouse, lever, personio, workday) or a raw domain.",
+                  "type": "string"
+                },
+                {
+                  "flags": "optional",
+                  "name": "job_boards[].signin_url",
+                  "notes": "Operator-supplied sign-in URL; blank for a known board, which resolves from the catalog.",
+                  "type": "string"
+                }
+              ]
+            },
+            "h": 200,
+            "id": "widget-schema-agent-config",
+            "title": "Schema",
+            "type": "schema",
+            "w": 350,
+            "x": 0,
+            "y": 0
+          }
+        ]
       },
       "id": "agent-config",
       "name": "Agent Config",

@@ -468,7 +468,6 @@ export interface JobProfile {
   enabled: boolean;
   keywords: string[];
   locations: string[];
-  preferredSources: string[];
   remoteModel: string | null;
   employmentCountry: string | null;
   eorAllowed: boolean | null;
@@ -486,6 +485,20 @@ export interface JobProfile {
   glassdoorMinReviews: number | null;
   acceptedRoleTypes: string[];
   rejectedRoleTypes: string[];
+}
+
+/** One job board the agent searches AND a site you sign in to.
+ *
+ * `source`/`signinUrl` are the operator's stored input (an override, if
+ * set). `domain`, `effectiveSigninUrl` and `isDefault` are resolved
+ * server-side (like `companyBoards` on `AgentConfig`, readonly): `isDefault`
+ * means the board is always searched and cannot be removed. */
+export interface JobBoard {
+  source: string;
+  signinUrl: string;
+  readonly domain: string;
+  readonly effectiveSigninUrl: string;
+  readonly isDefault: boolean;
 }
 
 /** Resolved company board entry. */
@@ -535,6 +548,7 @@ export interface AgentConfig {
   runAt: string[];
   runDays: string[];
   profiles: JobProfile[];
+  jobBoards: JobBoard[];
   targetCompanies: string[];
   cooldownDays: number | null;
   /** Per-window overrides; null inherits the legacy single cooldownDays. */
@@ -560,6 +574,7 @@ export type AgentConfigUpdate = Partial<
     | "runAt"
     | "runDays"
     | "profiles"
+    | "jobBoards"
     | "targetCompanies"
     | "cooldownDays"
     | "cooldownDaysSameRole"

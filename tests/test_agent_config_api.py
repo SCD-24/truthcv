@@ -32,7 +32,96 @@ def test_get_returns_defaults(client, data_dir):
         "mode": "full",
         "searchQueries": [],
     }
-    assert r.json() == expected
+    got = r.json()
+    job_boards = got.pop("jobBoards")
+    assert got == expected
+    # The regression this build fixes: with no boards configured, the
+    # sign-in list used to render nothing. GET must always return the four
+    # defaults, each searchable and each with a real sign-in URL.
+    assert len(job_boards) == 4
+    assert {b["source"] for b in job_boards} == {"ashby", "greenhouse", "lever", "workday"}
+    assert all(b["isDefault"] for b in job_boards)
+    assert all(b["effectiveSigninUrl"] for b in job_boards)
+    assert all(b["domain"] for b in job_boards)
+
+
+def test_defaults_present_even_when_operator_configured_boards(client, data_dir):
+    r = client.put("/api/agent/config", json={"jobBoards": [{"source": "linkedin"}]})
+    assert r.status_code == 200
+    sources = [b["source"] for b in r.json()["jobBoards"]]
+    assert sources[:4] == ["ashby", "greenhouse", "lever", "workday"]
+    assert "linkedin" in sources
+
+
+def test_configuring_a_default_board_explicitly_does_not_duplicate_it(client, data_dir):
+    r = client.put("/api/agent/config", json={"jobBoards": [{"source": "ashby"}]})
+    assert r.status_code == 200
+    sources = [b["source"] for b in r.json()["jobBoards"]]
+    assert sources.count("ashby") == 1
+
+
+def test_put_resolved_boards_back_does_not_persist_defaults_or_response_only_keys(client, data_dir):
+    resolved = client.get("/api/agent/config").json()["jobBoards"]
+    r = client.put("/api/agent/config", json={"jobBoards": resolved})
+    assert r.status_code == 200
+
+    import json as jsonlib
+    from pathlib import Path
+
+    stored = jsonlib.loads((Path(data_dir) / "agent_config.json").read_text())
+    assert stored["job_boards"] == []
+    for board in stored["job_boards"]:
+        assert "domain" not in board
+        assert "effective_signin_url" not in board
+        assert "is_default" not in board
+
+
+def test_put_default_board_with_signin_override_is_persisted(client, data_dir):
+    resolved = client.get("/api/agent/config").json()["jobBoards"]
+    for b in resolved:
+        if b["source"] == "ashby":
+            b["signinUrl"] = "https://custom.ashby.example/login"
+    r = client.put("/api/agent/config", json={"jobBoards": resolved})
+    assert r.status_code == 200
+    ashby = next(b for b in r.json()["jobBoards"] if b["source"] == "ashby")
+    assert ashby["effectiveSigninUrl"] == "https://custom.ashby.example/login"
+
+    import json as jsonlib
+    from pathlib import Path
+
+    stored = jsonlib.loads((Path(data_dir) / "agent_config.json").read_text())
+    assert any(b["source"] == "ashby" for b in stored["job_boards"])
+
+
+def test_search_queries_source_follows_resolved_boards_not_profile(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [{"source": "linkedin"}],
+            "profiles": [{"name": "p", "enabled": True, "keywords": ["backend"]}],
+        },
+    )
+    assert r.status_code == 200
+    sources = {q["source"] for q in client.get("/api/agent/config").json()["searchQueries"]}
+    assert sources == {
+        "jobs.ashbyhq.com",
+        "job-boards.greenhouse.io",
+        "jobs.lever.co",
+        "myworkdayjobs.com",
+        "linkedin.com/jobs",
+    }
+
+
+def test_old_shape_config_migrates_job_boards_on_first_get(client, data_dir):
+    import json as jsonlib
+    from pathlib import Path
+
+    (Path(data_dir) / "agent_config.json").write_text(
+        jsonlib.dumps({"profiles": [{"name": "p", "preferred_sources": ["linkedin"]}]})
+    )
+    got = client.get("/api/agent/config").json()
+    sources = {b["source"]: b["isDefault"] for b in got["jobBoards"]}
+    assert sources.get("linkedin") is False
 
 
 def test_search_queries_populated_after_put_of_enabled_profile(client, data_dir):
@@ -50,7 +139,6 @@ def test_search_queries_populated_after_put_of_enabled_profile(client, data_dir)
                     "enabled": True,
                     "keywords": ["platform engineer"],
                     "locations": ["Berlin"],
-                    "preferredSources": ["ashby"],
                 }
             ]
         },
@@ -63,8 +151,9 @@ def test_search_queries_populated_after_put_of_enabled_profile(client, data_dir)
 
 
 def test_profile_search_fields_round_trip_through_put_and_get(client, data_dir):
-    """keywords, locations and preferredSources survive a PUT then GET round-trip
-    on the wire, under their camelCase aliases."""
+    """keywords and locations survive a PUT then GET round-trip on the wire,
+    under their camelCase aliases. Sources are no longer per-profile — see
+    the jobBoards tests."""
     r = client.put(
         "/api/agent/config",
         json={
@@ -74,7 +163,6 @@ def test_profile_search_fields_round_trip_through_put_and_get(client, data_dir):
                     "enabled": True,
                     "keywords": ["Python", "FastAPI"],
                     "locations": ["Berlin", "Remote"],
-                    "preferredSources": ["ashby", "greenhouse.example.com"],
                 }
             ]
         },
@@ -83,12 +171,29 @@ def test_profile_search_fields_round_trip_through_put_and_get(client, data_dir):
     profile = r.json()["profiles"][0]
     assert profile["keywords"] == ["Python", "FastAPI"]
     assert profile["locations"] == ["Berlin", "Remote"]
-    assert profile["preferredSources"] == ["ashby", "greenhouse.example.com"]
 
     got_profile = client.get("/api/agent/config").json()["profiles"][0]
     assert got_profile["keywords"] == ["Python", "FastAPI"]
     assert got_profile["locations"] == ["Berlin", "Remote"]
-    assert got_profile["preferredSources"] == ["ashby", "greenhouse.example.com"]
+
+
+def test_job_boards_round_trip_source_and_signin_url(client, data_dir):
+    """jobBoards survive a PUT then GET round-trip: a known non-default
+    source and a custom domain with an explicit signinUrl."""
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [
+                {"source": "linkedin"},
+                {"source": "jobs.acme.com", "signinUrl": "https://acme.com/login"},
+            ]
+        },
+    )
+    assert r.status_code == 200
+    got = {b["source"]: b for b in client.get("/api/agent/config").json()["jobBoards"]}
+    assert got["linkedin"]["isDefault"] is False
+    assert got["jobs.acme.com"]["signinUrl"] == "https://acme.com/login"
+    assert got["jobs.acme.com"]["effectiveSigninUrl"] == "https://acme.com/login"
 
 
 def test_put_merges_partial(client, data_dir):

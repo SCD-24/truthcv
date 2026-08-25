@@ -41,6 +41,7 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     runAt: ["09:00"],
     runDays: ["mon"],
     profiles: [],
+    jobBoards: [],
     targetCompanies: [],
     cooldownDays: null,
     cooldownDaysSameRole: null,
