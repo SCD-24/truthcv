@@ -158,16 +158,27 @@ def set_approval(screening_id: str, approval: str) -> Screening | None:
     return _mutate(screening_id, lambda s: setattr(s, "approval", approval))
 
 
-def record_apply_failure(screening_id: str, error: str) -> Screening | None:
+def record_apply_failure(
+    screening_id: str,
+    error: str,
+    blocker: str = "",
+    signin_url: str = "",
+) -> Screening | None:
     """Count one failed application attempt and keep its error for the operator.
 
     Leaves `approval` untouched: a failure is not a decision, and the item stays
     queued for the next run.
+
+    `blocker` is the structured reason when there is one the app can act on —
+    only "login_required" today — and `signin_url` the page to sign in at. Both
+    default to empty so the original two-argument call is unchanged.
     """
 
     def _bump(s: Screening) -> None:
         s.apply_attempts += 1
         s.apply_error = error
+        s.apply_blocker = blocker
+        s.signin_url = signin_url
 
     return _mutate(screening_id, _bump)
 
