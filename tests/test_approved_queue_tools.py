@@ -36,14 +36,97 @@ def test_excludes_pending_and_rejected(data_dir):
     assert get_approved_applications() == []
 
 
-def test_excludes_already_applied_url(data_dir):
+def test_already_applied_url_is_flagged_not_hidden(data_dir):
     """Retry-forever would otherwise re-submit an application whose confirmation
-    capture failed."""
+    capture failed. It comes back flagged, so a queued item that stops moving
+    says why instead of vanishing from every run at zero attempts."""
     _approved(url="https://grafana.com/jobs/1")
     apps.create(
-        {"company": "Grafana Labs", "application_url": "https://grafana.com/jobs/1"}
+        {
+            "company": "Grafana Labs",
+            "application_url": "https://grafana.com/jobs/1",
+            "submitted": True,
+        }
     )
-    assert get_approved_applications() == []
+    items = get_approved_applications()
+    assert [i["blocked_reason"] for i in items] == ["already_applied"]
+
+
+def test_unsubmitted_ledger_row_does_not_block(data_dir):
+    """The ledger also holds reconstructed placeholders for postings nobody
+    applied to. Matching one hid a legitimately approved item from every run."""
+    import coverletter.store as letters
+
+    s = _approved(url="https://grafana.com/jobs/1")
+    letters.save(s.id, letters.CoverLetterDraft(text="Dear team,"))
+    apps.create(
+        {
+            "company": "Grafana Labs",
+            "application_url": "https://grafana.com/jobs/1",
+            "submitted": False,
+            "status": "pending",
+        }
+    )
+    items = get_approved_applications()
+    assert [i["blocked_reason"] for i in items] == [""]
+
+
+def test_confirmation_text_counts_as_a_submission(data_dir):
+    """Rows predating `record_application` naming `submitted` can carry False
+    despite having gone out; a captured confirmation is the corroboration."""
+    import applications.store as apps_store
+    from applications.model import Confirmation
+
+    _approved(url="https://grafana.com/jobs/1")
+    a = apps.create(
+        {
+            "company": "Grafana Labs",
+            "application_url": "https://grafana.com/jobs/1",
+            "submitted": False,
+        }
+    )
+    apps_store.save_confirmation(a.id, Confirmation(text="Application submitted!"))
+    items = get_approved_applications()
+    assert [i["blocked_reason"] for i in items] == ["already_applied"]
+
+
+def test_already_applied_outranks_cooldown(data_dir):
+    """Both hazards can name the same item; already_applied is the one that
+    says it must not go out at all rather than not yet."""
+    import agentconfig.store as agent_config_store
+
+    s = _approved(url="https://grafana.com/jobs/1")
+    apps.create(
+        {
+            "company": "Grafana Labs",
+            "application_url": "https://grafana.com/jobs/1",
+            "submitted": True,
+        }
+    )
+    cfg = agent_config_store.load()
+    cfg.blocked_companies = [s.company]
+    agent_config_store.save(cfg)
+
+    items = get_approved_applications()
+    assert [i["blocked_reason"] for i in items] == ["already_applied"]
+
+
+def test_record_application_marks_the_row_submitted(data_dir):
+    """The guard above keys on `submitted`; a row the agent records with it
+    still False would hand the same posting back on the next run."""
+    from agenttools.tools_ledger import record_application
+
+    created = record_application(
+        company="Grafana Labs", application_url="https://grafana.com/jobs/1"
+    )
+    assert created["submitted"] is True
+
+
+def test_record_application_can_record_an_unsubmitted_row(data_dir):
+    from agenttools.tools_ledger import record_application
+
+    created = record_application(company="Grafana Labs", submitted=False)
+    assert created["submitted"] is False
 
 
 def test_report_apply_failure_counts_and_keeps_approval(data_dir):

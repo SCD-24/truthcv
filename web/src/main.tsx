@@ -12,6 +12,7 @@ import "@fontsource/ibm-plex-mono/500.css";
 import { ThemeProvider } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 import "./styles/global.css";
+import { BrowserRouter } from "react-router-dom";
 import { App } from "./App";
 import { WizardProvider } from "./wizard/store";
 import { theme } from "./theme";
@@ -24,7 +25,9 @@ createRoot(rootEl).render(
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <WizardProvider>
-        <App />
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
       </WizardProvider>
     </ThemeProvider>
   </StrictMode>,

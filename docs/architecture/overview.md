@@ -7,9 +7,9 @@
 <!-- generated:start comp:web-ui -->
 ## Web UI (`web-ui`, FRONTEND)
 
-React single-page wizard (web/) that walks the user through Upload LinkedIn PDF → Review extracted truth → Paste job posting (with optional Fetch-from-URL) → Confirm inferences → Download PDF/DOCX. Built by Vite into a static bundle that the API serves. No auth, single-user per deployment.
+React single-page app (web/) with client-side routing (react-router). Lands on /analytics; the manual CV flow is its own /cv route (Upload LinkedIn PDF → Review extracted truth → Paste job posting (with optional Fetch-from-URL) → Confirm inferences → Download PDF/DOCX), and Applications, Agents, Screenings and Approvals each have their own URL, so a refresh keeps the user where they were. Built by Vite into a static bundle that the API serves (its catch-all returns index.html for deep links). No auth, single-user per deployment.
 
-**Tech:** React, Vite, TypeScript, MUI (@mui/material), Emotion (@emotion/react)
+**Tech:** React, Vite, TypeScript, MUI (@mui/material), Emotion (@emotion/react), react-router-dom v6
 <!-- generated:end comp:web-ui -->
 
 <!-- generated:start comp:api -->

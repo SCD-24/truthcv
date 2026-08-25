@@ -78,6 +78,7 @@ def record_application(
     capture_method: str = "",
     profile: str = "",
     notes: str = "",
+    submitted: bool = True,
     **fields,
 ) -> dict:
     """Persist one tracked application with its full evidence trail.
@@ -127,6 +128,14 @@ def record_application(
             fields[name] = value
     if applied_date:
         fields["application_date"] = applied_date
+    # Written unconditionally, and named rather than left to `**fields`, because
+    # `get_approved_applications` keys its double-submit guard on it: a row that
+    # reaches the ledger with `submitted` still at its dataclass default of False
+    # is indistinguishable from a reconstructed placeholder, and the approved item
+    # it came from would be handed straight back on the next run. The default is
+    # True because that is this tool's contract — it records an application that
+    # was submitted; a caller recording anything else passes submitted=False.
+    fields["submitted"] = bool(submitted)
     fields_submitted = fields.pop("fields_submitted", None)
     confirmation = fields.pop("confirmation", None)
     screening = fields.pop("screening", None)
@@ -305,15 +314,32 @@ def recommend_salary(profile_name: str, proposed: int | None = None) -> dict:
     }
 
 
+def _is_submission(app) -> bool:
+    """Whether a ledger row records an application that was actually sent.
+
+    ``submitted`` is the field that means this, but it defaults to False on the
+    dataclass and predates ``record_application`` naming it, so a row that was
+    genuinely submitted can still carry False. Confirmation text is accepted as
+    the corroborating evidence: nothing writes it but a captured confirmation.
+    """
+    return bool(app.submitted or app.confirmation.text.strip())
+
+
 def get_approved_applications() -> list[dict]:
     """Postings the operator approved and this run should apply to.
 
     Three guards live here rather than in the prompt, because a wrong judgement by
     the model would be costly and silent:
 
-    - An item whose URL already appears in the applications ledger is dropped.
+    - An item whose URL already appears in the applications ledger *as a
+      submission* comes back with ``blocked_reason`` set to "already_applied".
       The retry policy keeps failed items queued indefinitely, so a submission
-      whose confirmation capture failed would otherwise be sent twice.
+      whose confirmation capture failed would otherwise be sent twice. Only rows
+      carrying evidence of a submission count: the ledger also holds
+      reconstructed placeholders for postings nobody applied to, and matching
+      those hid a legitimately approved item from every run — silently, since
+      this guard used to drop the item instead of flagging it, so the operator
+      saw a queued item stuck at zero attempts with no reason recorded.
     - An item whose company is in cooldown comes back with ``blocked_reason``
       set instead of being hidden, so the run report can say why it did not go
       out rather than the posting silently vanishing.
@@ -328,17 +354,21 @@ def get_approved_applications() -> list[dict]:
       to "no_letter" rather than reaching the agent with nothing to send.
     """
     applied_urls = {
-        a.application_url for a in _apps_store.load_all() if a.application_url
+        a.application_url
+        for a in _apps_store.load_all()
+        if a.application_url and _is_submission(a)
     }
     items = []
     for s in _screening_store.load_all():
         if s.approval != "approved":
             continue
-        if s.url and s.url in applied_urls:
-            continue
         draft = _letter_store.load(s.id)
         status = _cooldown(s.company, s.role or None)
-        if status.blocked:
+        # already_applied outranks the rest: the others describe an item that
+        # cannot go out yet, this one an item that must not go out at all.
+        if s.url and s.url in applied_urls:
+            blocked_reason = "already_applied"
+        elif status.blocked:
             blocked_reason = "cooldown"
         elif not s.url.strip():
             blocked_reason = "no_url"
