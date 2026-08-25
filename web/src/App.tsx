@@ -19,6 +19,7 @@ import { UploadCvPage } from "./cv/UploadCvPage";
 import { ManualPage } from "./manual/ManualPage";
 import { DocumentEditPage } from "./documents/DocumentEditPage";
 import { OnboardingPage } from "./onboarding/OnboardingPage";
+import { BrowserSessionPage } from "./browser/BrowserSessionPage";
 import { Tour } from "./tour/Tour";
 import { getOnboarding, listPendingApprovals, updateOnboarding } from "./api/client";
 import { ROUTES } from "./routes";
@@ -124,6 +125,7 @@ function TopLevelRoutes({ onOnboardingComplete }: { onOnboardingComplete: () => 
       />
       <Route path={ROUTES.documentEdit} element={<DocumentEditPage />} />
       <Route path={ROUTES.manual} element={<ManualPage />} />
+      <Route path={ROUTES.browserSession} element={<BrowserSessionPage />} />
       <Route path="*" element={<Navigate to={ROUTES.analytics} replace />} />
     </Routes>
   );
