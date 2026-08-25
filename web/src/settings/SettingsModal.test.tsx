@@ -10,6 +10,7 @@ import {
 } from "../api/client";
 import type { ConnectionList, ProfileAnswers, Routing } from "../api/types";
 import { SettingsModal } from "./SettingsModal";
+import { WizardProvider } from "../wizard/store";
 
 /**
  * This file mixes two boundary choices: the profile-answers tests exercise
@@ -160,7 +161,11 @@ describe("SettingsModal", () => {
     vi.mocked(listConnections).mockResolvedValueOnce(list);
     vi.mocked(getRouting).mockResolvedValueOnce(routing);
 
-    render(<SettingsModal onClose={vi.fn()} />);
+    render(
+      <WizardProvider>
+        <SettingsModal onClose={vi.fn()} />
+      </WizardProvider>,
+    );
 
     expect(await screen.findByText("Accounts")).toBeTruthy();
     expect(screen.getByText("Default model")).toBeTruthy();

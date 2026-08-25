@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-18 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+19 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -152,3 +152,7 @@ Provider connection layer (connections/): a static catalog of provider connectio
 <!-- generated:start comp:screening-engine -->
 ## Screening Engine (`screening-engine`, BACKEND)
 <!-- generated:end comp:screening-engine -->
+
+<!-- generated:start comp:onboarding-store -->
+## Onboarding Store (`onboarding-store`, BACKEND)
+<!-- generated:end comp:onboarding-store -->

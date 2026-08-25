@@ -193,6 +193,23 @@ class ProfileStatus(_Camel):
     has_profile: bool
 
 
+class OnboardingState(_Camel):
+    """GET/PUT /api/onboarding response: first-run onboarding progress."""
+
+    provider_done: bool
+    has_profile: bool
+    cv_reviewed_at: str | None = None
+    tour_seen_at: str | None = None
+    complete: bool
+
+
+class OnboardingUpdate(_Camel):
+    """Partial PUT /api/onboarding body — only the sent fields are merged."""
+
+    cv_reviewed_at: str | None = None
+    tour_seen_at: str | None = None
+
+
 class AnswersModel(_Camel):
     """Canonical ATS screening answers — GET/PUT /api/profile/answers wire shape.
 

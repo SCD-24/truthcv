@@ -1479,6 +1479,14 @@
       "id": "screening-engine",
       "name": "Screening Engine",
       "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "id": "onboarding-store",
+      "name": "Onboarding Store",
+      "type": "backend"
     }
   ],
   "connections": [
@@ -1681,6 +1689,16 @@
       "from": "api",
       "protocol": "in-process",
       "to": "agent-config"
+    },
+    {
+      "from": "onboarding-store",
+      "protocol": "file I/O",
+      "to": "truth-data-volume"
+    },
+    {
+      "from": "api",
+      "protocol": "in-process",
+      "to": "onboarding-store"
     }
   ],
   "definitions": [
@@ -1783,7 +1801,8 @@
         "prompt-store",
         "application-tracker",
         "agent-config",
-        "screening-engine"
+        "screening-engine",
+        "onboarding-store"
       ],
       "name": "TruthCV Container (single Docker image)",
       "w": 1861.8301559792023,
@@ -1834,6 +1853,10 @@
     "llm-provider-service": {
       "x": 692,
       "y": 560
+    },
+    "onboarding-store": {
+      "x": 460,
+      "y": 380
     },
     "prompt-store": {
       "x": 1620,

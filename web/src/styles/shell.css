@@ -89,63 +89,6 @@
 .rail__brand span {
   color: var(--attest);
 }
-.rail__steps {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-.rail__step {
-  display: grid;
-  grid-template-columns: 24px 1fr;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-2);
-  border-radius: var(--radius);
-  color: var(--ink-soft);
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: 0;
-  cursor: pointer;
-  font: inherit;
-}
-.rail__step[disabled] {
-  cursor: not-allowed;
-}
-.rail__step[data-state="current"] {
-  color: var(--ink);
-  background: var(--ground);
-}
-.rail__step[data-state="done"] {
-  color: var(--ink);
-}
-.rail__marker {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: 1.5px solid var(--line);
-  display: grid;
-  place-items: center;
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--ink-soft);
-}
-.rail__step[data-state="current"] .rail__marker {
-  border-color: var(--ink);
-  color: var(--ink);
-}
-.rail__step[data-state="done"] .rail__marker {
-  border-color: var(--attest);
-  background: var(--attest);
-  color: var(--surface);
-}
-.rail__label {
-  font-family: var(--font-display);
-  font-weight: var(--w-medium);
-  font-size: var(--step-0);
-}
 /* Bottom-docked group: the source-trace tagline and the Settings control,
    pinned to the foot of the rail so Settings lives on the left panel. */
 .rail__bottom {
@@ -263,16 +206,6 @@
     gap: var(--space-5);
     padding: var(--space-4) var(--space-5);
     overflow-x: auto;
-  }
-  .rail__steps {
-    flex-direction: row;
-    gap: var(--space-2);
-  }
-  .rail__label {
-    display: none;
-  }
-  .rail__step {
-    grid-template-columns: 24px;
   }
   /* Mobile: rail is a horizontal strip. Drop the tagline but keep Settings
      reachable, pushed to the end of the strip as a compact control. */

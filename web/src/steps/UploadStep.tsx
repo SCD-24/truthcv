@@ -3,13 +3,17 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Alert from "@mui/material/Alert";
 import Typography from "@mui/material/Typography";
-import type { StepProps } from "../wizard/steps";
 import { useWizard } from "../wizard/store";
 import { extractTruth, uploadPdf } from "../api/client";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import "../styles/step.css";
 
-export function UploadStep({ onAdvance }: StepProps) {
+export interface UploadStepProps {
+  onNext: () => void;
+  onBack?: () => void;
+}
+
+export function UploadStep({ onNext }: UploadStepProps) {
   const { run, setTruth, loading, error } = useWizard();
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -33,13 +37,13 @@ export function UploadStep({ onAdvance }: StepProps) {
       setTruth(await extractTruth());
       return true;
     });
-    if (ok) onAdvance("review");
+    if (ok) onNext();
   };
 
   return (
     <section>
       <div className="stage__head">
-        <Typography variant="overline" className="eyebrow">Step 1 of 5</Typography>
+        <Typography variant="overline" className="eyebrow">Step 1 of 2</Typography>
         <h1 className="hero__title">Every line, traceable.</h1>
         <p className="stage__lede">
           Upload your LinkedIn profile as a PDF. We read it into your truth

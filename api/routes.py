@@ -40,6 +40,7 @@ from truth.pdf import (
 import applications as app_store
 import modelrouting
 import secretstore
+from onboarding import store as onboarding_store
 from agentconfig import store as agent_config_store
 from connections import catalog
 from connections.auth.claude import AuthError, get_valid_access_token
@@ -93,6 +94,8 @@ from .schemas import (
     ModelInfo,
     ModelList,
     BlockedClaimModel,
+    OnboardingState,
+    OnboardingUpdate,
     ProfileStatus,
     RenderRequest,
     RenderResult,
@@ -962,6 +965,36 @@ def _settings_status() -> SettingsStatus:
 @router.get("/profile", response_model=ProfileStatus)
 def profile() -> ProfileStatus:
     return ProfileStatus(has_profile=has_profile())
+
+
+def _onboarding_state() -> OnboardingState:
+    """Build the current onboarding status from provider routing, the profile,
+    and the persisted onboarding progress."""
+    provider_done = onboarding_store.provider_ready()
+    profile_done = has_profile()
+    state = onboarding_store.load()
+    return OnboardingState(
+        provider_done=provider_done,
+        has_profile=profile_done,
+        cv_reviewed_at=state.cv_reviewed_at,
+        tour_seen_at=state.tour_seen_at,
+        complete=provider_done and profile_done and state.cv_reviewed_at is not None,
+    )
+
+
+@router.get("/onboarding", response_model=OnboardingState)
+def onboarding() -> OnboardingState:
+    """First-run onboarding progress: provider setup, profile, CV review, tour."""
+    return _onboarding_state()
+
+
+@router.put("/onboarding", response_model=OnboardingState)
+def put_onboarding(body: OnboardingUpdate) -> OnboardingState:
+    """Merge only the fields the client actually sent onto the stored state."""
+    merged = onboarding_store.load().to_dict()
+    merged.update(body.model_dump(exclude_unset=True, by_alias=False))
+    onboarding_store.save(onboarding_store.OnboardingState.from_dict(merged))
+    return _onboarding_state()
 
 
 @router.get("/profile/answers", response_model=AnswersModel)

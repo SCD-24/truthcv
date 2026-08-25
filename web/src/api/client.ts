@@ -10,6 +10,8 @@ import type {
   SettingsUpdate,
   TestResult,
   ProfileStatus,
+  OnboardingState,
+  OnboardingUpdate,
   ProfileAnswers,
   ProfileAnswersUpdate,
   CoverLetterResult,
@@ -144,6 +146,20 @@ export function render(
 /** Whether a profile PDF is already saved on the server. */
 export function getProfile(): Promise<ProfileStatus> {
   return request("/api/profile");
+}
+
+/** First-run onboarding progress: provider setup, profile, CV review, tour. */
+export function getOnboarding(): Promise<OnboardingState> {
+  return request("/api/onboarding");
+}
+
+/** Patch onboarding progress (only the keys you pass change). Returns fresh values. */
+export function updateOnboarding(patch: OnboardingUpdate): Promise<OnboardingState> {
+  return request("/api/onboarding", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
 }
 
 /** Read the canonical ATS form answers the application agent submits. */

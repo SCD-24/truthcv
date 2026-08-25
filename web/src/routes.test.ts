@@ -1,17 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { STEPS } from "./wizard/steps";
-import { stepIdFromPath, stepPath } from "./routes";
+import { ROUTES, filledFormPath } from "./routes";
 
-describe("stepPath / stepIdFromPath", () => {
-  it("round-trips every known step id", () => {
-    for (const step of STEPS) {
-      expect(stepIdFromPath(stepPath(step.id))).toBe(step.id);
-    }
+describe("ROUTES", () => {
+  it("defines the app's top-level destinations", () => {
+    expect(ROUTES.analytics).toBe("/analytics");
+    expect(ROUTES.applications).toBe("/applications");
+    expect(ROUTES.agents).toBe("/agents");
+    expect(ROUTES.screenings).toBe("/screenings");
+    expect(ROUTES.approvals).toBe("/approvals");
+    expect(ROUTES.onboarding).toBe("/onboarding");
+    expect(ROUTES.uploadCv).toBe("/cv");
+    expect(ROUTES.manual).toBe("/manual");
+    expect(ROUTES.documentEdit).toBe("/documents/edit");
   });
 
-  it("returns null for non-step paths", () => {
-    expect(stepIdFromPath("/cv")).toBeNull();
-    expect(stepIdFromPath("/analytics")).toBeNull();
-    expect(stepIdFromPath("/cv/bogus")).toBeNull();
+  it("builds the filled-form path for an application id", () => {
+    expect(filledFormPath("abc")).toBe("/applications/abc/filled-form");
   });
 });
