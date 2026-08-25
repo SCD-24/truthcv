@@ -73,6 +73,12 @@ services:
       - SESSION_SERVER_PORT=${SESSION_SERVER_PORT:-8932}
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
       - AGENT_CONTROL_PORT=${AGENT_CONTROL_PORT:-9099}
+      # How long an attended sign-in session gets after a run asks for the
+      # browser back, before the session server closes it. MUST stay below
+      # the agent service's SESSION_EVICT_TIMEOUT (below) by more than one
+      # 5s tick plus the 10s close grace — daily-apply.sh gives up waiting
+      # at that timeout and ABORTS THE RUN, blaming the session rather than
+      # this setting. Raise both together or neither.
       - SESSION_GRACE_MS=${SESSION_GRACE_MS:-180000}
     healthcheck:
       # Probe the MCP HTTP port with a simple GET. The base image ships node,
@@ -167,6 +173,13 @@ services:
       # Where session-server.js listens, used by daily-apply.sh to reclaim the
       # browser from an attended sign-in session before a run.
       - SESSION_SERVER_PORT=${SESSION_SERVER_PORT:-8932}
+      # How long daily-apply.sh waits for an evicted sign-in session to
+      # release the browser before aborting the run. MUST exceed the browser
+      # service's SESSION_GRACE_MS (default 180s) plus one 5s poll tick and
+      # the 10s close grace — 240s against 180s leaves ~35s of margin. Raise
+      # SESSION_GRACE_MS without raising this and every run that meets an
+      # open session aborts.
+      - SESSION_EVICT_TIMEOUT=${SESSION_EVICT_TIMEOUT:-240}
     volumes:
       # Per-run logs written by agent/daily-apply.sh (RUN_LOG_DIR, default
       # /app/runs). Its own named volume, NOT the app's data volume: these are
