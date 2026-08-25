@@ -484,6 +484,29 @@
             "w": 350,
             "x": 0,
             "y": 0
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "Most recently started agent runs, newest first (limit, default 50); read in-process from runs.store.list_recent on the data volume, not proxied to the supervisor.",
+                  "method": "GET",
+                  "path": "/api/runs"
+                },
+                {
+                  "desc": "One agent run record by id, read in-process from runs.store.get; 404 when unknown.",
+                  "method": "GET",
+                  "path": "/api/runs/{run_id}"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1787697555398-14",
+            "title": "Run routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 50,
+            "y": 50
           }
         ]
       },

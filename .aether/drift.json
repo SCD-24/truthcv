@@ -1,63 +1,6 @@
 {
   "version": 1,
-  "findings": [
-    {
-      "kind": "undeclared-endpoint",
-      "severity": "medium",
-      "title": "New GET /api/runs route not declared on the API component",
-      "detail": "api/routes.py adds a list_runs handler exposing GET /api/runs (RunListResponse from runs.store.list_recent), which is absent from the API's declared endpoint tables.",
-      "verifiedReason": "",
-      "architecture": "No /api/runs route declared",
-      "sourceState": "GET /api/runs in api/routes.py",
-      "source": "auto",
-      "agent": "",
-      "target": {
-        "type": "component",
-        "id": "api"
-      },
-      "suggestion": {
-        "action": "add_endpoint",
-        "args": {
-          "componentId": "api",
-          "method": "GET",
-          "path": "/api/runs"
-        }
-      },
-      "destructive": false,
-      "status": "proposed",
-      "firstSeen": 1787686847759,
-      "lastSeen": 1787686847759,
-      "id": "8991fdff"
-    },
-    {
-      "kind": "undeclared-endpoint",
-      "severity": "medium",
-      "title": "New GET /api/runs/{run_id} route not declared on the API component",
-      "detail": "api/routes.py adds get_run, exposing GET /api/runs/{run_id} (404 when unknown) backed by runs.store.get; the API spec lists no such route.",
-      "verifiedReason": "",
-      "architecture": "No per-run detail route declared",
-      "sourceState": "GET /api/runs/{run_id} in api/routes.py",
-      "source": "auto",
-      "agent": "",
-      "target": {
-        "type": "component",
-        "id": "api"
-      },
-      "suggestion": {
-        "action": "add_endpoint",
-        "args": {
-          "componentId": "api",
-          "method": "GET",
-          "path": "/api/runs/{run_id}"
-        }
-      },
-      "destructive": false,
-      "status": "proposed",
-      "firstSeen": 1787686847759,
-      "lastSeen": 1787686847759,
-      "id": "9b763f27"
-    }
-  ],
+  "findings": [],
   "suppressions": [
     "6275e257",
     "ddce5a3a",
@@ -71,7 +14,9 @@
     "a75d7433",
     "93105448",
     "822edf8a",
-    "138ebfd1"
+    "138ebfd1",
+    "8991fdff",
+    "9b763f27"
   ],
   "dismissals": []
 }
