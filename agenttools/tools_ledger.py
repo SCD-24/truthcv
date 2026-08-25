@@ -39,6 +39,7 @@ from screening.url import validate_posting_url as _validate_posting_url
 from screening.url import normalize_application_url as _normalize_application_url
 from truth.answers import canonical_cv as _canonical_cv
 from truth.answers import load as _load_answers
+from truth.emailalias import alias_email as _alias_email
 
 
 def _backfill_from_screening(fields: dict, screening_id: str) -> dict:
@@ -164,6 +165,12 @@ def record_application(
     writers of ``applications.json`` (via the store's atomic ``_write_all``);
     nothing here touches the file directly. ``applied_date`` is accepted as
     the agent-facing alias for the record's ``application_date`` field.
+
+    These four evidence fields are now named parameters too, not left to
+    ``**fields``, for the same inputSchema-visibility reason given for the
+    identity fields above: an agent reading the schema needs to see that the
+    tool accepts this evidence, not just the identity fields. They still fall
+    back to ``**fields`` for any caller routing them that way.
     """
     fields = dict(fields)
     if company:
@@ -195,6 +202,17 @@ def record_application(
     # True because that is this tool's contract — it records an application that
     # was submitted; a caller recording anything else passes submitted=False.
     fields["submitted"] = bool(submitted)
+    # `main` kept a `**fields` fallback for these four when the named parameter
+    # is absent, so a caller still routing evidence through `**fields` keeps
+    # working; the coercion and validation below then apply either way.
+    if fields_submitted is None:
+        fields_submitted = fields.pop("fields_submitted", None)
+    if confirmation is None:
+        confirmation = fields.pop("confirmation", None)
+    if screening is None:
+        screening = fields.pop("screening", None)
+    if attachments is None:
+        attachments = fields.pop("attachments", None)
 
     # Parse and validate the structured evidence BEFORE any store write. Doing
     # this first is the fix for the orphan-row bug: the row used to be created
@@ -363,9 +381,23 @@ def get_canonical_cv() -> dict:
     }
 
 
-def get_profile_answers() -> dict:
-    """The canonical ATS screening answers (runbook §3), as a plain dict."""
-    return _load_answers().to_dict()
+def get_profile_answers(company: str = "") -> dict:
+    """The canonical ATS screening answers (runbook §3), as a plain dict.
+
+    When ``company`` (the employing entity for the application currently
+    being filled in) is given, the returned ``email`` is rewritten as a
+    per-company tracking address: local+tcv_<company_slug>@domain, so
+    replies from that employer are identifiable. This is a per-call
+    transformation only — it is never persisted. The stored answers, the
+    wizard's profile route, and the CV/cover-letter contact lines all
+    continue to see the real, un-aliased address. With ``company`` blank,
+    the returned email is unchanged from what is stored.
+    """
+    data = _load_answers().to_dict()
+    email = data.get("email")
+    if isinstance(email, str) and email:
+        data["email"] = _alias_email(email, company)
+    return data
 
 
 def get_job_profiles() -> list[dict]:

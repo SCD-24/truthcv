@@ -52,6 +52,10 @@ Projected from `schema` widgets on the architecture canvas.
 | `application_date` | string | - | User-set date the application was submitted (ISO yyyy-mm-dd); distinct from the auto created_at/updated_at timestamps. |
 | `notes` | string | - | Free-text notes the user attaches to the application record. |
 | `screening_id` | string |  | The approved screening this application was recorded against. The dedupe key: record_application creates-or-fetches by it under one lock, so a retried agent call updates the existing row instead of adding another. |
+| `fields_submitted` | list<{label,value,source}> |  | Every form field the agent actually submitted, with its provenance (observed \| canonical). Written only by the agent via MCP; read-only to the client. |
+| `confirmation` | {text, confirmed_at, evidence} |  | Verbatim success message proving the submission went through. |
+| `attachments` | list<{kind,path}> |  | The files actually uploaded with the application. |
+| `screening` | {entity, remote, salary, language, role_type, glassdoor} |  | The pre-application filter verdicts recorded against this application. |
 <!-- generated:end comp:application-tracker -->
 
 <!-- generated:start comp:connections -->

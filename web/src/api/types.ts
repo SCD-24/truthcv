@@ -243,6 +243,44 @@ export interface ApplicationDocument {
   updatedAt: string;
 }
 
+/** One form field as the agent actually submitted it, with its provenance. */
+export interface FieldSubmitted {
+  label: string;
+  value: string;
+  source: string;
+}
+
+/** Evidence that a submission actually went through. */
+export interface ApplicationConfirmation {
+  text: string;
+  confirmedAt: string;
+  evidence: string;
+}
+
+/** One file the agent actually uploaded with the application. */
+export interface ApplicationAttachment {
+  kind: string;
+  path: string;
+}
+
+/** The Glassdoor check within a pre-application screening verdict. */
+export interface ApplicationScreeningGlassdoor {
+  rating: string | number;
+  reviews: string | number;
+  waiverApplied: boolean;
+  note: string;
+}
+
+/** The pre-application filter verdicts recorded on a tracked application. */
+export interface ApplicationScreening {
+  entity: string;
+  remote: string;
+  salary: string;
+  language: string;
+  roleType: string;
+  glassdoor: ApplicationScreeningGlassdoor;
+}
+
 /** A tracked job application. `posting` is empty for General submissions; the
  * document fields are null until a CV/cover letter has been saved for it. */
 export interface Application {
@@ -264,6 +302,10 @@ export interface Application {
   coverLetterDocument: ApplicationDocument | null;
   createdAt: string;
   updatedAt: string;
+  fieldsSubmitted?: FieldSubmitted[];
+  confirmation?: ApplicationConfirmation;
+  screening?: ApplicationScreening;
+  attachments?: ApplicationAttachment[];
 }
 
 /** Editable fields the client may set when creating an application. */
