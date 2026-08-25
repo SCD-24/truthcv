@@ -3,7 +3,6 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Alert from "@mui/material/Alert";
 import Typography from "@mui/material/Typography";
-import type { StepProps } from "../wizard/steps";
 import { useWizard } from "../wizard/store";
 import { getTruth, saveTruth } from "../api/client";
 import type {
@@ -33,7 +32,12 @@ const isEmpty = (t: TruthDoc) =>
 let seq = 0;
 const newId = (p: string) => `${p}-new-${Date.now().toString(36)}-${seq++}`;
 
-export function ReviewStep({ onAdvance, onBack }: StepProps) {
+export interface ReviewStepProps {
+  onNext: () => void;
+  onBack?: () => void;
+}
+
+export function ReviewStep({ onNext, onBack }: ReviewStepProps) {
   const { truth, setTruth, run, loading, error } = useWizard();
   const [doc, setDoc] = useState<TruthDoc>(truth);
 
@@ -163,13 +167,13 @@ export function ReviewStep({ onAdvance, onBack }: StepProps) {
       setTruth(cleaned);
       return true;
     });
-    if (ok) onAdvance("posting");
+    if (ok) onNext();
   };
 
   return (
     <section>
       <div className="stage__head">
-        <Typography variant="overline" className="eyebrow">Step 2 of 5</Typography>
+        <Typography variant="overline" className="eyebrow">Step 2 of 2</Typography>
         <h1 className="stage__title">Review what we found</h1>
         <p className="stage__lede">
           Each job keeps its own dates and highlights, so nothing drifts between
@@ -366,7 +370,7 @@ export function ReviewStep({ onAdvance, onBack }: StepProps) {
       </div>
 
       <Box className="stage__actions" sx={{ display: "flex", gap: 2 }}>
-        <Button variant="outlined" onClick={() => onBack("upload")}>
+        <Button variant="outlined" onClick={() => onBack?.()}>
           Back
         </Button>
         <Button variant="contained" disabled={loading} onClick={save}>

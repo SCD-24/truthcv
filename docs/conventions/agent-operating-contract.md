@@ -48,6 +48,7 @@ Use these exact names and ids when discussing the architecture.
 | Guardrail Validator | `guardrail-validator` | backend |
 | LLM Provider Layer | `llm-provider-layer` | backend |
 | LLM Provider Service | `llm-provider-service` | custom |
+| Onboarding Store | `onboarding-store` | backend |
 | Prompt Store | `prompt-store` | backend |
 | Renderer | `renderer` | backend |
 | Screening Engine | `screening-engine` | backend |
@@ -61,5 +62,5 @@ Use these exact names and ids when discussing the architecture.
 <!-- generated:start cap:system-boundary -->
 ## System Boundary
 
-The declared system consists of 18 component(s) and 40 connection(s) — see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
+The declared system consists of 19 component(s) and 42 connection(s) — see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
 <!-- generated:end cap:system-boundary -->

@@ -10,11 +10,12 @@ import IconButton from "@mui/material/IconButton";
 import CloseIcon from "@mui/icons-material/Close";
 import Alert from "@mui/material/Alert";
 import Typography from "@mui/material/Typography";
-import { getRouting, listConnections } from "../api/client";
+import { getRouting, listConnections, updateOnboarding } from "../api/client";
 import { AccountsSection } from "./AccountsSection";
 import { DefaultModelSection } from "./DefaultModelSection";
 import { TaskModelsSection } from "./TaskModelsSection";
 import { JobSearchPolicySection } from "./JobSearchPolicySection";
+import { useWizard } from "../wizard/store";
 import type { ConnectionList, Routing } from "../api/types";
 import "../styles/settings.css";
 
@@ -62,6 +63,16 @@ export function SettingsModal({
   initialSection?: "job-search-policy";
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const { setOnboarding } = useWizard();
+
+  async function replayTour() {
+    try {
+      setOnboarding(await updateOnboarding({ tourSeenAt: null }));
+    } catch (err) {
+      console.error("Failed to reset tour state", err);
+    }
+    onClose();
+  }
 
   useEffect(() => {
     if (initialSection !== "job-search-policy") return;
@@ -151,6 +162,15 @@ export function SettingsModal({
             )}
 
             <JobSearchPolicySection />
+
+            <SettingsSection
+              title="Replay tour"
+              description="Walk through the guided tour of the manual and agent flows again."
+            >
+              <Button variant="outlined" onClick={replayTour} sx={{ alignSelf: "flex-start" }}>
+                Replay tour
+              </Button>
+            </SettingsSection>
           </Stack>
         )}
       </DialogContent>

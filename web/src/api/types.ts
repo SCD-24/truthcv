@@ -128,6 +128,21 @@ export interface RenderResult {
   renderUnavailable?: boolean;
 }
 
+/** First-run onboarding progress: provider setup, profile, CV review, tour. */
+export interface OnboardingState {
+  providerDone: boolean;
+  hasProfile: boolean;
+  cvReviewedAt: string | null;
+  tourSeenAt: string | null;
+  complete: boolean;
+}
+
+/** Partial PUT /api/onboarding body — only the sent fields are merged. */
+export interface OnboardingUpdate {
+  cvReviewedAt?: string | null;
+  tourSeenAt?: string | null;
+}
+
 /** Which LLM provider is active. */
 export type ProviderName = "anthropic" | "openai" | "ollama";
 

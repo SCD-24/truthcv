@@ -13,6 +13,7 @@ graph TD
     guardrail-validator["Guardrail Validator <br/> <small>(BACKEND)</small>"]
     llm-provider-layer["LLM Provider Layer <br/> <small>(BACKEND)</small>"]
     llm-provider-service["LLM Provider Service <br/> <small>(CUSTOM)</small>"]
+    onboarding-store["Onboarding Store <br/> <small>(BACKEND)</small>"]
     prompt-store["Prompt Store <br/> <small>(BACKEND)</small>"]
     renderer["Renderer <br/> <small>(BACKEND)</small>"]
     screening-engine["Screening Engine <br/> <small>(BACKEND)</small>"]
@@ -28,6 +29,7 @@ graph TD
     api -->|in-process| cover-letter-engine
     api -->|HTTPS| gmail-api
     api -->|in-process| guardrail-validator
+    api -->|in-process| onboarding-store
     api -->|in-process| renderer
     api -->|in-process| screening-engine
     api -->|in-process| secret-store
@@ -48,6 +50,7 @@ graph TD
     guardrail-validator -->|in-process| truth-store
     llm-provider-layer -->|HTTPS| llm-provider-service
     llm-provider-layer -->|in-process| secret-store
+    onboarding-store -->|file I/O| truth-data-volume
     renderer -->|file I/O| truth-data-volume
     screening-engine -->|in-process| agent-config
     screening-engine -->|in-process| application-tracker
@@ -75,6 +78,7 @@ graph TD
 - [Guardrail Validator](overview.md) (`guardrail-validator`, backend)
 - [LLM Provider Layer](overview.md) (`llm-provider-layer`, backend)
 - [LLM Provider Service](overview.md) (`llm-provider-service`, custom)
+- [Onboarding Store](overview.md) (`onboarding-store`, backend)
 - [Prompt Store](overview.md) (`prompt-store`, backend)
 - [Renderer](overview.md) (`renderer`, backend)
 - [Screening Engine](overview.md) (`screening-engine`, backend)
@@ -93,6 +97,7 @@ graph TD
 - [api → cover-letter-engine](interactions/api--cover-letter-engine.md) via `in-process`
 - [api → gmail-api](interactions/api--gmail-api.md) via `HTTPS`
 - [api → guardrail-validator](interactions/api--guardrail-validator.md) via `in-process`
+- [api → onboarding-store](interactions/api--onboarding-store.md) via `in-process`
 - [api → renderer](interactions/api--renderer.md) via `in-process`
 - [api → screening-engine](interactions/api--screening-engine.md) via `in-process`
 - [api → secret-store](interactions/api--secret-store.md) via `in-process`
@@ -113,6 +118,7 @@ graph TD
 - [guardrail-validator → truth-store](interactions/guardrail-validator--truth-store.md) via `in-process`
 - [llm-provider-layer → llm-provider-service](interactions/llm-provider-layer--llm-provider-service.md) via `HTTPS`
 - [llm-provider-layer → secret-store](interactions/llm-provider-layer--secret-store.md) via `in-process`
+- [onboarding-store → truth-data-volume](interactions/onboarding-store--truth-data-volume.md) via `file I/O`
 - [renderer → truth-data-volume](interactions/renderer--truth-data-volume.md) via `file I/O`
 - [screening-engine → agent-config](interactions/screening-engine--agent-config.md) via `in-process`
 - [screening-engine → application-tracker](interactions/screening-engine--application-tracker.md) via `in-process`
@@ -129,5 +135,5 @@ graph TD
 
 ## Groups
 
-- [TruthCV Container (single Docker image)](groups/truthcv-container-single-docker-image.md) (`truthcv-container-single-docker-image`, 11 member(s))
+- [TruthCV Container (single Docker image)](groups/truthcv-container-single-docker-image.md) (`truthcv-container-single-docker-image`, 12 member(s))
 <!-- generated:end file:system-map -->
