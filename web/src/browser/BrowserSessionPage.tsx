@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, AppBar, Box, Button, Stack, Toolbar, Typography } from "@mui/material";
+// `@novnc/novnc` is pinned to an EXACT 1.6.0 in package.json (no caret) —
+// 1.7.0's package.json restricts `exports` to `./core/rfb.js` only, which
+// breaks this `lib/rfb` subpath entirely (Vite's resolver fails before this
+// module even loads). Do not loosen the pin or bump the version without
+// re-checking that `@novnc/novnc/lib/rfb` still resolves.
 import RFB from "@novnc/novnc/lib/rfb";
 
 import {
@@ -60,6 +65,10 @@ export function BrowserSessionPage() {
   const [remaining, setRemaining] = useState(0);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const rfbRef = useRef<RFB | null>(null);
+  // Set just before a Reload-initiated disconnect, so the disconnect
+  // listener below can tell "operator hit Reload" apart from "the server
+  // actually closed the session" — only the latter should end the page.
+  const reloadingRef = useRef(false);
 
   // Open the session once on mount.
   useEffect(() => {
@@ -93,18 +102,42 @@ export function BrowserSessionPage() {
     };
   }, [url]);
 
-  // Attach noVNC once the session is live.
-  useEffect(() => {
-    if (state !== "live" || !canvasRef.current || rfbRef.current) return;
+  // Build a fresh RFB against the viewer socket. Used both to attach on
+  // first live render and to re-attach on Reload — Reload re-makes only
+  // this viewer connection, never the session server's session.
+  function connect() {
+    if (!canvasRef.current) return;
     const wsUrl = `${location.origin.replace(/^http/, "ws")}/api/browser/session/stream`;
     const rfb = new RFB(canvasRef.current, wsUrl);
-    rfb.addEventListener("disconnect", () => setState("closed"));
+    rfb.addEventListener("disconnect", () => {
+      if (reloadingRef.current) {
+        // This disconnect was Reload tearing down the old socket on its way
+        // to a new one, not the session actually ending — swallow it.
+        reloadingRef.current = false;
+        return;
+      }
+      setState("closed");
+    });
     rfbRef.current = rfb;
+  }
+
+  // Attach noVNC once the session is live.
+  useEffect(() => {
+    if (state !== "live" || rfbRef.current) return;
+    connect();
     return () => {
-      rfb.disconnect();
+      rfbRef.current?.disconnect();
       rfbRef.current = null;
     };
   }, [state]);
+
+  function onReload() {
+    if (!rfbRef.current) return;
+    reloadingRef.current = true;
+    rfbRef.current.disconnect();
+    rfbRef.current = null;
+    connect();
+  }
 
   // Poll for an eviction the run may have requested.
   useEffect(() => {
@@ -191,7 +224,7 @@ export function BrowserSessionPage() {
           <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
             {hostOf(url)}
           </Typography>
-          <Button size="small" onClick={() => rfbRef.current?.disconnect()}>
+          <Button size="small" onClick={onReload}>
             Reload
           </Button>
           <Button size="small" variant="contained" onClick={onDone}>
