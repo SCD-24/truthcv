@@ -35,7 +35,23 @@ run_bootstrap() {
     "$BOOTSTRAP_IMAGE" python -m launcher --repo /work "$@"
 }
 
-APP_PORT="$(run_bootstrap | cut -d= -f2)"
+# Under `set -e`, a bare `APP_PORT="$(run_bootstrap | cut -d= -f2)"` would
+# abort the whole script the instant run_bootstrap fails, bypassing fail()
+# entirely — a double-clicked .command window would just vanish. Capture
+# through an `if` so a failure is handled, not just fatal.
+read_port() {
+  local out
+  if ! out="$("$@")"; then
+    fail "TruthCV could not prepare its configuration. Make sure Docker Desktop is running, then try again."
+  fi
+  out="$(printf '%s' "$out" | cut -d= -f2)"
+  case "$out" in
+    ''|*[!0-9]*) fail "TruthCV could not work out which port to use. Please report this." ;;
+  esac
+  printf '%s' "$out"
+}
+
+APP_PORT="$(read_port run_bootstrap)"
 
 if ! docker compose images -q app 2>/dev/null | grep -q .; then
   printf '%s\n' "Setting up TruthCV for the first time.
@@ -45,14 +61,14 @@ fi
 attempt=1
 until docker compose up -d --build 2>compose.err; do
   if ! grep -qiE 'port is already allocated|address already in use|bind for' compose.err; then
-    cat compose.err >&2
+    if [ -s compose.err ]; then cat compose.err >&2; fi
     fail "TruthCV couldn't start. The log above says why; compose.err has the full text."
   fi
   if [ "$attempt" -ge "$MAX_PORT_ATTEMPTS" ]; then
     fail "Tried $MAX_PORT_ATTEMPTS ports and every one was busy. Something
 unusual is holding them — restart the machine and try again."
   fi
-  APP_PORT="$(run_bootstrap --bump APP_PORT | cut -d= -f2)"
+  APP_PORT="$(read_port run_bootstrap --bump APP_PORT)"
   attempt=$((attempt + 1))
 done
 rm -f compose.err

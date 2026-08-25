@@ -2,6 +2,13 @@
 Type=Application
 Name=TruthCV
 Comment=Start TruthCV and open it in your browser
-Exec=sh -c '"$(dirname "%k")/truthcv.sh"'
+# A .desktop file cannot reliably find its own location: the %k field code
+# is only filled in for some direct file-manager double-clicks and is empty
+# otherwise (per the Desktop Entry Specification), including when this file
+# is installed to an applications menu — so Exec must be an absolute path.
+# Before using this launcher, replace /path/to/truthcv below on BOTH the
+# Exec and Path lines with wherever you unzipped TruthCV.
+Exec=/path/to/truthcv/scripts/launch/truthcv.sh
+Path=/path/to/truthcv
 Terminal=true
 Categories=Office;
