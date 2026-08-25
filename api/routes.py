@@ -707,6 +707,10 @@ def _application_model(app) -> ApplicationModel:
         updated_at=app.updated_at,
         cv_document=_document_model(app.cv_document),
         cover_letter_document=_document_model(app.cover_letter_document),
+        fields_submitted=[f.to_dict() for f in app.fields_submitted],
+        confirmation=app.confirmation.to_dict(),
+        screening=app.screening.to_dict(),
+        attachments=[a.to_dict() for a in app.attachments],
         **data,
     )
 

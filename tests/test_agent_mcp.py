@@ -678,6 +678,17 @@ def test_record_application_schema_advertises_the_fields_the_agent_must_send():
         assert field in properties, f"not advertised to the agent: {field}"
 
 
+def test_record_application_schema_advertises_evidence_fields():
+    """The evidence fields (fields_submitted, confirmation, screening,
+    attachments) must be named parameters, not just reachable via **fields,
+    or the agent reading the schema never learns the tool accepts them."""
+    from agenttools.mcp_app import _input_schema
+
+    properties = _input_schema(tools_ledger.record_application)["properties"]
+    for field in ("fields_submitted", "confirmation", "screening", "attachments"):
+        assert field in properties, f"not advertised to the agent: {field}"
+
+
 def test_record_application_still_backfills_when_identity_is_omitted(data_dir):
     """Naming the fields must not turn the backfill path into a required one."""
     sid = _approve_screening("Backfill Co", "Platform Engineer", "https://b.example/jobs/9")
