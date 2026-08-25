@@ -48,3 +48,19 @@ def test_records_persisted_before_these_fields_existed_still_load():
     s = Screening.from_dict(old)
     assert s.apply_blocker == ""
     assert s.signin_url == ""
+
+
+def test_a_later_plain_failure_clears_a_recorded_login_wall(data_dir):
+    """This is how a site leaves the sign-in queue: the agent got past the
+    login and failed for some other reason, so the blocker must not persist."""
+    s = store.create({"company": "Acme", "role": "Dev", "verdict": "passed"})
+    store.record_apply_failure(
+        s.id, "sign-in required",
+        blocker="login_required",
+        signin_url="https://acme.wd3.myworkdayjobs.com/login",
+    )
+    updated = store.record_apply_failure(s.id, "submit button timed out")
+    assert updated is not None
+    assert updated.apply_blocker == ""
+    assert updated.signin_url == ""
+    assert updated.apply_attempts == 2
