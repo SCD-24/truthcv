@@ -154,6 +154,16 @@ canonical, maintained answers; the file you are reading now does not
 duplicate them, because a copy here would drift from the source of truth.
 Salary expectation is deliberately **not** among them — see below.
 
+When filling an actual application form, pass `company` — the employing
+entity for the application being filled in, the same company recorded on
+the screening — to `get_profile_answers`. With `company` given, the `email`
+it returns is a per-company tracking address carrying a fixed `tcv_` marker
+(worked example: for "Acme Co.", `name+tcv_acme_co@example.com`) and, like
+every other field, it is typed **verbatim**. Never construct, edit, shorten,
+or "correct" an email address yourself, and never reuse an address returned
+for a different company. During screening, before a specific application is
+being filled in, calling the tool without `company` is correct.
+
 Two rules travel with this table regardless of what it currently contains:
 
 - **Never answer "yes" to work authorization for a country not covered by
@@ -254,10 +264,12 @@ Every rule here applies identically regardless of which surface you have —
 especially §5.5, which matters *more* on the containerised browser, because it
 is likelier to be silently blocked by ATS bot detection.
 
-4. Fill every field from the `get_profile_answers` result (§3). If `name`,
-   `email`, or `work_authorisation` comes back blank, no identity is seeded —
-   stop, do not fill the form with blanks or submit it, and raise it as an
-   open issue in the §9 report instead of applying.
+4. Fill every field from the `get_profile_answers` result (§3), calling it
+   with `company` for this application so the email returned is the
+   per-company tracking address. If `name`, `email`, or
+   `work_authorisation` comes back blank, no identity is seeded — stop, do
+   not fill the form with blanks or submit it, and raise it as an open
+   issue in the §9 report instead of applying.
 5. **Verify before submitting**: re-read the form state. Toggle buttons often
    don't expose a pressed state in the accessibility tree — check their CSS
    classes for an `active` marker.
@@ -276,7 +288,10 @@ is likelier to be silently blocked by ATS bot detection.
      `source: "canonical"` for a `get_profile_answers` value you entered
      unchanged. Record what the field actually contains, never what you
      intended to type — this record is evidence, and §4 applies to it exactly
-     as it applies to the form.
+     as it applies to the form. For the email field, record the address
+     actually typed — the per-company `tcv_` address returned by
+     `get_profile_answers` — with `source: "canonical"`, since that is what
+     the form contains.
    - `screening`: the §2 filter verdicts — `entity` (the employment-entity /
      EOR finding), `remote`, `salary` (how the band was handled — the posted
      number, or the exact string `recommend_salary` returned when the posting

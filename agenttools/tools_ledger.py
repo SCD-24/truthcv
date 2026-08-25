@@ -36,6 +36,7 @@ from screening.store import create as create_screening
 from screening.url import validate_posting_url as _validate_posting_url
 from truth.answers import canonical_cv as _canonical_cv
 from truth.answers import load as _load_answers
+from truth.emailalias import alias_email as _alias_email
 
 
 def _backfill_from_screening(fields: dict, screening_id: str) -> dict:
@@ -276,9 +277,23 @@ def get_canonical_cv() -> dict:
     }
 
 
-def get_profile_answers() -> dict:
-    """The canonical ATS screening answers (runbook §3), as a plain dict."""
-    return _load_answers().to_dict()
+def get_profile_answers(company: str = "") -> dict:
+    """The canonical ATS screening answers (runbook §3), as a plain dict.
+
+    When ``company`` (the employing entity for the application currently
+    being filled in) is given, the returned ``email`` is rewritten as a
+    per-company tracking address: local+tcv_<company_slug>@domain, so
+    replies from that employer are identifiable. This is a per-call
+    transformation only — it is never persisted. The stored answers, the
+    wizard's profile route, and the CV/cover-letter contact lines all
+    continue to see the real, un-aliased address. With ``company`` blank,
+    the returned email is unchanged from what is stored.
+    """
+    data = _load_answers().to_dict()
+    email = data.get("email")
+    if isinstance(email, str) and email:
+        data["email"] = _alias_email(email, company)
+    return data
 
 
 def get_job_profiles() -> list[dict]:

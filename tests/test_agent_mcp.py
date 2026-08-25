@@ -686,3 +686,53 @@ def test_record_application_still_backfills_when_identity_is_omitted(data_dir):
     reloaded = next(a for a in load_applications() if a.id == created["id"])
     assert reloaded.company == "Backfill Co"
     assert reloaded.role == "Platform Engineer"
+
+
+def test_get_profile_answers_without_company_returns_stored_email_verbatim(data_dir):
+    """Regression guard on the default: no `company` argument means the
+    email is returned exactly as stored, unchanged from today's behaviour."""
+    from truth.answers import Answers, save as save_answers
+
+    save_answers(Answers(name="Glenn Chon", email="glenn.chon.de@gmail.com"))
+    result = tools_ledger.get_profile_answers()
+    assert result["email"] == "glenn.chon.de@gmail.com"
+
+
+def test_get_profile_answers_with_company_aliases_only_the_email(data_dir):
+    """Passing `company` rewrites `email` to the per-company tracking
+    address; every other field stays byte-identical to the un-aliased call."""
+    from truth.answers import Answers, save as save_answers
+
+    save_answers(Answers(name="Glenn Chon", email="glenn.chon.de@gmail.com", phone="+49 1"))
+
+    plain = tools_ledger.get_profile_answers()
+    aliased = tools_ledger.get_profile_answers(company="Acme Co.")
+
+    assert aliased["email"] == "glenn.chon.de+tcv_acme_co@gmail.com"
+    for field in plain:
+        if field == "email":
+            continue
+        assert aliased[field] == plain[field], f"field diverged: {field}"
+
+
+def test_get_profile_answers_with_company_does_not_mutate_stored_answers(data_dir):
+    """The alias is a per-call transformation only; the persisted answers
+    (and thus every other caller) must still see the real address."""
+    from truth.answers import Answers, load as load_answers, save as save_answers
+
+    save_answers(Answers(name="Glenn Chon", email="glenn.chon.de@gmail.com"))
+
+    tools_ledger.get_profile_answers(company="Acme Co.")
+
+    reloaded = load_answers()
+    assert reloaded.email == "glenn.chon.de@gmail.com"
+
+
+def test_get_profile_answers_input_schema_advertises_optional_company():
+    """The advertised inputSchema must include `company` as a string
+    property, and it must not be required, since it has a default."""
+    from agenttools.mcp_app import _input_schema
+
+    schema = _input_schema(tools_ledger.get_profile_answers)
+    assert schema["properties"]["company"]["type"] == "string"
+    assert "company" not in schema["required"]

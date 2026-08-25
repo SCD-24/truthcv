@@ -46,7 +46,10 @@ their application history is this tool surface. You have exactly eleven tools:
 - `get_profile_answers` — returns the operator's canonical screening answers
   (name, work authorisation, and the rest) from the answers store. Never
   assume, remember, or hard-code any of these — always call the tool. Salary
-  expectation is not among them — see `recommend_salary` below.
+  expectation is not among them — see `recommend_salary` below. Pass
+  `company` whenever an actual application form is being filled in, so the
+  returned `email` is the per-company `+tcv_` tracking address. Type
+  returned values verbatim; never construct an email address by hand.
 - `get_job_profiles` — returns the configured job search profiles and their
   full criteria (salary band, remote model, employment country, and the
   rest), so a posting can be matched against the profile it satisfies.
