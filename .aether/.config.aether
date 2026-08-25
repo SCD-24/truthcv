@@ -1786,7 +1786,11 @@
       "canvas": {
         "widgets": []
       },
-      "childGroups": [],
+      "childGroups": [
+        "document-toolchain",
+        "external-services",
+        "screening-pipeline"
+      ],
       "color": null,
       "h": 387.05719237435005,
       "id": "truthcv-container-single-docker-image",
@@ -1800,9 +1804,7 @@
         "cover-letter-engine",
         "prompt-store",
         "application-tracker",
-        "agent-config",
-        "screening-engine",
-        "onboarding-store"
+        "agent-config"
       ],
       "name": "TruthCV Container (single Docker image)",
       "w": 1861.8301559792023,
@@ -1815,23 +1817,23 @@
   "systemIntent": "TruthCV is a self-hostable, single-user web application that generates ATS-passing, truthful CVs tailored to a specific job posting. Every fact originates exclusively from a per-user \"truth file\" (truth.yaml) derived from the user's LinkedIn profile; the app may reword and reorder those facts freely, but any new claim must be explicitly confirmed by the user before it can enter a CV — enforced mechanically by a deterministic guardrail that diffs every factual token against the truth file. It is bring-your-own-API-key, Docker-deployable (docker compose up → localhost:8080), needs no database or accounts, and renders both PDF and DOCX from one ATS-safe source.",
   "topologyLayout": {
     "agent-config": {
-      "x": 1500,
-      "y": 200
+      "x": 1028,
+      "y": 140
     },
     "api": {
       "x": 436,
-      "y": 212
+      "y": 284
     },
     "application-agent": {
       "x": 100,
-      "y": 632
+      "y": 920
     },
     "application-tracker": {
-      "x": 732,
-      "y": 140
+      "x": 1028,
+      "y": 428
     },
     "connections": {
-      "x": 1324,
+      "x": 396,
       "y": 704
     },
     "cover-letter-engine": {
@@ -1839,8 +1841,8 @@
       "y": 284
     },
     "gmail-api": {
-      "x": 1620,
-      "y": 560
+      "x": 692,
+      "y": 920
     },
     "guardrail-validator": {
       "x": 1028,
@@ -1848,39 +1850,39 @@
     },
     "llm-provider-layer": {
       "x": 1620,
-      "y": 140
+      "y": 212
     },
     "llm-provider-service": {
-      "x": 692,
-      "y": 560
+      "x": 988,
+      "y": 848
     },
     "onboarding-store": {
-      "x": 460,
-      "y": 380
+      "x": 396,
+      "y": 848
     },
     "prompt-store": {
       "x": 1620,
-      "y": 284
+      "y": 356
     },
     "renderer": {
-      "x": 1028,
-      "y": 140
+      "x": 1324,
+      "y": 356
     },
     "screening-engine": {
-      "x": 200,
-      "y": 380
+      "x": 396,
+      "y": 992
     },
     "secret-store": {
-      "x": 692,
-      "y": 704
+      "x": 988,
+      "y": 992
     },
     "tailor-engine": {
       "x": 396,
-      "y": 632
+      "y": 1136
     },
     "truth-data-volume": {
-      "x": 988,
-      "y": 632
+      "x": 1284,
+      "y": 920
     },
     "truth-store": {
       "x": 1324,
@@ -1888,7 +1890,7 @@
     },
     "web-ui": {
       "x": 140,
-      "y": 212
+      "y": 284
     }
   },
   "version": "1.0.0"

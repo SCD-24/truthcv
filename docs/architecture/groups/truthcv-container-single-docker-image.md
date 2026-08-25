@@ -1,7 +1,7 @@
 <!-- generated:start group:truthcv-container-single-docker-image -->
 # Logical Group: TruthCV Container (single Docker image)
 - **Identifier**: `truthcv-container-single-docker-image`
-- **Members**: 12
+- **Members**: 10
 
 > A logical grouping of components (deployment boundary, bounded context, or scope marker). Groups have no connections of their own.
 
@@ -17,8 +17,6 @@
 - **Prompt Store** (`prompt-store`)
 - **Application Tracker** (`application-tracker`)
 - **Agent Config** (`agent-config`)
-- **Screening Engine** (`screening-engine`)
-- **Onboarding Store** (`onboarding-store`)
 
 *No specific widgets have been placed in this group yet. Define guidelines, stack tech, or schemas in the workspace.*
 <!-- generated:end group:truthcv-container-single-docker-image -->
