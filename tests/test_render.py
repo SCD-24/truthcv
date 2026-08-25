@@ -220,3 +220,44 @@ def test_ats_go_is_not_a_substring_of_django():
     warnings = lint(html, keywords=["Go"])
     codes = {w["code"] for w in warnings}
     assert "missing-keyword" in codes
+
+
+def test_ats_does_not_read_css_or_script_bodies_as_document_text():
+    """Regression: stripping tags alone leaves <style>/<script> bodies and
+    comment text behind, so CSS words counted as visible CV text. A keyword
+    that appears only inside those regions is genuinely absent."""
+    html = (
+        "<html><head><style>/* python, single-column: ats-safe. */"
+        "body { font-family: python; }</style></head><body>"
+        "<script>var python = 1;</script>"
+        "<!-- python -->"
+        "<p>Built services in Django. Contact: ada@example.com</p>"
+        "</body></html>"
+    )
+    warnings = lint(html, keywords=["Python"])
+    codes = {w["code"] for w in warnings}
+    assert "missing-keyword" in codes
+
+
+def test_ats_keeps_body_text_when_a_style_tag_is_commented_out():
+    """Regression: stripping <style> elements before comments let the <style>
+    inside the comment pair with the *next real* </style>, deleting the whole
+    document in between. Both this keyword and the contact are real body text."""
+    html = (
+        "<html><head><!-- <style> old theme --></head><body>"
+        "<p>Built payment services in Python. Contact: ada@example.com</p>"
+        "<style>body { font-family: Arial; }</style>"
+        "</body></html>"
+    )
+    assert lint(html, keywords=["Python"]) == []
+
+
+def test_ats_does_not_read_an_unclosed_style_body_as_document_text():
+    """A <style> with no closing tag must not leak its declarations as text."""
+    html = (
+        "<html><body><p>Built services in Django. Contact: ada@example.com</p>"
+        "<style>body { font-family: python; }"
+        "</body></html>"
+    )
+    codes = {w["code"] for w in lint(html, keywords=["Python"])}
+    assert "missing-keyword" in codes

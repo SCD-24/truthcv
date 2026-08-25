@@ -12,8 +12,12 @@ from dataclasses import asdict, dataclass
 
 VERDICT_VALUES = ("rejected", "passed", "deferred")
 
+# A posting the agent could not read at all — 403, login wall, dead link,
+# expired listing — is not a verdict on its merits. ``""`` means "no blocker".
+BLOCKER_VALUES = ("", "login_required", "unreadable", "not_found", "expired")
 
-def validate_verdict(verdict: str) -> str:
+
+def validate_verdict(verdict: str, blocker: str = "") -> str:
     """Return the verdict lowercased, or raise ``ValueError`` if not a known one.
 
     ``store.create`` routes a record into the operator's approval queue by
@@ -21,18 +25,43 @@ def validate_verdict(verdict: str) -> str:
     or empty verdict does not fail loudly — it silently produces a record the
     operator never sees. Checked at the agent's boundary rather than in the
     store, which stays lenient for the legacy importer.
+
+    A verdict is normally required, but a posting the agent could not read has
+    no merits to judge — passing a non-empty ``blocker`` allows an empty
+    verdict in that one case. It is a ValueError for both to be empty, and an
+    unrecognised non-empty verdict is always rejected regardless of blocker.
     """
     cleaned = verdict.strip().casefold() if isinstance(verdict, str) else ""
+    has_blocker = bool(blocker.strip()) if isinstance(blocker, str) else False
     if not cleaned:
+        if has_blocker:
+            return ""
         raise ValueError(
             "A verdict is required — without one the screening never reaches "
-            f"the operator's approval queue. Use one of: {', '.join(VERDICT_VALUES)}."
+            f"the operator's approval queue. Use one of: {', '.join(VERDICT_VALUES)}, "
+            "or supply a screening_blocker if the posting could not be read."
         )
     if cleaned not in VERDICT_VALUES:
         raise ValueError(
             f"Unknown verdict {verdict!r}. Use one of: {', '.join(VERDICT_VALUES)}."
         )
     return cleaned
+
+
+def validate_blocker(value: str) -> str:
+    """Return the blocker lowercased, or raise ``ValueError`` if not a known one.
+
+    Mirrors ``validate_verdict``'s normalisation. An empty string is a valid
+    value meaning "no blocker".
+    """
+    cleaned = value.strip().casefold() if isinstance(value, str) else ""
+    if cleaned not in BLOCKER_VALUES:
+        raise ValueError(
+            f"Unknown blocker {value!r}. Use one of: {', '.join(BLOCKER_VALUES)}."
+        )
+    return cleaned
+
+
 APPROVAL_VALUES = ("", "pending", "approved", "rejected", "applied")
 SOURCE_VALUES = ("agent", "imported", "manual")
 
@@ -74,6 +103,22 @@ class Screening:
     apply_blocker: str = ""
     # The page the operator should sign in at, recorded alongside the blocker.
     signin_url: str = ""
+    # Why the agent could not read the posting at all (see BLOCKER_VALUES),
+    # distinct from apply_blocker above: apply_blocker describes a failure to
+    # *submit* an application the agent did read and screen; screening_blocker
+    # describes a posting the agent never got to evaluate in the first place.
+    # Unlike apply_blocker/signin_url, this one IS in EDITABLE below — it is
+    # the agent's own honest report of "I could not read this", made at
+    # record_screening time, not a grant of approval or a routing decision.
+    screening_blocker: str = ""
+    # Lease state: which run currently holds this item and until when. Set
+    # only by get_approved_applications' hand-out (screening.store.claim_for_run)
+    # and cleared on release/retire — like approval, this is NOT in EDITABLE,
+    # because a claim is granted by the hand-out call, not something the agent
+    # is entitled to patch onto its own record. An expired claim_expires_at
+    # means the item is unclaimed and reclaimable by another run.
+    claimed_by_run: str = ""
+    claim_expires_at: str = ""
     created_at: str = ""
     updated_at: str = ""
 
@@ -90,6 +135,7 @@ class Screening:
         "source",
         "posting_text",
         "posted_date",
+        "screening_blocker",
     )
 
     @classmethod

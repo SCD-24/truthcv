@@ -1,0 +1,158 @@
+"""Persistence for agent run records against the ./data volume.
+
+Mirrors screening/store.py: one JSON file on the shared data volume. Every
+mutator runs its whole load-modify-write inside ``datafile.locked`` for the
+same reason screenings do — the API and the agent's MCP tools can both touch
+this file, and an unguarded load-modify-write silently drops one writer's
+change.
+
+Deliberately NOT modelled on agentconfig/store.py, which hand-rolls its own
+write and takes no lock: a run record is written far more often (every tool
+call bumps a counter) and losing one silently is exactly the failure mode
+this store exists to avoid.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+from datafile import atomic_write_text, locked
+from truth.store import data_dir
+
+from .model import RunRecord, new_id, validate_status
+
+# Keep only the most recent N run records; older ones are dropped on write so
+# runs.json cannot grow without bound over the life of the deployment.
+_MAX_RECORDS = 200
+
+
+def runs_path() -> Path:
+    return data_dir() / "runs.json"
+
+
+def _now() -> str:
+    """UTC ISO-8601 timestamp; single source so started/finished stay consistent."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def load_all() -> list[RunRecord]:
+    """Every run record; empty list if the file is missing or invalid.
+
+    Fails safe on a malformed file (returns []) so a hand-edited or partially
+    written JSON never crashes the app on startup.
+    """
+    p = runs_path()
+    if not p.exists():
+        return []
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(raw, list):
+        return []
+    return [RunRecord.from_dict(item) for item in raw if isinstance(item, dict)]
+
+
+def _write_all(runs: list[RunRecord]) -> None:
+    """Persist the full list to runs.json.
+
+    Callers must already hold ``locked(runs_path())`` — this writes the list
+    it is given and does no reconciliation, so an unguarded caller overwrites
+    whatever another writer stored since it loaded. Retention (most recent
+    ``_MAX_RECORDS``) is enforced here so every write path gets it for free.
+    """
+    trimmed = sorted(runs, key=lambda r: r.started_at)[-_MAX_RECORDS:]
+    atomic_write_text(
+        runs_path(),
+        json.dumps([r.to_dict() for r in trimmed], indent=2, ensure_ascii=False),
+    )
+
+
+def get(run_id: str) -> RunRecord | None:
+    """The run record with this id, or None."""
+    return next((r for r in load_all() if r.id == run_id), None)
+
+
+def list_recent(limit: int = 50) -> list[RunRecord]:
+    """The most recently started runs, newest first."""
+    runs = sorted(load_all(), key=lambda r: r.started_at, reverse=True)
+    if limit and limit > 0:
+        return runs[:limit]
+    return runs
+
+
+def start(run_id: str, trigger: str = "", apply_cap: int = 0) -> RunRecord:
+    """Begin a run record. Idempotent: starting an id that already exists
+    returns the existing record unchanged rather than resetting it — a
+    forgetful agent calling start_run twice must not lose the first call's
+    coverage counters.
+    """
+    with locked(runs_path()):
+        runs = load_all()
+        existing = next((r for r in runs if r.id == run_id), None)
+        if existing is not None:
+            return existing
+        record = RunRecord(
+            id=run_id or new_id(),
+            started_at=_now(),
+            status="running",
+            trigger=trigger,
+            apply_cap=apply_cap,
+        )
+        runs.append(record)
+        _write_all(runs)
+        return record
+
+
+def bump(run_id: str, **counters: int) -> RunRecord | None:
+    """Add each keyword's value to the same-named counter field on the run.
+
+    Unknown counter names are ignored rather than raising: this is called
+    from best-effort tool code, and a typo here must not be able to fail a
+    run.
+    """
+    with locked(runs_path()):
+        runs = load_all()
+        record = next((r for r in runs if r.id == run_id), None)
+        if record is None:
+            return None
+        for key, delta in counters.items():
+            if hasattr(record, key) and isinstance(getattr(record, key), int):
+                setattr(record, key, getattr(record, key) + int(delta))
+        _write_all(runs)
+        return record
+
+
+def set_note(run_id: str, note: str) -> RunRecord | None:
+    """Set (overwrite) the run's free-text note."""
+    with locked(runs_path()):
+        runs = load_all()
+        record = next((r for r in runs if r.id == run_id), None)
+        if record is None:
+            return None
+        record.note = note
+        _write_all(runs)
+        return record
+
+
+def finish(
+    run_id: str,
+    status: str = "completed",
+    stopped_reason: str = "",
+    note: str = "",
+) -> RunRecord | None:
+    """Close out a run record with its terminal status and coverage answer."""
+    with locked(runs_path()):
+        runs = load_all()
+        record = next((r for r in runs if r.id == run_id), None)
+        if record is None:
+            return None
+        record.status = validate_status(status)
+        record.finished_at = _now()
+        record.stopped_reason = stopped_reason
+        if note:
+            record.note = note
+        _write_all(runs)
+        return record

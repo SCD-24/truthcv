@@ -349,3 +349,83 @@ def test_record_application_malformed_evidence_persists_nothing(data_dir):
         tools_ledger.record_application(screening_id=s.id, confirmation="{not json")
 
     assert apps.load_all() == []
+
+
+def _with_letter(company: str, url: str):
+    import coverletter.store as letters
+
+    s = _approved(company=company, url=url)
+    letters.save(s.id, letters.CoverLetterDraft(text="Dear hiring manager,", source="generated"))
+    return s
+
+
+def test_two_run_ids_get_disjoint_lists(data_dir):
+    """Each unblocked item is claimed for the run that receives it, so a
+    second run calling immediately after must not see the same item."""
+    _with_letter(company="A", url="https://a.example/1")
+    _with_letter(company="B", url="https://b.example/1")
+
+    first = get_approved_applications(run_id="run-1", limit=1)
+    second = get_approved_applications(run_id="run-2")
+
+    first_ids = {i["screening_id"] for i in first}
+    second_ids = {i["screening_id"] for i in second}
+    assert first_ids
+    assert second_ids
+    assert first_ids.isdisjoint(second_ids)
+    assert all(i["claimed_by_run"] == "run-1" for i in first)
+    assert all(i["claimed_by_run"] == "run-2" for i in second)
+
+
+def test_cap_honoured_from_explicit_limit(data_dir):
+    for i in range(3):
+        _with_letter(company=f"C{i}", url=f"https://c{i}.example/1")
+    items = get_approved_applications(run_id="run-cap", limit=2)
+    assert len(items) == 2
+
+
+def test_cap_honoured_from_agent_config(data_dir):
+    import agentconfig.store as agent_config_store
+
+    cfg = agent_config_store.load()
+    cfg.max_applications_per_run = 1
+    agent_config_store.save(cfg)
+
+    for i in range(3):
+        _with_letter(company=f"D{i}", url=f"https://d{i}.example/1")
+    items = get_approved_applications(run_id="run-cfg-cap")
+    assert len(items) == 1
+
+
+def test_blocked_item_consumes_no_cap_budget(data_dir):
+    _with_letter(company="Contoso Labs", url="https://contoso.example/jobs/1")
+    apps.create(
+        {
+            "company": "Contoso Labs",
+            "application_url": "https://contoso.example/jobs/1",
+            "submitted": True,
+        }
+    )
+    _with_letter(company="Fresh Co", url="https://fresh.example/jobs/1")
+
+    items = get_approved_applications(run_id="run-blocked", limit=1)
+    reasons = {i["screening_id"]: i["blocked_reason"] for i in items}
+    # The blocked item is reported and the one cap slot still goes to the
+    # unblocked item.
+    assert "already_applied" in reasons.values()
+    assert "" in reasons.values()
+
+
+def test_expired_lease_is_reclaimable_live_lease_is_not(data_dir):
+    s = _with_letter(company="Lease Co", url="https://lease.example/jobs/1")
+
+    store.claim_for_run(s.id, "run-live", lease_seconds=900)
+    # A live lease held by a different run: not returned to run-other.
+    items = get_approved_applications(run_id="run-other")
+    assert items == []
+
+    # Simulate an expired lease.
+    store.claim_for_run(s.id, "run-live", lease_seconds=-1)
+    items = get_approved_applications(run_id="run-later")
+    assert [i["screening_id"] for i in items] == [s.id]
+    assert items[0]["claimed_by_run"] == "run-later"

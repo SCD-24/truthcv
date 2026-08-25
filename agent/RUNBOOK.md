@@ -14,6 +14,25 @@ the tool.
 
 ---
 
+## Run identity — start_run and finish_run
+
+Every run is given a run id in its prompt, under "Run identity". Call
+`start_run` with that id ONCE, at the very beginning, before doing anything
+else. Keep passing that same `run_id` on every subsequent tool call that
+accepts one (`get_approved_applications`, `record_application`,
+`record_screening` does not take one).
+
+Before you exit — for ANY reason, including stopping early because you hit
+the apply cap, the browser session died, or you ran out of postings — call
+`finish_run` with that run id and an honest `stopped_reason` describing where
+you stopped. **A run that ends without calling `finish_run` is
+indistinguishable from one that crashed.** This is not optional cleanup: it
+is the only honest record of how much of the run's work actually got done.
+`record_run_note` is available for anything you want on the record that
+doesn't fit the coverage counters `finish_run` tracks automatically.
+
+---
+
 ## 0. The approved queue — work it first
 
 Call `get_approved_applications` before anything else. It returns the postings
@@ -413,15 +432,29 @@ record without it is dead weight for all three. Where a posting is carried by
 an aggregator that hides the employer, name the aggregator and say so in
 `reason` — that is a fact about the posting, not a placeholder.
 
-`verdict` must be exactly one of `rejected`, `passed`, or `deferred`. Anything
-else — a blank, a synonym like `"approved"`, a sentence — is rejected. This is
-the field the operator's queue is built from: a `deferred` or (in SEMI-AUTO) a
+`verdict` must be exactly one of `rejected`, `passed`, or `deferred` — UNLESS
+the posting could not be read at all (see below), in which case leave `verdict`
+empty and pass `screening_blocker` instead. Anything else — a blank with no
+blocker, a synonym like `"approved"`, a sentence — is rejected. This is the
+field the operator's queue is built from: a `deferred` or (in SEMI-AUTO) a
 `passed` verdict is what puts a posting in front of them. A screening recorded
-without a usable verdict is a screening they never see.
+without a usable verdict (and no blocker) is a screening they never see.
 
 Both **raise** and persist nothing, exactly as `url` and `role` do. Put the
 verdict in the named argument — never in `posting_text` prose. `posting_text`
 is the posting, and the operator drafts a letter from it verbatim.
+
+### A posting you could not read is not a verdict
+
+If the posting itself was unreachable — a 403, a login wall in front of the
+listing, a dead link, an expired listing — you did not evaluate it, so do not
+give it a verdict. **Never guess.** Call `record_screening` with `verdict`
+left empty and `screening_blocker` set to one of: `login_required`,
+`unreadable`, `not_found`, `expired`. This is distinct from
+`report_apply_failure`'s `blocker="login_required"` in §4 above, which is for
+an approved posting you already screened but could not submit the form for;
+`screening_blocker` is for a posting you never got to screen at all. Either
+way, the record reaches the operator's approval queue.
 
 When `generate_cover_letter` returns `blocked: true`, it means the letter
 contains at least one factual claim its guardrail could not ground in the

@@ -1501,6 +1501,14 @@
       "canvas": {
         "widgets": []
       },
+      "id": "run-store",
+      "name": "Run Store",
+      "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
       "id": "keyword-vocabulary",
       "name": "Keyword Vocabulary",
       "type": "backend"
@@ -1743,9 +1751,24 @@
       "to": "company-research"
     },
     {
+      "from": "run-store",
+      "protocol": "file I/O",
+      "to": "truth-data-volume"
+    },
+    {
       "from": "keyword-vocabulary",
       "protocol": "file I/O",
       "to": "truth-data-volume"
+    },
+    {
+      "from": "api",
+      "protocol": "in-process",
+      "to": "run-store"
+    },
+    {
+      "from": "application-agent",
+      "protocol": "HTTP/MCP (streamable HTTP JSON-RPC)",
+      "to": "run-store"
     },
     {
       "from": "tailor-engine",
@@ -1868,6 +1891,7 @@
         "application-tracker",
         "agent-config",
         "company-research",
+        "run-store",
         "keyword-vocabulary"
       ],
       "name": "TruthCV Container (single Docker image)",
@@ -1939,6 +1963,10 @@
     "renderer": {
       "x": 1324,
       "y": 356
+    },
+    "run-store": {
+      "x": 1500,
+      "y": 380
     },
     "screening-engine": {
       "x": 396,

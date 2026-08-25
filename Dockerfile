@@ -40,6 +40,7 @@ COPY render/ ./render/
 COPY coverletter/ ./coverletter/
 COPY applications/ ./applications/
 COPY screening/ ./screening/
+COPY runs/ ./runs/
 COPY agentconfig/ ./agentconfig/
 COPY companyboards/ ./companyboards/
 COPY companyresearch/ ./companyresearch/

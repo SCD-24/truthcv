@@ -53,6 +53,7 @@ Use these exact names and ids when discussing the architecture.
 | Onboarding Store | `onboarding-store` | backend |
 | Prompt Store | `prompt-store` | backend |
 | Renderer | `renderer` | backend |
+| Run Store | `run-store` | backend |
 | Screening Engine | `screening-engine` | backend |
 | Secret Store | `secret-store` | backend |
 | Tailor Engine | `tailor-engine` | backend |
@@ -64,5 +65,5 @@ Use these exact names and ids when discussing the architecture.
 <!-- generated:start cap:system-boundary -->
 ## System Boundary
 
-The declared system consists of 21 component(s) and 51 connection(s) — see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
+The declared system consists of 22 component(s) and 54 connection(s) — see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
 <!-- generated:end cap:system-boundary -->

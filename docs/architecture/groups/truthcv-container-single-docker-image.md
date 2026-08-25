@@ -18,6 +18,7 @@
 - **Application Tracker** (`application-tracker`)
 - **Agent Config** (`agent-config`)
 - **Company Research** (`company-research`)
+- **Run Store** (`run-store`)
 - **Keyword Vocabulary** (`keyword-vocabulary`)
 
 *No specific widgets have been placed in this group yet. Define guidelines, stack tech, or schemas in the workspace.*

@@ -70,8 +70,24 @@ def _headings(html: str) -> list[str]:
     return [h.strip().lower() for h in re.findall(r"<h2[^>]*>(.*?)</h2>", html, re.I | re.S)]
 
 
+# <style>/<script> bodies and comments sit between tags, so stripping tags
+# alone leaves their contents behind and they read as document text.
+#
+# One left-to-right pass, not two: whichever construct opens first must win.
+# Stripping elements before comments lets a <style> inside a comment pair with
+# the next real </style> and swallow the document in between; stripping
+# comments first has the mirror flaw for a "<!--" inside CSS. Alternation with
+# re.sub takes the leftmost match, which is what a real parser does.
+_NON_TEXT = re.compile(
+    r"<!--.*?-->"  # comment
+    r"|<(style|script)\b[^>]*>.*?</\1\s*>"  # style/script with its closing tag
+    r"|<(?:style|script)\b[^>]*>.*",  # unclosed: everything after it is not text
+    re.I | re.S,
+)
+
+
 def _visible_text(html: str) -> str:
-    return re.sub(r"<[^>]+>", " ", html).lower()
+    return re.sub(r"<[^>]+>", " ", _NON_TEXT.sub(" ", html)).lower()
 
 
 def _keyword_warning(kw: str, verdict: str) -> dict[str, str] | None:

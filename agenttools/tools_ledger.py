@@ -31,9 +31,11 @@ from applications.store import save_screening as _save_screening
 import applications.store as _apps_store
 import coverletter.store as _letter_store
 import screening.store as _screening_store
+import agenttools.tools_runs as _tools_runs
 from screening.company import company_identity_key as _company_identity_key
 from screening.company import validate_company_name as _validate_company_name
 from screening.cooldown import cooldown as _cooldown
+from screening.model import validate_blocker as _validate_blocker
 from screening.model import validate_verdict as _validate_verdict
 from screening.role import validate_role_title as _validate_role_title
 from screening.store import create as create_screening
@@ -137,6 +139,7 @@ def record_application(
     screening: dict | None = None,
     attachments: list | None = None,
     submitted: bool = True,
+    run_id: str = "",
     **fields,
 ) -> dict:
     """Persist one tracked application with its full evidence trail.
@@ -262,6 +265,22 @@ def record_application(
     # An approved queue item retires on evidence of a confirmed application,
     # not on the agent electing to retire it.
     if screening_id:
+        # Read the claim before mark_applied clears it, so a submission for an
+        # item this run did not hold can be flagged. Best-effort throughout:
+        # the ledger write above already happened, so nothing here may raise
+        # or change the return shape — a real submission must never be lost
+        # over an accounting failure.
+        if run_id:
+            try:
+                held = _screening_store.get(screening_id)
+                over_cap = bool(held) and held.claimed_by_run != run_id
+                _tools_runs.bump_run_counters(
+                    run_id=run_id,
+                    applications_submitted=1,
+                    **({"over_cap_writes": 1} if over_cap else {}),
+                )
+            except Exception:
+                pass
         _screening_store.mark_applied(screening_id)
 
     result = app.to_dict()
@@ -281,6 +300,7 @@ def record_screening(
     screened_date: str = "",
     posting_text: str = "",
     posted_date: str = "",
+    screening_blocker: str = "",
     **fields,
 ) -> dict:
     """Persist one screening verdict via ``screening.store.create``.
@@ -307,11 +327,16 @@ def record_screening(
     by ``screening.company.validate_company_name``, which rejects placeholders
     ("Unknown", "Confidential", an empty string) and pasted URLs.
 
-    ``verdict`` is mandatory and must be one of ``VERDICT_VALUES``. This is the
-    one field whose absence fails silently rather than loudly:
-    ``screening.store.create`` routes a record into the operator's queue by
-    comparing the verdict against "deferred"/"passed", so a blank or misspelled
-    one produces a stored record the operator never sees.
+    ``verdict`` must be one of ``VERDICT_VALUES``, or blank if and only if
+    ``screening_blocker`` is set. A posting the agent could not read at all —
+    403, login wall, dead link, expired listing — has no merits to judge, so it
+    takes a ``screening_blocker`` (one of ``BLOCKER_VALUES``) and no verdict.
+    Never guess a verdict for a posting you could not read; that fabricates an
+    evaluation that never happened. Absent a blocker, an empty verdict fails
+    silently rather than loudly: ``screening.store.create`` routes a record
+    into the operator's queue by comparing the verdict against
+    "deferred"/"passed", so a blank or misspelled one produces a stored record
+    the operator never sees.
 
     Every field above is named explicitly rather than left to ``**fields``,
     because the MCP inputSchema is derived from this signature: a field absent
@@ -326,7 +351,8 @@ def record_screening(
     fields["url"] = validated_url
     fields["role"] = validated_role
     fields["company"] = _validate_company_name(company)
-    fields["verdict"] = _validate_verdict(verdict)
+    validated_blocker = _validate_blocker(screening_blocker) if screening_blocker else ""
+    fields["verdict"] = _validate_verdict(verdict, blocker=validated_blocker)
     named = {
         "failing_criterion": failing_criterion,
         "reason": reason,
@@ -335,6 +361,7 @@ def record_screening(
         "screened_date": screened_date,
         "posting_text": posting_text,
         "posted_date": posted_date,
+        "screening_blocker": validated_blocker,
     }
     for name, value in named.items():
         if value:
@@ -490,10 +517,38 @@ def _is_submission(app) -> bool:
     return bool(app.submitted or app.confirmation.text.strip())
 
 
-def get_approved_applications() -> list[dict]:
+# How long a hand-out claim holds before another run may reclaim the item —
+# long enough to cover one application's browser interaction, short enough
+# that a crashed run's work comes back reasonably soon.
+_CLAIM_LEASE_SECONDS = 900
+
+
+def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:
     """Postings the operator approved and this run should apply to.
 
-    Three guards live here rather than in the prompt, because a wrong judgement by
+    ``run_id`` and ``limit`` are both optional (and must stay defaulted: the
+    MCP schema in agenttools/mcp_app.py marks a defaultless parameter
+    required). With an empty ``run_id`` this behaves exactly as it always
+    has, apart from the cap described below — that keeps the operator-facing
+    and test call paths unchanged.
+
+    With a non-empty ``run_id``:
+
+    - The per-run apply cap is ``limit`` when it is > 0, else
+      ``maxApplicationsPerRun`` from the agent config, else uncapped. Only
+      items that are actually applicable (``blocked_reason == ""``) consume
+      this budget; a blocked item is still reported (so the run report can
+      say why it did not go out) but never counts against the cap and is
+      never claimed.
+    - An item already live-leased to a DIFFERENT run is left out entirely —
+      this run must not step on another run's in-flight work. An item whose
+      lease has expired is available again.
+    - Every unblocked item returned up to the cap is claimed for this run via
+      screening.store.claim_for_run, and its ``claimed_by_run`` reflects
+      that. A shorter list than the cap means the cap was reached, not that
+      work was lost.
+
+    Three further guards live here rather than in the prompt, because a wrong judgement by
     the model would be costly and silent:
 
     - An item whose URL already appears in the applications ledger *as a
@@ -537,7 +592,15 @@ def get_approved_applications() -> list[dict]:
         for a in _apps_store.load_all()
         if _is_submission(a) and a.screening_id
     }
+    cap = 0
+    if limit and limit > 0:
+        cap = limit
+    else:
+        cfg = _agentconfig_store.load()
+        cap = getattr(cfg, "max_applications_per_run", None) or 0
+
     items = []
+    claimed_count = 0
     for s in _screening_store.load_all():
         if s.approval != "approved":
             continue
@@ -562,6 +625,21 @@ def get_approved_applications() -> list[dict]:
             blocked_reason = "no_letter"
         else:
             blocked_reason = ""
+
+        claimed_by_run = s.claimed_by_run
+        if not blocked_reason and run_id:
+            if cap and claimed_count >= cap:
+                continue  # over this run's cap: leave it for a later run
+            claimed = _screening_store.claim_for_run(s.id, run_id, _CLAIM_LEASE_SECONDS)
+            if claimed is None:
+                continue  # lost a race for this item; skip rather than misreport it
+            claimed_by_run = claimed.claimed_by_run
+            claimed_count += 1
+        elif not blocked_reason and cap and claimed_count >= cap:
+            continue
+        elif not blocked_reason:
+            claimed_count += 1
+
         items.append(
             {
                 "screening_id": s.id,
@@ -573,6 +651,7 @@ def get_approved_applications() -> list[dict]:
                 "contradictions": contradictions,
                 "cover_letter": draft.text if draft else "",
                 "letter_source": draft.source if draft else "",
+                "claimed_by_run": claimed_by_run,
             }
         )
     return items

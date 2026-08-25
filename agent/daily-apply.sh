@@ -28,8 +28,15 @@ BROWSER_MCP_URL="${BROWSER_MCP_URL:-http://browser:8931/mcp}"
 
 STAMP="$(date +%Y-%m-%d_%H%M)"
 
+# TRUTHCV_RUN_ID identifies this run to the run store (runs/store.py) via the
+# start_run/finish_run/record_run_note MCP tools. The supervisor (supervisor.js)
+# mints one and passes it through the environment for a scheduled run; a
+# manual invocation with no supervisor gets one generated here so it is still
+# accountable.
+TRUTHCV_RUN_ID="${TRUTHCV_RUN_ID:-$(date +%s)-$$}"
+
 mkdir -p "$RUN_LOG_DIR"
-RUN_LOG="$RUN_LOG_DIR/run_$STAMP.log"
+RUN_LOG="$RUN_LOG_DIR/run_${STAMP}_${TRUTHCV_RUN_ID}.log"
 
 log() { printf '%s  %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$RUN_LOG"; }
 
@@ -200,6 +207,17 @@ log "agent mode: $AGENT_MODE"
 # agent/prompt.md carries the operating instructions (it references
 # agent/RUNBOOK.md and names the eleven tools); this script only adds the date.
 PROMPT="$(cat "$PROMPT_FILE")"$'\n\n'"Today is $(date +%Y-%m-%d)."
+
+PROMPT="$PROMPT"$'\n\n'"## Run identity
+
+Your run id for this run is: $TRUTHCV_RUN_ID
+
+Call start_run ONCE, at the very beginning, passing this run id. Keep passing
+this same run_id on every subsequent tool call that accepts one (e.g.
+get_approved_applications, record_application). Before you exit — including
+if you are stopping early — call finish_run with this run_id and an honest
+stopped_reason describing where you stopped. A run that ends without calling
+finish_run is indistinguishable from one that crashed."
 
 # The mode changes what the agent does with a posting that passes every
 # criterion, so it is rendered into the prompt rather than left implicit. The
@@ -470,6 +488,9 @@ log "invoking claude... (browser driver: $AGENT_BROWSER_DRIVER)"
     "mcp__truthcv__report_apply_failure" \
     "mcp__truthcv__record_company_finding" \
     "mcp__truthcv__get_company_findings" \
+    "mcp__truthcv__start_run" \
+    "mcp__truthcv__finish_run" \
+    "mcp__truthcv__record_run_note" \
     "${BROWSER_TOOLS[@]}" \
   --dangerously-skip-permissions \
   </dev/null >>"$RUN_LOG" 2>&1

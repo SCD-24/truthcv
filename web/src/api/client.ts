@@ -38,6 +38,7 @@ import type {
   BrowserSession,
   CompanyFinding,
   ContradictionGroup,
+  RunRecord,
 } from "./types";
 import { errorDetailToMessage } from "./errorDetail";
 
@@ -425,7 +426,10 @@ export function listAppliedScreenings(): Promise<ScreeningRecord[]> {
  * screened as rejected at all. */
 export async function listDidNotPass(): Promise<ScreeningRecord[]> {
   const all = await listScreenings();
-  return all.filter((s) => s.verdict === "rejected" && !s.approval);
+  // A record blocked at screening time (the agent could not read the
+  // posting at all) is not a rejection on its merits — excluding it here
+  // stops that fabricated outcome from ever reaching this list.
+  return all.filter((s) => s.verdict === "rejected" && !s.approval && !s.screeningBlocker);
 }
 
 /** Record the operator's decision on one screening. */
@@ -585,6 +589,17 @@ export function cancelAgentRun(): Promise<AgentCancelResult> {
 /** Poll the agent supervisor for running/idle status. */
 export function getAgentStatus(): Promise<AgentStatus> {
   return request("/api/agent/status");
+}
+
+/** The most recently started agent runs, newest first. */
+export function listRuns(limit?: number): Promise<RunRecord[]> {
+  const qs = limit ? `?limit=${limit}` : "";
+  return request<{ runs: RunRecord[] }>(`/api/runs${qs}`).then((r) => r.runs);
+}
+
+/** A single run record, or throws (404) if no run with this id was recorded. */
+export function getRun(id: string): Promise<RunRecord> {
+  return request(`/api/runs/${encodeURIComponent(id)}`);
 }
 
 /** List all provider connections and their status. */

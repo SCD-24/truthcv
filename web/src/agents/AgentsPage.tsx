@@ -23,6 +23,7 @@ import {
   getProfileAnswers,
   getRouting,
   listConnections,
+  listRuns,
   saveProfileAnswers,
   triggerAgentRun,
   updateAgentConfig,
@@ -40,6 +41,7 @@ import type {
   JobProfile,
   ProfileAnswers,
   Routing,
+  RunRecord,
 } from "../api/types";
 
 /** The 20 text answers to ATS screening questions and cover-letter claim sources.
@@ -188,6 +190,7 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
             onChange={(updater) => setConfig((cur) => (cur ? updater(cur) : cur))}
           />
           <RunNowSection agentEnabled={config.enabled} />
+          <RecentRunsSection />
           {routing ? (
             <ModelSection connections={connections} routing={routing} onSaved={setRouting} />
           ) : (
@@ -419,6 +422,116 @@ function RunNowSection({ agentEnabled }: { agentEnabled: boolean }) {
         </Alert>
       )}
     </Section>
+  );
+}
+
+export { RecentRunsSection };
+
+/** Lists recent agent runs with their honest coverage summary — how much of
+ * the work each run actually got through, and where a partial run stopped.
+ * Polls independently of RunNowSection's status poll so this list refreshes
+ * without coupling to that component's pacing. */
+function RecentRunsSection() {
+  const [runs, setRuns] = useState<RunRecord[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+
+    function refresh() {
+      listRuns(10)
+        .then((rs) => {
+          if (!alive) return;
+          setRuns(rs);
+          setError(null);
+        })
+        .catch((e: unknown) => {
+          if (!alive) return;
+          setError(e instanceof Error ? e.message : "Could not load recent runs");
+        });
+    }
+
+    refresh();
+    const id = setInterval(refresh, STATUS_POLL_IDLE_MS);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
+  return (
+    <Section title="Recent runs" description="What each run covered, and where a partial run stopped.">
+      {error && <Alert severity="warning">{error}</Alert>}
+      {runs === null && !error && (
+        <Typography variant="body2" color="text.secondary">
+          Loading…
+        </Typography>
+      )}
+      {runs !== null && runs.length === 0 && (
+        <Typography variant="body2" color="text.secondary">
+          No runs recorded yet.
+        </Typography>
+      )}
+      {runs !== null && runs.length > 0 && (
+        <Stack spacing={1}>
+          {runs.map((run) => (
+            <RunSummaryRow key={run.id} run={run} />
+          ))}
+        </Stack>
+      )}
+    </Section>
+  );
+}
+
+function RunSummaryRow({ run }: { run: RunRecord }) {
+  const isRunning = run.status === "running";
+  const capLabel = run.applyCap > 0 ? `${run.applicationsSubmitted}/${run.applyCap}` : `${run.applicationsSubmitted}`;
+  return (
+    <Paper
+      variant="outlined"
+      sx={{ p: 1.5, borderColor: isRunning ? "info.main" : undefined }}
+      aria-label={`Run ${run.id}`}
+    >
+      <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
+        <Chip
+          size="small"
+          label={isRunning ? "Running" : run.status || "unknown"}
+          color={isRunning ? "info" : run.status === "failed" ? "error" : "default"}
+          variant={isRunning ? "filled" : "outlined"}
+        />
+        <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+          {run.id}
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          {run.startedAt ? new Date(run.startedAt).toLocaleString() : ""}
+          {run.finishedAt ? ` – ${new Date(run.finishedAt).toLocaleString()}` : ""}
+        </Typography>
+      </Stack>
+      <Stack direction="row" spacing={2} sx={{ mt: 0.5, flexWrap: "wrap" }}>
+        <Typography variant="caption" color="text.secondary">
+          Postings seen: {run.postingsSeen}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          Screenings recorded: {run.screeningsRecorded}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          Blocked: {run.blockedCount}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          Applied: {capLabel}
+        </Typography>
+        {run.overCapWrites > 0 && (
+          <Typography variant="caption" color="warning.main">
+            Over cap: {run.overCapWrites}
+          </Typography>
+        )}
+      </Stack>
+      {run.stoppedReason && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+          Stopped: {run.stoppedReason}
+        </Typography>
+      )}
+    </Paper>
   );
 }
 

@@ -17,6 +17,8 @@ import TableRow from "@mui/material/TableRow";
 import Chip from "@mui/material/Chip";
 import Tooltip from "@mui/material/Tooltip";
 import TextField from "@mui/material/TextField";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import Checkbox from "@mui/material/Checkbox";
 import { deleteScreening, listScreenings, setScreeningRole } from "../api/client";
 import type { ScreeningRecord } from "../api/types";
 import { isCooldownActive } from "../settings/cooldown";
@@ -30,6 +32,20 @@ function cooldownLabel(record: ScreeningRecord, active: boolean): string {
 }
 
 export { cooldownLabel };
+
+/** Human label for a screening_blocker value, for the badge and the filter. */
+const BLOCKER_LABELS: Record<string, string> = {
+  login_required: "Login required",
+  unreadable: "Unreadable",
+  not_found: "Not found",
+  expired: "Expired listing",
+};
+
+function blockerLabel(blocker: string): string {
+  return BLOCKER_LABELS[blocker] ?? blocker;
+}
+
+export { blockerLabel };
 
 /** A role a user typed vs the role as last committed — if they match, a
  * commit is a no-op that must not fire a request. */
@@ -150,7 +166,18 @@ function ScreeningRow({
         </Tooltip>
       </TableCell>
       <RoleCell record={record} busy={savingRole} onSave={onSaveRole} />
-      <TableCell>{record.verdict || "—"}</TableCell>
+      <TableCell>
+        {record.screeningBlocker ? (
+          <Chip
+            size="small"
+            variant="outlined"
+            color="warning"
+            label={`Couldn't read: ${blockerLabel(record.screeningBlocker)}`}
+          />
+        ) : (
+          record.verdict || "—"
+        )}
+      </TableCell>
       <TableCell>{record.failingCriterion || "—"}</TableCell>
       <TableCell>
         <Chip
@@ -187,6 +214,7 @@ export function ScreeningsPage({ onBack }: { onBack: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [savingRoleId, setSavingRoleId] = useState<string | null>(null);
+  const [blockedOnly, setBlockedOnly] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -235,6 +263,9 @@ export function ScreeningsPage({ onBack }: { onBack: () => void }) {
 
   const last = lastAgentActivity(screenings);
   const lastLabel = last ? new Date(last).toLocaleDateString() : null;
+  const visibleScreenings = blockedOnly
+    ? screenings.filter((r) => r.screeningBlocker)
+    : screenings;
 
   return (
     <Box className="screenings-page" aria-labelledby="screenings-title">
@@ -277,6 +308,16 @@ export function ScreeningsPage({ onBack }: { onBack: () => void }) {
               Last recorded activity: {lastLabel}
             </Typography>
           )}
+          <FormControlLabel
+            control={
+              <Checkbox
+                size="small"
+                checked={blockedOnly}
+                onChange={(e) => setBlockedOnly(e.target.checked)}
+              />
+            }
+            label="Show only postings the agent couldn't read"
+          />
           <Table size="small">
             <TableHead>
               <TableRow>
@@ -289,7 +330,7 @@ export function ScreeningsPage({ onBack }: { onBack: () => void }) {
               </TableRow>
             </TableHead>
             <TableBody>
-              {screenings.map((record) => (
+              {visibleScreenings.map((record) => (
                 <ScreeningRow
                   key={record.id}
                   record={record}

@@ -417,8 +417,39 @@ export interface ScreeningRecord {
   approval: "" | "pending" | "approved" | "rejected" | "applied";
   applyAttempts: number;
   applyError: string;
+  /** Why the agent could not read the posting at all — distinct from a
+   * verdict on its merits. "" means no blocker. A strict union (unlike
+   * `verdict` above, which is loose) so a typo is caught at compile time. */
+  screeningBlocker: "" | "login_required" | "unreadable" | "not_found" | "expired";
+  /** Lease state granted by the agent's hand-out call, not agent-editable.
+   * An empty or past claimExpiresAt means the item is unclaimed. */
+  claimedByRun: string;
+  claimExpiresAt: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** One execution of the unattended job-application agent — its identity, how
+ * it ended, and an honest summary of how much of the work it covered. */
+export interface RunRecord {
+  id: string;
+  startedAt: string;
+  finishedAt: string;
+  status: "running" | "completed" | "cancelled" | "failed" | "";
+  trigger: string;
+  /** The per-run application cap in effect; 0 means uncapped. */
+  applyCap: number;
+  postingsSeen: number;
+  screeningsRecorded: number;
+  blockedCount: number;
+  applicationsSubmitted: number;
+  /** Submissions that arrived for an item this run had not claimed — flagged,
+   * not refused. */
+  overCapWrites: number;
+  /** Where a partial run stopped, in the agent's own words. Empty for a run
+   * that completed normally. */
+  stoppedReason: string;
+  note: string;
 }
 
 /** A screening's current cover letter. `source` says whether the guardrail
