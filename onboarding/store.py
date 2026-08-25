@@ -14,6 +14,7 @@ from pathlib import Path
 import yaml
 
 from modelrouting import store as modelrouting
+from truth import store as truth_store
 from truth.store import data_dir
 
 
@@ -90,3 +91,31 @@ def mark_tour_seen(when: str | None = None) -> OnboardingState:
 def provider_ready() -> bool:
     """Whether a default LLM provider route is configured (derived, not persisted)."""
     return modelrouting.load().default is not None
+
+
+def has_existing_cv() -> bool:
+    """Whether truth.yaml already holds real CV content.
+
+    Used only to backfill pre-existing users on their first onboarding read;
+    a ValueError from a corrupt truth.yaml is treated as 'no existing CV'.
+    """
+    try:
+        truth = truth_store.load()
+    except ValueError:
+        return False
+    has_header = bool(truth.profile.name or truth.profile.summary)
+    return bool(truth.experiences or truth.education or truth.skills or has_header)
+
+
+def ensure_initialized() -> OnboardingState:
+    """Create onboarding.yaml on first read, backfilling pre-existing users.
+
+    If onboarding.yaml already exists, this is a no-op that just loads it.
+    Otherwise it writes the file so this backfill can never fire again: a
+    user who already had a CV before onboarding existed gets cv_reviewed_at
+    set to now; a genuinely new user gets both fields left None.
+    """
+    if _state_path().exists():
+        return load()
+    state = OnboardingState(cv_reviewed_at=_now() if has_existing_cv() else None)
+    return save(state)

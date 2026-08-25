@@ -24,7 +24,7 @@ vi.mock("../api/client", () => ({
   listConnections: vi.fn(),
   saveTruth: vi.fn(),
   updateOnboarding: vi.fn(),
-  uploadPdf: vi.fn(),
+  uploadCv: vi.fn(),
   // Touched only by interactions in the provider step's sub-sections; stubbed
   // so their modules import cleanly under the mocked client.
   listConnectionModels: vi.fn(),
@@ -105,7 +105,7 @@ describe("OnboardingPage", () => {
 
     renderPage();
 
-    expect(await screen.findByText("Drop your LinkedIn PDF here")).toBeTruthy();
+    expect(await screen.findByText("Drop your CV here")).toBeTruthy();
   });
 
   it("skips Upload and opens on Review when a profile already exists and the CV isn't reviewed", async () => {

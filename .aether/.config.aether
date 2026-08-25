@@ -100,11 +100,6 @@
             "data": {
               "routes": [
                 {
-                  "desc": "Upload LinkedIn PDF (multipart); backend extracts text with pypdf.",
-                  "method": "POST",
-                  "path": "/api/upload"
-                },
-                {
                   "desc": "LLM extracts structured truth.yaml from the uploaded PDF text.",
                   "method": "POST",
                   "path": "/api/extract"
@@ -163,6 +158,11 @@
                   "desc": "Delete many screenings in one call; reports per-id outcomes. Operator-only — not an agent route and not an MCP tool.",
                   "method": "POST",
                   "path": "/api/screenings/deletions"
+                },
+                {
+                  "desc": "Upload a CV as PDF, DOCX, TXT or Markdown (multipart); backend extracts text per format and stores the file under its own extension.",
+                  "method": "POST",
+                  "path": "/api/upload"
                 }
               ]
             },
@@ -226,6 +226,11 @@
                   "desc": "Path to the mounted data volume (truth.yaml, secrets.enc, profile.pdf).",
                   "example": "./data",
                   "key": "DATA_DIR"
+                },
+                {
+                  "desc": "Host-side port the compose stack publishes the UI on (docker-compose.yml ${APP_PORT:-5627}). Display only — the app still binds PORT (8080) inside the container. Read by api.config.public_url() to print a reachable URL at startup. Unset in local dev, where it falls back to PORT.",
+                  "example": "8123",
+                  "key": "PUBLIC_PORT"
                 }
               ]
             },
@@ -472,7 +477,7 @@
         "widgets": [
           {
             "data": {
-              "text": "Owns truth.yaml, the single origin of all facts (truth/). Extracts text from the uploaded LinkedIn PDF via pypdf, uses a provider to build a structured truth file (every role/company/date/bullet/skill tagged source:linkedin-pdf with a stable id), and builds/validates/persists it. User-confirmed inferences are written back tagged source:user-confirmed."
+              "text": "Owns truth.yaml, the single origin of all facts (truth/). Extracts text from an uploaded CV in any supported format — PDF (pypdf), DOCX (python-docx), TXT or Markdown — uses a provider to build a structured truth file (every role/company/date/bullet/skill tagged source:uploaded-cv with a stable id), and builds/validates/persists it. Legacy entries tagged linkedin-pdf remain valid. User-confirmed inferences are tagged user-confirmed."
             },
             "h": 180,
             "id": "widget-1783591752580-0",
@@ -487,7 +492,8 @@
               "techs": [
                 "Python",
                 "pypdf",
-                "PyYAML"
+                "PyYAML",
+                "python-docx"
               ]
             },
             "h": 200,
@@ -1482,6 +1488,14 @@
       "id": "onboarding-store",
       "name": "Onboarding Store",
       "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "id": "company-research",
+      "name": "Company Research",
+      "type": "backend"
     }
   ],
   "connections": [
@@ -1699,6 +1713,26 @@
       "from": "renderer",
       "protocol": "in-process",
       "to": "prompt-store"
+    },
+    {
+      "from": "company-research",
+      "protocol": "file I/O",
+      "to": "truth-data-volume"
+    },
+    {
+      "from": "api",
+      "protocol": "in-process",
+      "to": "company-research"
+    },
+    {
+      "from": "application-tracker",
+      "protocol": "in-process",
+      "to": "company-research"
+    },
+    {
+      "from": "screening-engine",
+      "protocol": "in-process",
+      "to": "company-research"
     }
   ],
   "definitions": [
@@ -1804,7 +1838,8 @@
         "cover-letter-engine",
         "prompt-store",
         "application-tracker",
-        "agent-config"
+        "agent-config",
+        "company-research"
       ],
       "name": "TruthCV Container (single Docker image)",
       "w": 1861.8301559792023,
@@ -1831,6 +1866,10 @@
     "application-tracker": {
       "x": 1028,
       "y": 428
+    },
+    "company-research": {
+      "x": 1500,
+      "y": 200
     },
     "connections": {
       "x": 396,

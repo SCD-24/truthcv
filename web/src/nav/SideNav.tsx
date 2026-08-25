@@ -9,6 +9,7 @@ import InsightsOutlinedIcon from "@mui/icons-material/InsightsOutlined";
 import SmartToyOutlinedIcon from "@mui/icons-material/SmartToyOutlined";
 import PlaylistAddCheckOutlinedIcon from "@mui/icons-material/PlaylistAddCheckOutlined";
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
+import TravelExploreOutlinedIcon from "@mui/icons-material/TravelExploreOutlined";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import { ROUTES } from "../routes";
 
@@ -68,6 +69,12 @@ export function SideNav({ pathname, onNavigate, onOpenSettings, pendingApprovals
       label: "Screenings",
       icon: <FactCheckOutlinedIcon fontSize="small" />,
       dataTour: "nav-screenings",
+    },
+    {
+      path: ROUTES.companyResearch,
+      label: "Company Research",
+      icon: <TravelExploreOutlinedIcon fontSize="small" />,
+      dataTour: "nav-company-research",
     },
     {
       path: ROUTES.approvals,

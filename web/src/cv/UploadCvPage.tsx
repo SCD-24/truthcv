@@ -13,7 +13,7 @@ interface Props {
 /**
  * The reusable Upload → Review body: a local two-phase flow (Upload, then
  * Review) — not routes, not the global wizard rail. Opens on `initialPhase`
- * (default "upload"); callers that already know a profile PDF exists (e.g.
+ * (default "upload"); callers that already know a stored profile exists (e.g.
  * onboarding) can start it on Review instead of asking the user to re-upload.
  * Marks the onboarding CV review as done on the server once Review is saved,
  * then hands off to onDone. Shared by the standalone Upload CV page and the

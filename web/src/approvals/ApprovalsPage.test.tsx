@@ -11,6 +11,7 @@ import {
   listAppliedScreenings,
   markScreeningApplied,
   listApprovedApplications,
+  listContradictions,
   listDidNotPass,
   listPendingApprovals,
   listRejectedApprovals,
@@ -28,6 +29,7 @@ vi.mock("../api/client", () => ({
   listRejectedApprovals: vi.fn(),
   listDidNotPass: vi.fn(),
   listAppliedScreenings: vi.fn(),
+  listContradictions: vi.fn(),
   setScreeningApproval: vi.fn(),
   bulkSetApproval: vi.fn(),
   deleteScreening: vi.fn(),
@@ -55,6 +57,7 @@ beforeEach(() => {
   vi.mocked(listRejectedApprovals).mockResolvedValue([]);
   vi.mocked(listDidNotPass).mockResolvedValue([]);
   vi.mocked(listAppliedScreenings).mockResolvedValue([]);
+  vi.mocked(listContradictions).mockResolvedValue([]);
 });
 
 function makeRecord(overrides: Partial<ScreeningRecord> = {}): ScreeningRecord {

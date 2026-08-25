@@ -386,6 +386,8 @@ log "invoking claude... (browser driver: $AGENT_BROWSER_DRIVER)"
     "mcp__truthcv__recommend_salary" \
     "mcp__truthcv__get_approved_applications" \
     "mcp__truthcv__report_apply_failure" \
+    "mcp__truthcv__record_company_finding" \
+    "mcp__truthcv__get_company_findings" \
     "${BROWSER_TOOLS[@]}" \
   --dangerously-skip-permissions \
   </dev/null >>"$RUN_LOG" 2>&1

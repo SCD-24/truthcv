@@ -1,7 +1,7 @@
 /** Domain types shared across the wizard, matching the API contract. */
 
 /** Where a fact came from — the provenance the whole UI is built around. */
-export type TruthSource = "linkedin-pdf" | "user-confirmed";
+export type TruthSource = "uploaded-cv" | "linkedin-pdf" | "user-confirmed";
 
 /** One achievement line, owned by an experience. */
 export interface Bullet {
@@ -278,22 +278,42 @@ export interface ApplicationAttachment {
   path: string;
 }
 
-/** The Glassdoor check within a pre-application screening verdict. */
-export interface ApplicationScreeningGlassdoor {
-  rating: string | number;
-  reviews: string | number;
-  waiverApplied: boolean;
-  note: string;
-}
-
-/** The pre-application filter verdicts recorded on a tracked application. */
+/** The pre-application filter verdicts recorded on a tracked application.
+ * These are facts about a POSTING, not a company — company-level claims
+ * (employing entity, employer-review figures) live in CompanyFinding /
+ * companyresearch instead, where they carry a source and an as-of date. */
 export interface ApplicationScreening {
-  entity: string;
   remote: string;
   salary: string;
   language: string;
   roleType: string;
-  glassdoor: ApplicationScreeningGlassdoor;
+}
+
+/** One sourced, dated company research finding. Immutable once written —
+ * only `resolution`/`resolvedAt`/`resolutionNote` are ever set afterwards. */
+export interface CompanyFinding {
+  id: string;
+  company: string;
+  claim: string;
+  value: string;
+  sourceUrl: string;
+  sourceClass: string;
+  /** The date the SOURCE is dated. Empty means unknown — never substitute
+   * observedAt or "today" for it. */
+  asOf: string;
+  observedAt: string;
+  recordedBy: string;
+  note: string;
+  contradicts: string[];
+  resolution: string;
+  resolvedAt: string;
+  resolutionNote: string;
+}
+
+/** One claim with two or more disagreeing, cited findings. */
+export interface ContradictionGroup {
+  claim: string;
+  findings: CompanyFinding[];
 }
 
 /** A tracked job application. `posting` is empty for General submissions; the

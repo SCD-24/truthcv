@@ -97,7 +97,10 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Then open **http://localhost:5627**.
+5627 is only the default — the actual URL depends on `APP_PORT` in your
+`.env`. The app now prints its real URL at startup, so `docker compose logs
+app` (or `docker compose ps`, whose PORTS column shows
+`0.0.0.0:<host>->8080/tcp`) is the reliable way to find it.
 
 Generated CVs and your truth file are persisted in `./data` (mounted into the
 container), so they survive restarts.

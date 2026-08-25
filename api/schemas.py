@@ -26,7 +26,7 @@ class _Camel(BaseModel):
 class BulletModel(_Camel):
     id: str
     value: str
-    source: str = "linkedin-pdf"
+    source: str = "uploaded-cv"
 
 
 class ExperienceModel(_Camel):
@@ -35,7 +35,7 @@ class ExperienceModel(_Camel):
     company: str = ""
     start: str = ""
     end: str = ""
-    source: str = "linkedin-pdf"
+    source: str = "uploaded-cv"
     bullets: list[BulletModel] = Field(default_factory=list)
 
 
@@ -45,13 +45,13 @@ class EducationModel(_Camel):
     school: str = ""
     start: str = ""
     end: str = ""
-    source: str = "linkedin-pdf"
+    source: str = "uploaded-cv"
 
 
 class SkillModel(_Camel):
     id: str
     value: str
-    source: str = "linkedin-pdf"
+    source: str = "uploaded-cv"
 
 
 class LinkModel(_Camel):
@@ -568,28 +568,92 @@ class ConfirmationModel(_Camel):
     evidence: str = ""
 
 
-class GlassdoorModel(_Camel):
-    """The Glassdoor check within a screening verdict."""
-
-    rating: str | float = ""
-    reviews: str | int = ""
-    waiver_applied: bool = False
-    note: str = ""
-
-
 class ApplicationScreeningModel(_Camel):
     """The pre-application filter verdicts recorded on a tracked application.
 
     Distinct from ScreeningModel further down this file, which is the wire
     shape for the separate screenings-queue record (GET/POST /screenings).
+
+    These are facts about a POSTING (remote policy, salary, language, role
+    type), not about a company — company-level claims (employing entity,
+    employer-review figures) live in CompanyFindingModel / companyresearch
+    instead, where they carry a source and an as-of date.
     """
 
-    entity: str = ""
     remote: str = ""
     salary: str = ""
     language: str = ""
     role_type: str = ""
-    glassdoor: GlassdoorModel = Field(default_factory=GlassdoorModel)
+
+
+class CompanyFindingModel(_Camel):
+    """Wire shape for one company research finding (response)."""
+
+    id: str = ""
+    company: str = ""
+    claim: str = ""
+    value: str = ""
+    source_url: str = ""
+    source_class: str = ""
+    as_of: str = ""
+    observed_at: str = ""
+    recorded_by: str = ""
+    note: str = ""
+    contradicts: list[str] = Field(default_factory=list)
+    resolution: str = ""
+    resolved_at: str = ""
+    resolution_note: str = ""
+
+
+class CompanyFindingCreate(_Camel):
+    """Client-supplied fields for a new, operator-recorded company finding."""
+
+    company: str = ""
+    claim: str = ""
+    value: str = ""
+    source_url: str = ""
+    source_class: str = ""
+    as_of: str = ""
+    note: str = ""
+
+    @field_validator("source_class")
+    @classmethod
+    def _validate_source_class(cls, v: str) -> str:
+        from companyresearch.model import SOURCE_CLASSES
+
+        if v not in SOURCE_CLASSES:
+            raise ValueError(
+                f"source_class must be one of: {', '.join(SOURCE_CLASSES)}"
+            )
+        return v
+
+    @field_validator("source_url")
+    @classmethod
+    def _validate_source_url(cls, v: str) -> str:
+        if not v or "://" not in v:
+            raise ValueError("source_url is required — operator writes are never uncited")
+        return v
+
+
+class CompanyFindingResolve(_Camel):
+    """Body for resolving (accepting/rejecting) an existing finding."""
+
+    resolution: str = ""
+    note: str = ""
+
+    @field_validator("resolution")
+    @classmethod
+    def _validate_resolution(cls, v: str) -> str:
+        if v not in ("", "accepted", "rejected"):
+            raise ValueError("resolution must be one of: '', 'accepted', 'rejected'")
+        return v
+
+
+class ContradictionGroupModel(_Camel):
+    """One claim with two or more disagreeing, cited findings."""
+
+    claim: str = ""
+    findings: list[CompanyFindingModel] = Field(default_factory=list)
 
 
 class AttachmentModel(_Camel):

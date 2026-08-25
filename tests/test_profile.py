@@ -38,6 +38,16 @@ def test_profile_absent_then_present(client):
     assert client.get("/api/profile").json()["hasProfile"] is True
 
 
+def test_profile_absent_then_present_for_non_pdf(client):
+    assert client.get("/api/profile").json()["hasProfile"] is False
+    r = client.post(
+        "/api/upload",
+        files={"file": ("cv.md", io.BytesIO(b"# Jane Doe\n\n- Engineer"), "text/markdown")},
+    )
+    assert r.status_code == 204, r.text
+    assert client.get("/api/profile").json()["hasProfile"] is True
+
+
 def test_upload_records_source_hash(client):
     from truth.store import loaded_source_hash
 

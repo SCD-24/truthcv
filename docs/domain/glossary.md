@@ -19,7 +19,7 @@ Canonical component names projected from the architecture canvas.
 <!-- generated:end comp:api -->
 
 <!-- generated:start comp:truth-store -->
-- **Truth Store** (`truth-store`) — backend component. Owns truth.yaml, the single origin of all facts (truth/). Extracts text from the uploaded LinkedIn PDF via pypdf, uses a provider to build a structured truth file (every role/company/date/bullet/skill tagged source:linkedin-pdf with a stable id), and builds/validates/persists it. User-confirmed inferences are written back tagged source:user-confirmed.
+- **Truth Store** (`truth-store`) — backend component. Owns truth.yaml, the single origin of all facts (truth/). Extracts text from an uploaded CV in any supported format — PDF (pypdf), DOCX (python-docx), TXT or Markdown — uses a provider to build a structured truth file (every role/company/date/bullet/skill tagged source:uploaded-cv with a stable id), and builds/validates/persists it. Legacy entries tagged linkedin-pdf remain valid. User-confirmed inferences are tagged user-confirmed.
 <!-- generated:end comp:truth-store -->
 
 <!-- generated:start comp:tailor-engine -->
@@ -123,3 +123,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:start comp:onboarding-store -->
 - **Onboarding Store** (`onboarding-store`) — backend component.
 <!-- generated:end comp:onboarding-store -->
+
+<!-- generated:start comp:company-research -->
+- **Company Research** (`company-research`) — backend component.
+<!-- generated:end comp:company-research -->

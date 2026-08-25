@@ -52,8 +52,10 @@ class RenderRefused(Exception):
 
 
 # Order in which screening verdicts are rendered, so the log is diff-friendly
-# rather than dependent on field declaration order.
-_SCREENING_ORDER = ("entity", "remote", "salary", "language", "role_type")
+# rather than dependent on field declaration order. Company-level claims
+# (employing entity, employer-review figures) are no longer part of Screening
+# — they render via _findings_table instead, sourced and dated.
+_SCREENING_ORDER = ("remote", "salary", "language", "role_type")
 
 _MARKER = "<!-- record: {} -->"
 
@@ -77,17 +79,6 @@ def _cell(value: object) -> str:
     return text.replace("<!--", "&lt;!--").replace("|", "\\|")
 
 
-def _glassdoor_line(glassdoor) -> str | None:
-    """The Glassdoor check as one bullet, or None when nothing was recorded."""
-    if glassdoor.rating not in ("", None):
-        suffix = f" ({glassdoor.reviews} reviews)" if glassdoor.reviews not in ("", None) else ""
-        waiver = " — waiver applied" if glassdoor.waiver_applied else ""
-        return f"- **Glassdoor:** {_cell(glassdoor.rating)}{suffix}{waiver}"
-    if glassdoor.note:
-        return f"- **Glassdoor:** {_cell(glassdoor.note)}"
-    return None
-
-
 def _status_line(app: Application) -> str:
     """The headline disposition, in whichever vocabulary the record uses.
 
@@ -106,8 +97,8 @@ def _status_line(app: Application) -> str:
     return f"{_cell(status).upper()} — {submission}" if status else submission.upper()
 
 
-def _provenance_lines(app: Application) -> list[str]:
-    """Capture method and any confirmation evidence not already in the status."""
+def _provenance_lines(app: Application, findings: list | None = None) -> list[str]:
+    """Capture method, confirmation evidence, and an open-contradiction flag."""
     lines = []
     if app.capture_method == "reconstructed":
         lines.append(
@@ -124,7 +115,25 @@ def _provenance_lines(app: Application) -> list[str]:
     text = (app.confirmation.text or "").strip()
     if text and app.status != "confirmed":
         lines.append(f'- **Confirmation:** "{_cell(text)}"')
+    if _has_open_contradiction(findings or []):
+        lines.append(
+            "- **Company research:** open contradiction — see the findings "
+            "table below; the operator must resolve it."
+        )
     return lines
+
+
+def _has_open_contradiction(findings: list) -> bool:
+    """True when two or more cited, non-rejected findings share a claim but
+    disagree on its value."""
+    by_claim: dict[str, set[str]] = {}
+    for f in findings:
+        if getattr(f, "source_class", "unattributed") == "unattributed":
+            continue
+        if getattr(f, "resolution", "") == "rejected":
+            continue
+        by_claim.setdefault(f.claim, set()).add(f.value.strip().casefold())
+    return any(len(values) > 1 for values in by_claim.values())
 
 
 def _screening_lines(app: Application) -> list[str]:
@@ -134,10 +143,62 @@ def _screening_lines(app: Application) -> list[str]:
         value = getattr(app.screening, key, "")
         if value:
             lines.append(f"- **{_humanize_key(key)}:** {_cell(value)}")
-    glassdoor = _glassdoor_line(app.screening.glassdoor)
-    if glassdoor:
-        lines.append(glassdoor)
     return lines
+
+
+def _findings_table(findings: list) -> list[str]:
+    """Sourced company-research findings as a Markdown table.
+
+    Contradicting findings render as adjacent rows under the same claim,
+    strongest source first, so the disagreement stays visible rather than
+    being silently reconciled. Every cell goes through `_cell()` — required
+    so a finding's note or value can never forge the completeness guard's
+    record marker.
+    """
+    if not findings:
+        return []
+    # Mirrors companyresearch.model.SOURCE_CLASSES ranking (strongest first),
+    # duplicated rather than imported so this module keeps no dependency on
+    # the company research store — render_log stays pure: applications and
+    # findings in, Markdown out, nothing loaded here.
+    rank_order = (
+        "audited_accounts",
+        "regulatory_filing",
+        "listed_bond_price",
+        "company_statement",
+        "press",
+        "review_site",
+        "unattributed",
+    )
+
+    def _rank(source_class: str) -> int:
+        return rank_order.index(source_class) if source_class in rank_order else len(rank_order)
+
+    ordered = sorted(findings, key=lambda f: (f.claim, _rank(f.source_class)))
+    rows = [
+        "\n**Company research:**\n",
+        "| Claim | Value | Source | As of | Status |",
+        "|---|---|---|---|---|",
+    ]
+    for f in ordered:
+        source = f"{f.source_class} — {f.source_url}" if f.source_url else f.source_class
+        as_of = f.as_of or "unknown"
+        status = {"accepted": "accepted", "rejected": "rejected"}.get(f.resolution, "")
+        if not status and f.source_class != "unattributed":
+            claim_values = {
+                g.value.strip().casefold()
+                for g in ordered
+                if g.claim == f.claim
+                and g.source_class != "unattributed"
+                and g.resolution != "rejected"
+            }
+            if len(claim_values) > 1 and f.resolution != "rejected":
+                status = "open contradiction"
+        rows.append(
+            f"| {_cell(f.claim)} | {_cell(f.value)} | {_cell(source)} | "
+            f"{_cell(as_of)} | {_cell(status)} |"
+        )
+    return rows
 
 
 def _fields_table(app: Application) -> list[str]:
@@ -165,8 +226,9 @@ def _notes_lines(app: Application) -> list[str]:
     return ["\n**Notes:**\n"] + [f"- {_cell(p)}" for p in paragraphs]
 
 
-def _section(number: int, app: Application) -> list[str]:
+def _section(number: int, app: Application, findings: list | None = None) -> list[str]:
     """One application's complete section, marker included."""
+    findings = findings or []
     role = _cell(app.role) or "role not recorded"
     parts = [
         f"\n---\n\n## {number}. {_cell(app.company)} — {role}",
@@ -179,11 +241,12 @@ def _section(number: int, app: Application) -> list[str]:
         parts.append(f"- **ATS:** {_cell(app.ats)}")
     if app.profile:
         parts.append(f"- **Profile:** {_cell(app.profile)}")
-    parts += _provenance_lines(app)
+    parts += _provenance_lines(app, findings)
     parts += _screening_lines(app)
     if app.attachments:
         parts.append("- **Attachments:** " + ", ".join(_cell(a.path) for a in app.attachments))
     parts += _fields_table(app)
+    parts += _findings_table(findings)
     if app.gaps_disclosed:
         parts.append("\n**Gaps disclosed:**\n")
         parts += [f"- {_cell(gap)}" for gap in app.gaps_disclosed]
@@ -192,12 +255,20 @@ def _section(number: int, app: Application) -> list[str]:
     return parts
 
 
-def render_log(applications: list[Application]) -> str:
-    """Render the whole ledger to Markdown. Pure: applications in, text out."""
+def render_log(
+    applications: list[Application], findings_by_company: dict[str, list] | None = None
+) -> str:
+    """Render the whole ledger to Markdown. Pure: applications in, text out.
+
+    `findings_by_company` is an optional company -> [CompanyFinding] map;
+    this function does no loading of its own — see the module docstring.
+    """
+    findings_by_company = findings_by_company or {}
     ordered = sorted(applications, key=lambda a: (a.application_date or "", a.id))
     parts = [HEADER]
     for number, app in enumerate(ordered, start=1):
-        parts += _section(number, app)
+        findings = findings_by_company.get(app.company, [])
+        parts += _section(number, app, findings)
     return "\n".join(parts) + "\n"
 
 
@@ -212,7 +283,11 @@ def _unaccounted(rendered: str, ids: list[str]) -> list[str]:
     return [i for i in ids if rendered.count(_MARKER.format(i)) != 1]
 
 
-def write_log(applications: list[Application], target_path: str | Path) -> Path:
+def write_log(
+    applications: list[Application],
+    target_path: str | Path,
+    findings_by_company: dict[str, list] | None = None,
+) -> Path:
     """Render and atomically replace ``target_path``.
 
     Refuses (``RenderRefused``) if the applications do not have unique ids, or
@@ -228,7 +303,7 @@ def write_log(applications: list[Application], target_path: str | Path) -> Path:
             "applications do not have unique ids: " + ", ".join(duplicates)
         )
 
-    rendered = render_log(applications)
+    rendered = render_log(applications, findings_by_company)
     unaccounted = _unaccounted(rendered, ids)
     if unaccounted:
         raise RenderRefused(

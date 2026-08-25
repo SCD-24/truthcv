@@ -22,7 +22,8 @@ from fastapi.testclient import TestClient
 from api.main import app
 from applications.store import load_all as load_applications
 from agenttools import server as mcp_server
-from agenttools import tools_ledger, tools_letter, tools_boards
+from agenttools import tools_ledger, tools_letter, tools_boards, tools_research
+from companyresearch import store as company_findings_store
 from providers.fake import FakeProvider
 from truth.answers import register_canonical_cv
 from truth.model import Bullet, Experience, Skill, Truth
@@ -61,6 +62,8 @@ def test_no_registered_tool_accepts_an_approval_parameter():
         "record_company_board",
         "get_job_profiles",
         "recommend_salary",
+        "record_company_finding",
+        "get_company_findings",
     }
     offenses = []
     for name, fn in mcp_server.TOOLS.items():
@@ -95,6 +98,7 @@ def test_no_tool_module_reaches_the_guardrail_allow_list():
         tools_letter.__name__: tools_letter,
         tools_ledger.__name__: tools_ledger,
         tools_boards.__name__: tools_boards,
+        tools_research.__name__: tools_research,
     }
     assert module_names <= modules.keys(), (
         f"unknown tool module(s), extend this test's module map: {module_names - modules.keys()}"
@@ -873,3 +877,59 @@ def test_get_profile_answers_alias_falls_back_when_applications_store_broken(
 
     # Falls back to aliasing from the raw incoming string, unchanged.
     assert aliased["email"] == "jane.rivera+tcv_robco_gmbh@example.com"
+
+
+# --- record_company_finding / get_company_findings -------------------------
+
+
+def test_company_research_tools_registered_with_full_input_schema(data_dir):
+    from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
+
+    assert "record_company_finding" in _TOOL_REGISTRY
+    assert "get_company_findings" in _TOOL_REGISTRY
+
+    fn, _ = _TOOL_REGISTRY["record_company_finding"]
+    schema = _input_schema(fn)
+    for name in ("company", "claim", "value", "source_url", "source_class", "as_of", "note"):
+        assert name in schema["properties"], name
+    assert set(schema["required"]) == {"company", "claim", "value", "source_url", "source_class"}
+
+    fn2, _ = _TOOL_REGISTRY["get_company_findings"]
+    schema2 = _input_schema(fn2)
+    assert "company" in schema2["properties"]
+    assert schema2["required"] == ["company"]
+
+
+def test_record_company_finding_rejects_empty_source_url_and_stores_nothing(data_dir):
+    with pytest.raises(ValueError):
+        tools_research.record_company_finding(
+            company="Acme Co",
+            claim="employment_entity",
+            value="Acme Ireland Ltd",
+            source_url="",
+            source_class="press",
+        )
+    assert company_findings_store.for_company("Acme Co") == []
+
+
+def test_get_company_findings_reports_open_contradictions(data_dir):
+    tools_research.record_company_finding(
+        company="Acme Co",
+        claim="employer_rating",
+        value="4.5",
+        source_url="https://a.example/x",
+        source_class="press",
+    )
+    result = tools_research.record_company_finding(
+        company="Acme Co",
+        claim="employer_rating",
+        value="3.0",
+        source_url="https://b.example/y",
+        source_class="review_site",
+    )
+    assert result["contradicts"]
+    assert "warning" in result
+
+    report = tools_research.get_company_findings("Acme Co")
+    assert len(report["findings"]) == 2
+    assert len(report["open_contradictions"]) == 1

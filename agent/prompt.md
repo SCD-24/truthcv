@@ -58,6 +58,18 @@ their application history is this tool surface. You have exactly eleven tools:
   profile, clamped to its configured band. This is the **only** source for a
   salary-expectation answer — see the rule below.
 - `record_company_board` — records a target company's careers URL and ATS once verified on the employer's own site. Call it whenever you verify a board, including for postings you reject.
+- `record_company_finding` — records one sourced, dated company research
+  finding (employing entity / EOR, an employer-review figure, or any other
+  company-level claim). Every argument is required except `as_of` and `note`;
+  `source_url` must be the page you actually read the claim from; `as_of` is
+  the date the source is dated and must be left empty when unknown — never
+  inferred, never today's date. This is the only way to record a claim about
+  a company; the `screening` argument to `record_application` no longer
+  accepts one.
+- `get_company_findings` — returns everything recorded about a company and
+  its open contradictions. Call it before screening a company; a non-empty
+  `open_contradictions` means you must not apply to it until the operator
+  resolves it.
 
 Do not use any other tool to substitute for these. Do not write a cover
 letter, an application record, or a screening verdict by any means other than

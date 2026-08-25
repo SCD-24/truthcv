@@ -20,6 +20,21 @@ def port() -> int:
     return int(os.environ.get("PORT", "8080"))
 
 
+def public_url() -> str:
+    """The host-facing URL to show a human, for startup logging.
+
+    PUBLIC_PORT is the HOST-side port docker-compose publishes (display
+    only); `port()` above is the port this process actually binds inside
+    the container. They are deliberately different variables: PUBLIC_PORT
+    is NOT named APP_PORT because api/__init__.py's _load_dotenv()
+    setdefault()s every repo-root .env key into the process, which would
+    leak the host port into local dev runs that bind 8080 directly.
+    """
+    raw = os.environ.get("PUBLIC_PORT", "")
+    n = int(raw) if raw.isdigit() else port()
+    return f"http://localhost:{n}"
+
+
 # Credential/secret config moved to the neutral `secretstore` package so the
 # provider layer can reach it without importing api. Re-exported here for the
 # existing `from api.config import encryption_key/secrets_path` callers.

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from onboarding import store as onboarding_store
+from truth import store as truth_store
+from truth.model import Skill, Truth
 
 
 def test_load_defaults_when_no_file(data_dir):
@@ -55,3 +57,29 @@ def test_provider_ready_true_when_default_set(data_dir, monkeypatch):
 
     monkeypatch.setattr(onboarding_store.modelrouting, "load", lambda: Routing())
     assert onboarding_store.provider_ready() is True
+
+
+def test_ensure_initialized_writes_defaults_for_empty_data_dir(data_dir):
+    state = onboarding_store.ensure_initialized()
+    assert state.cv_reviewed_at is None
+    assert state.tour_seen_at is None
+    assert (data_dir / "onboarding.yaml").exists()
+
+
+def test_ensure_initialized_backfills_when_truth_has_content(data_dir):
+    truth_store.save(
+        Truth(skills=[Skill(id="s1", value="Python", source="user-confirmed")])
+    )
+    state = onboarding_store.ensure_initialized()
+    assert state.cv_reviewed_at is not None
+
+
+def test_ensure_initialized_is_idempotent_no_late_backfill(data_dir):
+    first = onboarding_store.ensure_initialized()
+    assert first.cv_reviewed_at is None
+
+    truth_store.save(
+        Truth(skills=[Skill(id="s1", value="Python", source="user-confirmed")])
+    )
+    second = onboarding_store.ensure_initialized()
+    assert second.cv_reviewed_at is None

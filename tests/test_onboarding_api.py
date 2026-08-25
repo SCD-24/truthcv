@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 
 import api.routes as routes
 from api.main import app
+from truth import store as truth_store
+from truth.model import Skill, Truth
 
 
 @pytest.fixture()
@@ -50,3 +52,15 @@ def test_complete_requires_provider_profile_and_cv_reviewed(client, monkeypatch)
 
 def test_profile_endpoint_shape_unchanged(client):
     assert client.get("/api/profile").json() == {"hasProfile": False}
+
+
+def test_get_onboarding_backfills_preexisting_user_as_complete(client, monkeypatch):
+    truth_store.save(
+        Truth(skills=[Skill(id="s1", value="Python", source="user-confirmed")])
+    )
+    monkeypatch.setattr(routes.onboarding_store, "provider_ready", lambda: True)
+    monkeypatch.setattr(routes, "has_profile", lambda: True)
+
+    body = client.get("/api/onboarding").json()
+    assert body["cvReviewedAt"] is not None
+    assert body["complete"] is True

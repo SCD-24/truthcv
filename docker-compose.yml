@@ -21,6 +21,14 @@ services:
       # In-container path the app writes to — must equal the volume mount target
       # below. Do NOT derive this from the host's .env DATA_DIR (that's a host path).
       - DATA_DIR=/app/data
+      # Host-side port from the `ports:` mapping above, passed in purely so
+      # the app can print a reachable URL at startup for people who run
+      # `docker compose up` directly instead of scripts/launch/truthcv.sh.
+      # Does NOT change what the app binds inside the container — that stays
+      # PORT=8080 from the Dockerfile. The ${APP_PORT:-5627} default here
+      # MUST stay identical to the left side of the `ports:` mapping above or
+      # the logged URL will point at nothing.
+      - PUBLIC_PORT=${APP_PORT:-5627}
     volumes:
       # Host storage location (DATA_DIR from .env) mounted at the fixed
       # in-container /app/data. Set DATA_DIR in .env to relocate host data.
