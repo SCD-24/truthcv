@@ -82,7 +82,7 @@ function input(overrides: Partial<ReadinessInput> = {}): ReadinessInput {
     connections: connections(),
     profile: { hasProfile: true } as ProfileStatus,
     answers: answers(),
-    agent: { targetCompanies: ["Grafana Labs"] } as AgentConfig,
+    agent: { targetCompanies: ["Contoso Labs"] } as AgentConfig,
     ...overrides,
   };
 }
@@ -355,7 +355,7 @@ describe("SetupPage", () => {
       email: "ada@example.com",
       phone: "+49",
     } as never);
-    vi.mocked(getAgentConfig).mockResolvedValue({ targetCompanies: ["Grafana"] } as never);
+    vi.mocked(getAgentConfig).mockResolvedValue({ targetCompanies: ["Contoso"] } as never);
 
     const onFinished = vi.fn();
     renderPage(onFinished);

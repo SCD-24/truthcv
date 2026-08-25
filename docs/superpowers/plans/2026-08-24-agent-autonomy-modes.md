@@ -93,7 +93,7 @@ def test_to_dict_carries_mode_and_derived_enabled():
 
 - [ ] **Step 2: Run it and watch it fail**
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_agent_config_mode.py -v`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_agent_config_mode.py -v`
 
 Expected: FAIL — `TypeError: AgentConfig.__init__() got an unexpected keyword argument 'mode'`.
 
@@ -155,10 +155,10 @@ In `to_dict`, replace `"enabled": self.enabled,` with:
 
 - [ ] **Step 4: Run the new test, then the whole suite**
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_agent_config_mode.py -v`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_agent_config_mode.py -v`
 Expected: PASS, 7 tests.
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest`
 Expected: PASS. `tests/test_agent_config_api.py` may fail here if it constructs `AgentConfig(enabled=...)` — that is Task 2's job to fix; if so, note it and continue to Task 2 before committing.
 
 - [ ] **Step 5: Commit**
@@ -220,7 +220,7 @@ def test_put_ignores_enabled(client, data_dir):
 
 - [ ] **Step 2: Run and watch them fail**
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_agent_config_api.py -v -k "mode or enabled"`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_agent_config_api.py -v -k "mode or enabled"`
 Expected: FAIL — the response has no `mode` key.
 
 - [ ] **Step 3: Implement**
@@ -260,10 +260,10 @@ matching whatever `_Camel` sets, plus `extra="forbid"`. Import `ConfigDict` and 
 
 - [ ] **Step 4: Verify**
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_agent_config_api.py -v`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_agent_config_api.py -v`
 Expected: PASS, including the pre-existing tests in that file.
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest`
 Expected: PASS, whole suite.
 
 - [ ] **Step 5: Commit**
@@ -310,13 +310,13 @@ def _set_mode(mode: str) -> None:
 
 def test_passed_is_queued_in_semi(data_dir):
     _set_mode("semi")
-    s = store.create({"company": "Grafana Labs", "verdict": "passed"})
+    s = store.create({"company": "Contoso Labs", "verdict": "passed"})
     assert s.approval == "pending"
 
 
 def test_passed_is_not_queued_in_full(data_dir):
     _set_mode("full")
-    s = store.create({"company": "Grafana Labs", "verdict": "passed"})
+    s = store.create({"company": "Contoso Labs", "verdict": "passed"})
     assert s.approval == ""
 
 
@@ -335,9 +335,9 @@ def test_rejected_is_never_queued(data_dir):
 def test_posting_text_and_posted_date_round_trip(data_dir):
     s = store.create(
         {
-            "company": "Grafana Labs",
+            "company": "Contoso Labs",
             "verdict": "passed",
-            "posting_text": "Staff AI Engineer. Germany (Remote). EUR 109k-137k.",
+            "posting_text": "Staff AI Engineer. Germany (Remote). EUR 100k-130k.",
             "posted_date": "2026-08-20",
         }
     )
@@ -354,7 +354,7 @@ def test_approval_still_cannot_be_set_by_a_caller(data_dir):
 
 - [ ] **Step 2: Run and watch it fail**
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_screening_mode_queueing.py -v`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_screening_mode_queueing.py -v`
 Expected: FAIL — `test_passed_is_queued_in_semi` gets `""`, and the posting-text test gets an `AttributeError`.
 
 - [ ] **Step 3: Implement**
@@ -403,10 +403,10 @@ Check for an import cycle before running: `agentconfig/store.py` must not import
 
 - [ ] **Step 4: Verify**
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_screening_mode_queueing.py -v`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_screening_mode_queueing.py -v`
 Expected: PASS, 6 tests.
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest`
 Expected: PASS, whole suite. `tests/test_screening_approval_store.py` and `tests/test_approvals_api.py` both exercise `create()` and must be unaffected — the default mode is `full`.
 
 - [ ] **Step 5: Commit**
@@ -508,7 +508,7 @@ def test_screening_id_cannot_escape_the_letters_dir(data_dir):
 
 - [ ] **Step 2: Run and watch it fail**
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_cover_letter_store.py -v`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_cover_letter_store.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'coverletter.store'`.
 
 - [ ] **Step 3: Implement**
@@ -638,10 +638,10 @@ def delete(screening_id: str) -> bool:
 
 - [ ] **Step 4: Verify**
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_cover_letter_store.py -v`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_cover_letter_store.py -v`
 Expected: PASS, 7 tests.
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest`
 Expected: PASS, whole suite.
 
 - [ ] **Step 5: Commit**
@@ -699,7 +699,7 @@ def client(data_dir):
 def _queued(posting_text="Staff AI Engineer, Germany (Remote). Python, LLMs."):
     return store.create(
         {
-            "company": "Grafana Labs",
+            "company": "Contoso Labs",
             "role": "Staff AI Engineer",
             "verdict": "deferred",
             "posting_text": posting_text,
@@ -796,7 +796,7 @@ def test_blocked_generation_writes_nothing_and_names_the_claims(client, monkeypa
             return {
                 "paragraphs": [
                     {
-                        "text": "I personally invented Kubernetes at Grafana Labs.",
+                        "text": "I personally invented Kubernetes at Contoso Labs.",
                         "claims": ["invented Kubernetes"],
                     }
                 ]
@@ -818,7 +818,7 @@ def test_letter_routes_are_outside_the_agent_prefix(client):
 
 - [ ] **Step 2: Run and watch them fail**
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_letter_routes.py -v`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_letter_routes.py -v`
 Expected: FAIL — 404 from FastAPI for every route (they do not exist).
 
 - [ ] **Step 3: Implement the schemas**
@@ -958,10 +958,10 @@ Route-order note: `/screenings/{screening_id}/letter` cannot be shadowed by `/sc
 
 - [ ] **Step 5: Verify**
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_letter_routes.py -v`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_letter_routes.py -v`
 Expected: PASS, 9 tests. If the stub provider is reached differently than expected, read `agenttools/tools_letter.py` — it calls `get_provider("cover_letter")` at module scope of the function, which is what the fixture patches.
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest`
 Expected: PASS, whole suite.
 
 - [ ] **Step 6: Commit**
@@ -1016,7 +1016,7 @@ def test_rejecting_never_needs_a_letter(client):
 def test_bulk_approve_reports_a_draftless_item_instead_of_approving_it(client):
     import coverletter.store as letters
 
-    a, b = _deferred("Grafana Labs"), _deferred("n8n")
+    a, b = _deferred("Contoso Labs"), _deferred("Aperture")
     letters.save(a.id, letters.CoverLetterDraft(text="Dear team,"))
     body = client.patch(
         "/api/screenings/approvals", json={"ids": [a.id, b.id], "approval": "approved"}
@@ -1049,7 +1049,7 @@ def test_approved_item_without_a_letter_reports_empty(data_dir):
 
 - [ ] **Step 2: Run and watch them fail**
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_approvals_api.py tests/test_approved_queue_tools.py -v`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_approvals_api.py tests/test_approved_queue_tools.py -v`
 Expected: FAIL — approval succeeds where a 409 is expected; `KeyError: 'cover_letter'`.
 
 - [ ] **Step 3: Implement the approval guard**
@@ -1120,10 +1120,10 @@ Extend the docstring's guard list:
 
 - [ ] **Step 5: Verify**
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_approvals_api.py tests/test_approved_queue_tools.py -v`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest tests/test_approvals_api.py tests/test_approved_queue_tools.py -v`
 Expected: PASS.
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest`
 Expected: PASS, whole suite.
 
 - [ ] **Step 6: Commit**
@@ -1224,13 +1224,13 @@ In `agent/test-prompt-render.sh`, following the existing `render_cap` simulation
 
 - [ ] **Step 5: Verify**
 
-Run: `cd /home/glenn/Documents/truthcv && bash -n agent/daily-apply.sh && bash -n agent/smoke-test.sh && node --check agent/agent-config.js && echo SYNTAX_OK`
+Run: `cd <repo root> && bash -n agent/daily-apply.sh && bash -n agent/smoke-test.sh && node --check agent/agent-config.js && echo SYNTAX_OK`
 Expected: `SYNTAX_OK`.
 
-Run: `cd /home/glenn/Documents/truthcv && agent/test-prompt-render.sh`
+Run: `cd <repo root> && agent/test-prompt-render.sh`
 Expected: all cases pass, including the pre-existing ones.
 
-Run: `cd /home/glenn/Documents/truthcv && grep -n "enabled" agent/daily-apply.sh`
+Run: `cd <repo root> && grep -n "enabled" agent/daily-apply.sh`
 Expected: no remaining gate on `enabled` — only comments, if any.
 
 - [ ] **Step 6: Commit**
@@ -1298,10 +1298,10 @@ work, so do not.
 
 - [ ] **Step 3: Verify**
 
-Run: `cd /home/glenn/Documents/truthcv && grep -n "cover_letter\|posting_text\|SEMI-AUTO\|semi-auto" agent/prompt.md agent/RUNBOOK.md`
+Run: `cd <repo root> && grep -n "cover_letter\|posting_text\|SEMI-AUTO\|semi-auto" agent/prompt.md agent/RUNBOOK.md`
 Expected: the new text appears in both files.
 
-Run: `cd /home/glenn/Documents/truthcv && DATA_DIR=$(mktemp -d) python3 -m pytest`
+Run: `cd <repo root> && DATA_DIR=$(mktemp -d) python3 -m pytest`
 Expected: PASS. (No code changed; this catches any test that asserts on the prompt text.)
 
 - [ ] **Step 4: Commit**
@@ -1439,7 +1439,7 @@ MUI's `Slider` renders a hidden `<input type="range">` carrying the `slider` rol
 
 - [ ] **Step 2: Run and watch them fail**
 
-Run: `cd /home/glenn/Documents/truthcv/web && npm test -- AgentsPage`
+Run: `cd <repo root>/web && npm test -- AgentsPage`
 Expected: FAIL — no slider in the DOM.
 
 - [ ] **Step 3: Update the TS type**
@@ -1524,7 +1524,7 @@ The optimistic-update comment above the old component explains why `onChange` ta
 
 - [ ] **Step 5: Verify**
 
-Run: `cd /home/glenn/Documents/truthcv/web && npm run typecheck && npm test && npm run build`
+Run: `cd <repo root>/web && npm run typecheck && npm test && npm run build`
 Expected: all three exit 0.
 
 - [ ] **Step 6: Commit**
@@ -1574,7 +1574,7 @@ Append to `web/src/api/approvals.client.test.ts`, mirroring the existing cases e
 
 - [ ] **Step 2: Run and watch them fail**
 
-Run: `cd /home/glenn/Documents/truthcv/web && npm test -- approvals.client`
+Run: `cd <repo root>/web && npm test -- approvals.client`
 Expected: FAIL — the functions are not exported.
 
 - [ ] **Step 3: Implement the client functions**
@@ -1709,7 +1709,7 @@ Then extend `PendingCard` in `web/src/approvals/ApprovalsPage.tsx`:
 
 - [ ] **Step 5: Verify**
 
-Run: `cd /home/glenn/Documents/truthcv/web && npm run typecheck && npm test && npm run build`
+Run: `cd <repo root>/web && npm run typecheck && npm test && npm run build`
 Expected: all three exit 0.
 
 - [ ] **Step 6: Commit**
@@ -1740,24 +1740,24 @@ Add `listRejectedApprovals` and `listDidNotPass` to the `vi.mock("../api/client"
 describe("ApprovalsPage reviewable lists", () => {
   it("lists what the agent rejected on a criterion, apart from what you rejected", async () => {
     vi.mocked(listDidNotPass).mockResolvedValue([
-      makeRecord({ id: "d1", company: "SumUp", verdict: "rejected", approval: "", failingCriterion: "remote" }),
+      makeRecord({ id: "d1", company: "Paycrest", verdict: "rejected", approval: "", failingCriterion: "remote" }),
     ]);
     vi.mocked(listRejectedApprovals).mockResolvedValue([
-      makeRecord({ id: "r1", company: "Pleo", approval: "rejected" }),
+      makeRecord({ id: "r1", company: "Soylent", approval: "rejected" }),
     ]);
     await renderPage([]);
     expect(await screen.findByRole("heading", { name: "Did not pass" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Rejected" })).toBeTruthy();
-    expect(screen.getByText("SumUp")).toBeTruthy();
-    expect(screen.getByText("Pleo")).toBeTruthy();
+    expect(screen.getByText("Paycrest")).toBeTruthy();
+    expect(screen.getByText("Soylent")).toBeTruthy();
   });
 
   it("moving one back queues it and takes it out of the list it came from", async () => {
     vi.mocked(listRejectedApprovals).mockResolvedValue([
-      makeRecord({ id: "r1", company: "Pleo", approval: "rejected" }),
+      makeRecord({ id: "r1", company: "Soylent", approval: "rejected" }),
     ]);
     vi.mocked(setScreeningApproval).mockResolvedValue(
-      makeRecord({ id: "r1", company: "Pleo", approval: "pending" }),
+      makeRecord({ id: "r1", company: "Soylent", approval: "pending" }),
     );
     await renderPage([]);
     fireEvent.click(await screen.findByRole("button", { name: "Move to approvals" }));
@@ -1773,7 +1773,7 @@ describe("ApprovalsPage reviewable lists", () => {
 
 - [ ] **Step 2: Run and watch it fail**
 
-Run: `cd /home/glenn/Documents/truthcv/web && npm test -- ApprovalsPage`
+Run: `cd <repo root>/web && npm test -- ApprovalsPage`
 Expected: FAIL — neither section exists.
 
 - [ ] **Step 3: Implement the client functions**
@@ -1821,7 +1821,7 @@ Keep the two lists as separate sections: they differ in volume and meaning — t
 
 - [ ] **Step 5: Verify**
 
-Run: `cd /home/glenn/Documents/truthcv/web && npm run typecheck && npm test && npm run build`
+Run: `cd <repo root>/web && npm run typecheck && npm test && npm run build`
 Expected: all three exit 0.
 
 - [ ] **Step 6: Commit**
@@ -1840,7 +1840,7 @@ git commit -m "feat(web): did-not-pass and rejected lists, with move back to app
 - [ ] **Step 1: Rebuild and restart**
 
 ```bash
-cd /home/glenn/Documents/truthcv && docker compose build app agent && docker compose up -d app agent
+cd <repo root> && docker compose build app agent && docker compose up -d app agent
 ```
 
 - [ ] **Step 2: Confirm the config round-trips**

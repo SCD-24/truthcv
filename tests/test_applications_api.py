@@ -49,13 +49,13 @@ def test_create_list_update_delete(client):
     r = client.post(
         "/api/applications",
         json={
-            "company": "Nagarro",
-            "website": "https://www.nagarro.com/en/",
+            "company": "Vandelay",
+            "website": "https://www.vandelay.example/en/",
             "applicationUrl": "N/A",
             "submitted": True,
             "submissionType": "General",
             "reachedOut": True,
-            "toWho": "Patricia Pavelescu",
+            "toWho": "Jane Rivera",
             "responseReceived": False,
             "method": "Linkedin",
             "applicationDate": "2026-07-01",
@@ -64,7 +64,7 @@ def test_create_list_update_delete(client):
     )
     assert r.status_code == 201, r.text
     app_id = r.json()["id"]
-    assert r.json()["company"] == "Nagarro"
+    assert r.json()["company"] == "Vandelay"
     assert r.json()["posting"] == ""
     assert r.json()["applicationDate"] == "2026-07-01"
     assert r.json()["notes"] == "Referred by a friend on the platform team."
@@ -87,7 +87,7 @@ def test_create_list_update_delete(client):
     assert r.json()["responseReceived"] is True
     assert r.json()["applicationDate"] == "2026-07-05"
     assert r.json()["notes"] == "Heard back — phone screen scheduled."
-    assert r.json()["company"] == "Nagarro"  # untouched
+    assert r.json()["company"] == "Vandelay"  # untouched
 
     # Delete.
     assert client.delete(f"/api/applications/{app_id}").status_code == 204
@@ -107,7 +107,7 @@ def test_create_round_trips_role_ats_capture_method_gaps_and_profile(client):
     r = client.post(
         "/api/applications",
         json={
-            "company": "Nagarro",
+            "company": "Vandelay",
             "role": "Staff Engineer",
             "ats": "Greenhouse",
             "captureMethod": "extension",

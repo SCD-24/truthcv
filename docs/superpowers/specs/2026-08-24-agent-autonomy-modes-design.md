@@ -83,7 +83,7 @@ Two fields, both in `EDITABLE` so `record_screening(**fields)` can set them:
 - `posting_text: str` — the posting as the agent read it. Stored because the
   operator drafts the letter from it later, in the app, long after the run that
   found it; without it, drafting would mean re-fetching a page that may be
-  unreachable. Several boards in the existing history (Dealfront's careers page
+  unreachable. Several boards in the existing history (Fabrikam's careers page
   and its Workable board among them) could not be reached on five consecutive
   runs; a design that depends on re-fetching would fail on exactly those.
 - `posted_date: str` — the employer's publication date, best-effort. Empty when

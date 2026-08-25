@@ -16,7 +16,7 @@ from agenttools import tools_ledger
 from agenttools.tools_ledger import get_approved_applications, report_apply_failure
 
 
-def _approved(company="Grafana Labs", url="https://grafana.com/jobs/1"):
+def _approved(company="Contoso Labs", url="https://contoso.example/jobs/1"):
     s = store.create(
         {"company": company, "role": "Staff", "url": url, "verdict": "deferred"}
     )
@@ -28,7 +28,7 @@ def test_returns_approved_items(data_dir):
     s = _approved()
     items = get_approved_applications()
     assert [(i["screening_id"], i["company"], i["url"]) for i in items] == [
-        (s.id, "Grafana Labs", "https://grafana.com/jobs/1")
+        (s.id, "Contoso Labs", "https://contoso.example/jobs/1")
     ]
 
 
@@ -43,11 +43,11 @@ def test_already_applied_url_is_flagged_not_hidden(data_dir):
     """Retry-forever would otherwise re-submit an application whose confirmation
     capture failed. It comes back flagged, so a queued item that stops moving
     says why instead of vanishing from every run at zero attempts."""
-    _approved(url="https://grafana.com/jobs/1")
+    _approved(url="https://contoso.example/jobs/1")
     apps.create(
         {
-            "company": "Grafana Labs",
-            "application_url": "https://grafana.com/jobs/1",
+            "company": "Contoso Labs",
+            "application_url": "https://contoso.example/jobs/1",
             "submitted": True,
         }
     )
@@ -60,12 +60,12 @@ def test_unsubmitted_ledger_row_does_not_block(data_dir):
     applied to. Matching one hid a legitimately approved item from every run."""
     import coverletter.store as letters
 
-    s = _approved(url="https://grafana.com/jobs/1")
+    s = _approved(url="https://contoso.example/jobs/1")
     letters.save(s.id, letters.CoverLetterDraft(text="Dear team,"))
     apps.create(
         {
-            "company": "Grafana Labs",
-            "application_url": "https://grafana.com/jobs/1",
+            "company": "Contoso Labs",
+            "application_url": "https://contoso.example/jobs/1",
             "submitted": False,
             "status": "pending",
         }
@@ -80,11 +80,11 @@ def test_confirmation_text_counts_as_a_submission(data_dir):
     import applications.store as apps_store
     from applications.model import Confirmation
 
-    _approved(url="https://grafana.com/jobs/1")
+    _approved(url="https://contoso.example/jobs/1")
     a = apps.create(
         {
-            "company": "Grafana Labs",
-            "application_url": "https://grafana.com/jobs/1",
+            "company": "Contoso Labs",
+            "application_url": "https://contoso.example/jobs/1",
             "submitted": False,
         }
     )
@@ -98,11 +98,11 @@ def test_already_applied_outranks_cooldown(data_dir):
     says it must not go out at all rather than not yet."""
     import agentconfig.store as agent_config_store
 
-    s = _approved(url="https://grafana.com/jobs/1")
+    s = _approved(url="https://contoso.example/jobs/1")
     apps.create(
         {
-            "company": "Grafana Labs",
-            "application_url": "https://grafana.com/jobs/1",
+            "company": "Contoso Labs",
+            "application_url": "https://contoso.example/jobs/1",
             "submitted": True,
         }
     )
@@ -120,7 +120,7 @@ def test_record_application_marks_the_row_submitted(data_dir):
     from agenttools.tools_ledger import record_application
 
     created = record_application(
-        company="Grafana Labs", application_url="https://grafana.com/jobs/1"
+        company="Contoso Labs", application_url="https://contoso.example/jobs/1"
     )
     assert created["submitted"] is True
 
@@ -128,7 +128,7 @@ def test_record_application_marks_the_row_submitted(data_dir):
 def test_record_application_can_record_an_unsubmitted_row(data_dir):
     from agenttools.tools_ledger import record_application
 
-    created = record_application(company="Grafana Labs", submitted=False)
+    created = record_application(company="Contoso Labs", submitted=False)
     assert created["submitted"] is False
 
 
@@ -156,7 +156,7 @@ def test_no_url_flagged_blocked_reason(data_dir):
 def test_url_present_no_cooldown_blocked_reason_empty(data_dir):
     import coverletter.store as letters
 
-    s = _approved(url="https://grafana.com/jobs/1")
+    s = _approved(url="https://contoso.example/jobs/1")
     letters.save(s.id, letters.CoverLetterDraft(text="Dear team,"))
     items = get_approved_applications()
     assert [i["blocked_reason"] for i in items] == [""]
@@ -229,18 +229,18 @@ def test_cooldown_takes_precedence_over_a_missing_letter(data_dir):
     assert [i["blocked_reason"] for i in items] == ["cooldown"]
 
 
-def test_record_application_is_idempotent_per_screening_id_reproducing_robco(data_dir):
-    """The RobCo incident: four record_application calls against one approved
+def test_record_application_is_idempotent_per_screening_id_reproducing_initech(data_dir):
+    """The Initech incident: four record_application calls against one approved
     queue item must write ONE application row, not four. The idempotency keys on
     screening_id; a re-record improves the same row, a malformed evidence
     payload persists nothing, and the item ends up retired and double-submit
     guarded."""
-    s = _approved(company="RobCo", url="https://robco.example/jobs/4d090169/")
+    s = _approved(company="Initech", url="https://initech.example/jobs/4d090169/")
 
     # 1st: minimal args create the row.
     created = tools_ledger.record_application(
         screening_id=s.id,
-        application_url="https://robco.example/jobs/4d090169/application",
+        application_url="https://initech.example/jobs/4d090169/application",
     )
     assert created["created"] is True
     first_id = created["id"]
@@ -269,9 +269,9 @@ def test_record_application_is_idempotent_per_screening_id_reproducing_robco(dat
         )
 
     # Exactly one row exists, carrying the evidence calls 2 and 3 persisted.
-    robco_rows = [a for a in apps.load_all() if a.company == "RobCo"]
-    assert len(robco_rows) == 1
-    row = robco_rows[0]
+    initech_rows = [a for a in apps.load_all() if a.company == "Initech"]
+    assert len(initech_rows) == 1
+    row = initech_rows[0]
     assert row.id == first_id
     assert [(f.label, f.value) for f in row.fields_submitted] == [("resume", "attached")]
     assert row.confirmation.text == "Application submitted!"
@@ -289,7 +289,7 @@ def test_record_application_is_idempotent_per_screening_id_reproducing_robco(dat
 def test_record_application_malformed_evidence_persists_nothing(data_dir):
     """Parse-before-write: a malformed evidence payload raises before any store
     write, so no orphan application row is left behind."""
-    s = _approved(company="RobCo", url="https://robco.example/jobs/orphan/")
+    s = _approved(company="Initech", url="https://initech.example/jobs/orphan/")
 
     with pytest.raises(ValueError):
         tools_ledger.record_application(screening_id=s.id, confirmation="{not json")

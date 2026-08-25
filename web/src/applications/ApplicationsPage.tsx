@@ -753,7 +753,7 @@ function ApplicationForm({
           label="Website"
           value={draft.website ?? ""}
           onChange={(e) => set("website", e.target.value)}
-          placeholder="nagarro.com"
+          placeholder="vandelay.example"
         />
         <TextField
           label="Application URL"
@@ -865,7 +865,7 @@ function ApplicationForm({
 /**
  * Make a user-entered link safe to use as an href.
  *
- * Users type bare hosts like "nagarro.com"; a scheme-less value is a RELATIVE
+ * Users type bare hosts like "vandelay.example"; a scheme-less value is a RELATIVE
  * URL, so the browser would navigate inside the app instead of opening the
  * external site. Prepend https:// when there is no scheme, leaving already-
  * absolute URLs (and mailto:/tel:) untouched.

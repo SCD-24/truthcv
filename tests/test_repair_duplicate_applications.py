@@ -33,13 +33,13 @@ def test_url_suffix_and_tracking_param_group_folds_to_first_created(
     first = _create_at(
         monkeypatch,
         "2026-01-01T00:00:01+00:00",
-        {"company": "RobCo", "application_url": base + "/", "submitted": True},
+        {"company": "Initech", "application_url": base + "/", "submitted": True},
     )
     _create_at(
         monkeypatch,
         "2026-01-01T00:00:02+00:00",
         {
-            "company": "RobCo",
+            "company": "Initech",
             "application_url": base + "/application",
             "submitted": True,
         },
@@ -48,7 +48,7 @@ def test_url_suffix_and_tracking_param_group_folds_to_first_created(
         monkeypatch,
         "2026-01-01T00:00:03+00:00",
         {
-            "company": "RobCo",
+            "company": "Initech",
             "application_url": base + "/application?utm_source=x",
             "submitted": True,
         },
@@ -56,7 +56,7 @@ def test_url_suffix_and_tracking_param_group_folds_to_first_created(
     _create_at(
         monkeypatch,
         "2026-01-01T00:00:04+00:00",
-        {"company": "RobCo", "application_url": base, "submitted": True},
+        {"company": "Initech", "application_url": base, "submitted": True},
     )
 
     main(["--apply"])
@@ -64,7 +64,7 @@ def test_url_suffix_and_tracking_param_group_folds_to_first_created(
     rows = applications_store.load_all()
     assert len(rows) == 1
     assert rows[0].id == first.id
-    assert rows[0].company == "RobCo"
+    assert rows[0].company == "Initech"
 
 
 def test_notes_union_and_evidence_richness(data_dir, monkeypatch):
@@ -75,7 +75,7 @@ def test_notes_union_and_evidence_richness(data_dir, monkeypatch):
         monkeypatch,
         "2026-02-01T00:00:01+00:00",
         {
-            "company": "RobCo",
+            "company": "Initech",
             "application_url": base,
             "submitted": True,
             "notes": "First attempt via the careers portal.",
@@ -85,7 +85,7 @@ def test_notes_union_and_evidence_richness(data_dir, monkeypatch):
         monkeypatch,
         "2026-02-01T00:00:02+00:00",
         {
-            "company": "RobCo",
+            "company": "Initech",
             "application_url": base + "/apply",
             "submitted": True,
             "notes": "Retry that carried the confirmation email.",
@@ -95,7 +95,7 @@ def test_notes_union_and_evidence_richness(data_dir, monkeypatch):
         monkeypatch,
         "2026-02-01T00:00:03+00:00",
         {
-            "company": "RobCo",
+            "company": "Initech",
             "application_url": base + "/application",
             "submitted": True,
             "notes": "Retry that captured the as-submitted fields.",
@@ -136,7 +136,7 @@ def test_shared_screening_id_groups_despite_different_urls(data_dir, monkeypatch
         monkeypatch,
         "2026-03-01T00:00:01+00:00",
         {
-            "company": "RobCo",
+            "company": "Initech",
             "application_url": "https://a.example.com/one",
             "screening_id": "scr-123",
         },
@@ -145,7 +145,7 @@ def test_shared_screening_id_groups_despite_different_urls(data_dir, monkeypatch
         monkeypatch,
         "2026-03-01T00:00:02+00:00",
         {
-            "company": "RobCo",
+            "company": "Initech",
             "application_url": "https://b.example.com/two",
             "screening_id": "scr-123",
         },
@@ -165,12 +165,12 @@ def test_dry_run_writes_nothing(data_dir, monkeypatch, capsys):
     _create_at(
         monkeypatch,
         "2026-04-01T00:00:01+00:00",
-        {"company": "RobCo", "application_url": base, "submitted": True},
+        {"company": "Initech", "application_url": base, "submitted": True},
     )
     _create_at(
         monkeypatch,
         "2026-04-01T00:00:02+00:00",
-        {"company": "RobCo", "application_url": base + "/apply", "submitted": True},
+        {"company": "Initech", "application_url": base + "/apply", "submitted": True},
     )
 
     path = applications_store.applications_path()
@@ -192,12 +192,12 @@ def test_second_apply_is_a_no_op(data_dir, monkeypatch, capsys):
     _create_at(
         monkeypatch,
         "2026-05-01T00:00:01+00:00",
-        {"company": "RobCo", "application_url": base, "submitted": True},
+        {"company": "Initech", "application_url": base, "submitted": True},
     )
     _create_at(
         monkeypatch,
         "2026-05-01T00:00:02+00:00",
-        {"company": "RobCo", "application_url": base + "/apply", "submitted": True},
+        {"company": "Initech", "application_url": base + "/apply", "submitted": True},
     )
 
     main(["--apply"])
@@ -222,7 +222,7 @@ def test_duplicate_owning_a_document_is_held_back_as_manual_repair(
         monkeypatch,
         "2026-06-01T00:00:01+00:00",
         {
-            "company": "RobCo",
+            "company": "Initech",
             "application_url": "https://c.example.com/one",
             "screening_id": "scr-doc",
         },
@@ -231,7 +231,7 @@ def test_duplicate_owning_a_document_is_held_back_as_manual_repair(
         monkeypatch,
         "2026-06-01T00:00:02+00:00",
         {
-            "company": "RobCo",
+            "company": "Initech",
             "application_url": "https://c.example.com/two",
             "screening_id": "scr-doc",
         },

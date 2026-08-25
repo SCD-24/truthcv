@@ -717,9 +717,9 @@ def test_get_profile_answers_without_company_returns_stored_email_verbatim(data_
     email is returned exactly as stored, unchanged from today's behaviour."""
     from truth.answers import Answers, save as save_answers
 
-    save_answers(Answers(name="Glenn Chon", email="glenn.chon.de@gmail.com"))
+    save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com"))
     result = tools_ledger.get_profile_answers()
-    assert result["email"] == "glenn.chon.de@gmail.com"
+    assert result["email"] == "jane.rivera@example.com"
 
 
 def test_get_profile_answers_with_company_aliases_only_the_email(data_dir):
@@ -727,12 +727,12 @@ def test_get_profile_answers_with_company_aliases_only_the_email(data_dir):
     address; every other field stays byte-identical to the un-aliased call."""
     from truth.answers import Answers, save as save_answers
 
-    save_answers(Answers(name="Glenn Chon", email="glenn.chon.de@gmail.com", phone="+49 1"))
+    save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com", phone="+49 1"))
 
     plain = tools_ledger.get_profile_answers()
     aliased = tools_ledger.get_profile_answers(company="Acme Co.")
 
-    assert aliased["email"] == "glenn.chon.de+tcv_acme_co@gmail.com"
+    assert aliased["email"] == "jane.rivera+tcv_acme_co@example.com"
     for field in plain:
         if field == "email":
             continue
@@ -744,12 +744,12 @@ def test_get_profile_answers_with_company_does_not_mutate_stored_answers(data_di
     (and thus every other caller) must still see the real address."""
     from truth.answers import Answers, load as load_answers, save as save_answers
 
-    save_answers(Answers(name="Glenn Chon", email="glenn.chon.de@gmail.com"))
+    save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com"))
 
     tools_ledger.get_profile_answers(company="Acme Co.")
 
     reloaded = load_answers()
-    assert reloaded.email == "glenn.chon.de@gmail.com"
+    assert reloaded.email == "jane.rivera@example.com"
 
 
 def test_get_profile_answers_input_schema_advertises_optional_company():

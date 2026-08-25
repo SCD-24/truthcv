@@ -117,7 +117,7 @@ def record_key(record: dict) -> tuple[str, str, str]:
 def _looks_like_path(value: str) -> bool:
     """Whether an attachment's ``path`` is a real filename and not prose.
 
-    Two Jobs records (Cohere, Synera) use the attachment slot to explain that
+    Two Jobs records (Sirius, Meridian) use the attachment slot to explain that
     the employer offered no upload field, putting a sentence where a path
     belongs. Copying those as filenames would fail noisily or, worse, create
     junk on the volume.
@@ -182,7 +182,7 @@ def _clean_cell(text: str) -> str:
 def _split_companies(cell: str) -> list[tuple[str, str]]:
     """Split a "Company — Role" table cell into (company, role) pairs.
 
-    A cell naming several companies with no role ("Mercor, Starbridge, ...")
+    A cell naming several companies with no role ("Cyberdyne, Oceanic, ...")
     becomes one pair each; anything carrying a role stays whole, because
     splitting a role on its commas would invent companies that do not exist.
     """

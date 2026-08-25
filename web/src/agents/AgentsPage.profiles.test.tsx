@@ -240,9 +240,9 @@ describe("AgentsPage profiles section", () => {
         employmentCountry: "Germany",
         eorAllowed: false,
         requireEntityVerification: true,
-        salaryFloor: 85000,
-        salaryAskMin: 95000,
-        salaryAskMax: 110000,
+        salaryFloor: 70000,
+        salaryAskMin: 80000,
+        salaryAskMax: 100000,
         // No regional default: a new profile starts with no currency set.
         currency: null,
         workingLanguage: null,

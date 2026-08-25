@@ -10,7 +10,7 @@
       "planId": "p-41e5f926",
       "componentId": "agent-config-store",
       "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
-      "ref": "/home/glenn/Documents/truthcv",
+      "ref": "<repo root>",
       "name": "job-profiles-config-store",
       "feature": "agent-job-profiles",
       "tasks": [
@@ -51,7 +51,7 @@
         "name": "Agent Config Store",
         "type": "backend",
         "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
-        "ref": "/home/glenn/Documents/truthcv",
+        "ref": "<repo root>",
         "group": "truthcv-container-single-docker-image"
       },
       "provisionalConnections": [
@@ -141,7 +141,7 @@
       "planId": "p-5d178b86",
       "componentId": "api",
       "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
-      "ref": "/home/glenn/Documents/truthcv",
+      "ref": "<repo root>",
       "name": "job-profiles-api",
       "feature": "agent-job-profiles",
       "tasks": [
@@ -306,7 +306,7 @@
       "planId": "p-9ff26f29",
       "componentId": "application-agent",
       "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
-      "ref": "/home/glenn/Documents/truthcv",
+      "ref": "<repo root>",
       "name": "job-profiles-prompt-render",
       "feature": "agent-job-profiles",
       "tasks": [
@@ -389,7 +389,7 @@
         "name": "Application Agent",
         "type": "custom",
         "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
-        "ref": "/home/glenn/Documents/truthcv",
+        "ref": "<repo root>",
         "group": null
       },
       "provisionalConnections": [
@@ -490,7 +490,7 @@
       "planId": "p-f2f66ba3",
       "componentId": "mcp-tool-surface",
       "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
-      "ref": "/home/glenn/Documents/truthcv",
+      "ref": "<repo root>",
       "name": "company-board-resolution",
       "feature": "agent-job-profiles",
       "tasks": [
@@ -584,7 +584,7 @@
         "name": "MCP Tool Surface",
         "type": "backend",
         "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
-        "ref": "/home/glenn/Documents/truthcv",
+        "ref": "<repo root>",
         "group": "truthcv-container-single-docker-image"
       },
       "provisionalConnections": [
@@ -696,7 +696,7 @@
       "planId": "p-c20decaf",
       "componentId": "screening-engine",
       "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
-      "ref": "/home/glenn/Documents/truthcv",
+      "ref": "<repo root>",
       "name": "cooldown-from-config",
       "feature": "agent-job-profiles",
       "tasks": [
@@ -737,7 +737,7 @@
         "name": "Screening Engine",
         "type": "backend",
         "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
-        "ref": "/home/glenn/Documents/truthcv",
+        "ref": "<repo root>",
         "group": "truthcv-container-single-docker-image"
       },
       "provisionalConnections": [
@@ -849,7 +849,7 @@
       "planId": "p-5f5248a1",
       "componentId": "application-tracker",
       "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
-      "ref": "/home/glenn/Documents/truthcv",
+      "ref": "<repo root>",
       "name": "ledger-profile-attribution",
       "feature": "agent-job-profiles",
       "tasks": [
@@ -980,7 +980,7 @@
       "planId": "p-4b09e827",
       "componentId": "web-ui",
       "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
-      "ref": "/home/glenn/Documents/truthcv",
+      "ref": "<repo root>",
       "name": "job-profiles-ui",
       "feature": "agent-job-profiles",
       "tasks": [
@@ -1006,7 +1006,7 @@
         {
           "id": "t-2",
           "title": "Add the ProfilesSection and global limit fields to the Agents page",
-          "description": "In web/src/agents/AgentsPage.tsx add a `ProfilesSection` rendering profile cards with add / duplicate / remove; duplicate pre-fills from the source profile and is the primary creation path; a brand-new profile is pre-filled with the spec §5.3 defaults (fully remote; employment country Germany, EOR disallowed, entity verification required; salary floor 85000, ask 95000-110000; working language English; Glassdoor 3.5 waived under 20 reviews; accepted 'agentic / AI engineering, data engineering'; rejected 'generic full-stack, frontend, SRE, Java-heavy backend'). Every multi-item field is a single text input the user types comma-separated values into, joined with ', ' on load. Use an EXPLICIT Save button following the ScheduleSection pattern (`const fresh = await updateAgentConfig({ runAt, runDays });`) — NOT the blocklist section's save-on-change, because these edits are consequential. Add watchlist rows: company name, read-only resolved URL, a clear-resolution control, and an optional manual URL override. Add the entity-verification checkbox with helper text stating the trade-off per spec §5.2.7 (checked = today's fail-closed behaviour, unchecked = waives on absence). Place `cooldownDays` and `maxApplicationsPerRun` following the page's existing section pattern — your call whether that is a new small section or appended to an existing one. Use the MUI components the page already uses. New test files MUST carry the line-1 `// @vitest-environment jsdom` pragma, as AgentsPage.model.test.tsx does — the vitest default environment in vite.config.ts is `node`.",
+          "description": "In web/src/agents/AgentsPage.tsx add a `ProfilesSection` rendering profile cards with add / duplicate / remove; duplicate pre-fills from the source profile and is the primary creation path; a brand-new profile is pre-filled with the spec §5.3 defaults (fully remote; employment country Germany, EOR disallowed, entity verification required; salary floor 70000, ask 80000-100000; working language English; Glassdoor 3.5 waived under 20 reviews; accepted 'backend engineering, platform engineering'; rejected 'sales, marketing'). Every multi-item field is a single text input the user types comma-separated values into, joined with ', ' on load. Use an EXPLICIT Save button following the ScheduleSection pattern (`const fresh = await updateAgentConfig({ runAt, runDays });`) — NOT the blocklist section's save-on-change, because these edits are consequential. Add watchlist rows: company name, read-only resolved URL, a clear-resolution control, and an optional manual URL override. Add the entity-verification checkbox with helper text stating the trade-off per spec §5.2.7 (checked = today's fail-closed behaviour, unchecked = waives on absence). Place `cooldownDays` and `maxApplicationsPerRun` following the page's existing section pattern — your call whether that is a new small section or appended to an existing one. Use the MUI components the page already uses. New test files MUST carry the line-1 `// @vitest-environment jsdom` pragma, as AgentsPage.model.test.tsx does — the vitest default environment in vite.config.ts is `node`.",
           "complexity": "high",
           "status": "pending",
           "wave": 2,

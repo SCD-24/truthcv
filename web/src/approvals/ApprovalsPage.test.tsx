@@ -60,9 +60,9 @@ beforeEach(() => {
 function makeRecord(overrides: Partial<ScreeningRecord> = {}): ScreeningRecord {
   return {
     id: "s1",
-    company: "Grafana Labs",
+    company: "Contoso Labs",
     role: "Staff AI Engineer",
-    url: "https://grafana.com/jobs/1",
+    url: "https://contoso.example/jobs/1",
     screenedDate: "2026-08-23",
     verdict: "deferred",
     failingCriterion: "entity",
@@ -107,7 +107,7 @@ function clickTab(name: string | RegExp) {
 describe("ApprovalsPage", () => {
   it("renders four tabs with the counts of each queue", async () => {
     await renderPage(
-      [makeRecord(), makeRecord({ id: "s2", company: "n8n" })],
+      [makeRecord(), makeRecord({ id: "s2", company: "Aperture" })],
       [makeRecord({ id: "a1", approval: "approved" })],
       {
         rejected: [makeRecord({ id: "r1", approval: "rejected" })],
@@ -126,7 +126,7 @@ describe("ApprovalsPage", () => {
 
   it("renders a pending item with the agent's deferral reason", async () => {
     await renderPage([makeRecord()]);
-    expect(await screen.findByText("Grafana Labs")).toBeTruthy();
+    expect(await screen.findByText("Contoso Labs")).toBeTruthy();
     expect(screen.getByText(/German hiring entity unverified/)).toBeTruthy();
   });
 
@@ -144,7 +144,7 @@ describe("ApprovalsPage", () => {
     clickTab(/applied/i);
     expect(screen.getByText(/nothing applied/i)).toBeTruthy();
     clickTab(/found/i);
-    expect(screen.getByText("Grafana Labs")).toBeTruthy();
+    expect(screen.getByText("Contoso Labs")).toBeTruthy();
   });
 
   it("approving calls through and removes the row", async () => {
@@ -175,7 +175,7 @@ describe("ApprovalsPage", () => {
 
   it("bulk approve sends every selected id", async () => {
     vi.mocked(bulkSetApproval).mockResolvedValue({ results: [] });
-    await renderPage([makeRecord(), makeRecord({ id: "s2", company: "n8n" })]);
+    await renderPage([makeRecord(), makeRecord({ id: "s2", company: "Aperture" })]);
     fireEvent.click(await screen.findByRole("checkbox", { name: /select all/i }));
     fireEvent.click(screen.getByRole("button", { name: /approve selected/i }));
     await waitFor(() =>
@@ -200,7 +200,7 @@ describe("ApprovalsPage", () => {
 
   it("does not render a URL entry field for a record that already has a url", async () => {
     await renderPage([makeRecord()]);
-    await screen.findByText("Grafana Labs");
+    await screen.findByText("Contoso Labs");
     expect(screen.queryByLabelText(/posting url/i)).toBeNull();
   });
 
@@ -216,7 +216,7 @@ describe("ApprovalsPage", () => {
     clickTab(/queued/i);
     fireEvent.click(await screen.findByRole("button", { name: /edit url/i }));
     const field = screen.getByLabelText(/posting url/i) as HTMLInputElement;
-    expect(field.value).toBe("https://grafana.com/jobs/1");
+    expect(field.value).toBe("https://contoso.example/jobs/1");
     fireEvent.change(field, { target: { value: "https://x.example/updated" } });
     fireEvent.click(screen.getByRole("button", { name: /save url/i }));
     await waitFor(() =>
@@ -235,7 +235,7 @@ describe("ApprovalsPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
     expect(screen.queryByLabelText(/posting url/i)).toBeNull();
-    expect(await screen.findByText("https://grafana.com/jobs/1")).toBeTruthy();
+    expect(await screen.findByText("https://contoso.example/jobs/1")).toBeTruthy();
     expect(setScreeningUrl).not.toHaveBeenCalled();
   });
 
@@ -244,10 +244,10 @@ describe("ApprovalsPage", () => {
       makeRecord({ id: "r1", approval: "rejected", url: "https://x.example/rejected" }),
     );
     await renderPage([], [], {
-      rejected: [makeRecord({ id: "r1", company: "Pleo", approval: "rejected" })],
+      rejected: [makeRecord({ id: "r1", company: "Soylent", approval: "rejected" })],
     });
     clickTab(/rejected/i);
-    expect(await screen.findByText("https://grafana.com/jobs/1")).toBeTruthy();
+    expect(await screen.findByText("https://contoso.example/jobs/1")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /edit url/i }));
     fireEvent.change(screen.getByLabelText(/posting url/i), {
       target: { value: "https://x.example/rejected" },
@@ -390,25 +390,25 @@ describe("ApprovalsPage reviewable lists", () => {
   it("the Rejected tab lists agent-rejected and user-rejected records with distinct labels", async () => {
     await renderPage([], [], {
       didNotPass: [
-        makeRecord({ id: "d1", company: "SumUp", verdict: "rejected", approval: "", failingCriterion: "remote" }),
+        makeRecord({ id: "d1", company: "Paycrest", verdict: "rejected", approval: "", failingCriterion: "remote" }),
       ],
       rejected: [
-        makeRecord({ id: "r1", company: "Pleo", approval: "rejected" }),
+        makeRecord({ id: "r1", company: "Soylent", approval: "rejected" }),
       ],
     });
     clickTab(/rejected \(2\)/i);
-    expect(await screen.findByText("SumUp")).toBeTruthy();
-    expect(screen.getByText("Pleo")).toBeTruthy();
+    expect(await screen.findByText("Paycrest")).toBeTruthy();
+    expect(screen.getByText("Soylent")).toBeTruthy();
     expect(screen.getByText("Rejected by agent")).toBeTruthy();
     expect(screen.getByText("Rejected by you")).toBeTruthy();
   });
 
   it("moving one back queues it and takes it out of the Rejected tab", async () => {
     vi.mocked(setScreeningApproval).mockResolvedValue(
-      makeRecord({ id: "r1", company: "Pleo", approval: "pending" }),
+      makeRecord({ id: "r1", company: "Soylent", approval: "pending" }),
     );
     await renderPage([], [], {
-      rejected: [makeRecord({ id: "r1", company: "Pleo", approval: "rejected" })],
+      rejected: [makeRecord({ id: "r1", company: "Soylent", approval: "rejected" })],
     });
     clickTab(/rejected/i);
     fireEvent.click(await screen.findByRole("button", { name: "Move to approvals" }));
@@ -418,7 +418,7 @@ describe("ApprovalsPage reviewable lists", () => {
     );
     // The row joined the Found queue without a refetch.
     clickTab(/found/i);
-    expect(await screen.findByText("Pleo")).toBeTruthy();
+    expect(await screen.findByText("Soylent")).toBeTruthy();
   });
 
   it("moving a queued record back to Found unqueues it and updates both tab counts", async () => {
@@ -437,7 +437,7 @@ describe("ApprovalsPage reviewable lists", () => {
     expect(await screen.findByRole("tab", { name: "Found (1)" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Queued (0)" })).toBeTruthy();
     clickTab(/found/i);
-    expect(await screen.findByText("Grafana Labs")).toBeTruthy();
+    expect(await screen.findByText("Contoso Labs")).toBeTruthy();
   });
 });
 
@@ -445,14 +445,14 @@ describe("ApprovalsPage applied tab", () => {
   it("lists applied records read-only, with no action buttons", async () => {
     await renderPage([], [], {
       applied: [
-        makeRecord({ id: "ap1", company: "Wolt", approval: "applied" }),
-        makeRecord({ id: "ap2", company: "Spotify", approval: "applied", url: "" }),
+        makeRecord({ id: "ap1", company: "Fernwood", approval: "applied" }),
+        makeRecord({ id: "ap2", company: "Bluenote", approval: "applied", url: "" }),
       ],
     });
     clickTab(/applied/i);
     // AppliedRow prints "company — role" in one node, so match on a substring.
-    expect(await screen.findByText(/Wolt/)).toBeTruthy();
-    expect(screen.getByText(/Spotify/)).toBeTruthy();
+    expect(await screen.findByText(/Fernwood/)).toBeTruthy();
+    expect(screen.getByText(/Bluenote/)).toBeTruthy();
     expect(screen.getByText(/applications page/i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^approve$/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /^reject$/i })).toBeNull();
@@ -465,30 +465,30 @@ describe("ApprovalsPage rejected tab delete", () => {
   it("deletes one rejected row after confirming", async () => {
     vi.mocked(deleteScreening).mockResolvedValue(undefined);
     await renderPage([], [], {
-      rejected: [makeRecord({ id: "r1", company: "Pleo", approval: "rejected" })],
+      rejected: [makeRecord({ id: "r1", company: "Soylent", approval: "rejected" })],
     });
     clickTab(/rejected/i);
     fireEvent.click(
-      await screen.findByRole("button", { name: "Delete rejected posting for Pleo" }),
+      await screen.findByRole("button", { name: "Delete rejected posting for Soylent" }),
     );
     expect(deleteScreening).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() => expect(deleteScreening).toHaveBeenCalledWith("r1"));
-    await waitFor(() => expect(screen.queryByText("Pleo")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Soylent")).toBeNull());
   });
 
   it("requires confirming the dialog before any delete request fires", async () => {
     await renderPage([], [], {
-      rejected: [makeRecord({ id: "r1", company: "Pleo", approval: "rejected" })],
+      rejected: [makeRecord({ id: "r1", company: "Soylent", approval: "rejected" })],
     });
     clickTab(/rejected/i);
     fireEvent.click(
-      await screen.findByRole("button", { name: "Delete rejected posting for Pleo" }),
+      await screen.findByRole("button", { name: "Delete rejected posting for Soylent" }),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(deleteScreening).not.toHaveBeenCalled();
     expect(bulkDeleteScreenings).not.toHaveBeenCalled();
-    expect(screen.getByText("Pleo")).toBeTruthy();
+    expect(screen.getByText("Soylent")).toBeTruthy();
   });
 
   it("select-all then Delete selected calls bulk delete for every rejected row", async () => {
@@ -500,8 +500,8 @@ describe("ApprovalsPage rejected tab delete", () => {
     });
     await renderPage([], [], {
       rejected: [
-        makeRecord({ id: "r1", company: "Pleo", approval: "rejected" }),
-        makeRecord({ id: "r2", company: "SumUp", approval: "rejected" }),
+        makeRecord({ id: "r1", company: "Soylent", approval: "rejected" }),
+        makeRecord({ id: "r2", company: "Paycrest", approval: "rejected" }),
       ],
     });
     clickTab(/rejected/i);
@@ -511,8 +511,8 @@ describe("ApprovalsPage rejected tab delete", () => {
     await waitFor(() =>
       expect(bulkDeleteScreenings).toHaveBeenCalledWith(expect.arrayContaining(["r1", "r2"])),
     );
-    await waitFor(() => expect(screen.queryByText("Pleo")).toBeNull());
-    expect(screen.queryByText("SumUp")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("Soylent")).toBeNull());
+    expect(screen.queryByText("Paycrest")).toBeNull();
   });
 
   it("a partial bulk-delete failure leaves the failed row visible with an error message", async () => {
@@ -524,16 +524,16 @@ describe("ApprovalsPage rejected tab delete", () => {
     });
     await renderPage([], [], {
       rejected: [
-        makeRecord({ id: "r1", company: "Pleo", approval: "rejected" }),
-        makeRecord({ id: "r2", company: "SumUp", approval: "rejected" }),
+        makeRecord({ id: "r1", company: "Soylent", approval: "rejected" }),
+        makeRecord({ id: "r2", company: "Paycrest", approval: "rejected" }),
       ],
     });
     clickTab(/rejected/i);
     fireEvent.click(await screen.findByRole("checkbox", { name: "Select all rejected" }));
     fireEvent.click(await screen.findByRole("button", { name: "Delete selected" }));
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
-    await waitFor(() => expect(screen.queryByText("Pleo")).toBeNull());
-    expect(await screen.findByText("SumUp")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Soylent")).toBeNull());
+    expect(await screen.findByText("Paycrest")).toBeTruthy();
     expect(await screen.findByText("1 could not be deleted.")).toBeTruthy();
   });
 
@@ -595,7 +595,7 @@ describe("Found ordering", () => {
     // fallback dates alone — here deliberately older than the fresh posting.
     const stale = makeRecord({
       id: "stale",
-      company: "Zillow Group",
+      company: "Harbor Group",
       postedDate: "30+ days ago (as stated on posting)",
       screenedDate: "2026-06-01",
       createdAt: "2026-06-01T17:00:00Z",
@@ -667,20 +667,20 @@ describe("applying by hand from the Found tab", () => {
   it("creates the application and drops the row from Found", async () => {
     vi.mocked(markScreeningApplied).mockResolvedValue({ id: "app1" } as never);
     await renderPage([
-      makeRecord({ id: "p1", company: "Camunda" }),
-      makeRecord({ id: "p2", company: "Pleo" }),
+      makeRecord({ id: "p1", company: "Duff" }),
+      makeRecord({ id: "p2", company: "Soylent" }),
     ]);
 
     fireEvent.click(screen.getAllByRole("button", { name: "I applied" })[0]);
 
     await waitFor(() => expect(markScreeningApplied).toHaveBeenCalledWith("p1"));
-    await waitFor(() => expect(screen.queryByText("Camunda")).toBeNull());
-    expect(screen.getByText("Pleo")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Duff")).toBeNull());
+    expect(screen.getByText("Soylent")).toBeTruthy();
   });
 
   it("confirms where the posting went", async () => {
     vi.mocked(markScreeningApplied).mockResolvedValue({ id: "app1" } as never);
-    await renderPage([makeRecord({ id: "p1", company: "Camunda" })]);
+    await renderPage([makeRecord({ id: "p1", company: "Duff" })]);
 
     fireEvent.click(screen.getByRole("button", { name: "I applied" }));
 
@@ -689,7 +689,7 @@ describe("applying by hand from the Found tab", () => {
 
   it("is available without a cover-letter draft, unlike Approve", async () => {
     // The operator already applied; the draft gate does not apply to them.
-    await renderPage([makeRecord({ id: "p1", company: "Camunda" })]);
+    await renderPage([makeRecord({ id: "p1", company: "Duff" })]);
 
     const applied = screen.getByRole("button", { name: "I applied" }) as HTMLButtonElement;
     const approve = screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement;
@@ -699,11 +699,11 @@ describe("applying by hand from the Found tab", () => {
 
   it("keeps the row and surfaces the error when the call fails", async () => {
     vi.mocked(markScreeningApplied).mockRejectedValue(new Error("already applied"));
-    await renderPage([makeRecord({ id: "p1", company: "Camunda" })]);
+    await renderPage([makeRecord({ id: "p1", company: "Duff" })]);
 
     fireEvent.click(screen.getByRole("button", { name: "I applied" }));
 
     await waitFor(() => expect(screen.getByText(/already applied/)).toBeTruthy());
-    expect(screen.getByText("Camunda")).toBeTruthy();
+    expect(screen.getByText("Duff")).toBeTruthy();
   });
 });

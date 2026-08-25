@@ -52,14 +52,14 @@ class TestValidateCompanyName:
         with pytest.raises(ValueError, match="no letters"):
             validate_company_name("12345")
 
-    def test_real_names_with_punctuation_survive(self):
-        """Names the live agent actually recorded must not be caught by the rules."""
+    def test_punctuated_names_survive(self):
+        """Awkwardly punctuated names of the shape the live agent records must not be caught by the rules."""
         for name in [
-            "ResMed (adiutaByte / MEDIFOX DAN)",
-            "Klar (Klar Technologies GmbH)",
-            "IBIS Prof. Thome AG",
-            "accantec group (part of x1F)",
-            "Noxtua (formerly Xayn)",
-            "trawa",
+            "Medico (nordByte / CARESOFT DAN)",
+            "Sable (Sable Technologies GmbH)",
+            "OTIS Prof. Mueller AG",
+            "adventec group (part of z9K)",
+            "Vertua (formerly Zayn)",
+            "tessa",
         ]:
             assert validate_company_name(name) == name
