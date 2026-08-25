@@ -239,6 +239,22 @@
   font-family: var(--font-mono);
   color: var(--ink-soft);
   font-style: italic;
+  display: block;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Free-text cells (Company, To Who, Method) — bounded so a long value
+ * doesn't stretch the row past the page width; the full value is still
+ * available as a hover title. */
+.apps__clip {
+  display: block;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .apps__rowactions {
