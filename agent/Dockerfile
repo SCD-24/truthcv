@@ -25,7 +25,9 @@
 # answered by the browser service, not by the host: its Chromium profile lives
 # on the persistent `browser-profile` volume, and the operator establishes those
 # sessions once by hand through the Agents page → Site sign-ins, which relays
-# the noVNC viewport through the app, after which they survive restarts.
+# the noVNC viewport through the app for the duration of that sign-in, after
+# which they survive restarts. The viewport is not a way to watch a run: a run
+# and a sign-in session cannot both hold the profile, and the run wins.
 #
 # NOTHING that renders a page is installed below — do not "fix" the absence of
 # a browser in this image by adding one back.

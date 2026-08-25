@@ -50,10 +50,14 @@ capability it has goes through TruthCV's MCP tool surface — it deliberately
 does not mount the data volume.
 
 > **It submits from a real Chromium**, running headful in its own `browser`
-> container, not this one. Watch a run live, or do the one-time manual login
-> an ATS needs (SSO, CAPTCHA, SMS MFA), from the **Agents page → Site
-> sign-ins**. That login persists on the `browser-profile` volume, so it
-> survives restarts and later runs reuse it. There is no headless fallback:
+> container, not this one. Do the one-time manual login an ATS needs (SSO,
+> CAPTCHA, SMS MFA) from the **Agents page → Site sign-ins**, which opens the
+> browser's viewport in the app. That login persists on the `browser-profile`
+> volume, so it survives restarts and later runs reuse it. The viewport is
+> for signing in only — you cannot watch a run in progress, because a run and
+> a sign-in session cannot hold the browser at the same time and the run
+> wins. To see what a run did, read its log and the application ledger.
+> There is no headless fallback:
 > that was a deliberate choice, because a fresh, logged-out browser would
 > apply as nobody. If the `browser` service is not reachable, the agent aborts
 > the run rather than proceeding blind.
@@ -92,6 +96,7 @@ cp .env.example .env
 
 # 2. Edit .env — set LLM_PROVIDER and paste the matching API key
 #    e.g. LLM_PROVIDER=anthropic  and  ANTHROPIC_API_KEY=sk-ant-...
+#    and set AGENT_API_TOKEN (required):  openssl rand -hex 32
 
 # 3. Build and run
 docker compose up --build
@@ -121,6 +126,18 @@ docker compose run --rm -v "$(pwd)/answers.local.yaml:/app/answers.local.yaml" a
 You can also fill these in later from the web UI's **Settings** modal (same
 file, via `PUT /api/profile/answers`) — but until one route or the other has
 run, the agent has no identity to submit with.
+
+### Upgrading
+
+This version needs two things an older setup may not have:
+
+- **A non-empty `AGENT_API_TOKEN` in `.env`** (`openssl rand -hex 32`). The
+  browser container's session control server rejects an empty token, so every
+  scheduled run aborts with `session server unreachable at browser:8932 - ...
+  rejected the agent's X-Agent-Token`.
+- **`docker compose up --build`, not `up`.** The `browser` image gains a
+  session control server; an old image does not answer on port 8932, and every
+  scheduled run aborts with the same message naming an unreachable server.
 
 ### Run fully offline with Ollama
 

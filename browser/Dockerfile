@@ -39,8 +39,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #               second top-level window for the identity provider, which lands
 #               stacked over or under the first with no way to switch — so a
 #               manual sign-in through the viewport is unusable without this.
-#   procps:     pgrep, used by session-server.js to check whether any Chromium
-#               already holds the profile.
+#   procps:     ps, used by session-server.js (`ps -eo stat=,comm=`) to check
+#               whether a live Chromium already holds the profile.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       xvfb x11vnc novnc websockify openbox procps \
  && rm -rf /var/lib/apt/lists/*
