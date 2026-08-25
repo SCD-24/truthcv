@@ -1006,12 +1006,14 @@ def _onboarding_state() -> OnboardingState:
 @router.get("/onboarding", response_model=OnboardingState)
 def onboarding() -> OnboardingState:
     """First-run onboarding progress: provider setup, profile, CV review, tour."""
+    onboarding_store.ensure_initialized()
     return _onboarding_state()
 
 
 @router.put("/onboarding", response_model=OnboardingState)
 def put_onboarding(body: OnboardingUpdate) -> OnboardingState:
     """Merge only the fields the client actually sent onto the stored state."""
+    onboarding_store.ensure_initialized()
     merged = onboarding_store.load().to_dict()
     merged.update(body.model_dump(exclude_unset=True, by_alias=False))
     onboarding_store.save(onboarding_store.OnboardingState.from_dict(merged))
