@@ -14,6 +14,7 @@ import applications.store as apps
 import screening.store as store
 from agenttools import tools_ledger
 from agenttools.tools_ledger import get_approved_applications, report_apply_failure
+from companyresearch import store as findings_store
 
 
 def _approved(company="Contoso Labs", url="https://contoso.example/jobs/1"):
@@ -51,6 +52,59 @@ def test_already_applied_url_is_flagged_not_hidden(data_dir):
             "submitted": True,
         }
     )
+    items = get_approved_applications()
+    assert [i["blocked_reason"] for i in items] == ["already_applied"]
+
+
+def test_open_contradiction_blocks_but_does_not_hide_the_item(data_dir):
+    """A company whose own research disagrees with itself must not be applied
+    to, but the agent still needs to see the item to report why it did not go
+    out — the same discipline cooldown uses."""
+    _approved(company="Contoso Labs")
+    findings_store.record(
+        "Contoso Labs", "employer_rating", "4.5", "https://a.example/x", "press", "", "agent"
+    )
+    findings_store.record(
+        "Contoso Labs", "employer_rating", "3.0", "https://b.example/y", "review_site", "", "agent"
+    )
+
+    items = get_approved_applications()
+    assert [i["blocked_reason"] for i in items] == ["contradictory_research"]
+    assert items[0]["contradictions"]
+    assert items[0]["contradictions"][0]["claim"] == "employer_rating"
+
+
+def test_resolving_the_contradiction_clears_the_block(data_dir):
+    first = findings_store.record(
+        "Contoso Labs", "employer_rating", "4.5", "https://a.example/x", "press", "", "agent"
+    )
+    findings_store.record(
+        "Contoso Labs", "employer_rating", "3.0", "https://b.example/y", "review_site", "", "agent"
+    )
+    _approved(company="Contoso Labs")
+    findings_store.resolve(first.id, "rejected")
+
+    items = get_approved_applications()
+    assert items[0]["blocked_reason"] != "contradictory_research"
+    assert items[0]["contradictions"] == []
+
+
+def test_already_applied_outranks_contradictory_research(data_dir):
+    _approved(company="Contoso Labs", url="https://contoso.example/jobs/1")
+    apps.create(
+        {
+            "company": "Contoso Labs",
+            "application_url": "https://contoso.example/jobs/1",
+            "submitted": True,
+        }
+    )
+    findings_store.record(
+        "Contoso Labs", "employer_rating", "4.5", "https://a.example/x", "press", "", "agent"
+    )
+    findings_store.record(
+        "Contoso Labs", "employer_rating", "3.0", "https://b.example/y", "review_site", "", "agent"
+    )
+
     items = get_approved_applications()
     assert [i["blocked_reason"] for i in items] == ["already_applied"]
 

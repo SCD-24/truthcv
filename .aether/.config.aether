@@ -1482,6 +1482,14 @@
       "id": "onboarding-store",
       "name": "Onboarding Store",
       "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "id": "company-research",
+      "name": "Company Research",
+      "type": "backend"
     }
   ],
   "connections": [
@@ -1699,6 +1707,26 @@
       "from": "renderer",
       "protocol": "in-process",
       "to": "prompt-store"
+    },
+    {
+      "from": "company-research",
+      "protocol": "file I/O",
+      "to": "truth-data-volume"
+    },
+    {
+      "from": "api",
+      "protocol": "in-process",
+      "to": "company-research"
+    },
+    {
+      "from": "application-tracker",
+      "protocol": "in-process",
+      "to": "company-research"
+    },
+    {
+      "from": "screening-engine",
+      "protocol": "in-process",
+      "to": "company-research"
     }
   ],
   "definitions": [
@@ -1804,7 +1832,8 @@
         "cover-letter-engine",
         "prompt-store",
         "application-tracker",
-        "agent-config"
+        "agent-config",
+        "company-research"
       ],
       "name": "TruthCV Container (single Docker image)",
       "w": 1861.8301559792023,
@@ -1831,6 +1860,10 @@
     "application-tracker": {
       "x": 1028,
       "y": 428
+    },
+    "company-research": {
+      "x": 1500,
+      "y": 200
     },
     "connections": {
       "x": 396,

@@ -33,6 +33,8 @@ import type {
   StartLoginResult,
   Routing,
   RoutingUpdate,
+  CompanyFinding,
+  ContradictionGroup,
 } from "./types";
 import { errorDetailToMessage } from "./errorDetail";
 
@@ -323,6 +325,52 @@ export function listApprovedApplications(): Promise<ScreeningRecord[]> {
 /** Postings you rejected. Kept listed so a decision can be reversed. */
 export function listRejectedApprovals(): Promise<ScreeningRecord[]> {
   return request("/api/screenings?approval=rejected");
+}
+
+/** Every sourced company research finding, newest observed first. */
+export function listCompanyFindings(): Promise<CompanyFinding[]> {
+  return request("/api/company-findings");
+}
+
+/** Every finding recorded for one company. */
+export function listCompanyFindingsFor(company: string): Promise<CompanyFinding[]> {
+  return request("/api/company-findings/" + encodeURIComponent(company));
+}
+
+/** Open contradiction groups; narrowed to one company, or across all of them. */
+export function listContradictions(company?: string): Promise<ContradictionGroup[]> {
+  const query = company ? `?company=${encodeURIComponent(company)}` : "";
+  return request(`/api/company-findings/contradictions${query}`);
+}
+
+/** Record an operator-sourced company finding. Never overwrites an existing one. */
+export function createCompanyFinding(body: {
+  company: string;
+  claim: string;
+  value: string;
+  sourceUrl: string;
+  sourceClass: string;
+  asOf?: string;
+  note?: string;
+}): Promise<CompanyFinding> {
+  return request("/api/company-findings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Accept or reject an existing finding. Cannot change its factual fields. */
+export function resolveCompanyFinding(
+  id: string,
+  resolution: string,
+  note?: string,
+): Promise<CompanyFinding> {
+  return request("/api/company-findings/" + encodeURIComponent(id), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ resolution, note: note ?? "" }),
+  });
 }
 
 /** Postings already applied to — the queue items that settled into tracked

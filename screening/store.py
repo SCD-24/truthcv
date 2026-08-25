@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agentconfig.store import load as _agent_config_load
+from companyresearch.store import open_contradictions as _open_contradictions
 from datafile import atomic_write_text, locked
 from truth.store import data_dir
 
@@ -172,28 +173,60 @@ def record_apply_failure(screening_id: str, error: str) -> Screening | None:
     return _mutate(screening_id, _bump)
 
 
+def _apply_refusal(screening: Screening) -> str:
+    """"" when `screening` may be applied to; a machine-readable reason otherwise.
+
+    "already_applied" outranks everything else: an applied item is retired
+    and there is nothing left to arbitrate. "contradictory_research" fires
+    when the company has an unresolved contradiction in companyresearch — a
+    company whose own research disagrees with itself must not be applied to
+    until the operator resolves it (see companyresearch.store.resolve).
+
+    `open_contradictions` only calls `load_all()`, which takes no lock, so
+    this is safe to call from inside the screenings lock — it must stay to
+    that one unlocked read and take no companyresearch lock of its own,
+    since holding one file's lock while acquiring another's is how two
+    writers racing in opposite orders deadlock.
+    """
+    if screening.approval == "applied":
+        return "already_applied"
+    if _open_contradictions(screening.company):
+        return "contradictory_research"
+    return ""
+
+
 def mark_applied(screening_id: str) -> Screening | None:
-    """Retire an approved item once its application is confirmed."""
-    return _mutate(screening_id, lambda s: setattr(s, "approval", "applied"))
+    """Retire an approved item once its application is confirmed.
 
-
-def claim_for_apply(screening_id: str) -> Screening | None:
-    """Atomically retire a screening, but only if it is not already retired.
-
-    Returns the record on success, or None if it does not exist or was already
-    ``applied``. The check and the write happen under one lock, which is what
-    makes it a claim rather than a request: two concurrent callers cannot both
-    succeed, so the caller that wins is the only one that may create the
-    application row.
-
-    ``mark_applied`` remains the unconditional form for the agent's own path,
-    where the application has already been confirmed and there is nothing to
-    arbitrate.
+    No longer unconditional: an item whose company has an open research
+    contradiction is refused here too, since the agent's own path must not
+    be able to route around the same guard the REST route enforces.
     """
     with locked(screenings_path()):
         screenings = load_all()
         screening = next((s for s in screenings if s.id == screening_id), None)
-        if screening is None or screening.approval == "applied":
+        if screening is None or _apply_refusal(screening):
+            return None
+        screening.approval = "applied"
+        screening.updated_at = _now()
+        _write_all(screenings)
+        return screening
+
+
+def claim_for_apply(screening_id: str) -> Screening | None:
+    """Atomically retire a screening, but only if it may be applied to.
+
+    Returns the record on success, or None if it does not exist, was already
+    ``applied``, or its company has an open research contradiction (see
+    `_apply_refusal`). The check and the write happen under one lock, which
+    is what makes it a claim rather than a request: two concurrent callers
+    cannot both succeed, so the caller that wins is the only one that may
+    create the application row.
+    """
+    with locked(screenings_path()):
+        screenings = load_all()
+        screening = next((s for s in screenings if s.id == screening_id), None)
+        if screening is None or _apply_refusal(screening):
             return None
         screening.approval = "applied"
         screening.updated_at = _now()

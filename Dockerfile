@@ -41,6 +41,7 @@ COPY applications/ ./applications/
 COPY screening/ ./screening/
 COPY agentconfig/ ./agentconfig/
 COPY companyboards/ ./companyboards/
+COPY companyresearch/ ./companyresearch/
 COPY connections/ ./connections/
 COPY modelrouting/ ./modelrouting/
 COPY agenttools/ ./agenttools/

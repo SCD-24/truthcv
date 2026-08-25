@@ -21,6 +21,7 @@ import json
 import agentconfig.store as _agentconfig_store
 from agentconfig.salary import clamp_ask as _clamp_ask
 from agentconfig.salary import format_ask as _format_ask
+from companyresearch.store import open_contradictions as _open_contradictions
 from applications.model import Attachment, Confirmation, FieldSubmitted, Screening
 from applications.store import create as create_application
 from applications.store import save_attachments as _save_attachments
@@ -459,6 +460,13 @@ def get_approved_applications() -> list[dict]:
       those hid a legitimately approved item from every run — silently, since
       this guard used to drop the item instead of flagging it, so the operator
       saw a queued item stuck at zero attempts with no reason recorded.
+    - An item whose company has an unresolved company-research contradiction
+      comes back with ``blocked_reason`` set to "contradictory_research"
+      rather than hidden. The agent must not apply to a company whose own
+      research disagrees with itself, so this ranks directly after
+      already_applied: like that guard it describes an item that must not go
+      out at all, not one that cannot go out yet. It is flagged rather than
+      hidden so the run report can say why it did not go out.
     - An item whose company is in cooldown comes back with ``blocked_reason``
       set instead of being hidden, so the run report can say why it did not go
       out rather than the posting silently vanishing.
@@ -490,10 +498,17 @@ def get_approved_applications() -> list[dict]:
             continue
         draft = _letter_store.load(s.id)
         status = _cooldown(s.company, s.role or None)
-        # already_applied outranks the rest: the others describe an item that
-        # cannot go out yet, this one an item that must not go out at all.
+        contradictions = [
+            {"claim": g["claim"], "findings": [f.to_dict() for f in g["findings"]]}
+            for g in _open_contradictions(s.company)
+        ]
+        # already_applied and contradictory_research outrank the rest: those
+        # two describe an item that must not go out at all, the others one
+        # that cannot go out yet.
         if s.id in applied_screening_ids or (s.url and _normalize_application_url(s.url) in applied_urls):
             blocked_reason = "already_applied"
+        elif contradictions:
+            blocked_reason = "contradictory_research"
         elif status.blocked:
             blocked_reason = "cooldown"
         elif not s.url.strip():
@@ -510,6 +525,7 @@ def get_approved_applications() -> list[dict]:
                 "url": s.url,
                 "attempts": s.apply_attempts,
                 "blocked_reason": blocked_reason,
+                "contradictions": contradictions,
                 "cover_letter": draft.text if draft else "",
                 "letter_source": draft.source if draft else "",
             }

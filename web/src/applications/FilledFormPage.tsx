@@ -93,7 +93,7 @@ export function FilledFormPage({ onBack }: { onBack: () => void }) {
     fieldsSubmitted.length > 0 ||
     Boolean(confirmation?.text) ||
     attachments.length > 0 ||
-    Boolean(screening?.entity);
+    Boolean(screening?.remote);
 
   return (
     <Box className="apps-page" aria-labelledby="apps-title">

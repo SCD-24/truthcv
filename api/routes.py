@@ -53,6 +53,7 @@ from providers import (
     reset_provider,
 )
 from providers.base import supports_effort_levels
+from companyresearch import store as company_findings_store
 from screening import store as screening_store
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
@@ -88,6 +89,10 @@ from .schemas import (
     ConnectionList,
     ConnectionStatus,
     ConnectionTestRequest,
+    CompanyFindingCreate,
+    CompanyFindingModel,
+    CompanyFindingResolve,
+    ContradictionGroupModel,
     CoverLetterApprovals,
     CoverLetterRequest,
     CooldownResult,
@@ -219,6 +224,16 @@ def mark_screening_applied(screening_id: str) -> ApplicationModel:
     # screening with no row (visible, fixable) rather than a duplicate row.
     screening = screening_store.claim_for_apply(screening_id)
     if screening is None:
+        refused = screening_store.get(screening_id)
+        reason = screening_store._apply_refusal(refused) if refused else "already_applied"
+        if reason == "contradictory_research":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"{refused.company} has an open company-research contradiction — "
+                    "resolve it at /api/company-findings/contradictions before applying."
+                ),
+            )
         raise HTTPException(
             status_code=409, detail="This screening has already been applied to."
         )
@@ -307,6 +322,88 @@ def set_screening_approval(screening_id: str, body: ApprovalUpdate) -> Screening
             raise HTTPException(status_code=404, detail="Screening not found.")
 
     return _screening_model(screening)
+
+
+def _company_finding_model(f) -> CompanyFindingModel:
+    """Map a stored CompanyFinding to its wire model."""
+    return CompanyFindingModel(**f.to_dict())
+
+
+@router.get("/company-findings", response_model=list[CompanyFindingModel])
+def list_company_findings() -> list[CompanyFindingModel]:
+    """Every company research finding, newest observed_at first."""
+    findings = sorted(
+        company_findings_store.load_all(), key=lambda f: f.observed_at, reverse=True
+    )
+    return [_company_finding_model(f) for f in findings]
+
+
+# Declared BEFORE /company-findings/{company}: otherwise the router binds
+# "contradictions" as a company name and this route is unreachable.
+@router.get(
+    "/company-findings/contradictions", response_model=list[ContradictionGroupModel]
+)
+def list_company_finding_contradictions(
+    company: str | None = None,
+) -> list[ContradictionGroupModel]:
+    """Open contradiction groups; narrowed to one company, or across all of them."""
+    if company is not None:
+        groups = company_findings_store.open_contradictions(company)
+    else:
+        companies = {f.company for f in company_findings_store.load_all()}
+        groups = []
+        for c in companies:
+            groups.extend(company_findings_store.open_contradictions(c))
+    return [
+        ContradictionGroupModel(
+            claim=g["claim"],
+            findings=[_company_finding_model(f) for f in g["findings"]],
+        )
+        for g in groups
+    ]
+
+
+@router.get("/company-findings/{company}", response_model=list[CompanyFindingModel])
+def list_company_findings_for(company: str) -> list[CompanyFindingModel]:
+    """Every finding recorded for one company."""
+    return [
+        _company_finding_model(f) for f in company_findings_store.for_company(company)
+    ]
+
+
+@router.post("/company-findings", response_model=CompanyFindingModel, status_code=201)
+def create_company_finding(body: CompanyFindingCreate) -> CompanyFindingModel:
+    """Record an operator-sourced company finding. Never overwrites an existing one."""
+    try:
+        finding = company_findings_store.record(
+            company=body.company,
+            claim=body.claim,
+            value=body.value,
+            source_url=body.source_url,
+            source_class=body.source_class,
+            as_of=body.as_of,
+            recorded_by="operator",
+            note=body.note,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _company_finding_model(finding)
+
+
+@router.patch("/company-findings/{finding_id}", response_model=CompanyFindingModel)
+def resolve_company_finding(
+    finding_id: str, body: CompanyFindingResolve
+) -> CompanyFindingModel:
+    """Accept or reject an existing finding. Cannot change its factual fields."""
+    try:
+        finding = company_findings_store.resolve(
+            finding_id, body.resolution, body.note
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if finding is None:
+        raise HTTPException(status_code=404, detail="Finding not found.")
+    return _company_finding_model(finding)
 
 
 def _draft_model(draft: letter_store.CoverLetterDraft) -> CoverLetterDraftModel:

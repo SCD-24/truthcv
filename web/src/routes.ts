@@ -5,6 +5,7 @@ export const ROUTES = {
   filledForm: "/applications/:id/filled-form",
   agents: "/agents",
   screenings: "/screenings",
+  companyResearch: "/company-research",
   approvals: "/approvals",
   onboarding: "/onboarding",
   uploadCv: "/cv",

@@ -98,16 +98,15 @@ def _confirmation_populated(confirmation) -> bool:
 
 
 def _screening_populated(screening) -> bool:
-    """True if any Screening field is set, including the nested Glassdoor check."""
-    if any(
-        _nonempty(getattr(screening, f))
-        for f in ("entity", "remote", "salary", "language", "role_type")
-    ):
-        return True
-    g = screening.glassdoor
+    """True if any Screening field is set.
+
+    Company-level facts (employing entity, employer-review figures) no
+    longer live on Screening — they are recorded in companyresearch instead
+    — so this only looks at the posting-level verdicts that remain.
+    """
     return any(
-        _nonempty(getattr(g, f))
-        for f in ("rating", "reviews", "waiver_applied", "note")
+        _nonempty(getattr(screening, f))
+        for f in ("remote", "salary", "language", "role_type")
     )
 
 
