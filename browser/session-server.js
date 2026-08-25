@@ -278,6 +278,18 @@ function createSessionManager(deps) {
     session.proc = result.proc;
     session.startedAt = now().toISOString();
     delete session.reserved; // promoted: no longer a reservation
+    if (session.pendingEvict) {
+      // A run asked for the browser back while this was still a reservation.
+      // evict() could not stamp a deadline then (see its comment), so it left
+      // this flag instead; apply it the moment the session becomes real.
+      // Without this the eviction is simply lost: the run's wait loop polls a
+      // session that will never be evicted and aborts the run at
+      // SESSION_EVICT_TIMEOUT. Runs win — a dropped eviction is the session
+      // winning by accident.
+      delete session.pendingEvict;
+      session.evictDeadline = new Date(now().getTime() + graceMs).toISOString();
+      log(`session eviction (requested during launch) scheduled for ${session.evictDeadline}`);
+    }
     attachExitHandler(result.proc);
     log(`session opened at ${url} (pid ${result.proc && result.proc.pid})`);
     return { ok: true };
@@ -330,7 +342,13 @@ function createSessionManager(deps) {
       // Same reservation-window hazard as close(): stamping a deadline here
       // would let tick() call close() against a still-reserving session once
       // the grace period passed, reaching the same orphan by a longer route.
-      return { evicting: false, reserving: true };
+      // So record the request instead — open() applies it on promotion. The
+      // deadline is stamped from the promotion, not from here, so the operator
+      // still gets the full grace once their browser actually exists; the
+      // reservation window is bounded by supervisorIdle()'s 5s timeout plus a
+      // probe and a launch, which the run's own wait budget absorbs.
+      session.pendingEvict = true;
+      return { evicting: false, reserving: true, pending: true };
     }
     // Never extend an existing deadline: a run that asks twice must not push
     // the browser further out of its own reach.

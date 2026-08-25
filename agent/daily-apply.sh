@@ -131,6 +131,16 @@ case "$AGENT_BROWSER_DRIVER" in
         if ! grep -q '"open":true' <<<"$state"; then
           return 0
         fi
+        # Re-issue the eviction on every pass, not once before the loop. A
+        # session in its reservation window (open() has taken the slot but the
+        # browser has not launched yet) reports open:true while refusing the
+        # evict, so a single request can be dropped and the run would then wait
+        # out the whole timeout and abort. session-server.js also carries a
+        # pending-evict flag across that window; this is the other half, and it
+        # heals any refusal that flag does not cover. evict() never extends an
+        # existing deadline, so repeating it cannot push the browser further
+        # out of the run's reach.
+        session_request POST /session/evict >/dev/null || return 1
         sleep 5
         waited=$((waited + 5))
       done

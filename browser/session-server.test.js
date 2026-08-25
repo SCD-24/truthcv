@@ -344,6 +344,63 @@ test("evict() during the open() reservation window is refused, not applied", asy
   assert.strictEqual(m.state().open, true);
 });
 
+test("an evict during the reservation window is applied once the session is real", async () => {
+  // The run's eviction must not be lost just because it arrived while open()
+  // was still awaiting its preconditions. Dropping it costs a whole run: the
+  // wait loop polls a session that will never be evicted and aborts at
+  // SESSION_EVICT_TIMEOUT, which is the session winning over the run.
+  let resolveIdle;
+  const idlePromise = new Promise((resolve) => {
+    resolveIdle = resolve;
+  });
+  const proc = { pid: 4242, kill() { this.killed = true; }, killed: false };
+  const m = manager({
+    supervisorIdle: () => idlePromise,
+    launch: () => proc,
+  });
+
+  const openPromise = m.open("https://example.com/login");
+
+  const evictResult = m.evict();
+  assert.strictEqual(evictResult.evicting, false);
+  assert.strictEqual(evictResult.reserving, true);
+  assert.strictEqual(evictResult.pending, true);
+  // Still no deadline while it is only a reservation — tick() must not be
+  // able to close() a session whose browser has not launched yet.
+  assert.strictEqual(m.state().evictDeadline, null);
+
+  resolveIdle(true);
+  const openResult = await openPromise;
+  assert.strictEqual(openResult.ok, true);
+
+  // Promoted: the deadline the eviction asked for is now stamped, a full
+  // grace period from the moment the session became real.
+  assert.strictEqual(m.state().evictDeadline, "2026-08-25T12:03:00.000Z");
+});
+
+test("a pending evict fires at its deadline like any other", async () => {
+  let resolveIdle;
+  const idlePromise = new Promise((resolve) => {
+    resolveIdle = resolve;
+  });
+  let clock = new Date("2026-08-25T12:00:00.000Z");
+  const proc = { pid: 4242, kill() { this.killed = true; }, killed: false };
+  const m = manager({
+    supervisorIdle: () => idlePromise,
+    launch: () => proc,
+    now: () => clock,
+  });
+
+  const openPromise = m.open("https://example.com/login");
+  m.evict();
+  resolveIdle(true);
+  await openPromise;
+
+  clock = new Date("2026-08-25T12:03:01.000Z");
+  m.tick();
+  assert.strictEqual(proc.killed, true);
+});
+
 test("an unexpected error inside open() produces a 500 instead of crashing the handler", async () => {
   const brokenManager = {
     state: () => ({ open: false, url: null, startedAt: null, evictDeadline: null }),
