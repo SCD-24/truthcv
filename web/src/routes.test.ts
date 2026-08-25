@@ -7,6 +7,7 @@ describe("ROUTES", () => {
     expect(ROUTES.applications).toBe("/applications");
     expect(ROUTES.agents).toBe("/agents");
     expect(ROUTES.screenings).toBe("/screenings");
+    expect(ROUTES.companyResearch).toBe("/company-research");
     expect(ROUTES.approvals).toBe("/approvals");
     expect(ROUTES.onboarding).toBe("/onboarding");
     expect(ROUTES.uploadCv).toBe("/cv");

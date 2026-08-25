@@ -301,6 +301,33 @@ class TestMarkScreeningApplied:
     def test_unknown_screening_is_404(self, client, data_dir):
         assert client.post("/api/screenings/nope/applied").status_code == 404
 
+    def test_open_contradiction_gives_a_contradiction_specific_409(self, client, data_dir):
+        """The 409 must not flatten a research contradiction into the
+        already-applied wording — the operator needs to know which is true."""
+        from companyresearch import store as findings_store
+
+        sid = self._screening(client)
+        findings_store.record(
+            "Contoso Labs", "employer_rating", "4.5", "https://a.example/x", "press", "", "agent"
+        )
+        findings_store.record(
+            "Contoso Labs", "employer_rating", "3.0", "https://b.example/y", "review_site", "", "agent"
+        )
+
+        r = client.post(f"/api/screenings/{sid}/applied")
+        assert r.status_code == 409
+        detail = r.json()["detail"]
+        assert "Contoso Labs" in detail
+        assert "contradiction" in detail.lower()
+        assert "already been applied" not in detail
+
+    def test_already_applied_keeps_the_original_wording(self, client, data_dir):
+        sid = self._screening(client)
+        assert client.post(f"/api/screenings/{sid}/applied").status_code == 201
+        r = client.post(f"/api/screenings/{sid}/applied")
+        assert r.status_code == 409
+        assert "already been applied" in r.json()["detail"]
+
     def test_a_screening_with_a_url_is_a_posting_submission(self, client, data_dir):
         sid = self._screening(client, url="https://example.com/x")
         r = client.post(f"/api/screenings/{sid}/applied")

@@ -24,8 +24,10 @@ import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 // MUI icons v9 names this "DeleteOutlined"; "DeleteOutline" does not exist
 // in the installed package and fails the build at import time.
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
+import { Link as RouterLink } from "react-router-dom";
 import { isCooldownActive } from "../settings/cooldown";
 import { cooldownBlockLabel } from "../screenings/ScreeningsPage";
+import { ROUTES } from "../routes";
 import {
   bulkDeleteScreenings,
   bulkSetApproval,
@@ -35,6 +37,7 @@ import {
   markScreeningApplied,
   listAppliedScreenings,
   listApprovedApplications,
+  listContradictions,
   listDidNotPass,
   listPendingApprovals,
   listRejectedApprovals,
@@ -318,6 +321,7 @@ function PendingCard({
   record,
   checked,
   busy,
+  contested,
   onToggle,
   onDecide,
   onSaveUrl,
@@ -326,6 +330,7 @@ function PendingCard({
   record: ScreeningRecord;
   checked: boolean;
   busy: boolean;
+  contested: boolean;
   onToggle: (id: string) => void;
   onDecide: (id: string, approval: "approved" | "rejected") => void;
   onSaveUrl: (id: string, url: string) => void;
@@ -358,6 +363,16 @@ function PendingCard({
             ) : null}
             <Typography variant="body2">{record.reason}</Typography>
           </Stack>
+          {contested ? (
+            <Alert severity="warning" sx={{ mt: 1 }}>
+              This company has an open research contradiction — the agent will not
+              apply until it is resolved.{" "}
+              <Link component={RouterLink} to={ROUTES.companyResearch}>
+                Resolve it on Company Research
+              </Link>
+              .
+            </Alert>
+          ) : null}
           <CoverLetterSection
             record={record}
             onDraftChange={(_id, draft) => setHasDraft(draft !== null)}
@@ -685,6 +700,9 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [tab, setTab] = useState(0);
+  // Companies with at least one open research contradiction: the agent will
+  // not apply to these until it is resolved, so each affected card says so.
+  const [contestedCompanies, setContestedCompanies] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let live = true;
@@ -694,14 +712,18 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
       listRejectedApprovals(),
       listDidNotPass(),
       listAppliedScreenings(),
+      listContradictions(),
     ])
-      .then(([p, a, r, d, ap]) => {
+      .then(([p, a, r, d, ap, contradictions]) => {
         if (!live) return;
         setPending(p);
         setApproved(a);
         setRejected(r);
         setDidNotPass(d);
         setApplied(ap);
+        setContestedCompanies(
+          new Set(contradictions.flatMap((g) => g.findings.map((f) => f.company))),
+        );
       })
       .catch((e) => live && setError(String(e)))
       .finally(() => live && setLoading(false));
@@ -978,6 +1000,7 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
                     record={r}
                     checked={selected.includes(r.id)}
                     busy={busy}
+                    contested={contestedCompanies.has(r.company)}
                     onToggle={toggle}
                     onDecide={decide}
                     onSaveUrl={saveUrl}

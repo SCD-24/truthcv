@@ -3,9 +3,14 @@
 The nested-evidence fixture preserves the exact shape of a real Jobs
 applications/records/*.json entry — the nesting, field population, and
 evidence sub-objects a migrated record actually has — so the evidence
-dataclasses (Confirmation, Screening/Glassdoor, FieldSubmitted, Attachment) are
+dataclasses (Confirmation, Screening, FieldSubmitted, Attachment) are
 exercised against a real production record shape, with all identifying values
 replaced by placeholders rather than invented from scratch.
+
+Screening no longer carries `entity`/`glassdoor`: those were company-level
+claims with no source or date, and now live in `companyresearch` instead. A
+raw record still carrying those legacy keys must load cleanly and simply
+drop them — see test_screening_from_dict_drops_legacy_entity_and_glassdoor.
 """
 
 from __future__ import annotations
@@ -17,7 +22,6 @@ from applications.model import (
     Confirmation,
     Document,
     FieldSubmitted,
-    Glassdoor,
     Screening,
 )
 from applications.store import (
@@ -45,20 +49,33 @@ def test_confirmation_defaults():
     assert Confirmation.from_dict({}) == Confirmation(text="", confirmed_at="", evidence="")
 
 
-def test_glassdoor_defaults():
-    assert Glassdoor.from_dict(None) == Glassdoor(
-        rating="", reviews="", waiver_applied=False, note=""
-    )
-
-
-def test_screening_defaults_include_nested_glassdoor_default():
+def test_screening_defaults():
     screening = Screening.from_dict(None)
-    assert screening.entity == ""
     assert screening.remote == ""
     assert screening.salary == ""
     assert screening.language == ""
     assert screening.role_type == ""
-    assert screening.glassdoor == Glassdoor()
+
+
+def test_screening_from_dict_drops_legacy_entity_and_glassdoor():
+    """A raw record still carrying the removed keys loads without raising and
+    simply drops them — the back-compat contract for any un-migrated file."""
+    screening = Screening.from_dict(
+        {
+            "entity": "Some GmbH, read off the Impressum",
+            "glassdoor": {"rating": 3.3, "reviews": 17, "waiver_applied": True},
+            "remote": "Berlin",
+            "salary": "not stated",
+            "language": "English",
+            "role_type": "engineering",
+        }
+    )
+    assert not hasattr(screening, "entity")
+    assert not hasattr(screening, "glassdoor")
+    assert screening.remote == "Berlin"
+    assert screening.salary == "not stated"
+    assert screening.language == "English"
+    assert screening.role_type == "engineering"
 
 
 def test_attachment_defaults():
@@ -144,11 +161,6 @@ NORTHWIND_FIXTURE = {
         ),
     },
     "screening": {
-        "entity": (
-            "Northwind Health GmbH, Musterstra\u00dfe 1, 10115 Berlin \u2014 "
-            "HRB 100000 B, Amtsgericht Charlottenburg (Berlin), managing director "
-            "Erika Mustermann, read off Northwind's own Impressum."
-        ),
         "remote": (
             "Passes, with a mild internal conflict raised in the letter. The "
             "employer's own posting header reads \"Remote \u2014 Berlin, Berlin, "
@@ -167,32 +179,6 @@ NORTHWIND_FIXTURE = {
             "Target category \u2014 agentic / AI engineering, not a "
             "data-engineering fallback and not generic full-stack."
         ),
-        "glassdoor": {
-            "rating": 3.3,
-            "reviews": 17,
-            "waiver_applied": True,
-            "note": (
-                "Read directly in the browser off Glassdoor's own company page, "
-                "not from a search snippet (the Stark rule). Profile "
-                "**E1000001**, identified as the right company by four "
-                "independent markers on that page: HQ **Berlin, Deutschland**, "
-                "founded **2017**, CEO **Erika Mustermann** (the same person "
-                "named as managing director in the Impressum), and website "
-                "**northwind-health.example**. Rating **3,3 \u2605**. The page reports "
-                "its review count inconsistently \u2014 the overview header says "
-                "\"Basierend auf 8 Bewertungen\" while the FAQ says \"basierend "
-                "auf **17** anonymen Bewertungen\"; the higher of the two is "
-                "recorded here, since the waiver has to survive the least "
-                "favourable reading. **17 < 20, so the \u00a72.5 under-20-reviews "
-                "waiver applies** and the 3.3 rating does not reject. Note that "
-                "the rating is below the 3.5 bar and would fail without the "
-                "waiver, and that other sentiment figures on the page are weak "
-                "(54% would recommend, 37% positive business outlook, 61% "
-                "approve of CEO). A second, smaller Glassdoor profile literally "
-                "named \"Northwind\" exists (E1000002, 3.1\u2605, 5 reviews) and is "
-                "also under 20 reviews, so the waiver holds on either profile."
-            ),
-        },
     },
     "attachments": [
         {"kind": "cv", "path": "2026_Ada_Example_CV_v2.pdf"},
@@ -220,10 +206,9 @@ def test_full_nested_evidence_shape_exact_round_trip():
         "and the Application tab relabelled itself \"Application \u2014 Applied\"."
     )
 
-    # Glassdoor numeric data matches the real record exactly.
-    assert app.screening.glassdoor.rating == 3.3
-    assert app.screening.glassdoor.reviews == 17
-    assert app.screening.glassdoor.waiver_applied is True
+    # Screening's posting-level verdicts match the real record exactly.
+    assert app.screening.remote.startswith("Passes")
+    assert app.screening.role_type.startswith("Target category")
 
     # Whole-record round trip is exact. The fixture is a real legacy record and
     # so carries no "profile" or "screening_id" key; to_dict always emits them,
@@ -281,9 +266,8 @@ def test_dedicated_setters_persist_structured_fields(data_dir):
     assert saved.confirmation.evidence == NORTHWIND_FIXTURE["confirmation"]["evidence"]
 
     saved = save_screening(app.id, NORTHWIND_FIXTURE["screening"])
-    assert saved.screening.glassdoor.rating == 3.3
-    assert saved.screening.glassdoor.reviews == 17
-    assert saved.screening.glassdoor.waiver_applied is True
+    assert saved.screening.remote == NORTHWIND_FIXTURE["screening"]["remote"]
+    assert saved.screening.role_type == NORTHWIND_FIXTURE["screening"]["role_type"]
 
     saved = save_fields_submitted(app.id, NORTHWIND_FIXTURE["fields_submitted"])
     assert len(saved.fields_submitted) == 2
@@ -295,8 +279,7 @@ def test_dedicated_setters_persist_structured_fields(data_dir):
     # Persisted, not just in-memory.
     reloaded = applications.get(app.id)
     assert reloaded.confirmation.confirmed_at == "2026-08-13T09:27:00+02:00"
-    assert reloaded.screening.glassdoor.rating == 3.3
-    assert reloaded.screening.glassdoor.reviews == 17
+    assert reloaded.screening.remote == NORTHWIND_FIXTURE["screening"]["remote"]
     assert len(reloaded.fields_submitted) == 2
     assert [a.to_dict() for a in reloaded.attachments] == NORTHWIND_FIXTURE["attachments"]
 

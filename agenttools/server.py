@@ -29,6 +29,7 @@ from agenttools.tools_ledger import (
     recommend_salary,
 )
 from agenttools.tools_boards import record_company_board
+from agenttools.tools_research import get_company_findings, record_company_finding
 
 TOOLS: dict[str, Callable[..., dict]] = {}
 
@@ -52,6 +53,8 @@ register("get_profile_answers", get_profile_answers)
 register("record_company_board", record_company_board)
 register("get_job_profiles", get_job_profiles)
 register("recommend_salary", recommend_salary)
+register("record_company_finding", record_company_finding)
+register("get_company_findings", get_company_findings)
 
 router = APIRouter(prefix="/mcp")
 

@@ -18,9 +18,9 @@ from applications.model import (
     Attachment,
     Confirmation,
     FieldSubmitted,
-    Glassdoor,
     Screening,
 )
+from companyresearch.model import CompanyFinding
 
 
 def _app(app_id, company="Acme GmbH", **kwargs):
@@ -38,6 +38,21 @@ def _app(app_id, company="Acme GmbH", **kwargs):
     app = Application(**fields)
     app.confirmation = Confirmation(text="Your application has been received")
     return app
+
+
+def _finding(company, claim, value, source_class="press", source_url="https://x.example/y", as_of="", resolution=""):
+    return CompanyFinding(
+        id=f"f-{company}-{claim}-{value}",
+        company=company,
+        claim=claim,
+        value=value,
+        source_url=source_url,
+        source_class=source_class,
+        as_of=as_of,
+        observed_at="2026-01-01T00:00:00+00:00",
+        recorded_by="agent",
+        resolution=resolution,
+    )
 
 
 def test_every_application_is_accounted_for_exactly_once(tmp_path):
@@ -72,7 +87,7 @@ def test_an_unrendered_application_is_refused(tmp_path, monkeypatch):
     """
     import applications.log_render as module
 
-    monkeypatch.setattr(module, "render_log", lambda apps: module.HEADER)
+    monkeypatch.setattr(module, "render_log", lambda apps, findings=None: module.HEADER)
     target = tmp_path / "APPLICATION_LOG.md"
 
     with pytest.raises(RenderRefused) as refusal:
@@ -127,17 +142,12 @@ def test_submitted_fields_render_with_their_provenance_and_escape_pipes():
 def test_screening_and_attachments_and_gaps_reach_the_log():
     """Everything the Jobs log carried per record still appears."""
     app = _app("999ddd999ddd", capture_method="reconstructed")
-    app.screening = Screening(
-        entity="German GmbH",
-        remote="Fully remote",
-        glassdoor=Glassdoor(rating="4.1", reviews="120"),
-    )
+    app.screening = Screening(remote="Fully remote")
     app.attachments = [Attachment(kind="cv", path="cv_999ddd999ddd.pdf")]
     app.gaps_disclosed = ["No Kubernetes production experience"]
 
     text = render_log([app])
-    assert "- **Entity:** German GmbH" in text
-    assert "- **Glassdoor:** 4.1 (120 reviews)" in text
+    assert "- **Remote:** Fully remote" in text
     assert "- **Attachments:** cv_999ddd999ddd.pdf" in text
     assert "- No Kubernetes production experience" in text
     assert "reconstructed from the hand-written log" in text
@@ -163,10 +173,39 @@ def test_profile_omitted_when_blank():
     """Blank profile renders identically to pre-profile records."""
     app_with_blank = _app("222ggg222ggg", profile="")
     app_without = _app("333hhh333hhh")
-    
+
     text_blank = render_log([app_with_blank])
     text_without = render_log([app_without])
-    
+
     # Both should omit the profile line
     assert "- **Profile:**" not in text_blank
     assert "- **Profile:**" not in text_without
+
+
+def test_findings_table_renders_source_and_as_of():
+    app = _app("444iii444iii", company="Acme Co")
+    findings = [_finding("Acme Co", "employer_rating", "4.5", source_class="press")]
+    text = render_log([app], {"Acme Co": findings})
+    assert "**Company research:**" in text
+    assert "| employer_rating | 4.5 | press — https://x.example/y | unknown | " in text
+
+
+def test_findings_table_unknown_as_of_renders_literal_unknown():
+    app = _app("555jjj555jjj", company="Acme Co")
+    findings = [_finding("Acme Co", "employer_rating", "4.5", as_of="")]
+    text = render_log([app], {"Acme Co": findings})
+    assert "| unknown |" in text
+
+
+def test_contradicting_findings_render_as_adjacent_rows_with_open_status():
+    app = _app("666kkk666kkk", company="Acme Co")
+    findings = [
+        _finding("Acme Co", "employer_rating", "4.5", source_class="company_statement"),
+        _finding("Acme Co", "employer_rating", "3.0", source_class="review_site"),
+    ]
+    text = render_log([app], {"Acme Co": findings})
+    lines = [l for l in text.splitlines() if l.startswith("| employer_rating")]
+    assert len(lines) == 2
+    assert "open contradiction" in lines[0]
+    assert "open contradiction" in lines[1]
+    assert "**Company research:** open contradiction" in text

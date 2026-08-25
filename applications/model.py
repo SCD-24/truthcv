@@ -84,49 +84,30 @@ class Confirmation:
 
 
 @dataclass
-class Glassdoor:
-    """The Glassdoor check within a screening verdict."""
-
-    rating: str | float = ""
-    reviews: str | int = ""
-    waiver_applied: bool = False
-    note: str = ""
-
-    @classmethod
-    def from_dict(cls, raw: dict | None) -> "Glassdoor":
-        raw = raw or {}
-        return cls(
-            rating=raw.get("rating", ""),
-            reviews=raw.get("reviews", ""),
-            waiver_applied=raw.get("waiver_applied", False),
-            note=raw.get("note", ""),
-        )
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-
-@dataclass
 class Screening:
-    """The pre-application filter verdicts, one field per filter."""
+    """The pre-application filter verdicts, one field per filter.
 
-    entity: str = ""
+    These are facts about a POSTING (its remote policy, salary, language and
+    role type), not about a company. Company-level claims — the employing
+    entity, employer-review figures, and anything else that needs a source
+    and an as-of date — live in ``companyresearch`` (see
+    ``companyresearch.store``) instead: a company fact must be traceable to
+    where it was read and must never be silently overwritten by a later run.
+    """
+
     remote: str = ""
     salary: str = ""
     language: str = ""
     role_type: str = ""
-    glassdoor: Glassdoor = field(default_factory=Glassdoor)
 
     @classmethod
     def from_dict(cls, raw: dict | None) -> "Screening":
         raw = raw or {}
         return cls(
-            entity=raw.get("entity", ""),
             remote=raw.get("remote", ""),
             salary=raw.get("salary", ""),
             language=raw.get("language", ""),
             role_type=raw.get("role_type", ""),
-            glassdoor=Glassdoor.from_dict(raw.get("glassdoor")),
         )
 
     def to_dict(self) -> dict:
