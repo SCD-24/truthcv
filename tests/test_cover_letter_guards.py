@@ -151,6 +151,35 @@ class TestSignOff:
 
         assert _with_sign_off("Body.", "[Your Name]") == "Body."
 
+    def test_a_name_merely_containing_a_placeholder_appends_nothing(self):
+        """The guard must match the guardrail's own test, which scans anywhere.
+
+        Guarding with `fullmatch` let "[Your Name] Smith" through — a literal
+        template slot, shipped to an employer, which is exactly what the
+        placeholder check exists to stop.
+        """
+        from coverletter.generate import _with_sign_off
+
+        assert _with_sign_off("Body.", "[Your Name] Smith") == "Body."
+        assert _with_sign_off("Body.", "Glenn [Your Name]") == "Body."
+        assert _with_sign_off("Body.", "Ada [Company] Lovelace") == "Body."
+
+    def test_a_sentence_length_name_appends_nothing(self):
+        """`answers.name` has no validator, and the sign-off lands AFTER the
+        guardrail — so an unbounded value would smuggle an unverified claim
+        into a guardrailed letter with nothing left to check it."""
+        from coverletter.generate import _with_sign_off
+
+        smuggled = "Dr. Glenn Chon, ex-Google Staff Engineer with 15 years at NASA"
+        assert _with_sign_off("Body.", smuggled) == "Body."
+
+    def test_a_long_but_genuine_name_still_signs(self):
+        """The bound must not refuse real names with post-nominals."""
+        from coverletter.generate import _with_sign_off
+
+        name = "Jean-Luc Picard-Fauchelevent OBE PhD"
+        assert _with_sign_off("Body.", name).endswith(name)
+
     def test_whitespace_in_name_is_normalized(self):
         from coverletter.generate import _with_sign_off
 

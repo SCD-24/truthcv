@@ -42,6 +42,16 @@ const runState = {
   lastCancelled: false,
 };
 
+// Shell convention for a signalled process: 128 + signal number. Node gives the
+// name, not the number, and only the two this supervisor ever sends can appear
+// here — anything else falls back to 1 rather than inventing a code.
+const SIGNAL_EXIT_CODES = { SIGTERM: 143, SIGKILL: 137 };
+
+/** Exit code for a child that died on `signal`, or 1 when it did not. */
+function signalExitCode(signal) {
+  return signal ? (SIGNAL_EXIT_CODES[signal] ?? 1) : 1;
+}
+
 /** The daily-apply child of the run in progress, or null when idle. */
 let currentChild = null;
 
@@ -103,10 +113,15 @@ function doRun() {
   runState.lastCancelled = false;
   runState.lastStartedAt = new Date().toISOString();
 
-  // detached: the run is a tree — daily-apply.sh, the claude CLI it execs, and
-  // the MCP servers claude spawns. Its own process group is what makes cancel
-  // able to reach all of them with one signal; signalling the shell alone would
-  // orphan claude, which is the process actually holding the browser session.
+  // detached: the run is a tree — daily-apply.sh, the claude CLI it spawns, and
+  // the stdio MCP servers under it. Its own process group is what lets cancel
+  // reach all of them with one signal; signalling the shell alone would orphan
+  // claude.
+  //
+  // The headful browser is NOT in this tree: Chromium runs in the sibling
+  // `browser` container, reached over HTTP MCP, in another PID namespace. A
+  // cancel therefore drops the MCP session without closing it, and that
+  // container's page state survives until it restarts.
   const child = spawn(DAILY_APPLY, [], {
     stdio: "inherit",
     env: { ...process.env },
@@ -128,13 +143,8 @@ function doRun() {
     runState.lastExitCode = rc;
   }
 
-  // Shell convention for a signalled process: 128 + signal number. Node gives
-  // the name, not the number, and only the two this supervisor ever sends can
-  // appear here — anything else falls back to 1 rather than inventing a code.
-  const SIGNAL_EXIT_CODES = { SIGTERM: 143, SIGKILL: 137 };
-
   child.on("close", (code, signal) => {
-    const rc = code ?? (signal ? (SIGNAL_EXIT_CODES[signal] ?? 1) : 1);
+    const rc = code ?? signalExitCode(signal);
     const how = runState.cancelling ? "cancelled" : "finished";
     log(`=== run ${stamp} ${how} rc=${rc}${signal ? ` signal=${signal}` : ""} ===`);
     settle(rc);
@@ -156,26 +166,41 @@ function doRun() {
  * second SIGKILL escalation racing the first.
  */
 function cancelRun() {
-  if (!runState.running || currentChild === null || runState.cancelling) {
+  // `cancelling` alone was a one-shot latch: if the group survived the SIGKILL
+  // escalation, a second cancel was refused forever, the button stayed on
+  // "Stopping…", and only a container restart recovered. Refuse only while an
+  // escalation is still pending; once it has fired, a repeat cancel may retry.
+  const escalationPending = runState.cancelling && killTimer !== null;
+  if (!runState.running || currentChild === null || escalationPending) {
     return false;
   }
   const pid = currentChild.pid;
-  runState.cancelling = true;
   log(`cancel requested — SIGTERM to process group ${pid}`);
   try {
     process.kill(-pid, "SIGTERM");
+    // Only now: a run that had already exited was never cancelled by us, and
+    // reporting it as cancelled hid its real exit code behind "Last run
+    // cancelled" in the UI.
+    runState.cancelling = true;
   } catch (err) {
-    // ESRCH: the run exited between the status check and the signal. The close
-    // handler settles state either way, so this is not an error path.
-    log(`cancel: SIGTERM failed (${err.code || err.message})`);
+    // ESRCH here means the run exited between the status check and the signal
+    // — or, far less likely, that the pid was recycled. Either way nothing of
+    // ours was signalled, so this is not a cancellation.
+    log(`cancel: SIGTERM not delivered (${err.code || err.message}) — run was already exiting`);
+    return false;
   }
 
   killTimer = setTimeout(() => {
     killTimer = null;
-    if (!runState.running || currentChild === null) return;
-    log(`cancel: still running after ${CANCEL_GRACE_MS}ms — SIGKILL`);
+    // Signal the pid captured when the cancel was requested, and only while
+    // that is still the live run. `settle` clears this timer on every exit
+    // path, so this cannot normally fire against a later run — but reading
+    // `currentChild.pid` at fire time made that invariant the only thing
+    // standing between a cancel and SIGKILLing a healthy successor.
+    if (!runState.running || currentChild === null || currentChild.pid !== pid) return;
+    log(`cancel: still running after ${CANCEL_GRACE_MS}ms — SIGKILL to group ${pid}`);
     try {
-      process.kill(-currentChild.pid, "SIGKILL");
+      process.kill(-pid, "SIGKILL");
     } catch (err) {
       log(`cancel: SIGKILL failed (${err.code || err.message})`);
     }
@@ -346,7 +371,7 @@ if (process.env.RUN_ONCE === "1") {
   // Run once at startup then exit with the run's exit code.
   log("RUN_ONCE set — running immediately then exiting");
   const child = doRun();
-  child.on("close", (code) => process.exit(code ?? 1));
+  child.on("close", (code, signal) => process.exit(code ?? signalExitCode(signal)));
   child.on("error", () => process.exit(1));
 } else {
   server.listen(PORT, "0.0.0.0", () => {

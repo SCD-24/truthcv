@@ -1,8 +1,13 @@
 """Persistence for job screening records against the ./data volume.
 
 Mirrors applications/store.py and truth/store.py: one JSON file on the shared
-data volume, written atomically (.tmp then replace) so a crash mid-write can
-never corrupt the list.
+data volume.
+
+Every function that mutates the list runs its whole load-modify-write inside
+``datafile.locked``. The agent writes screenings over MCP into the same `app`
+process the operator's browser talks to, so two writers racing here is routine
+rather than exotic, and without the lock one of the two records is silently
+dropped. See ``datafile`` for what each half of that guarantee buys.
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agentconfig.store import load as _agent_config_load
+from datafile import atomic_write_text, locked
 from truth.store import data_dir
 
 from .model import APPROVAL_VALUES, Screening, new_id
@@ -45,14 +51,16 @@ def load_all() -> list[Screening]:
 
 
 def _write_all(screenings: list[Screening]) -> None:
-    """Atomically persist the full list to screenings.json."""
-    p = screenings_path()
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(
+    """Persist the full list to screenings.json.
+
+    Callers must already hold ``locked(screenings_path())`` — this writes the
+    list it is given and does no reconciliation, so an unguarded caller
+    overwrites whatever another writer stored since it loaded.
+    """
+    atomic_write_text(
+        screenings_path(),
         json.dumps([s.to_dict() for s in screenings], indent=2, ensure_ascii=False),
-        encoding="utf-8",
     )
-    tmp.replace(p)
 
 
 def get(screening_id: str) -> Screening | None:
@@ -74,21 +82,23 @@ def create(fields: dict) -> Screening:
         screening.approval = "pending"
     elif screening.verdict == "passed" and _agent_config_load().mode == "semi":
         screening.approval = "pending"
-    screenings = load_all()
-    screenings.append(screening)
-    _write_all(screenings)
+    with locked(screenings_path()):
+        screenings = load_all()
+        screenings.append(screening)
+        _write_all(screenings)
     return screening
 
 
 def update(screening_id: str, patch: dict) -> Screening | None:
     """Patch a screening's editable fields; returns the updated record."""
-    screenings = load_all()
-    screening = next((s for s in screenings if s.id == screening_id), None)
-    if screening is None:
-        return None
-    _apply_editable(screening, patch)
-    screening.updated_at = _now()
-    _write_all(screenings)
+    with locked(screenings_path()):
+        screenings = load_all()
+        screening = next((s for s in screenings if s.id == screening_id), None)
+        if screening is None:
+            return None
+        _apply_editable(screening, patch)
+        screening.updated_at = _now()
+        _write_all(screenings)
     return screening
 
 
@@ -100,11 +110,14 @@ def delete(screening_id: str) -> bool:
     """
     from coverletter import store as _coverletter_store
 
-    screenings = load_all()
-    screening = next((s for s in screenings if s.id == screening_id), None)
-    if screening is None:
-        return False
-    _write_all([s for s in screenings if s.id != screening_id])
+    with locked(screenings_path()):
+        screenings = load_all()
+        screening = next((s for s in screenings if s.id == screening_id), None)
+        if screening is None:
+            return False
+        _write_all([s for s in screenings if s.id != screening_id])
+    # Outside the lock: a different file, and holding one file's lock while
+    # touching another is how two writers deadlock on opposite orderings.
     _coverletter_store.delete(screening_id)
     return True
 
@@ -124,13 +137,14 @@ def delete_many(ids: list[str]) -> list[tuple[str, bool]]:
     """
     from coverletter import store as _coverletter_store
 
-    screenings = load_all()
-    existing_ids = {s.id for s in screenings}
-    to_delete = {i for i in ids if i in existing_ids}
-    if to_delete:
-        _write_all([s for s in screenings if s.id not in to_delete])
-        for deleted_id in to_delete:
-            _coverletter_store.delete(deleted_id)
+    with locked(screenings_path()):
+        screenings = load_all()
+        existing_ids = {s.id for s in screenings}
+        to_delete = {i for i in ids if i in existing_ids}
+        if to_delete:
+            _write_all([s for s in screenings if s.id not in to_delete])
+    for deleted_id in to_delete:
+        _coverletter_store.delete(deleted_id)
     return [(i, i in to_delete) for i in ids]
 
 
@@ -163,15 +177,40 @@ def mark_applied(screening_id: str) -> Screening | None:
     return _mutate(screening_id, lambda s: setattr(s, "approval", "applied"))
 
 
+def claim_for_apply(screening_id: str) -> Screening | None:
+    """Atomically retire a screening, but only if it is not already retired.
+
+    Returns the record on success, or None if it does not exist or was already
+    ``applied``. The check and the write happen under one lock, which is what
+    makes it a claim rather than a request: two concurrent callers cannot both
+    succeed, so the caller that wins is the only one that may create the
+    application row.
+
+    ``mark_applied`` remains the unconditional form for the agent's own path,
+    where the application has already been confirmed and there is nothing to
+    arbitrate.
+    """
+    with locked(screenings_path()):
+        screenings = load_all()
+        screening = next((s for s in screenings if s.id == screening_id), None)
+        if screening is None or screening.approval == "applied":
+            return None
+        screening.approval = "applied"
+        screening.updated_at = _now()
+        _write_all(screenings)
+        return screening
+
+
 def _mutate(screening_id: str, apply) -> Screening | None:
     """Load, mutate one record outside EDITABLE, stamp, and write back."""
-    screenings = load_all()
-    screening = next((s for s in screenings if s.id == screening_id), None)
-    if screening is None:
-        return None
-    apply(screening)
-    screening.updated_at = _now()
-    _write_all(screenings)
+    with locked(screenings_path()):
+        screenings = load_all()
+        screening = next((s for s in screenings if s.id == screening_id), None)
+        if screening is None:
+            return None
+        apply(screening)
+        screening.updated_at = _now()
+        _write_all(screenings)
     return screening
 
 

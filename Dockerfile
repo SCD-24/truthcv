@@ -26,6 +26,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Shared single-module helper, not a package — the stores import it, so it must
+# be copied explicitly like the packages below.
+COPY datafile.py ./
 COPY secretstore/ ./secretstore/
 COPY prompts/ ./prompts/
 COPY providers/ ./providers/

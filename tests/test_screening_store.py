@@ -280,3 +280,71 @@ def test_delete_many_removes_saved_cover_letter_drafts(data_dir):
 
     assert not letter_draft_path(a.id).exists()
     assert not letter_draft_path(b.id).exists()
+
+
+# ---------------------------------------------------------------------------
+# Concurrency
+# ---------------------------------------------------------------------------
+
+def test_concurrent_creates_lose_no_records(data_dir):
+    """The measured regression: two writers each dropped some of the other's.
+
+    Before the store took a lock, 3x40 concurrent creates onto a 20-record file
+    finished with 64 of 140 records and 34 raised renames.
+    """
+    import threading
+
+    from screening import store
+
+    for i in range(20):
+        store.create({"company": f"Seed{i}", "role": "Engineer", "url": f"https://e.com/{i}"})
+
+    errors = []
+
+    def writer(tag: str):
+        for i in range(40):
+            try:
+                store.create(
+                    {"company": f"{tag}{i}", "role": "Engineer", "url": f"https://e.com/{tag}{i}"}
+                )
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(t,)) for t in "ABC"]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+
+    assert errors == []
+    assert len(store.load_all()) == 140
+    assert len({s.id for s in store.load_all()}) == 140
+
+
+def test_a_concurrent_create_does_not_undo_a_concurrent_approval(data_dir):
+    """Mixed mutators race too: create vs set_approval on the same file.
+
+    This is the live shape — the operator clicks while an agent run records.
+    """
+    import threading
+
+    from screening import store
+
+    target = store.create(
+        {"company": "Acme", "role": "Engineer", "url": "https://e.com/a", "verdict": "deferred"}
+    )
+
+    def approve():
+        for _ in range(30):
+            store.set_approval(target.id, "approved")
+
+    def record():
+        for i in range(30):
+            store.create({"company": f"New{i}", "role": "Engineer", "url": f"https://e.com/n{i}"})
+
+    threads = [threading.Thread(target=approve), threading.Thread(target=record)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+
+    assert len(store.load_all()) == 31
+    reloaded = store.get(target.id)
+    assert reloaded is not None
+    assert reloaded.approval == "approved"

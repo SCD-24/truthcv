@@ -31,11 +31,12 @@ _TOOL_REGISTRY = {
     ),
     "record_application": (
         _record_application,
-        "Records a submitted application and its evidence trail.",
+        "Records a submitted application and its evidence trail. Pass company and role, or a screening_id to inherit them from the approved queue item.",
     ),
     "record_screening": (
         _record_screening,
-        "Records a rejected or deferred posting. The posting's own URL is required and the call is rejected without it. "
+        "Records one screening verdict. company, verdict, role and url are ALL required and the call is rejected, storing nothing, without a usable value for each: "
+        "company is the employing entity (never a placeholder like \"Unknown\"), verdict is exactly rejected, passed or deferred, role is the job title as posted, url is the posting's own URL. "
         "You must also pass posting_text — the posting exactly as you read it — because the operator will draft the cover letter from it days later, on a page the agent never sees.",
     ),
     "check_cooldown": (

@@ -452,29 +452,54 @@ function ApprovedRow({
   );
 }
 
-/** The date a row is ordered by, newest first.
+/** Milliseconds for a stored date string, or null if it is not a real date.
+ *
+ * `postedDate` is free text: the agent writes whatever the board stated, and
+ * the live data already contains "30+ days ago (as stated on posting)". String
+ * comparison put that value above every ISO date ("3" > "2"), pinning the
+ * stalest posting to the top of a list sorted newest-first — so the value is
+ * parsed rather than compared, and anything unparseable is treated as no date
+ * at all instead of as an extreme one.
+ *
+ * The `\d{4}-\d{2}-\d{2}` guard is what makes `Date.parse` safe to use here:
+ * it accepts far more than ISO-8601 (including "30" as a year), so an
+ * unguarded parse would turn that same value into a date in the year 2030.
+ */
+function dateValue(raw: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(raw)) return null;
+  const ms = Date.parse(raw);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/** The instant a row is ordered by, or null when it has no usable date.
  *
  * `postedDate` is the posting's own publication date and the one that matters
  * for "newest", but many boards publish none — so it falls back to when the
- * agent screened it, then to when the record was written. Without the
- * fallbacks every dateless posting would clump at one end regardless of how
- * recently it was found.
+ * agent screened it, then to when the record was written. Each candidate is
+ * tried in turn: an unparseable `postedDate` falls through to `screenedDate`
+ * rather than poisoning the sort.
  */
-export function orderingDate(record: ScreeningRecord): string {
-  return record.postedDate || record.screenedDate || record.createdAt || "";
+export function orderingDate(record: ScreeningRecord): number | null {
+  for (const candidate of [record.postedDate, record.screenedDate, record.createdAt]) {
+    const value = dateValue(candidate || "");
+    if (value !== null) return value;
+  }
+  return null;
 }
 
-/** Newest first. Does not mutate the array it is given. */
+/** Newest first, with undateable records last. Does not mutate its argument.
+ *
+ * A bare date and a timestamp on the same day compare by instant, so a record
+ * posted on a day no longer loses to one merely created that day at 00:00:01.
+ */
 export function byDateDesc(records: ScreeningRecord[]): ScreeningRecord[] {
   return [...records].sort((a, b) => {
     const da = orderingDate(a);
     const db = orderingDate(b);
     if (da === db) return 0;
-    // ISO-8601 dates sort correctly as strings; a blank sorts last, which is
-    // only reachable when a record carries no date of any kind.
-    if (!da) return 1;
-    if (!db) return -1;
-    return da < db ? 1 : -1;
+    if (da === null) return 1;
+    if (db === null) return -1;
+    return db - da;
   });
 }
 
@@ -807,8 +832,12 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
     setError("");
     try {
       await markScreeningApplied(id);
+      const moved = pending.find((r) => r.id === id);
       setPending((rows) => rows.filter((r) => r.id !== id));
       setSelected((sel) => sel.filter((x) => x !== id));
+      // Move it into `applied` too, or the Applied tab and its count stay
+      // stale until a reload while the alert claims it was added.
+      if (moved) setApplied((rows) => [{ ...moved, approval: "applied" }, ...rows]);
       setAppliedNotice("Added to the Applications page.");
     } catch (e) {
       setError(String(e));

@@ -1,5 +1,12 @@
 """Ledger, screening and profile tools for the agent tool surface.
 
+Note on ``record_application``: it accepts a blank ``company`` or ``role``,
+unlike ``record_screening``, which rejects both. That is a deliberate gap and
+not an oversight — the backfill from an approved queue item is the normal path
+and supplies them — but it does mean an application row can be stored that
+cooldown matching and the blocklist cannot key on. Tightening it is a contract
+change for every existing caller and has not been made.
+
 Every function here delegates to an existing store or pure function — none of
 them re-implements persistence, cooldown matching, or file I/O. They exist
 only to give the agent a stable, per-call vocabulary (``applied_date``,
@@ -57,8 +64,36 @@ def _backfill_from_screening(fields: dict, screening_id: str) -> dict:
     return fields
 
 
-def record_application(**fields) -> dict:
+def record_application(
+    company: str = "",
+    role: str = "",
+    application_url: str = "",
+    screening_id: str = "",
+    applied_date: str = "",
+    submission_type: str = "",
+    method: str = "",
+    status: str = "",
+    posting: str = "",
+    ats: str = "",
+    capture_method: str = "",
+    profile: str = "",
+    notes: str = "",
+    **fields,
+) -> dict:
     """Persist one tracked application with its full evidence trail.
+
+    The fields above are named rather than left to ``**fields`` because the MCP
+    inputSchema is derived from this signature: an unnamed field is invisible to
+    the agent reading the schema, and the tool then advertises an empty property
+    set for a record with eighteen editable fields. That is the same defect that
+    silently emptied ``company`` and ``verdict`` on 36 consecutive screenings,
+    on the tool that records real applications rather than verdicts.
+
+    Nothing here is a *required* argument, unlike ``record_screening``:
+    ``_backfill_from_screening`` is designed to supply ``company``, ``role`` and
+    the posting from the approved queue item when ``screening_id`` is given, and
+    a caller that does so legitimately passes neither. This tool therefore still
+    accepts a blank company or role — see the note in the module docstring.
 
     ``applications.store.create`` only accepts ``Application.EDITABLE``
     fields, so the structured evidence — ``fields_submitted``,
@@ -71,11 +106,26 @@ def record_application(**fields) -> dict:
     the agent-facing alias for the record's ``application_date`` field.
     """
     fields = dict(fields)
-    # Not an Application field: it names the approved queue item this
-    # application settles.
-    screening_id = fields.pop("screening_id", "")
-    applied_date = fields.pop("applied_date", None)
-    if applied_date is not None:
+    if company:
+        fields["company"] = company
+    if role:
+        fields["role"] = role
+    # Named optionals are written only when non-empty, so an omitted one never
+    # overwrites a value `_backfill_from_screening` would otherwise supply.
+    for name, value in (
+        ("application_url", application_url),
+        ("submission_type", submission_type),
+        ("method", method),
+        ("status", status),
+        ("posting", posting),
+        ("ats", ats),
+        ("capture_method", capture_method),
+        ("profile", profile),
+        ("notes", notes),
+    ):
+        if value:
+            fields[name] = value
+    if applied_date:
         fields["application_date"] = applied_date
     fields_submitted = fields.pop("fields_submitted", None)
     confirmation = fields.pop("confirmation", None)

@@ -116,6 +116,11 @@ def _provenance_lines(app: Application) -> list[str]:
         )
     elif app.capture_method == "observed":
         lines.append("- **Provenance:** observed at submit time")
+    elif app.capture_method == "manual":
+        lines.append(
+            "- **Provenance:** applied by hand by the operator, recorded from "
+            "the screening"
+        )
     text = (app.confirmation.text or "").strip()
     if text and app.status != "confirmed":
         lines.append(f'- **Confirmation:** "{_cell(text)}"')

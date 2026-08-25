@@ -533,14 +533,32 @@ class TestMaxPostingAgeDays:
         assert r.status_code == 200
         assert r.json()["maxPostingAgeDays"] == 0
 
-    def test_null_does_not_clear_the_window(self, client, data_dir):
-        """This route merges with exclude_none, so null reads as "not sent" for
-        every field on it. Pinned here because the UI sends null for a blank
-        box: the way to stop filtering on age is 0, not blank."""
+    def test_null_clears_the_window(self, client, data_dir):
+        """Emptying the box on the Agents page must actually unset the window.
+
+        The route used to merge with exclude_none, so a null read as "not
+        sent": the stored value survived and the UI repainted it next to a
+        "saved" indicator, with no way back to unset.
+        """
         client.put("/api/agent/config", json={"maxPostingAgeDays": 30})
         r = client.put("/api/agent/config", json={"maxPostingAgeDays": None})
         assert r.status_code == 200
-        assert r.json()["maxPostingAgeDays"] == 30
+        assert r.json()["maxPostingAgeDays"] is None
+        assert client.get("/api/agent/config").json()["maxPostingAgeDays"] is None
+
+    def test_omitting_the_key_still_leaves_the_window_alone(self, client, data_dir):
+        """Clearing requires SENDING null — an unrelated PUT must not wipe it."""
+        client.put("/api/agent/config", json={"maxPostingAgeDays": 21})
+        client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
+        assert client.get("/api/agent/config").json()["maxPostingAgeDays"] == 21
+
+    def test_a_null_does_not_clear_unrelated_fields(self, client, data_dir):
+        """Only the keys actually sent are touched."""
+        client.put("/api/agent/config", json={"maxPostingAgeDays": 21, "cooldownDays": 45})
+        client.put("/api/agent/config", json={"maxPostingAgeDays": None})
+        body = client.get("/api/agent/config").json()
+        assert body["maxPostingAgeDays"] is None
+        assert body["cooldownDays"] == 45
 
     def test_negative_is_rejected(self, client, data_dir):
         assert client.put("/api/agent/config", json={"maxPostingAgeDays": -1}).status_code == 422

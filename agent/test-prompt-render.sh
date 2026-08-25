@@ -160,11 +160,16 @@ render_mode() {
 
 Do NOT apply to a posting you find this run, however well it scores, and do not
 write a cover letter for it. For a posting that passes every criterion, call
-record_screening with verdict \"passed\", the full posting text in posting_text,
-the posting's own job title (as posted, not a placeholder) in role as a
-required field, the posting's own URL in url as a required field, and the
-employer's publication date in posted_date when the board states one.
+record_screening passing \"passed\" in verdict, the employing entity's name
+in company, the posting's own job title (as posted, not a placeholder)
+in role, the posting's own URL in url, the full posting text in posting_text,
+and the employer's publication date in posted_date when the board states one.
+company, verdict, role and url are each required.
 It enters the operator's approval queue; they draft the letter and decide.
+
+record_screening REJECTS the call and stores nothing unless company, verdict,
+role and url all carry usable values — this applies to every screening you
+record, rejections included, not only to passing ones.
 
 Phase 0 is unchanged: postings the operator already approved ARE applied to,
 using the cover_letter text that arrives with each item, verbatim."
@@ -172,13 +177,44 @@ using the cover_letter text that arrives with each item, verbatim."
     prompt="$prompt"$'\n\n'"## Autonomy mode: FULL AUTO
 
 A posting that passes every criterion is applied to this run, as described in
-agent/RUNBOOK.md. Record the full posting text in posting_text, the posting's
-own job title (as posted, not a placeholder) in role, the posting's own URL
-in url, and the employer's publication date in posted_date on every
-record_screening call."
+agent/RUNBOOK.md. On every record_screening call pass the employing entity's
+name in company, the verdict (rejected, passed or deferred) in verdict, the
+posting's own job title (as posted, not a placeholder) in role, the posting's
+own URL in url, the full posting text in posting_text, and the employer's
+publication date in posted_date when the board states one.
+
+record_screening REJECTS the call and stores nothing unless company, verdict,
+role and url all carry usable values."
   fi
   echo "$prompt"
 }
+
+# Case 6b: the mandatory record_screening arguments are named in BOTH mode
+# branches of the REAL daily-apply.sh — not in this file's copy of it.
+#
+# This is the one assertion here that reads the shipped script. The block above
+# is a verbatim copy, and a copy is exactly how the last defect happened: the
+# tool made `company` and `verdict` required, RUNBOOK.md and prompt.md were
+# updated, this block was not, and the copy here asserted the stale text back.
+# A run following the stale prompt got a TypeError and stored nothing at all.
+echo "Testing: daily-apply.sh names every mandatory record_screening argument..."
+DAILY_APPLY_SRC="$(dirname "${BASH_SOURCE[0]}")/daily-apply.sh"
+SEMI_BLOCK="$(sed -n '/## Autonomy mode: SEMI-AUTO/,/^else$/p' "$DAILY_APPLY_SRC")"
+FULL_BLOCK="$(sed -n '/## Autonomy mode: FULL AUTO/,/^fi$/p' "$DAILY_APPLY_SRC")"
+# Match "in <field>" — the phrasing that actually tells the agent where the
+# value goes. A bare word match is not enough: every field name also appears in
+# the "each required" sentence, so removing an argument still passed.
+for field in company verdict role url; do
+  case "$SEMI_BLOCK" in
+    *"in $field"*) ;;
+    *) echo "FAIL: daily-apply.sh SEMI-AUTO block never passes a value 'in $field'"; exit 1 ;;
+  esac
+  case "$FULL_BLOCK" in
+    *"in $field"*) ;;
+    *) echo "FAIL: daily-apply.sh FULL AUTO block never passes a value 'in $field'"; exit 1 ;;
+  esac
+done
+echo "PASS: daily-apply.sh names every mandatory record_screening argument"
 
 # Case 7: semi renders SEMI-AUTO and the "Do NOT apply" line.
 echo "Testing: semi mode renders SEMI-AUTO block..."

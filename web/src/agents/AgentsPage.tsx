@@ -240,10 +240,18 @@ function RunNowSection({ agentEnabled }: { agentEnabled: boolean }) {
   // clears whichever interval is live at unmount time, including any that were
   // started by pace changes inside the poll callback.
   const pollIdRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Mounted-ness has to outlive the effect closure: `setPoll` is called from
+  // async continuations (the cancel POST, the status poll) that can resolve
+  // after unmount. Without this an interval was installed on a dead component
+  // AFTER cleanup had already run, so nothing could ever clear it — a 2-second
+  // poll for the rest of the session.
+  const aliveRef = useRef(true);
 
-  /** Replace the current poll with one at a new interval. */
+  /** Replace the current poll with one at a new interval, unless unmounted. */
   function setPoll(intervalMs: number) {
     if (pollIdRef.current != null) clearInterval(pollIdRef.current);
+    pollIdRef.current = null;
+    if (!aliveRef.current) return;
     pollIdRef.current = setInterval(() => {
       getAgentStatus()
         .then((s) => {
@@ -264,6 +272,7 @@ function RunNowSection({ agentEnabled }: { agentEnabled: boolean }) {
   }
 
   useEffect(() => {
+    aliveRef.current = true;
     let alive = true;
 
     // Kick off an immediate status fetch, then start the poller
@@ -283,7 +292,11 @@ function RunNowSection({ agentEnabled }: { agentEnabled: boolean }) {
 
     return () => {
       alive = false;
+      aliveRef.current = false;
       if (pollIdRef.current != null) clearInterval(pollIdRef.current);
+      // Null it too: a later `setPoll` from an in-flight promise would
+      // otherwise clear an already-cleared id and install a fresh interval.
+      pollIdRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -894,7 +907,7 @@ function ProfilesSection({
         onChange={(e) => setMaxPostingAgeDays(e.target.value)}
         slotProps={{ htmlInput: { inputMode: "numeric" } }}
         sx={{ maxWidth: 420 }}
-        helperText="Applies to all profiles. Filters discovery and rejects older postings when screening. Blank keeps the default past-week filter; 0 considers any age. Press Save profiles below to apply."
+        helperText="Applies to all profiles. Filters discovery and rejects older postings when screening. Leave blank for no age filter. Press Save profiles below to apply."
       />
       <Stack spacing={2}>
         {drafts.map((draft, index) => (

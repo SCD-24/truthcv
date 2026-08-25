@@ -1,7 +1,9 @@
 """Persistence for tracked applications against the ./data volume.
 
 Mirrors truth/store.py: one JSON file on the shared data volume, written
-atomically (.tmp then replace) so a crash mid-write can never corrupt the list.
+written through ``datafile``, which serialises each load-modify-write against
+an advisory lock — the agent records applications over MCP into the same `app`
+process the operator's browser writes from, so concurrent writers are routine.
 The store also owns the lifecycle of each application's rendered document files.
 """
 
@@ -23,6 +25,9 @@ from .model import (
     Screening,
     new_id,
 )
+
+
+from datafile import atomic_write_text, locked
 
 
 def applications_path() -> Path:
@@ -53,14 +58,15 @@ def load_all() -> list[Application]:
 
 
 def _write_all(apps: list[Application]) -> None:
-    """Atomically persist the full list to applications.json."""
-    p = applications_path()
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(
+    """Persist the full list to applications.json.
+
+    Callers must already hold ``locked(applications_path())``; this writes the
+    list it is given and reconciles nothing.
+    """
+    atomic_write_text(
+        applications_path(),
         json.dumps([a.to_dict() for a in apps], indent=2, ensure_ascii=False),
-        encoding="utf-8",
     )
-    tmp.replace(p)
 
 
 def get(app_id: str) -> Application | None:
@@ -73,32 +79,35 @@ def create(fields: dict) -> Application:
     now = _now()
     app = Application(id=new_id(), created_at=now, updated_at=now)
     _apply_editable(app, fields)
-    apps = load_all()
-    apps.append(app)
-    _write_all(apps)
+    with locked(applications_path()):
+        apps = load_all()
+        apps.append(app)
+        _write_all(apps)
     return app
 
 
 def update(app_id: str, patch: dict) -> Application | None:
     """Patch an application's editable fields; returns the updated record."""
-    apps = load_all()
-    app = next((a for a in apps if a.id == app_id), None)
-    if app is None:
-        return None
-    _apply_editable(app, patch)
-    app.updated_at = _now()
-    _write_all(apps)
+    with locked(applications_path()):
+        apps = load_all()
+        app = next((a for a in apps if a.id == app_id), None)
+        if app is None:
+            return None
+        _apply_editable(app, patch)
+        app.updated_at = _now()
+        _write_all(apps)
     return app
 
 
 def delete(app_id: str) -> bool:
     """Remove an application and its owned document files. True if it existed."""
-    apps = load_all()
-    app = next((a for a in apps if a.id == app_id), None)
-    if app is None:
-        return False
-    delete_documents(app)
-    _write_all([a for a in apps if a.id != app_id])
+    with locked(applications_path()):
+        apps = load_all()
+        app = next((a for a in apps if a.id == app_id), None)
+        if app is None:
+            return False
+        delete_documents(app)
+        _write_all([a for a in apps if a.id != app_id])
     return True
 
 
@@ -122,14 +131,15 @@ def cover_letter_filenames(app_id: str) -> tuple[str, str]:
 
 
 def _persist_document(app_id: str, attr: str, doc: Document) -> Application | None:
-    apps = load_all()
-    app = next((a for a in apps if a.id == app_id), None)
-    if app is None:
-        return None
-    doc.updated_at = _now()
-    setattr(app, attr, doc)
-    app.updated_at = doc.updated_at
-    _write_all(apps)
+    with locked(applications_path()):
+        apps = load_all()
+        app = next((a for a in apps if a.id == app_id), None)
+        if app is None:
+            return None
+        doc.updated_at = _now()
+        setattr(app, attr, doc)
+        app.updated_at = doc.updated_at
+        _write_all(apps)
     return app
 
 
@@ -151,13 +161,14 @@ def save_cover_letter_document(app_id: str, source: str) -> Application | None:
 
 def _persist_field(app_id: str, attr: str, value) -> Application | None:
     """Load, set one structured field, stamp updated_at, and atomically persist."""
-    apps = load_all()
-    app = next((a for a in apps if a.id == app_id), None)
-    if app is None:
-        return None
-    setattr(app, attr, value)
-    app.updated_at = _now()
-    _write_all(apps)
+    with locked(applications_path()):
+        apps = load_all()
+        app = next((a for a in apps if a.id == app_id), None)
+        if app is None:
+            return None
+        setattr(app, attr, value)
+        app.updated_at = _now()
+        _write_all(apps)
     return app
 
 
