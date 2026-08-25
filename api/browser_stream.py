@@ -6,11 +6,14 @@ guard rather than a second passwordless port on every interface.
 
 That guard is two checks, both run before `websocket.accept()`:
 
-- `peer_allowed` requires the TCP peer to be loopback, or the container's
-  default gateway (see `_default_gateway` — that is the address the
-  operator's own browser arrives as once Docker NATs a published port; a
-  sibling container keeps its own address). Origin and Host are both set by
-  the client, so a non-browser caller — including another container on the
+- `peer_allowed` requires the TCP peer to be loopback, or — only when this
+  process is actually running inside a container (`_running_in_container`) —
+  the container's default gateway (see `_default_gateway`, that is the
+  address the operator's own browser arrives as once Docker NATs a published
+  port; a sibling container keeps its own address). On a bare host the same
+  gateway lookup would just name the LAN router, so it is trusted only where
+  it means "arrived from the host". Origin and Host are both set by the
+  client, so a non-browser caller — including another container on the
   compose network, such as `agent`, which runs LLM-driven code over
   attacker-controlled job-posting text — can simply send whatever it wants
   for either. The peer address is the one signal it cannot forge.
@@ -104,6 +107,21 @@ def _default_gateway(path: str = "/proc/net/route") -> str:
 _DEFAULT_GATEWAY = _default_gateway()
 
 
+def _running_in_container(marker: str = "/.dockerenv") -> bool:
+    """True when this process is running inside a (Docker) container.
+
+    The gateway is trusted ONLY inside a container, where it is how host
+    traffic arrives through Docker's NAT. On a bare host the same lookup
+    returns the LAN router, which has no business reaching this socket —
+    running `api/main.py` directly binds `0.0.0.0`, and without this check
+    the router's address would be silently admitted.
+
+    `marker` is overridable so the decision is testable without depending on
+    where the tests happen to run.
+    """
+    return os.path.exists(marker)
+
+
 def allowed_origin_hostnames() -> frozenset[str]:
     """Loopback by default; extend via BROWSER_STREAM_ALLOWED_HOSTS (comma-separated)
     for a deployment that deliberately publishes the app beyond loopback.
@@ -126,14 +144,17 @@ def allowed_origin_hostnames() -> frozenset[str]:
 
 
 def allowed_peers() -> frozenset[str]:
-    """Loopback plus the container's default gateway (see `_default_gateway`),
-    extended via BROWSER_STREAM_ALLOWED_PEERS (comma-separated) for a
-    deployment this does not fit. An unresolved gateway ("") is dropped rather
-    than included, so a failure to resolve it never widens the allowlist.
+    """Loopback plus, when running inside a container, the default gateway
+    (see `_default_gateway` and `_running_in_container`), extended via
+    BROWSER_STREAM_ALLOWED_PEERS (comma-separated) for a deployment this does
+    not fit. An unresolved gateway ("") is dropped rather than included, so a
+    failure to resolve it never widens the allowlist — and outside a
+    container the gateway is never trusted at all, since there it is just the
+    LAN router.
     """
     extra = os.environ.get("BROWSER_STREAM_ALLOWED_PEERS", "")
     peers = {p.strip() for p in extra.split(",") if p.strip()}
-    if _DEFAULT_GATEWAY:
+    if _DEFAULT_GATEWAY and _running_in_container():
         peers.add(_DEFAULT_GATEWAY)
     return frozenset(_LOOPBACK_PEERS | peers)
 

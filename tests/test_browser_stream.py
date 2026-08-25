@@ -88,21 +88,49 @@ class TestPeerAllowed:
     def test_an_empty_peer_is_refused(self):
         assert peer_allowed("") is False
 
-    def test_the_resolved_gateway_is_allowed(self, monkeypatch):
+    def test_the_resolved_gateway_is_allowed_inside_a_container(self, monkeypatch):
         """Docker NATs a published port, so the operator's own browser arrives
         with the bridge gateway as its source, never 127.0.0.1."""
         monkeypatch.setattr(browser_stream, "_DEFAULT_GATEWAY", "172.18.0.1")
+        monkeypatch.setattr(browser_stream, "_running_in_container", lambda: True)
         assert peer_allowed("172.18.0.1") is True
+
+    def test_the_gateway_is_refused_outside_a_container(self, monkeypatch):
+        """Off a container, the same lookup just names the LAN router: a peer
+        that happens to be it must not be silently trusted."""
+        monkeypatch.setattr(browser_stream, "_DEFAULT_GATEWAY", "192.168.178.1")
+        monkeypatch.setattr(browser_stream, "_running_in_container", lambda: False)
+        assert peer_allowed("192.168.178.1") is False
 
     def test_a_sibling_container_that_is_not_the_gateway_is_refused(self, monkeypatch):
         """A container on the same compose network (e.g. `agent`) keeps its own
-        address; only the gateway means "arrived from the host"."""
+        address; only the gateway means "arrived from the host". Refused both
+        inside and outside a container."""
         monkeypatch.setattr(browser_stream, "_DEFAULT_GATEWAY", "172.18.0.1")
+        monkeypatch.setattr(browser_stream, "_running_in_container", lambda: True)
         assert peer_allowed("172.18.0.4") is False
+        monkeypatch.setattr(browser_stream, "_running_in_container", lambda: False)
+        assert peer_allowed("172.18.0.4") is False
+
+    def test_loopback_is_allowed_regardless_of_container_status(self, monkeypatch):
+        monkeypatch.setattr(browser_stream, "_running_in_container", lambda: True)
+        assert peer_allowed("127.0.0.1") is True
+        monkeypatch.setattr(browser_stream, "_running_in_container", lambda: False)
+        assert peer_allowed("127.0.0.1") is True
 
     def test_an_extra_allowed_peer_can_be_configured(self, monkeypatch):
         monkeypatch.setenv("BROWSER_STREAM_ALLOWED_PEERS", "172.20.0.9")
         assert peer_allowed("172.20.0.9") is True
+
+
+class TestRunningInContainer:
+    def test_the_marker_file_present_means_in_a_container(self, tmp_path):
+        marker = tmp_path / ".dockerenv"
+        marker.write_text("")
+        assert browser_stream._running_in_container(str(marker)) is True
+
+    def test_no_marker_file_means_not_in_a_container(self, tmp_path):
+        assert browser_stream._running_in_container(str(tmp_path / "no-such-file")) is False
 
 
 class TestDefaultGateway:
