@@ -13,7 +13,7 @@ port already recorded in .env is never moved speculatively.
 
 from __future__ import annotations
 
-DEFAULTS: dict[str, int] = {"APP_PORT": 5627, "NOVNC_HOST_PORT": 5628}
+DEFAULTS: dict[str, int] = {"APP_PORT": 5627}
 
 MAX_PORT = 65535
 
@@ -26,8 +26,8 @@ def default_for(key: str) -> int:
 def bump(current: int, reserved: set[int]) -> int:
     """The next candidate above `current`, skipping `reserved`.
 
-    `reserved` carries the ports already assigned to the other host variables,
-    so an app port advancing past 5627 cannot land on the noVNC default.
+    `reserved` carries the ports already assigned to the other host
+    variables, so an advancing port cannot land on one already claimed.
     """
     candidate = current + 1
     while candidate in reserved:

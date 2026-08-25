@@ -4,18 +4,20 @@ The `browser` service in docker-compose.yml runs a headful Chromium instance und
 
 ## noVNC Viewport
 
-While a run is in progress, observe what Chromium is doing at:
-
-```
-http://localhost:5628
-```
+The port is not published to the host. Observe what Chromium is doing, or
+drive it, from **Agents page → Site sign-ins** in TruthCV, which relays the
+viewport through the app's origin-checked WebSocket route
+(`WS /api/browser/session/stream`).
 
 This is useful for:
 - Watching an application or screening in real time
 - Completing a one-time login (CAPTCHA, SMS MFA, SSO challenge) to establish a session
 - Debugging why a site loaded unexpectedly or a click did not work
 
-The viewport requires no password and connects directly to the Xvfb display the browser runs on.
+The viewport itself requires no password (x11vnc runs `-nopw`) and connects
+directly to the Xvfb display the browser runs on — reaching it directly, not
+through the app's relay, would give unauthenticated control of a browser that
+may hold live ATS and email sessions, which is why it is not published.
 
 ## Profile Persistence
 
@@ -43,8 +45,8 @@ This is why the browser container mounts the data volume, but the agent containe
 A containerised browser presents a datacenter IP address and a fresh Chromium fingerprint that differs from your personal machine. Some ATS platforms and application sites use bot-detection logic (Cloudflare, Perimeter X, etc.) and may silently block or challenge a containerised browser more aggressively than they would your own.
 
 This is documented in agent/RUNBOOK.md §5 "Browser tooling is whatever this environment provides", which flags that §5 "Verify the submission actually landed" matters more here for exactly this reason. Mitigations:
-- Use the noVNC viewport (http://localhost:5628) to watch runs in real time and spot when a site challenges or blocks the browser
-- Manually complete any one-time login or CAPTCHA in the viewport (it persists to the profile volume)
+- Use the noVNC viewport (Agents page → Site sign-ins) to watch runs in real time and spot when a site challenges or blocks the browser
+- Manually complete any one-time login or CAPTCHA from the Site sign-ins flow (it persists to the profile volume)
 - Monitor your email for any "Verify this login" challenges and complete them as they arrive
 
 ## History

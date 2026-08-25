@@ -21,12 +21,13 @@ service, `browser`, built from `browser/Dockerfile` — see
 Keeping it in a sibling container rather than this one means a browser crash
 can never take the agent's own run loop down.
 
-> **First run against a login-walled site (SSO, CAPTCHA, SMS MFA) needs a
-> one-time manual sign-in.** Watch or drive the real Chromium through the
-> noVNC viewport at http://localhost:5628; its profile persists on the named
-> volume `browser-profile`, so the session survives container restarts and
-> you should not need to sign in again. See
-> [`browser/README.md`](../browser/README.md) for detail.
+> **A login-walled site (SSO, CAPTCHA, SMS MFA) needs a one-time manual
+> sign-in.** Open **Agents → Site sign-ins** in TruthCV and click Sign in; a
+> browser you can drive opens in the app. The session persists on the named
+> volume `browser-profile`, so you should not need to sign in again. A run in
+> progress takes priority — the button is refused while the agent is applying,
+> and a run that starts during a session asks for the browser back with three
+> minutes' notice. See [`browser/README.md`](../browser/README.md) for detail.
 
 ## The agent has no identity until you seed one
 

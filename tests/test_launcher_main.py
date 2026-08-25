@@ -33,7 +33,6 @@ def test_creates_env_with_every_required_key(repo: Path, capsys):
     assert len(values["ENCRYPTION_KEY"]) > 0
     assert len(values["AGENT_API_TOKEN"]) == 64
     assert values["APP_PORT"] == "5627"
-    assert values["NOVNC_HOST_PORT"] == "5628"
 
 
 def test_prints_the_app_port_as_the_only_stdout_line(repo: Path, capsys):
@@ -47,8 +46,7 @@ def test_prints_the_app_port_as_the_only_stdout_line(repo: Path, capsys):
 def test_does_not_rotate_existing_secrets(repo: Path):
     env = repo / ".env"
     env.write_text(
-        "ENCRYPTION_KEY=mine\nAGENT_API_TOKEN=also-mine\nAPP_PORT=9999\n"
-        "NOVNC_HOST_PORT=9998\n",
+        "ENCRYPTION_KEY=mine\nAGENT_API_TOKEN=also-mine\nAPP_PORT=9999\n",
         encoding="utf-8",
     )
     original = env.read_text(encoding="utf-8")
@@ -60,7 +58,7 @@ def test_does_not_rotate_existing_secrets(repo: Path):
 
 def test_reports_the_stored_port_not_the_default(repo: Path, capsys):
     (repo / ".env").write_text(
-        "ENCRYPTION_KEY=k\nAGENT_API_TOKEN=t\nAPP_PORT=9999\nNOVNC_HOST_PORT=9998\n",
+        "ENCRYPTION_KEY=k\nAGENT_API_TOKEN=t\nAPP_PORT=9999\n",
         encoding="utf-8",
     )
 
@@ -76,10 +74,8 @@ def test_bump_advances_the_named_port(repo: Path, capsys):
     assert bootstrap.main(["--repo", str(repo), "--bump", "APP_PORT"]) == 0
 
     values = envfile.parse((repo / ".env").read_text(encoding="utf-8"))
-    # 5628 is the noVNC default, so the app port skips it.
-    assert values["APP_PORT"] == "5629"
-    assert values["NOVNC_HOST_PORT"] == "5628"
-    assert capsys.readouterr().out.strip() == "APP_PORT=5629"
+    assert values["APP_PORT"] == "5628"
+    assert capsys.readouterr().out.strip() == "APP_PORT=5628"
 
 
 def test_bump_leaves_secrets_untouched(repo: Path):

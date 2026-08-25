@@ -51,9 +51,9 @@ does not mount the data volume.
 
 > **It submits from a real Chromium**, running headful in its own `browser`
 > container, not this one. Watch a run live, or do the one-time manual login
-> an ATS needs (SSO, CAPTCHA, SMS MFA), at the noVNC viewport on
-> http://localhost:5628 — that login then persists on the `browser-profile`
-> volume, so it survives container restarts. There is no headless fallback:
+> an ATS needs (SSO, CAPTCHA, SMS MFA), from the **Agents page → Site
+> sign-ins**. That login persists on the `browser-profile` volume, so it
+> survives restarts and later runs reuse it. There is no headless fallback:
 > that was a deliberate choice, because a fresh, logged-out browser would
 > apply as nobody. If the `browser` service is not reachable, the agent aborts
 > the run rather than proceeding blind.
