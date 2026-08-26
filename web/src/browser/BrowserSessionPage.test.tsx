@@ -5,21 +5,44 @@ import { MemoryRouter } from "react-router-dom";
 
 import { BrowserSessionPage } from "./BrowserSessionPage";
 
-// Fires registered listeners synchronously on disconnect(), like the real
-// RFB does when its socket closes — needed so the Reload test below can
-// actually exercise the disconnect handler's reload-vs-real-close guard,
-// not just call a no-op.
-vi.mock("@novnc/novnc/lib/rfb", () => ({
-  default: class {
-    private listeners: Record<string, Array<() => void>> = {};
-    addEventListener(type: string, cb: () => void) {
+// `vi.mock` factories are hoisted above the rest of the module, so the mock
+// class and the holder that captures its latest instance must be created
+// through `vi.hoisted` rather than as ordinary top-level declarations.
+const { MockRfb, rfbHolder } = vi.hoisted(() => {
+  const rfbHolder: { current: InstanceType<typeof MockRfbClass> | null } = { current: null };
+  class MockRfbClass {
+    private listeners: Record<string, Array<(e?: unknown) => void>> = {};
+    constructor() {
+      rfbHolder.current = this;
+    }
+    addEventListener(type: string, cb: (e?: unknown) => void) {
       (this.listeners[type] ||= []).push(cb);
     }
+    // Fires registered listeners synchronously, like the real RFB does when
+    // its socket closes — needed so the Reload test below can actually
+    // exercise the disconnect handler's reload-vs-real-close guard, not just
+    // call a no-op.
     disconnect() {
       this.listeners["disconnect"]?.forEach((cb) => cb());
     }
-  },
+    dispatch(type: string, detail?: unknown) {
+      this.listeners[type]?.forEach((cb) => cb(detail !== undefined ? { detail } : undefined));
+    }
+  }
+  return { MockRfb: MockRfbClass, rfbHolder };
+});
+
+vi.mock("@novnc/novnc/lib/rfb", () => ({
+  default: MockRfb,
 }));
+
+// Mirrors what the real RFB does: a failed handshake fires `securityfailure`
+// immediately followed by `disconnect` on the same socket. The disconnect
+// handler must not be allowed to overwrite the securityfailure state.
+function triggerSecurityFailureThenDisconnect(reason: string) {
+  rfbHolder.current?.dispatch("securityfailure", { reason });
+  rfbHolder.current?.dispatch("disconnect");
+}
 
 function renderPage(url = "https://example.com/login") {
   return render(
@@ -105,6 +128,20 @@ describe("BrowserSessionPage", () => {
     expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "DELETE")).toBe(
       false,
     );
+  });
+
+  it("keeps showing the securityfailure reason after the disconnect that follows it", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("example.com")).toBeTruthy();
+    });
+
+    triggerSecurityFailureThenDisconnect("bad handshake");
+
+    await waitFor(() => {
+      expect(screen.getByText(/bad handshake/i)).toBeTruthy();
+    });
+    expect(screen.queryByText(/if it worked, the next run will get through/i)).toBeNull();
   });
 
   it("does not claim the sign-in succeeded when closed", async () => {

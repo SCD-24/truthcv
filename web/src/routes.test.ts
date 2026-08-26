@@ -13,6 +13,7 @@ describe("ROUTES", () => {
     expect(ROUTES.uploadCv).toBe("/cv");
     expect(ROUTES.manual).toBe("/manual");
     expect(ROUTES.documentEdit).toBe("/documents/edit");
+    expect(ROUTES.jobBoards).toBe("/job-boards");
   });
 
   it("builds the filled-form path for an application id", () => {
