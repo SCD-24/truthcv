@@ -37,29 +37,15 @@ FROM node:22-bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive \
     NODE_ENV=production
 
-# ca-certificates: TLS for the claude CLI and for this container's calls to
-# ${TRUTHCV_MCP_URL}. tzdata: RUN_AT (docker-compose.yml) is a container-TZ
-# schedule, same as the retired Jobs project's RUN_AT. jq: agent/daily-apply.sh
-# renders the entire job-profile / criteria / salary prompt block with it, and
-# now aborts the run outright when it is missing rather than silently dropping
-# every configured profile.
+# ca-certificates: TLS for the harness's provider calls and for this
+# container's calls to ${TRUTHCV_MCP_URL}. tzdata: RUN_AT (docker-compose.yml)
+# is a container-TZ schedule, same as the retired Jobs project's RUN_AT. jq:
+# agent/daily-apply.sh renders the entire job-profile / criteria / salary
+# prompt block with it, and now aborts the run outright when it is missing
+# rather than silently dropping every configured profile.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tzdata jq \
  && rm -rf /var/lib/apt/lists/*
-
-# The claude CLI — pinned to an exact version (not @latest) so a rebuild
-# today vs. next month cannot silently change CLI behavior/flags out from
-# under agent/daily-apply.sh's --allowedTools / --dangerously-skip-permissions
-# invocation. There is no CI here to catch such a break before an unattended
-# run applies to real jobs, so the version is frozen deliberately rather than
-# floated. To bump it: change the version below, run the agent smoke test
-# (agent/smoke-test.sh) against the rebuilt image, and re-validate that
-# daily-apply.sh's flags still behave the same under the new version before
-# shipping. @playwright/mcp is deliberately NOT installed here: it runs in the
-# `browser` service (browser/Dockerfile), and this image only needs to TALK to
-# it over HTTP, which the claude CLI does from agent/mcp.json's `browser`
-# server entry. See the BROWSER STRATEGY note above.
-RUN npm install -g @anthropic-ai/claude-code@1.0.88
 
 # node:22-bookworm-slim already ships a `node` user at UID 1000 — reuse it
 # rather than create a second UID-1000 account, which fails (same reasoning
@@ -70,6 +56,19 @@ RUN npm install -g @anthropic-ai/claude-code@1.0.88
 # (USER node) could then not write its run logs.
 RUN mkdir -p /app/agent /app/runs \
  && chown -R node:node /app
+
+WORKDIR /app/agent
+
+# Build the harness (agent/harness/) as our own dependency, pinned exactly by
+# the lockfile — same rationale that used to pin the claude CLI to an exact
+# version: a rebuild today vs. next month must not silently change behavior
+# out from under an unattended run. Copy the manifest + lockfile first so this
+# layer only rebuilds when dependencies actually change.
+COPY --chown=node:node agent/package.json agent/package-lock.json ./
+RUN npm ci
+COPY --chown=node:node agent/tsconfig.json ./
+COPY --chown=node:node agent/harness ./harness
+RUN npm run build && npm prune --omit=dev
 
 # The agent's own files — its operating spec, its prompt, its MCP config, the
 # per-run script and the scheduling loop that invokes it (task t-3 of plan
@@ -93,6 +92,5 @@ COPY --chown=node:node agent/smoke-test.sh   /app/agent/smoke-test.sh
 RUN chmod +x /app/agent/daily-apply.sh /app/agent/entrypoint.sh /app/agent/smoke-test.sh
 
 USER node
-WORKDIR /app/agent
 
 ENTRYPOINT ["/app/agent/entrypoint.sh"]

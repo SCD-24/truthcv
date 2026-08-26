@@ -289,13 +289,27 @@ def test_record_application_persists_the_whole_evidence_trail(data_dir):
     assert (attachment.kind, attachment.path) == ("cv", "cv_abc123.pdf")
 
 
+def _long_posting_text(role: str, company: str) -> str:
+    """A realistic posting body comfortably over the MIN_POSTING_TEXT_CHARS floor."""
+    return (
+        f"{role} at {company}. Remote. We are looking for an experienced "
+        "engineer to join our platform team, designing, building and "
+        "operating services that power our product. You will work closely "
+        "with product managers and designers to ship reliable software. "
+        "Requirements: strong experience with distributed systems, a track "
+        "record of shipping production software, and excellent communication "
+        "skills. We offer a competitive salary, remote-friendly culture, and "
+        "a generous learning budget for every member of the team."
+    )
+
+
 def _approve_screening(company: str, role: str, url: str) -> str:
     """Create an approved screening and return its id."""
     s = tools_ledger.record_screening(
         company=company,
         role=role,
         url=url,
-        posting_text=f"{role} at {company}. Remote.",
+        posting_text=_long_posting_text(role, company),
         verdict="deferred",
         source="agent",
     )
@@ -323,7 +337,7 @@ def test_record_application_backfills_identity_from_the_screening(data_dir):
     assert reloaded.company == "Acme Corp"
     assert reloaded.role == "Senior Engineer"
     assert reloaded.application_url == "https://acme.example/job/1"
-    assert reloaded.posting == "Senior Engineer at Acme Corp. Remote."
+    assert reloaded.posting == _long_posting_text("Senior Engineer", "Acme Corp")
 
     from screening.store import get as get_screening
 
@@ -498,6 +512,7 @@ def test_record_screening_persists_verdict_and_company(data_dir):
         verdict="deferred",
         failing_criterion="glassdoor_rating",
         reason="Rating not published; operator to decide.",
+        posting_text=_long_posting_text("Applied AI Engineer", "ExampleCo"),
         source="agent",
     )
     assert s["company"] == "ExampleCo"
@@ -599,6 +614,66 @@ def test_record_screening_omitted_fields_are_not_written(data_dir):
     assert s["failing_criterion"] == ""
     assert s["source"] == ""
     assert s["approval"] == ""
+
+
+def test_record_screening_deferred_with_no_posting_text_persists_nothing(data_dir):
+    """A deferred verdict is about to queue for the operator's decision, so it
+    is rejected — and nothing is stored — without usable posting text."""
+    from screening import store as screening_store
+
+    before = screening_store.load_all()
+    with pytest.raises(ValueError):
+        tools_ledger.record_screening(
+            url="https://jobs.example.com/postings/no-text",
+            role="Data Engineer",
+            company="ExampleCo",
+            verdict="deferred",
+        )
+    assert screening_store.load_all() == before
+
+
+def test_record_screening_passed_with_login_wall_text_is_rejected(data_dir):
+    """A short login-wall body is not a real posting: a passed verdict with
+    one is rejected the same way a blank one is."""
+    from screening import store as screening_store
+
+    before = screening_store.load_all()
+    with pytest.raises(ValueError):
+        tools_ledger.record_screening(
+            url="https://jobs.example.com/postings/login-wall",
+            role="Data Engineer",
+            company="ExampleCo",
+            verdict="passed",
+            posting_text="Sign in to view this job",
+        )
+    assert screening_store.load_all() == before
+
+
+def test_record_screening_rejected_verdict_needs_no_posting_text(data_dir):
+    """A 'rejected' verdict is exempt from the posting_text guard."""
+    s = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/rejected-no-text",
+        role="Data Engineer",
+        company="ExampleCo",
+        verdict="rejected",
+    )
+    assert s["verdict"] == "rejected"
+    assert s["posting_text"] == ""
+
+
+def test_record_screening_blocker_only_call_needs_no_posting_text_and_is_not_queued(data_dir):
+    """A blocker-only call (no verdict) is exempt from the posting_text guard,
+    and a 'not_found' blocker does not queue for the operator's approval."""
+    s = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/blocker-only",
+        role="Data Engineer",
+        company="ExampleCo",
+        verdict="",
+        screening_blocker="not_found",
+    )
+    assert s["screening_blocker"] == "not_found"
+    assert s["posting_text"] == ""
+    assert s["approval"] != "pending"
 
 
 def test_generate_cover_letter_refuses_blocked_company(data_dir):

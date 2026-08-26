@@ -169,7 +169,10 @@ It enters the operator's approval queue; they draft the letter and decide.
 
 record_screening REJECTS the call and stores nothing unless company, verdict,
 role and url all carry usable values — this applies to every screening you
-record, rejections included, not only to passing ones.
+record, rejections included, not only to passing ones. A \"passed\" verdict
+is also rejected, storing nothing, without usable posting_text — a real
+posting body, not a login wall or a 404 page; a posting you could not read
+takes a screening_blocker instead.
 
 Phase 0 is unchanged: postings the operator already approved ARE applied to,
 using the cover_letter text that arrives with each item, verbatim."
@@ -184,7 +187,10 @@ own URL in url, the full posting text in posting_text, and the employer's
 publication date in posted_date when the board states one.
 
 record_screening REJECTS the call and stores nothing unless company, verdict,
-role and url all carry usable values."
+role and url all carry usable values. A \"passed\" or \"deferred\" verdict is
+also rejected, storing nothing, without usable posting_text — a real posting
+body, not a login wall or a 404 page; a posting you could not read takes a
+screening_blocker instead."
   fi
   echo "$prompt"
 }
@@ -283,6 +289,47 @@ if ! diff -q "$BASELINE4" "$PROMPT_FILE4" >/dev/null 2>&1; then
   exit 1
 fi
 echo "PASS: omitted search queries leaves prompt unchanged"
+
+# --- Inlined RUNBOOK operating spec -----------------------------------------
+# Mirrors daily-apply.sh's RUNBOOK inlining verbatim (see the "Inline its full
+# text here" block there), so a divergence between this simulation and the real
+# script is a bug in one of the two, not just here. The harness has no Read
+# tool, so daily-apply.sh appends the RUNBOOK's full text under a fixed marker
+# rather than pointing at a file the agent cannot open.
+#
+# daily-apply.sh enforces no byte/char/line cap on the composed prompt before
+# invoking the harness, so there is no render-size limit for this test to
+# mirror; RUNBOOK inlining is covered by the case below.
+
+# Case 12: the composed prompt inlines RUNBOOK.md's full text under its marker.
+echo "Testing: composed prompt inlines the RUNBOOK operating spec..."
+RUNBOOK_FIXTURE="$TEST_DIR/RUNBOOK.md"
+cat > "$RUNBOOK_FIXTURE" <<'EOF'
+# Operating spec fixture
+## §1 quota
+There is no daily quota.
+## §2 filters
+Match each posting against the configured profiles.
+EOF
+
+PROMPT_FILE5="$TEST_DIR/prompt5.txt"
+echo "## Original RUNBOOK filters" > "$PROMPT_FILE5"
+echo "Apply to at most 5 role(s) this run." >> "$PROMPT_FILE5"
+
+# Same composition as daily-apply.sh: PROMPT starts from the prompt file, then
+# the RUNBOOK's full text is appended under the "## Operating spec" marker.
+PROMPT="$(cat "$PROMPT_FILE5")"$'\n\n'"Today is $(date +%Y-%m-%d)."
+PROMPT="$PROMPT"$'\n\n'"## Operating spec (agent/RUNBOOK.md)"$'\n\n'"$(cat "$RUNBOOK_FIXTURE")"
+
+if [[ "$PROMPT" != *"## Operating spec (agent/RUNBOOK.md)"* ]]; then
+  echo "FAIL: composed prompt is missing the RUNBOOK operating-spec marker"
+  exit 1
+fi
+if [[ "$PROMPT" != *"There is no daily quota."* ]] || [[ "$PROMPT" != *"Match each posting against the configured profiles."* ]]; then
+  echo "FAIL: composed prompt is missing the inlined RUNBOOK fixture content"
+  exit 1
+fi
+echo "PASS: composed prompt inlines the RUNBOOK operating spec"
 
 echo ""
 echo "All tests passed!"

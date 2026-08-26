@@ -52,6 +52,8 @@ _TOOL_REGISTRY = {
         "in which case leave verdict empty and pass screening_blocker instead, set to one of: login_required, unreadable, not_found, expired. "
         "Never guess a verdict for a posting you could not read — that fabricates an evaluation that never happened. "
         "You must also pass posting_text — the posting exactly as you read it — because the operator will draft the cover letter from it days later, on a page the agent never sees. "
+        "A 'passed' or 'deferred' verdict is REJECTED, storing nothing, when it has no usable posting text (a real posting body, not a login wall or a 404 page). "
+        "A posting you could not read takes a screening_blocker instead. "
         "Pass your run_id (from start_run) on EVERY call, so this screening is attributed to your run and the run's coverage counters reflect the work you actually did.",
     ),
     "check_cooldown": (

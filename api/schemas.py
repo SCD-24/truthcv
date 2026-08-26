@@ -1022,7 +1022,15 @@ class RoutingModel(_Camel):
 
 
 class AgentLlmCredentials(_Camel):
-    """GET /api/agent/llm-credentials response: never logged, response-only egress."""
+    """GET /api/agent/llm-credentials response: never logged, response-only egress.
+
+    Serves credentials for any of the four connection cards (claude, codex,
+    openrouter, ollama). `provider` names which card the credentials came
+    from and `wire` names the API dialect the caller must speak
+    ("anthropic-messages" or "openai-chat-completions"), so a
+    provider-agnostic caller can dispatch on the response alone instead of
+    assuming Anthropic.
+    """
 
     auth_type: str
     token: str
@@ -1030,6 +1038,10 @@ class AgentLlmCredentials(_Camel):
     # Set only for Anthropic-compatible third parties (OpenRouter). Empty means
     # the agent talks to Anthropic directly, as it always did.
     base_url: str = ""
+    # The connections/catalog.py card key this credential came from.
+    provider: str = ""
+    # The wire dialect to speak: "anthropic-messages" or "openai-chat-completions".
+    wire: str = ""
 
 
 class AgentStatus(_Camel):

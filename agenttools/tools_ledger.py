@@ -37,6 +37,7 @@ from screening.company import validate_company_name as _validate_company_name
 from screening.cooldown import cooldown as _cooldown
 from screening.model import validate_blocker as _validate_blocker
 from screening.model import validate_verdict as _validate_verdict
+from screening.posting import validate_posting_text as _validate_posting_text
 from screening.role import validate_role_title as _validate_role_title
 from screening.store import create as create_screening
 from screening.url import validate_posting_url as _validate_posting_url
@@ -351,6 +352,19 @@ def record_screening(
     "deferred"/"passed", so a blank or misspelled one produces a stored record
     the operator never sees.
 
+    ``posting_text`` is mandatory whenever the record is about to queue for
+    the operator's decision — a validated verdict of "passed" or "deferred"
+    with no ``screening_blocker`` — because the operator drafts the cover
+    letter from this text days later, on a page the agent never sees: no
+    usable text means no decision the operator can make and nothing to draft
+    from. It is validated by ``screening.posting.validate_posting_text``,
+    which rejects blank, too-short, or wall/error-page text (a login prompt, a
+    cookie banner, a 404) and normalizes what passes; its ``ValueError`` is
+    left to propagate, so a passed/deferred call with no usable posting text
+    persists nothing. A "rejected" verdict, or any call carrying a
+    ``screening_blocker``, is exempt and keeps today's lenient behaviour — a
+    posting the agent could not read takes a blocker instead of posting_text.
+
     Every field above is named explicitly rather than left to ``**fields``,
     because the MCP inputSchema is derived from this signature: a field absent
     from it is invisible to the agent reading the schema, and one model will
@@ -365,7 +379,14 @@ def record_screening(
     fields["role"] = validated_role
     fields["company"] = _validate_company_name(company)
     validated_blocker = _validate_blocker(screening_blocker) if screening_blocker else ""
-    fields["verdict"] = _validate_verdict(verdict, blocker=validated_blocker)
+    validated_verdict = _validate_verdict(verdict, blocker=validated_blocker)
+    fields["verdict"] = validated_verdict
+    if validated_verdict in ("passed", "deferred") and not validated_blocker:
+        # This is about to queue for the operator's decision: no usable
+        # posting text means nothing to draft the letter from, so the call is
+        # rejected and nothing is stored (see the posting_text docstring
+        # paragraph above).
+        posting_text = _validate_posting_text(posting_text)
     named = {
         "failing_criterion": failing_criterion,
         "reason": reason,

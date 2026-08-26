@@ -10,6 +10,14 @@ several callers import them directly; the fragment builders below render the
 same text from a CvConventions value object so an operator can change bullet
 counts, ordering, page targets, and pronoun policy without touching prompt
 prose.
+
+``cv_anti_slop``/``letter_anti_slop`` add a second, independent set of style
+bans distilled from the no-ai-slop skill
+(skills/no-ai-slop/SKILL.md), covering AI-slop patterns TruthCV's existing
+anti-tell rules do not: the portability test, show-don't-tell, weasel
+attribution, fake-strong verbs, synonym cycling, vague-scale words standing
+in for a number, negative listing, and rhetorical setups. Style only; no
+facts.
 """
 
 from __future__ import annotations
@@ -50,6 +58,63 @@ LETTER_STYLE = (
     "body paragraphs of concrete supporting examples drawn ONLY from the facts, then a "
     "brief, forward-looking close."
 )
+
+
+_ANTI_SLOP_BANS = (
+    " Additional AI-slop guardrails (style only, add no facts), distilled from "
+    "the no-ai-slop skill: apply the portability test to every sentence - if it "
+    "could move unchanged to another person, company, or product, cut it or "
+    "replace it with a specific fact already in the truth. Show, don't tell: "
+    "never label a point as important, notable, key, or worth noting, let the "
+    "fact carry the weight. Do not use weasel attribution such as "
+    "industry-leading, widely regarded as, world-class, or experts agree. "
+    "Prefer a concrete, direct verb over an abstraction (write 'tracks "
+    "sponsors, drafts, and due dates' rather than 'serves as a centralized hub "
+    "for sponsor management'). Do not rotate synonyms for the same thing "
+    "across sentences; repeat the clear word instead. Do not use vague-scale "
+    "words such as significantly, substantially, various, or numerous, or 'a "
+    "wide range of' in place of a number, unless that number is present in "
+    "the referenced fact. Do not use negative listing ('not a X, not a Y, a "
+    "Z') and do not use rhetorical setups."
+)
+
+
+def cv_anti_slop() -> str:
+    """Render the CV-specific AI-slop bans, distilled from the no-ai-slop skill.
+
+    Independent of, and additive to, ``cv_style``: covers patterns TruthCV's
+    existing ``_CV_ANTI_TELL_RULES`` do not (portability, show-don't-tell,
+    weasel attribution, fake-strong verbs, synonym cycling, vague-scale
+    words, negative listing, rhetorical setups), plus a CV-only ban on
+    dramatic bullet fragmentation. Style only; adds no facts.
+    """
+    return (
+        _ANTI_SLOP_BANS
+        + " Keep each bullet a single complete statement; do not fragment a "
+        "bullet into short dramatic clauses."
+    )
+
+
+def letter_anti_slop() -> str:
+    """Render the cover-letter-specific AI-slop bans, distilled from the
+    no-ai-slop skill.
+
+    Independent of, and additive to, ``letter_style``: covers patterns
+    TruthCV's existing ``_ANTI_TELL_RULES`` do not (portability,
+    show-don't-tell, weasel attribution, fake-strong verbs, synonym
+    cycling, vague-scale words, negative listing, rhetorical setups), plus
+    letter-only bans on summary-recap endings, fake-profound closers, and
+    hollow adverbs. Style only; adds no facts.
+    """
+    return (
+        _ANTI_SLOP_BANS
+        + " Do not end with a summary-recap paragraph (In conclusion, "
+        "Ultimately, Overall, or a final paragraph that restates the "
+        "letter); end on the last concrete point or a plain next step. Do "
+        "not close with a fake-profound metaphor or aphorism. Avoid hollow "
+        "adverbs in the letter: successfully, effectively, efficiently, "
+        "strategically, proactively."
+    )
 
 
 def _pronoun_clause(conventions: CvConventions) -> str:

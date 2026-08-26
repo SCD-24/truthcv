@@ -45,6 +45,7 @@ graph TD
     application-agent -->|HTTP/REST| agent-config
     application-agent -->|HTTP/MCP (streamable HTTP JSON-RPC)| api
     application-agent -->|HTTP/MCP (streamable HTTP JSON-RPC)| browser-service
+    application-agent -->|HTTPS| llm-provider-service
     application-agent -->|HTTP/MCP (streamable HTTP JSON-RPC)| run-store
     application-tracker -->|in-process| company-research
     application-tracker -->|in-process| renderer
@@ -133,6 +134,7 @@ graph TD
 - [application-agent → agent-config](interactions/application-agent--agent-config.md) via `HTTP/REST`
 - [application-agent → api](interactions/application-agent--api.md) via `HTTP/MCP (streamable HTTP JSON-RPC)`
 - [application-agent → browser-service](interactions/application-agent--browser-service.md) via `HTTP/MCP (streamable HTTP JSON-RPC)`
+- [application-agent → llm-provider-service](interactions/application-agent--llm-provider-service.md) via `HTTPS`
 - [application-agent → run-store](interactions/application-agent--run-store.md) via `HTTP/MCP (streamable HTTP JSON-RPC)`
 - [application-tracker → company-research](interactions/application-tracker--company-research.md) via `in-process`
 - [application-tracker → renderer](interactions/application-tracker--renderer.md) via `in-process`

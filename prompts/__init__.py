@@ -14,7 +14,7 @@ raw constant; style fragments live in ``prompts.style`` and are re-exported.
 
 from __future__ import annotations
 
-from .style import CV_STYLE, LETTER_STYLE
+from .style import CV_STYLE, LETTER_STYLE, cv_anti_slop, letter_anti_slop
 from .truth import extract_system
 from .tailor import (
     keywords_system,
@@ -28,6 +28,8 @@ from .coverletter import cover_letter_system, cover_letter_facts_block
 __all__ = [
     "CV_STYLE",
     "LETTER_STYLE",
+    "cv_anti_slop",
+    "letter_anti_slop",
     "extract_system",
     "keywords_system",
     "infer_system",

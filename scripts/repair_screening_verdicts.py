@@ -182,17 +182,23 @@ def classify(screenings: list) -> tuple[list, list, list]:
     return complete, recoverable, manual
 
 
-def queues_for_approval(verdict: str) -> bool:
+def queues_for_approval(verdict: str, blocker: str = "") -> bool:
     """Whether ``store.create`` would have queued this verdict for the operator.
 
     Mirrors the rule in ``screening.store.create`` deliberately: ``update`` does
     not run it, so a record whose verdict is only being recovered now would keep
     an empty approval and stay invisible — which is the exact failure this
-    script exists to undo.
+    script exists to undo. A ``blocker`` only queues when it is one of
+    ``screening.store.QUEUEING_BLOCKERS`` (login_required, unreadable) — a
+    not_found/expired blocker describes a posting that no longer exists, and
+    the constant is imported rather than re-listed so the two rules cannot
+    drift apart again.
     """
     if verdict == "deferred":
         return True
-    return verdict == "passed" and agent_config_load().mode == "semi"
+    if verdict == "passed" and agent_config_load().mode == "semi":
+        return True
+    return blocker in screening_store.QUEUEING_BLOCKERS
 
 
 def apply_fixes(recoverable: list) -> list:
@@ -205,7 +211,7 @@ def apply_fixes(recoverable: list) -> list:
     for s, patch in recoverable:
         screening_store.update(s.id, patch)
         verdict = patch.get("verdict", s.verdict)
-        if not (s.approval or "").strip() and queues_for_approval(verdict):
+        if not (s.approval or "").strip() and queues_for_approval(verdict, s.screening_blocker):
             screening_store.set_approval(s.id, "pending")
             queued.append(s)
     return queued

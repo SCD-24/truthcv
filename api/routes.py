@@ -1367,11 +1367,81 @@ def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:
     return AgentConfigModel.model_validate(data)
 
 
+def _claude_credentials(model: str) -> AgentLlmCredentials:
+    """Resolve claude card credentials: oauth first, then apikey, else 404/503."""
+    conn = secretstore.get_connection("claude")
+    oauth = conn.get("oauth") or {}
+    if oauth.get("accessToken") and conn.get("authMode") != "apikey":
+        try:
+            token = get_valid_access_token()
+        except AuthError:
+            raise HTTPException(
+                status_code=503, detail="Claude subscription needs reconnecting."
+            ) from None
+        return AgentLlmCredentials(
+            auth_type="oauth", token=token, model=model,
+            provider="claude", wire="anthropic-messages",
+        )
+
+    api_key = conn.get("apiKey")
+    if api_key:
+        return AgentLlmCredentials(
+            auth_type="api_key", token=api_key, model=model,
+            provider="claude", wire="anthropic-messages",
+        )
+    raise HTTPException(status_code=404)
+
+
+def _codex_credentials(model: str) -> AgentLlmCredentials:
+    """Resolve codex card credentials: apikey-only, OpenAI Chat Completions wire."""
+    api_key = secretstore.get_connection("codex").get("apiKey")
+    if not api_key:
+        raise HTTPException(status_code=404)
+    return AgentLlmCredentials(
+        auth_type="api_key", token=api_key, model=model,
+        provider="codex", wire="openai-chat-completions",
+    )
+
+
+def _openrouter_credentials(model: str) -> AgentLlmCredentials:
+    """Resolve openrouter card credentials: apikey-only, plain OpenAI wire (not
+    the Anthropic-compat shim, which is only for the claude CLI)."""
+    api_key = secretstore.get_connection("openrouter").get("apiKey")
+    if not api_key:
+        raise HTTPException(status_code=404)
+    return AgentLlmCredentials(
+        auth_type="api_key", token=api_key, model=model,
+        base_url=OPENROUTER_BASE_URL,
+        provider="openrouter", wire="openai-chat-completions",
+    )
+
+
+def _ollama_credentials(model: str) -> AgentLlmCredentials:
+    """Resolve ollama card credentials: url-only, no token, OpenAI-shaped wire."""
+    base_url = secretstore.get_connection("ollama").get("baseUrl")
+    if not base_url:
+        raise HTTPException(status_code=404)
+    return AgentLlmCredentials(
+        auth_type="url", token="", model=model, base_url=base_url,
+        provider="ollama", wire="openai-chat-completions",
+    )
+
+
+_CARD_CREDENTIALS = {
+    "claude": _claude_credentials,
+    "codex": _codex_credentials,
+    "openrouter": _openrouter_credentials,
+    "ollama": _ollama_credentials,
+}
+
+
 @router.get("/agent/llm-credentials", response_model=AgentLlmCredentials)
 def get_agent_llm_credentials(x_agent_token: str = Header(default="")) -> AgentLlmCredentials:
     """Guarded: only the unattended agent (holding AGENT_API_TOKEN) may call this.
 
     Returns 404 rather than 401/403 so the response carries no authentication hint.
+    Serves all four connection cards; the caller picks its wire format from the
+    `wire` field on the response rather than assuming Anthropic.
     """
     secret = os.environ.get("AGENT_API_TOKEN", "").strip()
     given = x_agent_token.encode("utf-8", "surrogateescape")
@@ -1382,43 +1452,10 @@ def get_agent_llm_credentials(x_agent_token: str = Header(default="")) -> AgentL
     card = route.connection if route else "claude"
     model = route.model if route else ""
 
-    # The agent IS the `claude` CLI, which speaks the Anthropic Messages API
-    # and nothing else. OpenRouter serves that API too, so the CLI can be
-    # pointed at it with ANTHROPIC_BASE_URL. Cards that only offer an
-    # OpenAI-shaped surface (codex, ollama) have no path here.
-    if card == "openrouter":
-        api_key = secretstore.get_connection("openrouter").get("apiKey")
-        if not api_key:
-            raise HTTPException(status_code=404)
-        return AgentLlmCredentials(
-            auth_type="api_key",
-            token=api_key,
-            model=model,
-            base_url=ANTHROPIC_COMPAT_OPENROUTER_BASE_URL,
-        )
-    if card != "claude":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Agent cannot run on the '{card}' connection: it does not "
-            "serve the Anthropic Messages API the claude CLI requires.",
-        )
-
-    conn = secretstore.get_connection("claude")
-    oauth = conn.get("oauth") or {}
-    if oauth.get("accessToken") and conn.get("authMode") != "apikey":
-        try:
-            token = get_valid_access_token()
-        except AuthError:
-            raise HTTPException(
-                status_code=503, detail="Claude subscription needs reconnecting."
-            ) from None
-        return AgentLlmCredentials(auth_type="oauth", token=token, model=model)
-
-    api_key = conn.get("apiKey")
-    if api_key:
-        return AgentLlmCredentials(auth_type="api_key", token=api_key, model=model)
-
-    raise HTTPException(status_code=404)
+    resolve = _CARD_CREDENTIALS.get(card)
+    if resolve is None:
+        raise HTTPException(status_code=404)
+    return resolve(model)
 
 
 def _agent_control_url(path: str) -> str:
