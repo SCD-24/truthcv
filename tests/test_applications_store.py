@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import applications
 from applications.store import (
     applications_path,
@@ -204,6 +206,22 @@ def test_create_for_screening_distinct_ids_create_separate_rows(data_dir):
     assert a.id != b.id
     assert {app.screening_id for app in applications.load_all()} == {"s1", "s2"}
     assert len(applications.load_all()) == 2
+
+
+def test_create_defaults_application_date_to_today_when_absent(data_dir):
+    app = applications.create({"company": "Hooli"})
+    assert app.application_date == date.today().isoformat()
+
+
+def test_create_preserves_explicitly_supplied_application_date(data_dir):
+    app = applications.create({"company": "Hooli", "application_date": "2026-07-01"})
+    assert app.application_date == "2026-07-01"
+
+
+def test_create_for_screening_defaults_application_date_to_today(data_dir):
+    app, created = create_for_screening({"company": "Hooli"}, "s1")
+    assert created is True
+    assert app.application_date == date.today().isoformat()
 
 
 def test_create_for_screening_empty_id_never_dedupes(data_dir):

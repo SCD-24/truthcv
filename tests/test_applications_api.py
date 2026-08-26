@@ -98,6 +98,14 @@ def test_update_unknown_returns_404(client):
     assert client.put("/api/applications/nope", json={"company": "X"}).status_code == 404
 
 
+def test_create_defaults_application_date_when_omitted(client):
+    from datetime import date
+
+    r = client.post("/api/applications", json={"company": "Acme"})
+    assert r.status_code == 201, r.text
+    assert r.json()["applicationDate"] == date.today().isoformat()
+
+
 def test_create_round_trips_role_ats_capture_method_gaps_and_profile(client):
     """`ApplicationModel` once declared only thirteen of the eighteen EDITABLE
     fields, so Pydantic's default extra="ignore" silently dropped these five

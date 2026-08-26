@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from truth.store import data_dir
@@ -37,6 +37,15 @@ def applications_path() -> Path:
 def _now() -> str:
     """UTC ISO-8601 timestamp; single source so created/updated stay consistent."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _today() -> str:
+    """Civil 'date applied', local calendar date — deliberately matches the
+    explicit date.today().isoformat() already stamped by
+    POST /screenings/{screening_id}/applied, not the UTC timestamp _now() uses
+    for created_at/updated_at.
+    """
+    return date.today().isoformat()
 
 
 def load_all() -> list[Application]:
@@ -85,6 +94,10 @@ def _create_locked(fields: dict, apps: list[Application]) -> Application:
     now = _now()
     app = Application(id=new_id(), created_at=now, updated_at=now)
     _apply_editable(app, fields)
+    # An explicitly supplied application_date always wins; this is the single
+    # funnel covering both create() and create_for_screening().
+    if not app.application_date:
+        app.application_date = _today()
     apps.append(app)
     _write_all(apps)
     return app
