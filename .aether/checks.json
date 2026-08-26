@@ -5,7 +5,7 @@
       "id": "python-tests",
       "name": "Python Tests",
       "kind": "test",
-      "command": "/home/glenn/Documents/truthcv/.venv/bin/pytest",
+      "command": "V=\"$(dirname \"$(git rev-parse --git-common-dir)\")/.venv/bin/pytest\"; if [ -x \"$V\" ]; then \"$V\"; else python3 -m pytest; fi",
       "enabled": true,
       "scope": "repo"
     },
