@@ -131,9 +131,23 @@ def test_ollama_route_returns_tokenless_credentials(client):
     }
 
 
-def test_ollama_route_without_base_url_404(client):
+def test_ollama_route_without_stored_base_url_falls_back_to_env_default(client, monkeypatch):
+    # Unlike the keyed cards, ollama has no unconfigured state to 404 on:
+    # secretstore.get_connection("ollama") fills an absent baseUrl from
+    # OLLAMA_HOST and, failing that, from the documented localhost default
+    # (compose sets OLLAMA_HOST=http://ollama:11434). The route therefore
+    # serves that fallback rather than refusing.
+    monkeypatch.setenv("OLLAMA_HOST", "http://ollama:11434")
     modelrouting.save(Routing(agent=Route("ollama", "llama3.1")))
-    assert client.get("/api/agent/llm-credentials", headers=_hdr()).status_code == 404
+    body = client.get("/api/agent/llm-credentials", headers=_hdr()).json()
+    assert body == {
+        "authType": "url",
+        "token": "",
+        "model": "llama3.1",
+        "baseUrl": "http://ollama:11434",
+        "provider": "ollama",
+        "wire": "openai-chat-completions",
+    }
 
 
 def test_nothing_configured_404(client):
