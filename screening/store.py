@@ -23,6 +23,13 @@ from truth.store import data_dir
 
 from .model import APPROVAL_VALUES, Screening, new_id, validate_blocker
 
+# screening_blocker values that stay operator-actionable: the operator can sign
+# in themselves (login_required) or paste the posting text back in
+# (unreadable). 'not_found' and 'expired' are deliberately excluded — there is
+# no decision to make and nothing to draft from a posting that no longer
+# exists, so those records must not reach the approval queue.
+QUEUEING_BLOCKERS = ("login_required", "unreadable")
+
 
 def screenings_path() -> Path:
     return data_dir() / "screenings.json"
@@ -84,10 +91,13 @@ def create(fields: dict) -> Screening:
     # the agent, decides whether to apply. A screening_blocker means the agent
     # could not even read the posting to reach a verdict — that is equally an
     # unresolved decision only the operator can settle, so it queues the same
-    # way. Set here rather than accepted from `fields`: the agent's
-    # record_screening reaches this function directly, and approval is not its
-    # to grant.
-    if screening.verdict == "deferred" or screening.screening_blocker:
+    # way, but only when the blocker is one the operator can actually act on
+    # (QUEUEING_BLOCKERS): 'not_found' and 'expired' describe a posting that no
+    # longer exists, so there is nothing for the operator to decide or draft
+    # from and the record must not queue. Set here rather than accepted from
+    # `fields`: the agent's record_screening reaches this function directly,
+    # and approval is not its to grant.
+    if screening.verdict == "deferred" or screening.screening_blocker in QUEUEING_BLOCKERS:
         screening.approval = "pending"
     elif screening.verdict == "passed" and _agent_config_load().mode == "semi":
         screening.approval = "pending"
