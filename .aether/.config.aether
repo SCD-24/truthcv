@@ -2007,8 +2007,8 @@
       "y": 428
     },
     "company-research": {
-      "x": 1500,
-      "y": 200
+      "x": 1324,
+      "y": 284
     },
     "connections": {
       "x": 396,
@@ -2016,7 +2016,7 @@
     },
     "cover-letter-engine": {
       "x": 732,
-      "y": 284
+      "y": 212
     },
     "gmail-api": {
       "x": 692,
@@ -2027,12 +2027,12 @@
       "y": 284
     },
     "keyword-vocabulary": {
-      "x": 1500,
-      "y": 380
+      "x": 1620,
+      "y": 428
     },
     "llm-provider-layer": {
       "x": 1620,
-      "y": 212
+      "y": 140
     },
     "llm-provider-service": {
       "x": 988,
@@ -2044,15 +2044,15 @@
     },
     "prompt-store": {
       "x": 1620,
-      "y": 356
+      "y": 284
     },
     "renderer": {
       "x": 1324,
-      "y": 356
+      "y": 428
     },
     "run-store": {
-      "x": 1500,
-      "y": 380
+      "x": 732,
+      "y": 356
     },
     "screening-engine": {
       "x": 396,
@@ -2072,7 +2072,7 @@
     },
     "truth-store": {
       "x": 1324,
-      "y": 212
+      "y": 140
     },
     "web-ui": {
       "x": 140,
