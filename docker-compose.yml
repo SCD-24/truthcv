@@ -63,6 +63,11 @@ services:
       context: .
       dockerfile: browser/Dockerfile
     restart: unless-stopped
+    # Docker's 64MB default /dev/shm is what kills Chromium's renderer mid-page
+    # (silently, leaving the last painted frame on screen). Companion to
+    # --disable-dev-shm-usage in browser/session-server.js — belt and braces,
+    # since @playwright/mcp's own Chromium shares this container.
+    shm_size: "2gb"
     # No published ports. noVNC (7900) and the session control server (8932)
     # are reached only from the `app` service over the compose network:
     # /api/browser/session/stream relays the viewport with an Origin check,

@@ -13,6 +13,7 @@ import { ApplicationsPage } from "./applications/ApplicationsPage";
 import { FilledFormPage } from "./applications/FilledFormPage";
 import { AnalyticsPage } from "./analytics/AnalyticsPage";
 import { AgentsPage } from "./agents/AgentsPage";
+import { JobBoardsPage } from "./jobboards/JobBoardsPage";
 import { ScreeningsPage } from "./screenings/ScreeningsPage";
 import { CompanyResearchPage } from "./companyresearch/CompanyResearchPage";
 import { ApprovalsPage } from "./approvals/ApprovalsPage";
@@ -150,6 +151,7 @@ function TopLevelRoutes({ onOnboardingComplete }: { onOnboardingComplete: () => 
         element={<FilledFormPage onBack={() => navigate(ROUTES.applications)} />}
       />
       <Route path={ROUTES.agents} element={<AgentsPage onBack={onBack} />} />
+      <Route path={ROUTES.jobBoards} element={<JobBoardsPage />} />
       <Route path={ROUTES.screenings} element={<ScreeningsPage onBack={onBack} />} />
       <Route
         path={ROUTES.companyResearch}

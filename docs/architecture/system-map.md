@@ -7,6 +7,7 @@ graph TD
     api["API <br/> <small>(BACKEND)</small>"]
     application-agent["Application Agent <br/> <small>(BACKEND)</small>"]
     application-tracker["Application Tracker <br/> <small>(BACKEND)</small>"]
+    browser-service["Browser Service <br/> <small>(BACKEND)</small>"]
     company-research["Company Research <br/> <small>(BACKEND)</small>"]
     connections["Connections <br/> <small>(BACKEND)</small>"]
     cover-letter-engine["Cover Letter Engine <br/> <small>(BACKEND)</small>"]
@@ -28,6 +29,7 @@ graph TD
     agent-config -->|file I/O| truth-data-volume
     api -->|in-process| agent-config
     api -->|in-process| application-tracker
+    api -->|WebSocket (noVNC relay) + HTTP| browser-service
     api -->|in-process| company-research
     api -->|in-process| connections
     api -->|in-process| cover-letter-engine
@@ -42,6 +44,7 @@ graph TD
     api -->|in-process| truth-store
     application-agent -->|HTTP/REST| agent-config
     application-agent -->|HTTP/MCP (streamable HTTP JSON-RPC)| api
+    application-agent -->|HTTP/MCP (streamable HTTP JSON-RPC)| browser-service
     application-agent -->|HTTP/MCP (streamable HTTP JSON-RPC)| run-store
     application-tracker -->|in-process| company-research
     application-tracker -->|in-process| renderer
@@ -87,6 +90,7 @@ graph TD
 - [API](overview.md) (`api`, backend)
 - [Application Agent](overview.md) (`application-agent`, backend)
 - [Application Tracker](overview.md) (`application-tracker`, backend)
+- [Browser Service](overview.md) (`browser-service`, backend)
 - [Company Research](overview.md) (`company-research`, backend)
 - [Connections](overview.md) (`connections`, backend)
 - [Cover Letter Engine](overview.md) (`cover-letter-engine`, backend)
@@ -111,6 +115,7 @@ graph TD
 - [agent-config → truth-data-volume](interactions/agent-config--truth-data-volume.md) via `file I/O`
 - [api → agent-config](interactions/api--agent-config.md) via `in-process`
 - [api → application-tracker](interactions/api--application-tracker.md) via `in-process`
+- [api → browser-service](interactions/api--browser-service.md) via `WebSocket (noVNC relay) + HTTP`
 - [api → company-research](interactions/api--company-research.md) via `in-process`
 - [api → connections](interactions/api--connections.md) via `in-process`
 - [api → cover-letter-engine](interactions/api--cover-letter-engine.md) via `in-process`
@@ -125,6 +130,7 @@ graph TD
 - [api → truth-store](interactions/api--truth-store.md) via `in-process`
 - [application-agent → agent-config](interactions/application-agent--agent-config.md) via `HTTP/REST`
 - [application-agent → api](interactions/application-agent--api.md) via `HTTP/MCP (streamable HTTP JSON-RPC)`
+- [application-agent → browser-service](interactions/application-agent--browser-service.md) via `HTTP/MCP (streamable HTTP JSON-RPC)`
 - [application-agent → run-store](interactions/application-agent--run-store.md) via `HTTP/MCP (streamable HTTP JSON-RPC)`
 - [application-tracker → company-research](interactions/application-tracker--company-research.md) via `in-process`
 - [application-tracker → renderer](interactions/application-tracker--renderer.md) via `in-process`

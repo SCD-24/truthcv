@@ -42,6 +42,7 @@ Use these exact names and ids when discussing the architecture.
 | API | `api` | backend |
 | Application Agent | `application-agent` | backend |
 | Application Tracker | `application-tracker` | backend |
+| Browser Service | `browser-service` | backend |
 | Company Research | `company-research` | backend |
 | Connections | `connections` | backend |
 | Cover Letter Engine | `cover-letter-engine` | backend |
@@ -65,5 +66,5 @@ Use these exact names and ids when discussing the architecture.
 <!-- generated:start cap:system-boundary -->
 ## System Boundary
 
-The declared system consists of 22 component(s) and 54 connection(s) — see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
+The declared system consists of 23 component(s) and 56 connection(s) — see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
 <!-- generated:end cap:system-boundary -->

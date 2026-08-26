@@ -4,8 +4,8 @@ The `browser` service in docker-compose.yml runs a headful Chromium instance und
 
 ## noVNC Viewport
 
-The port is not published to the host. Reach the viewport from **Agents page
-→ Site sign-ins** in TruthCV, which relays it through the app's origin- and
+The port is not published to the host. Reach the viewport from the **Job
+boards** page in TruthCV, which relays it through the app's origin- and
 peer-checked WebSocket route (`WS /api/browser/session/stream`) and only
 while a sign-in session is open.
 
@@ -44,6 +44,25 @@ This is why the browser container mounts the data volume, but the agent containe
 | `BROWSER_MCP_PORT` | `8931` | Port the @playwright/mcp HTTP server listens on (internal to compose) |
 | `BROWSER_PROFILE_DIR` | `/browser-profile` | Mounted path of the persistent Chromium profile |
 | `TZ` | `UTC` | Container timezone (affects logs and any time-based logic) |
+
+## Diagnosing a Stalled Attended Sign-In
+
+If clicking or typing in the attended sign-in viewport appears to do nothing,
+the browser container now forwards Chromium's own stdout/stderr under a
+`chrome:` prefix — `docker compose logs browser` is the first stop. Three
+signatures are worth looking for:
+
+- A renderer crash / out-of-memory line from Chromium itself — this was the
+  usual cause of a silently dead viewport before `--disable-dev-shm-usage`
+  (session-server.js) and `shm_size: "2gb"` (docker-compose.yml) were added;
+  seeing one after this change means the mitigation did not cover the case.
+- An `eviction deadline reached` line — the agent took the browser back
+  mid-sign-in because `SESSION_GRACE_MS` (default `180000`ms) elapsed. Finish
+  the sign-in faster, or raise `SESSION_GRACE_MS` together with the agent's
+  `SESSION_EVICT_TIMEOUT` (see the `browser`/`agent` service comments in
+  docker-compose.yml).
+- A clean page with no Chromium complaint at all — points at a site-side
+  anti-bot challenge (see below) rather than this container.
 
 ## Risk: Bot Detection
 

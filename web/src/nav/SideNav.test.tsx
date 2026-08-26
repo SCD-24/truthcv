@@ -13,11 +13,12 @@ const props = {
 };
 
 describe("SideNav", () => {
-  it("renders all nine buttons", () => {
+  it("renders all ten buttons", () => {
     render(<SideNav {...props} />);
     const labels = [
       "Upload CV",
       "Manual",
+      "Job boards",
       "Applications",
       "Analytics",
       "Agents",
@@ -39,13 +40,13 @@ describe("SideNav", () => {
 
   it("shows the number of sites waiting on a sign-in", () => {
     render(<SideNav {...props} signinSites={2} />);
-    const button = screen.getByRole("button", { name: /^agents$/i });
+    const button = screen.getByRole("button", { name: /^job boards$/i });
     expect(within(button).getByText("2")).toBeTruthy();
   });
 
-  it("shows nothing on Agents when no site is waiting", () => {
+  it("shows nothing on Job boards when no site is waiting", () => {
     render(<SideNav {...props} />);
-    const button = screen.getByRole("button", { name: /^agents$/i });
+    const button = screen.getByRole("button", { name: /^job boards$/i });
     // A count of zero is not news, and an empty badge on a permanent nav item
     // reads as an alert that never clears.
     expect(within(button).queryByText("0")).toBeNull();

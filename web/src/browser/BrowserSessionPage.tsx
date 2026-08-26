@@ -141,6 +141,11 @@ export function BrowserSessionPage() {
     if (!canvasRef.current) return;
     const wsUrl = `${location.origin.replace(/^http/, "ws")}/api/browser/session/stream`;
     const rfb = new RFB(canvasRef.current, wsUrl);
+    // noVNC 1.6.0 defaults to rendering the full remote 1920x1080 desktop
+    // at native size, which overflows this page's <Box> with no way to pan
+    // to the right/bottom of the desktop. Scale-and-clip it to the box instead.
+    rfb.clipViewport = true;
+    rfb.scaleViewport = true;
     rfb.addEventListener("disconnect", () => {
       if (reloadingRef.current) {
         // This disconnect was Reload tearing down the old socket on its way
@@ -149,6 +154,13 @@ export function BrowserSessionPage() {
         return;
       }
       setState("closed");
+    });
+    // A failed handshake (bad Origin, relay rejection, etc.) previously
+    // looked identical to a normal close — the operator saw "Closed" for a
+    // session that never actually connected. Surface it distinctly.
+    rfb.addEventListener("securityfailure", (e: CustomEvent<{ reason?: string }>) => {
+      setState("unavailable");
+      setMessage(e.detail?.reason || "The viewport could not connect to the browser.");
     });
     rfbRef.current = rfb;
   }
@@ -238,7 +250,7 @@ export function BrowserSessionPage() {
   }
 
   const back = (
-    <Button onClick={() => navigate(ROUTES.agents)}>Back to Agents</Button>
+    <Button onClick={() => navigate(ROUTES.jobBoards)}>Back to job boards</Button>
   );
 
   if (state === "starting") {

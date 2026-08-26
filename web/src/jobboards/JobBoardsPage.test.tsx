@@ -3,11 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
-import { getSigninQueue, updateAgentConfig } from "../api/client";
+import { getAgentConfig, getSigninQueue, updateAgentConfig } from "../api/client";
 import type { AgentConfig, JobBoard } from "../api/types";
-import { JobBoardsSection } from "./JobBoardsSection";
+import { JobBoardsPage } from "./JobBoardsPage";
 
 vi.mock("../api/client", () => ({
+  getAgentConfig: vi.fn(),
   getSigninQueue: vi.fn(),
   updateAgentConfig: vi.fn(),
 }));
@@ -43,19 +44,21 @@ function makeConfig(jobBoards: JobBoard[]): AgentConfig {
   };
 }
 
-function renderSection(config: AgentConfig, onChange = vi.fn()) {
+async function renderPage(config: AgentConfig) {
+  vi.mocked(getAgentConfig).mockResolvedValue(config);
   render(
     <MemoryRouter>
-      <JobBoardsSection config={config} onChange={onChange} />
+      <JobBoardsPage />
     </MemoryRouter>,
   );
-  return onChange;
+  // Wait for the loaded page instead of the loading placeholder.
+  await screen.findByText("Job boards");
 }
 
-describe("JobBoardsSection", () => {
+describe("JobBoardsPage", () => {
   it("renders a Sign in button for each default board when the queue is empty", async () => {
     vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
-    renderSection(makeConfig(DEFAULT_BOARDS));
+    await renderPage(makeConfig(DEFAULT_BOARDS));
 
     await screen.findByText("No sites are waiting on a sign-in.");
     const signInButtons = screen.getAllByRole("button", { name: "Sign in" });
@@ -64,7 +67,7 @@ describe("JobBoardsSection", () => {
 
   it("shows a Default chip and no remove button for a default board", async () => {
     vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
-    renderSection(makeConfig([DEFAULT_BOARDS[0]]));
+    await renderPage(makeConfig([DEFAULT_BOARDS[0]]));
 
     await screen.findByText("Default");
     expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
@@ -81,13 +84,13 @@ describe("JobBoardsSection", () => {
     };
     const config = makeConfig([...DEFAULT_BOARDS, linkedin]);
     vi.mocked(updateAgentConfig).mockResolvedValue(makeConfig(DEFAULT_BOARDS));
-    const onChange = renderSection(config);
+    await renderPage(config);
 
     const removeButton = await screen.findByRole("button", { name: "Remove" });
     fireEvent.click(removeButton);
 
     await waitFor(() => expect(updateAgentConfig).toHaveBeenCalledWith({ jobBoards: DEFAULT_BOARDS }));
-    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Remove" })).toBeNull());
   });
 
   it("disables the Sign in button when effectiveSigninUrl is empty", async () => {
@@ -99,7 +102,7 @@ describe("JobBoardsSection", () => {
       effectiveSigninUrl: "",
       isDefault: false,
     };
-    renderSection(makeConfig([board]));
+    await renderPage(makeConfig([board]));
 
     const button = await screen.findByRole("button", { name: "Sign in" });
     expect((button as HTMLButtonElement).disabled).toBe(true);
@@ -108,7 +111,7 @@ describe("JobBoardsSection", () => {
   it("adds a known board via the add control", async () => {
     vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
     vi.mocked(updateAgentConfig).mockResolvedValue(makeConfig(DEFAULT_BOARDS));
-    renderSection(makeConfig(DEFAULT_BOARDS));
+    await renderPage(makeConfig(DEFAULT_BOARDS));
 
     await screen.findByText("No sites are waiting on a sign-in.");
     fireEvent.mouseDown(screen.getByRole("combobox"));
@@ -128,7 +131,7 @@ describe("JobBoardsSection", () => {
   it("adds a custom domain via the add control", async () => {
     vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
     vi.mocked(updateAgentConfig).mockResolvedValue(makeConfig(DEFAULT_BOARDS));
-    renderSection(makeConfig(DEFAULT_BOARDS));
+    await renderPage(makeConfig(DEFAULT_BOARDS));
 
     await screen.findByText("No sites are waiting on a sign-in.");
     fireEvent.mouseDown(screen.getByRole("combobox"));
@@ -167,10 +170,20 @@ describe("JobBoardsSection", () => {
         },
       ],
     });
-    renderSection(makeConfig(DEFAULT_BOARDS));
+    await renderPage(makeConfig(DEFAULT_BOARDS));
 
     await screen.findByText(/3 postings waiting/);
     expect(screen.getByText(/Acme/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sign in to jobs.ashbyhq.com" })).toBeTruthy();
+  });
+
+  it("shows an error when the config fails to load", async () => {
+    vi.mocked(getAgentConfig).mockRejectedValue(new Error("boom"));
+    render(
+      <MemoryRouter>
+        <JobBoardsPage />
+      </MemoryRouter>,
+    );
+    await screen.findByText("boom");
   });
 });
