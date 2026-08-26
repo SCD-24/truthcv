@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "checks": [
+    {
+      "id": "lint",
+      "name": "Python syntax lint",
+      "kind": "lint",
+      "command": "python3 scripts/lint.py",
+      "enabled": true,
+      "scope": "changed"
+    },
+    {
+      "id": "test",
+      "name": "Python test suite",
+      "kind": "test",
+      "command": "python3 -m pytest -q",
+      "enabled": true,
+      "scope": "repo"
+    }
+  ]
+}
