@@ -35,10 +35,20 @@ echo "   browser driver: $AGENT_BROWSER_DRIVER"
 
 # --- The image itself --------------------------------------------------------
 
-if command -v claude >/dev/null 2>&1; then
-  ok "claude CLI present ($(claude --version 2>/dev/null | head -1))"
+# The provider-neutral agent harness (agent/harness, compiled to
+# dist/harness/cli.js by agent/package.json's `build`) is what daily-apply.sh
+# invokes as `node "$HARNESS_CLI" ...` - it replaces the CLI this test used to
+# check for. Same default path as daily-apply.sh's HARNESS_CLI, so the smoke
+# test cannot pass against an image the run path would reject. The harness has
+# no --help / no-op mode, so the meaningful check for a compiled ESM file is
+# that it exists, is non-empty, and parses under `node --check`.
+HARNESS_CLI="${HARNESS_CLI:-$AGENT_DIR/dist/harness/cli.js}"
+if [[ ! -s "$HARNESS_CLI" ]]; then
+  bad "agent harness missing - build it with \`npm run build\` in agent/ (daily-apply.sh aborts without $HARNESS_CLI)"
+elif node --check "$HARNESS_CLI" 2>/dev/null; then
+  ok "agent harness built and parses ($HARNESS_CLI)"
 else
-  bad "claude CLI missing - daily-apply.sh aborts without it"
+  bad "agent harness present but fails node --check ($HARNESS_CLI) - the build output is broken"
 fi
 
 # node ships with the base image (node:22-bookworm-slim) and is what the

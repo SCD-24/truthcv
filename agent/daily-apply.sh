@@ -14,6 +14,11 @@ RUN_LOG_DIR="${RUN_LOG_DIR:-/app/runs}"
 RUNBOOK="${RUNBOOK:-/app/agent/RUNBOOK.md}"
 PROMPT_FILE="${PROMPT_FILE:-/app/agent/prompt.md}"
 MCP_CONFIG="${MCP_CONFIG:-/app/agent/mcp.json}"
+# The provider-neutral agent harness (agent/harness, compiled to
+# dist/harness/cli.js by agent/package.json's `build`) is what actually drives
+# the run — it replaces the CLI this script used to invoke. Overridable for out-of-container
+# harness testing.
+HARNESS_CLI="${HARNESS_CLI:-/app/agent/dist/harness/cli.js}"
 # Which browser driver this run uses. `browser`, the self-contained
 # containerised Chromium, is currently the only supported value - the
 # variable is kept deliberately as a validating seam so a second driver can
@@ -23,7 +28,7 @@ AGENT_BROWSER_DRIVER="${AGENT_BROWSER_DRIVER:-browser}"
 # The containerised Chromium's MCP endpoint (docker-compose.yml `browser`
 # service, browser/Dockerfile). Same default as agent/mcp.json's
 # ${BROWSER_MCP_URL:-...} expansion, so the probe below and the server the
-# claude CLI actually dials cannot drift apart.
+# harness actually dials cannot drift apart.
 BROWSER_MCP_URL="${BROWSER_MCP_URL:-http://browser:8931/mcp}"
 
 STAMP="$(date +%Y-%m-%d_%H%M)"
@@ -46,8 +51,7 @@ log "=== daily-apply run $STAMP ==="
 
 # --- Preconditions -----------------------------------------------------------
 
-CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude)}"
-[[ -n "$CLAUDE_BIN" && -x "$CLAUDE_BIN" ]] || abort "claude CLI not found (set CLAUDE_BIN, or put claude on PATH)"
+[[ -r "$HARNESS_CLI" ]] || abort "agent harness not found: $HARNESS_CLI (build it with \`npm run build\` in agent/, or set HARNESS_CLI)"
 
 [[ -r "$RUNBOOK" ]] || abort "runbook missing: $RUNBOOK"
 
@@ -205,8 +209,16 @@ log "agent mode: $AGENT_MODE"
 # --- Run ---------------------------------------------------------------------
 
 # agent/prompt.md carries the operating instructions (it references
-# agent/RUNBOOK.md and names the eleven tools); this script only adds the date.
+# agent/RUNBOOK.md and names the eleven tools); this script adds the date and,
+# below, inlines the RUNBOOK text the prompt refers to.
 PROMPT="$(cat "$PROMPT_FILE")"$'\n\n'"Today is $(date +%Y-%m-%d)."
+
+# agent/prompt.md tells the agent to "read agent/RUNBOOK.md in full before
+# doing anything else", but the harness has no Read tool — no file access at
+# all — so the runbook cannot be fetched at runtime. Inline its full text here
+# so the operating spec the prompt refers to actually travels with the prompt.
+# $RUNBOOK is checked readable in the preconditions above.
+PROMPT="$PROMPT"$'\n\n'"## Operating spec (agent/RUNBOOK.md)"$'\n\n'"$(cat "$RUNBOOK")"
 
 PROMPT="$PROMPT"$'\n\n'"## Run identity
 
@@ -399,104 +411,116 @@ if [[ "$APPLY_CAP" =~ ^[1-9][0-9]*$ ]]; then
   PROMPT="$PROMPT"$'\n\n'"Apply to at most $APPLY_CAP role(s) this run."
 fi
 
-# Fetch routed LLM credentials from the app (Stage 2). Fallback: the
-# container's ANTHROPIC_API_KEY env, exactly the pre-Stage-2 behavior.
+# Fetch routed LLM credentials from the app (Stage 2) and export them as the
+# provider-neutral variables the harness consumes (AGENT_LLM_*). Fallback (when
+# AGENT_API_TOKEN is unset): the container's own AGENT_LLM_* environment — the
+# docker-compose-level provider-neutral vars — exactly the pre-Stage-2 spirit,
+# just no longer Anthropic-only.
 AGENT_MODEL=""
 if [[ -n "${AGENT_API_TOKEN:-}" ]]; then
   if CREDS="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" llm_credentials 2>/dev/null)"; then
+    # Six lines, in order: authType, token, model, baseUrl, provider, wire. An
+    # older agent-config.js emitting only four lines yields empty provider/wire
+    # here (sed on a missing line prints nothing), which the final gate rejects.
     AUTH_TYPE="$(sed -n 1p <<<"$CREDS")"
     AUTH_TOKEN="$(sed -n 2p <<<"$CREDS")"
     AGENT_MODEL="$(sed -n 3p <<<"$CREDS")"
     AGENT_BASE_URL="$(sed -n 4p <<<"$CREDS")"
-    # A base URL means the route points at an Anthropic-compatible third party
-    # (OpenRouter) rather than Anthropic itself. The claude CLI appends
-    # /v1/messages to ANTHROPIC_BASE_URL and authenticates with
-    # ANTHROPIC_AUTH_TOKEN, so ANTHROPIC_API_KEY must be unset or it wins and
-    # the run goes to Anthropic with a key that is not one.
-    if [[ -n "$AGENT_BASE_URL" ]]; then
-      export ANTHROPIC_BASE_URL="$AGENT_BASE_URL"
-      export ANTHROPIC_AUTH_TOKEN="$AUTH_TOKEN"
-      unset ANTHROPIC_API_KEY
-      # The CLI only knows Anthropic's own model ids and warns on anything
-      # else while still honouring it; this silences a warning, it does not
-      # change which model runs.
-      export CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1
-      log "using $AGENT_BASE_URL credentials from app"
-    elif [[ "$AUTH_TYPE" == "oauth" ]]; then
-      export CLAUDE_CODE_OAUTH_TOKEN="$AUTH_TOKEN"
-      unset ANTHROPIC_API_KEY
-      log "using Claude subscription credentials from app"
-    elif [[ "$AUTH_TYPE" == "api_key" ]]; then
-      export ANTHROPIC_API_KEY="$AUTH_TOKEN"
-      log "using API key credentials from app"
-    else
-      abort "unrecognized auth type from app: $AUTH_TYPE (expected oauth or api_key)"
-    fi
-    [[ -n "$AUTH_TOKEN" ]] || abort "credential fetch returned empty token for $AUTH_TYPE"
-    unset CREDS AUTH_TOKEN
+    AGENT_PROVIDER="$(sed -n 5p <<<"$CREDS")"
+    AGENT_WIRE="$(sed -n 6p <<<"$CREDS")"
+
+    export AGENT_LLM_PROVIDER="$AGENT_PROVIDER"
+    export AGENT_LLM_MODEL="$AGENT_MODEL"
+    # Empty token is valid for ollama; the final gate enforces the per-provider
+    # rule, so we do not reject an empty token unconditionally here.
+    export AGENT_LLM_API_KEY="$AUTH_TOKEN"
+    export AGENT_LLM_BASE_URL="$AGENT_BASE_URL"
+    export AGENT_LLM_WIRE="$AGENT_WIRE"
+    # Distinct from AGENT_LLM_PROVIDER: a claude connection can be either
+    # 'oauth' or 'api_key', and the harness must send the token via the
+    # matching wire mechanism (Bearer vs x-api-key) or an oauth token is
+    # rejected when sent as an api key. Forwarded verbatim to the harness CLI.
+    export AGENT_LLM_AUTH_TYPE="$AUTH_TYPE"
+    log "using ${AGENT_LLM_PROVIDER:-unknown} credentials from app${AGENT_LLM_BASE_URL:+ ($AGENT_LLM_BASE_URL)}"
+    unset CREDS AUTH_TOKEN AUTH_TYPE AGENT_PROVIDER AGENT_WIRE
   else
     abort "credential fetch failed (app returned non-zero exit)"
   fi
+else
+  # No app-issued agent token: take the provider-neutral credentials straight
+  # from the container's own environment (the docker-compose-level AGENT_LLM_*
+  # vars) instead of the app.
+  export AGENT_LLM_PROVIDER="${AGENT_LLM_PROVIDER:-}"
+  export AGENT_LLM_MODEL="${AGENT_LLM_MODEL:-}"
+  export AGENT_LLM_API_KEY="${AGENT_LLM_API_KEY:-}"
+  export AGENT_LLM_BASE_URL="${AGENT_LLM_BASE_URL:-}"
+  export AGENT_LLM_WIRE="${AGENT_LLM_WIRE:-}"
+  export AGENT_LLM_AUTH_TYPE="${AGENT_LLM_AUTH_TYPE:-}"
+  AGENT_MODEL="$AGENT_LLM_MODEL"
 fi
 
-# Final gate: at least one credential source must be set
-[[ -n "${ANTHROPIC_API_KEY:-}" ]] || [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] || [[ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]] || abort "no usable LLM credential: set ANTHROPIC_API_KEY or AGENT_API_TOKEN + app credentials"
-MODEL_ARGS=()
-[[ -n "$AGENT_MODEL" ]] && MODEL_ARGS=(--model "$AGENT_MODEL")
+# Final gate: the harness needs a known provider AND a usable credential for it.
+# claude|codex|openrouter each require a non-empty token; ollama legitimately
+# has none and requires a base URL instead.
+case "$AGENT_LLM_PROVIDER" in
+  claude|codex|openrouter)
+    [[ -n "$AGENT_LLM_API_KEY" ]] || abort "no usable LLM credential for provider '$AGENT_LLM_PROVIDER': set AGENT_API_TOKEN + app credentials, or AGENT_LLM_API_KEY in the container env"
+    ;;
+  ollama)
+    [[ -n "$AGENT_LLM_BASE_URL" ]] || abort "provider 'ollama' requires a base URL: set AGENT_LLM_BASE_URL"
+    ;;
+  *)
+    abort "unrecognised or unset LLM provider '$AGENT_LLM_PROVIDER' (expected claude|codex|openrouter|ollama)"
+    ;;
+esac
 
-# The containerised browser is granted as the whole server, `mcp__browser`,
-# rather than as an enumerated tool list. Every truthcv grant below is a single
-# named tool, and the asymmetry is deliberate: the truthcv tools are OUR eleven,
-# fixed by agenttools/mcp_app.py (the JSON-RPC surface this agent dials -
-# agenttools/server.py is the separate REST surface and registers only 9) and
-# changing only when we change it, so naming
-# them keeps the blast radius of a new tool at zero until it is granted on
-# purpose. The browser server is upstream @playwright/mcp (browser/Dockerfile),
-# whose tool set - browser_navigate, browser_click, browser_type,
-# browser_file_upload, browser_snapshot, browser_take_screenshot and the rest -
-# is theirs to rename or extend on any version bump; pinning a list here would
-# silently disable whichever tool got renamed, mid-run, in an unattended job.
-# Containment for the browser comes from the container instead: no host
-# filesystem, no host network, its profile on its own volume, and the app data
-# volume mounted read-only.
-#
-# (Superseding the Jobs original's mcp__plugin_playwright_playwright__* grants,
-# which were dropped when this image had no browser at all.)
-BROWSER_TOOLS=("mcp__browser")
+# The tool allow-list is NOT passed on the command line any more: it is
+# hardcoded inside the harness (agent/harness/tools.ts), which reproduces this
+# script's former policy exactly — the same 16 named truthcv tools granted
+# individually (generate_cover_letter, record_application, record_screening,
+# check_cooldown, get_canonical_cv, get_profile_answers, record_company_board,
+# get_job_profiles, recommend_salary, get_approved_applications,
+# report_apply_failure, record_company_finding, get_company_findings, start_run,
+# finish_run, record_run_note), plus the browser server granted WHOLE. Naming
+# each truthcv tool keeps the blast radius of a new server-side tool at zero
+# until it is granted on purpose; the browser server is upstream @playwright/mcp
+# (browser/Dockerfile) and renames/extends its own tools on version bumps, so it
+# is trusted whole and containment comes from the container instead (no host
+# filesystem, no host network, its profile on its own volume, the app data
+# volume read-only). Read/Write/WebSearch/WebFetch are gone entirely: the
+# harness has no built-in tools of its own, only MCP tools exist to be granted.
 
-log "invoking claude... (browser driver: $AGENT_BROWSER_DRIVER)"
+# This is an unattended run with stdin at /dev/null, so it cannot block on any
+# approval prompt — the harness's hardcoded allow-list, not an interactive
+# prompt, is the authorization boundary. The composed prompt (with the RUNBOOK
+# inlined, since the harness has no Read tool) is handed over via a temp file.
+log "invoking agent harness... (provider: $AGENT_LLM_PROVIDER, browser driver: $AGENT_BROWSER_DRIVER)"
 
-# --dangerously-skip-permissions: this is an unattended run with stdin at
-# /dev/null, so any trust or permission prompt would EOF and kill the run. The
-# --allowedTools list below, not an interactive prompt, is the actual boundary on
-# what the agent may do; the flag only stops the run blocking on a question no
-# one is there to answer.
-"$CLAUDE_BIN" -p "$PROMPT" "${MODEL_ARGS[@]}" \
+HARNESS_PROMPT_FILE="$(mktemp)"
+printf '%s' "$PROMPT" >"$HARNESS_PROMPT_FILE"
+# The harness writes its final assistant message here; named alongside RUN_LOG
+# so a run's artifacts share one stamp+id prefix.
+RUN_OUTPUT="$RUN_LOG_DIR/run_${STAMP}_${TRUTHCV_RUN_ID}.output"
+
+# Exit codes are the harness's machine contract: 0 success, 2 turn cap, 3
+# provider error, 4 MCP connection failure, 5 bad configuration. They are logged
+# and propagated verbatim below, not remapped.
+node "$HARNESS_CLI" \
+  --prompt-file "$HARNESS_PROMPT_FILE" \
+  --model "$AGENT_MODEL" \
+  --provider "$AGENT_LLM_PROVIDER" \
+  --wire "$AGENT_LLM_WIRE" \
+  --auth-type "$AGENT_LLM_AUTH_TYPE" \
+  --token "$AGENT_LLM_API_KEY" \
+  --base-url "$AGENT_LLM_BASE_URL" \
   --mcp-config "$MCP_CONFIG" \
-  --allowedTools \
-    "Read" "Write" "WebSearch" "WebFetch" \
-    "mcp__truthcv__generate_cover_letter" \
-    "mcp__truthcv__record_application" \
-    "mcp__truthcv__record_screening" \
-    "mcp__truthcv__check_cooldown" \
-    "mcp__truthcv__get_canonical_cv" \
-    "mcp__truthcv__get_profile_answers" \
-    "mcp__truthcv__record_company_board" \
-    "mcp__truthcv__get_job_profiles" \
-    "mcp__truthcv__recommend_salary" \
-    "mcp__truthcv__get_approved_applications" \
-    "mcp__truthcv__report_apply_failure" \
-    "mcp__truthcv__record_company_finding" \
-    "mcp__truthcv__get_company_findings" \
-    "mcp__truthcv__start_run" \
-    "mcp__truthcv__finish_run" \
-    "mcp__truthcv__record_run_note" \
-    "${BROWSER_TOOLS[@]}" \
-  --dangerously-skip-permissions \
+  --max-turns "${AGENT_MAX_TURNS:-40}" \
+  --output-file "$RUN_OUTPUT" \
   </dev/null >>"$RUN_LOG" 2>&1
 
 RC=$?
-log "claude exited rc=$RC"
+rm -f "$HARNESS_PROMPT_FILE"
+log "agent harness exited rc=$RC"
 
 log "=== run complete: $RUN_LOG ==="
 exit $RC

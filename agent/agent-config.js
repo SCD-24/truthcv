@@ -53,8 +53,12 @@ if (field === "llm_credentials") {
         const creds = JSON.parse(body);
         // Line 4 is the Anthropic-compatible base URL, empty for Anthropic
         // itself. Appended last so an older daily-apply.sh reading only
-        // three lines is unaffected.
-        process.stdout.write(`${creds.authType}\n${creds.token}\n${creds.model || ""}\n${creds.baseUrl || ""}\n`);
+        // three lines is unaffected. Lines 5 (provider) and 6 (wire) are the
+        // newest additions, appended after baseUrl for the same reason: a
+        // reader that only wants the earlier lines keeps working, and an
+        // older API server that omits provider/wire degrades to empty lines
+        // (via `|| ""`) rather than crashing, so output stays exactly 6 lines.
+        process.stdout.write(`${creds.authType}\n${creds.token}\n${creds.model || ""}\n${creds.baseUrl || ""}\n${creds.provider || ""}\n${creds.wire || ""}\n`);
         process.exit(0);
       } catch { process.exit(1); }
     });

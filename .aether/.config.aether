@@ -163,6 +163,11 @@
                   "desc": "Upload a CV as PDF, DOCX, TXT or Markdown (multipart); backend extracts text per format and stores the file under its own extension.",
                   "method": "POST",
                   "path": "/api/upload"
+                },
+                {
+                  "desc": "Agent-token-authenticated credential handoff for the unattended agent. Returns provider, wire format, auth type, token, model and base URL for the configured agent route; serves all four connection cards.",
+                  "method": "GET",
+                  "path": "/api/agent/llm-credentials"
                 }
               ]
             },
@@ -1234,7 +1239,7 @@
         "widgets": [
           {
             "data": {
-              "text": "Unattended job-application agent running as its OWN container (agent/Dockerfile, the `agent` compose service), separate from the app image so a crash there can never take the wizard down. entrypoint.sh preflights credentials and the selected browser driver, then execs supervisor.js, an always-on scheduler plus token-guarded control server that invokes agent/daily-apply.sh — which drives the headless `claude` CLI (@anthropic-ai/claude-code) against agent/prompt.md, agent/RUNBOOK.md and the MCP servers in agent/mcp.json. Schedule, enablement, job profiles and LLM credentials are fetched from the app's /api/agent/* config API (agent/agent-config.js); RUN_AT/RUN_DAYS env are only the fallback. The image is deliberately browserless: pages are rendered by the sibling `browser` service over HTTP MCP (default) or by the operator's host Chrome via the opt-in `interceptor` driver."
+              "text": "Unattended job-application agent running as its OWN container. Drives a nightly run through the TruthCV MCP tool surface and a remote browser MCP server, screening postings, generating guardrailed CVs and cover letters, submitting applications and writing results back to the ledger. Since the provider-agnostic cutover it is driven by TruthCV's own TypeScript agent harness (agent/harness/) rather than the Claude Code CLI, so it runs on any configured connection - Anthropic, OpenAI, OpenRouter or a local Ollama. The container remains deliberately browserless and has no access to the app data volume."
             },
             "h": 180,
             "id": "widget-1787566001330-0",
@@ -1250,9 +1255,11 @@
                 "Docker (separate image)",
                 "Node 22",
                 "Bash",
-                "claude CLI (@anthropic-ai/claude-code)",
                 "MCP",
-                "jq"
+                "jq",
+                "TypeScript",
+                "@modelcontextprotocol/sdk",
+                "Vitest"
               ]
             },
             "h": 200,
@@ -1300,11 +1307,6 @@
                   "key": "AGENT_API_TOKEN"
                 },
                 {
-                  "desc": "Optional; when unset, credentials are fetched from the app at run time.",
-                  "example": "sk-ant-...",
-                  "key": "ANTHROPIC_API_KEY"
-                },
-                {
                   "desc": "'browser' (default, sibling Chromium/@playwright/mcp service) or 'interceptor' (host Chrome, opt-in overlay).",
                   "example": "browser",
                   "key": "AGENT_BROWSER_DRIVER"
@@ -1338,6 +1340,61 @@
                   "desc": "Container timezone the schedule is interpreted in.",
                   "example": "Europe/London",
                   "key": "TZ"
+                },
+                {
+                  "desc": "Fallback connection card the harness runs on when the app does not supply credentials: claude, codex, openrouter or ollama.",
+                  "example": "ollama",
+                  "key": "AGENT_LLM_PROVIDER"
+                },
+                {
+                  "desc": "Fallback model id for the harness when the app does not supply one.",
+                  "example": "qwen2.5:32b",
+                  "key": "AGENT_LLM_MODEL"
+                },
+                {
+                  "desc": "Provider-neutral fallback API key, replacing the Anthropic-specific ANTHROPIC_API_KEY.",
+                  "example": "sk-...",
+                  "key": "AGENT_LLM_API_KEY"
+                },
+                {
+                  "desc": "Provider-neutral fallback base URL, required for ollama and any OpenAI-compatible gateway.",
+                  "example": "http://ollama:11434/v1",
+                  "key": "AGENT_LLM_BASE_URL"
+                },
+                {
+                  "desc": "Hard cap on agent loop turns per run, so an unattended overnight run cannot loop indefinitely.",
+                  "example": "120",
+                  "key": "AGENT_MAX_TURNS"
+                },
+                {
+                  "desc": "Provider the harness dials directly (claude|codex|openrouter|ollama).",
+                  "example": "claude",
+                  "key": "AGENT_LLM_PROVIDER"
+                },
+                {
+                  "desc": "Model id passed to the provider adapter.",
+                  "example": "claude-sonnet-4",
+                  "key": "AGENT_LLM_MODEL"
+                },
+                {
+                  "desc": "Wire protocol of the provider API (anthropic|openai).",
+                  "example": "anthropic",
+                  "key": "AGENT_LLM_WIRE"
+                },
+                {
+                  "desc": "Credential for the provider call; redacted from harness output.",
+                  "example": "sk-...",
+                  "key": "AGENT_LLM_API_KEY"
+                },
+                {
+                  "desc": "Provider base URL; required for ollama.",
+                  "example": "http://ollama:11434",
+                  "key": "AGENT_LLM_BASE_URL"
+                },
+                {
+                  "desc": "oauth | api_key | url — only for provider=claude.",
+                  "example": "api_key",
+                  "key": "AGENT_LLM_AUTH_TYPE"
                 }
               ]
             },
@@ -1888,6 +1945,11 @@
       "from": "application-agent",
       "protocol": "HTTP/MCP (streamable HTTP JSON-RPC)",
       "to": "browser-service"
+    },
+    {
+      "from": "application-agent",
+      "protocol": "HTTPS",
+      "to": "llm-provider-service"
     }
   ],
   "definitions": [

@@ -12,6 +12,13 @@ their application history is the TruthCV tool surface: `generate_cover_letter`,
 `record_company_board`. There is no file on disk to read any of this from — call
 the tool.
 
+This spec is deliberately provider-agnostic — it names no model and assumes
+none. That is not a promise that every model can run it. It is long,
+densely negation-heavy, and demands strict tool-argument discipline sustained
+across a multi-hour run; a small or local model will very likely lose the
+thread of it. Provider-agnostic means any sufficiently capable model may drive
+the run — not that every model will succeed at it.
+
 ---
 
 ## Run identity — start_run and finish_run
@@ -170,10 +177,10 @@ Two rules keep this honest:
   publication date, it passes this filter — do not estimate one from a
   copyright year, a job id, or where it sat in a search result.
 - **The window is not only a search parameter.** The composed search URLs
-  carry it as a Google recency filter, but WebSearch results and an employer's
-  own board ignore that entirely, so a stale posting still reaches you through
-  those channels. Apply the filter when you read the posting, not only when
-  you search.
+  carry it as a Google recency filter, but the results pages those URLs open in
+  the browser and an employer's own board ignore that entirely, so a stale
+  posting still reaches you through those channels. Apply the filter when you
+  read the posting, not only when you search.
 
 A single profile passing all its criteria drives an application
 (single-profile-passes rule); each profile waives criteria independently.
@@ -273,10 +280,13 @@ deliberately does not duplicate its values.
 
 Your run prompt may carry a list of composed search queries, built
 deterministically from each enabled profile's `keywords` and `locations`,
-plus the configured job boards. Work them as entry points into discovery. They are a
-starting point, not a boundary — free-form search remains permitted
-alongside them. A composed query never changes *where* you apply, which is
-still the employer's own site, per item 1 below.
+plus the configured job boards. Each one ships with a ready-made search URL
+printed beneath it — use the browser MCP tool (`browser_navigate`, or the
+equivalent on the browser surface described below) to open that URL, and work
+the results as entry points into discovery. They are a starting point, not a
+boundary — you may point the browser at further searches of your own alongside
+them. A composed query never changes *where* you apply, which is still the
+employer's own site, per item 1 below.
 
 1. Find the role on the **employer's own site** (Ashby / Greenhouse / Personio /
    Lever). Apply there, not through an aggregator.

@@ -1,8 +1,9 @@
 # The unattended application agent
 
-A second container alongside TruthCV's `app` service. On a schedule it runs
-headless Claude Code against [`RUNBOOK.md`](RUNBOOK.md), finds roles, applies to
-them in a real browser, and records what it did through TruthCV's own tools.
+A second container alongside TruthCV's `app` service. On a schedule it runs a
+provider-neutral agent harness against [`RUNBOOK.md`](RUNBOOK.md), finds roles,
+applies to them in a real browser, and records what it did through TruthCV's own
+tools.
 
 It is deliberately a separate service and a separate image: a browser session
 going wrong must never take the wizard down with it, and the wizard's image
@@ -111,7 +112,7 @@ under the operator's name. Watch it.
 | `MAX_APPLICATIONS_PER_RUN` | empty | Empty means **no cap**, matching RUNBOOK §1 ("there is no daily quota"). Not zero. |
 | `RUN_LOG_DIR` | `/app/runs` | Where `daily-apply.sh` writes per-run logs. Must stay inside the `agent-runs` volume or logs vanish on restart. |
 
-The agent runs the Claude Code CLI, so the **Model** setting on the Agents page accepts only the Claude connection — other providers are filtered out by design.
+The agent runs a provider-neutral harness (`agent/harness`, compiled into the image), so the **Model** setting on the Agents page can point at any supported provider — `claude`, `codex`, `openrouter`, or `ollama` — chosen via the connection configured in Settings. The harness's credentials are resolved at run start through `GET /api/agent/llm-credentials`.
 
 ## Agents page: the schedule and enable switch
 
@@ -165,12 +166,15 @@ filesystem route to your data and should not acquire one.
 
 ## What the agent may and may not do
 
-Its allow-list (`daily-apply.sh`) is the eleven TruthCV MCP tools, the whole
-`browser` MCP server (granted as `mcp__browser`, not as individually named
-tools — the upstream `@playwright/mcp` tool set is theirs to rename or extend
-on a version bump), and `Read`/`Write`/`WebSearch`/`WebFetch`. It has no
-tool for approving an inference: the approve/deny gate is the product, and the
-agent never stands on both sides of it. The RUNBOOK's core rules still hold —
+Its allow-list is hardcoded in the harness (`agent/harness/tools.ts`) and is the
+TruthCV MCP tools, each granted individually — naming each one keeps the blast
+radius of a new server-side tool at zero until it is granted on purpose — plus
+the whole `browser` MCP server (granted as `mcp__browser`, not as individually
+named tools — the upstream `@playwright/mcp` tool set is theirs to rename or
+extend on a version bump). The harness has no built-in tools of its own: the
+former `Read`/`Write`/`WebSearch`/`WebFetch` are gone, and only MCP tools exist
+to be granted. It has no tool for approving an inference: the approve/deny gate
+is the product, and the agent never stands on both sides of it. The RUNBOOK's core rules still hold —
 the truthfulness rules, the cooldowns, and the rule that an application counts
 as submitted only when the confirmation page says so — but its search filters
 are no longer built in: they come entirely from your configured job profiles,
@@ -180,7 +184,7 @@ and a run with zero enabled profiles aborts instead of applying defaults.
 
 `smoke-test.sh` checks, without applying to anything:
 
-- the `claude` CLI is present and the agent's files parse
+- the compiled agent harness (`dist/harness/cli.js`) is present, non-empty, and parses under `node --check`, and the agent's files parse
 - `mcp.json` is valid and declares the server the allow-list names
 - **no browser is present in the image** — this is pinned as a test, so re-adding
   one turns it red
