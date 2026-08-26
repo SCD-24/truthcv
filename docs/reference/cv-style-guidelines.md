@@ -92,6 +92,42 @@ invent a section the user has no facts for.
 - **Teaching/Helping:** Coached, Advised, Facilitated, Guided, Instructed,
   Mentored, Trained, Enabled, Supported, Motivated, Demonstrated.
 
+## AI-slop patterns to avoid
+
+Distilled from the no-ai-slop skill; `prompts/style.py` (`cv_anti_slop()` /
+`letter_anti_slop()`) is the executable copy of these bans, so change both
+together.
+
+**Both surfaces**
+
+- Apply the portability test to every sentence: if it could move unchanged to
+  another person, company, or product, cut it or replace it with a specific
+  fact.
+- Show, don't tell: never label a point as important, notable, key, or worth
+  noting; let the fact carry the weight.
+- No weasel attribution: industry-leading, widely regarded as, world-class,
+  experts agree.
+- No fake-strong verbs or abstraction: prefer "tracks sponsors, drafts, and
+  due dates" over "serves as a centralized hub for sponsor management".
+- No synonym cycling: repeat the clear word rather than rotating terms.
+- No vague-scale words standing in for a number: significantly, substantially,
+  various, numerous, a wide range of, unless the number is present in the
+  referenced fact.
+- No negative listing ("not a X, not a Y, a Z") and no rhetorical setups.
+
+**CV bullets**
+
+- Keep each bullet a single complete statement; no dramatic fragmentation.
+
+**Cover letters**
+
+- No summary-recap ending: In conclusion, Ultimately, Overall, or a final
+  paragraph restating the letter; end on the last concrete point or a plain
+  next step.
+- No fake-profound closing metaphor or aphorism.
+- No hollow adverbs: successfully, effectively, efficiently, strategically,
+  proactively.
+
 ## Hard rule (truthfulness)
 
 These guidelines never override the truth store. When generating a CV line or a

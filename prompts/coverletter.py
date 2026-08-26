@@ -12,7 +12,7 @@ from truth.answers import Answers
 from truth.model import Truth
 
 from .conventions import CvConventions, DEFAULT_CONVENTIONS
-from .style import letter_style
+from .style import letter_style, letter_anti_slop
 
 
 _TONE_DIRECTION = {
@@ -126,6 +126,7 @@ def cover_letter_system(
         + direction
         + letter_style(conventions)
         + _ANTI_TELL_RULES
+        + letter_anti_slop()
         + " Guardrail contract: every sentence that states a FACT about the candidate "
         "(employer, title, date, metric, skill, achievement) must list that fact "
         "verbatim in its 'claims'. Never invent a fact absent from the candidate's "

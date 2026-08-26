@@ -16,7 +16,7 @@ The Tailor Engine (`tailor/`) consumes the Prompt Store (`prompts/`) as an **in-
 - `prompts.keywords_system() -> str` — system prompt for keyword extraction. No args.
 - `prompts.infer_system() -> str` — system prompt for missing-qualification inference. No args.
 - `prompts.infer_truth_block(truth: Truth) -> str` — renders experiences (id + `role — company` + bullets) and a `SKILLS:` line. **Invariant: deliberately omits dates and bullet ids** (inference reasons about content, not identity).
-- `prompts.select_system() -> str` — system prompt for selection/rephrasing; concatenates `_CV_STANDARD + CV_STYLE + _CV_ANTI_TELL_RULES`. No args.
+- `prompts.select_system() -> str` — system prompt for selection/rephrasing; concatenates `_CV_STANDARD + CV_STYLE + cv_anti_tell_rules(vocabulary)`, where `cv_anti_tell_rules()` renders its plain-verb preference from `DomainVocabulary.plain_action_verbs` rather than a fixed literal. No args.
 - `prompts.select_truth_block(truth: Truth) -> str` — renders experiences **with** ids and date ranges (`[e.id] role — company (start – end)`), and each bullet as `[b.id] value`, plus skills as `[s.id] value`. **Invariant: every fact carries its id** so the selection step can reference facts strictly by id.
 
 **Responses.** Each prompt function returns a `str`. The truth-block builders take a `truth.model.Truth` and return formatted text. The Prompt Store contains **no facts and no schemas** — it emits only prompt text and style fragments.
@@ -51,7 +51,7 @@ The engine assembles the results into a `Draft`, persists it (`save_draft` → `
 
 **Prompt Store side (entry points):**
 - `prompts/__init__.py` — public API surface; re-exports the tailor prompt functions and style fragments.
-- `prompts/tailor.py` — defines `keywords_system()`, `infer_system()`, `infer_truth_block()`, `select_system()`, `select_truth_block()`, plus the private style constants `_CV_STANDARD` and `_CV_ANTI_TELL_RULES`.
+- `prompts/tailor.py` — defines `keywords_system()`, `infer_system()`, `infer_truth_block()`, `select_system()`, `select_truth_block()`, plus the private style constant `_CV_STANDARD` and the `cv_anti_tell_rules(vocabulary)` builder (rendered from `DomainVocabulary.plain_action_verbs`, not a fixed literal).
 - `prompts/style.py` — defines `CV_STYLE` (injected into `select_system()`); `LETTER_STYLE` is for the cover-letter path and not used by the Tailor Engine.
 
 Note: `prompts/truth.py` and `prompts/coverletter.py` exist in the store but serve other consumers (truth extraction and cover-letter generation), not the Tailor Engine interaction documented here.
