@@ -125,7 +125,8 @@ The button is on the Applications page; the browser downloads the zip directly.
 ## Unattended application agent
 
 TruthCV also runs the applications, not just the paperwork. The agent
-(`agent/`) is a headless Claude Code process that works through a target list,
+(`agent/`) is a headless run of TruthCV's own provider-neutral harness
+(`agent/harness`), driven over MCP, that works through a target list,
 screens each posting against your filters, generates the CV and cover letter
 through the same guardrailed engine the wizard uses, submits the form, and
 writes the result back into the ledger.

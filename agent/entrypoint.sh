@@ -36,8 +36,9 @@ log() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 # one back.
 
 # --- Preconditions -----------------------------------------------------------
-# Per-run preconditions (claude CLI, runbook readable, jq present, browser MCP
-# reachable, TRUTHCV_MCP_URL set) live in daily-apply.sh and are checked there,
+# Per-run preconditions (built harness at $HARNESS_CLI, runbook readable, jq
+# present, browser MCP reachable, TRUTHCV_MCP_URL set) live in daily-apply.sh
+# and are checked there,
 # every run - do not duplicate them here. This preflight only checks what is
 # worth failing fast at container START, before the first sleep.
 validate_run_at() {

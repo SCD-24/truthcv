@@ -481,8 +481,8 @@ case "$AGENT_LLM_PROVIDER" in
 esac
 
 # The tool allow-list is NOT passed on the command line any more: it is
-# hardcoded inside the harness (agent/harness/tools.ts), which reproduces this
-# script's former policy exactly — the same 17 named truthcv tools granted
+# hardcoded inside the harness (agent/harness/tools.ts), which enforces the
+# tool allow-list itself — the same 17 named truthcv tools granted
 # individually (generate_cover_letter, record_application, record_screening,
 # check_cooldown, get_canonical_cv, get_profile_answers, record_company_board,
 # get_job_profiles, recommend_salary, get_approved_applications,

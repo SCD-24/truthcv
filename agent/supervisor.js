@@ -66,9 +66,10 @@ let currentChild = null;
 /** SIGKILL escalation timer for a cancel in progress, so it can be cleared. */
 let killTimer = null;
 
-// How long a cancelled run gets to exit on SIGTERM before SIGKILL. The claude
-// CLI has MCP servers and a headful browser session to tear down, so this is
-// generous; the escalation exists for a wedged run, not a slow one.
+// How long a cancelled run gets to exit on SIGTERM before SIGKILL. daily-apply.sh
+// and the Node harness process it spawns have MCP servers and a headful browser
+// session to tear down, so this is generous; the escalation exists for a wedged
+// run, not a slow one.
 const CANCEL_GRACE_MS = parseInt(process.env.AGENT_CANCEL_GRACE_MS || "10000", 10);
 
 // ---------------------------------------------------------------------------
@@ -125,10 +126,10 @@ function doRun() {
   runState.currentRunId = runId;
   runState.lastRunId = runId;
 
-  // detached: the run is a tree — daily-apply.sh, the claude CLI it spawns, and
-  // the stdio MCP servers under it. Its own process group is what lets cancel
-  // reach all of them with one signal; signalling the shell alone would orphan
-  // claude.
+  // detached: the run is a tree — daily-apply.sh, the Node harness process it
+  // spawns, and the stdio MCP servers under it. Its own process group is what
+  // lets cancel reach all of them with one signal; signalling the shell alone
+  // would orphan the harness.
   //
   // The headful browser is NOT in this tree: Chromium runs in the sibling
   // `browser` container, reached over HTTP MCP, in another PID namespace. A

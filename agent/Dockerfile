@@ -60,10 +60,11 @@ RUN mkdir -p /app/agent /app/runs \
 WORKDIR /app/agent
 
 # Build the harness (agent/harness/) as our own dependency, pinned exactly by
-# the lockfile — same rationale that used to pin the claude CLI to an exact
-# version: a rebuild today vs. next month must not silently change behavior
-# out from under an unattended run. Copy the manifest + lockfile first so this
-# layer only rebuilds when dependencies actually change.
+# the lockfile — the same reproducibility rationale that once applied to the
+# earlier CLI-based agent (historical, no longer used here): a rebuild today
+# vs. next month must not silently change behavior out from under an unattended
+# run. Copy the manifest + lockfile first so this layer only rebuilds when
+# dependencies actually change.
 COPY --chown=node:node agent/package.json agent/package-lock.json ./
 RUN npm ci
 COPY --chown=node:node agent/tsconfig.json ./

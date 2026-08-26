@@ -115,7 +115,7 @@ services:
 
   # Unattended job-application agent — its own container, deliberately
   # separate from `app` and `browser`, so a browser crash can never take the
-  # wizard or agent down. Runs Claude Code on a schedule against
+  # wizard or agent down. Runs TruthCV's agent harness on a schedule against
   # agent/RUNBOOK.md and agent/prompt.md, reaching tools via agent/mcp.json.
   # Now started on a bare `docker compose up` (no profiles) and drives the
   # containerised browser over HTTP.

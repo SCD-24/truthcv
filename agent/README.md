@@ -114,6 +114,62 @@ under the operator's name. Watch it.
 
 The agent runs a provider-neutral harness (`agent/harness`, compiled into the image), so the **Model** setting on the Agents page can point at any supported provider — `claude`, `codex`, `openrouter`, or `ollama` — chosen via the connection configured in Settings. The harness's credentials are resolved at run start through `GET /api/agent/llm-credentials`.
 
+### Harness configuration surface
+
+`daily-apply.sh` invokes the harness as `node "$HARNESS_CLI"` and hands it the
+provider, wire, model, credential, and auth type it resolved from the app (or,
+absent `AGENT_API_TOKEN`, straight from the container's own environment). The
+knobs below are that whole surface.
+
+**Providers and wires.** The harness targets four logical **providers** —
+`claude`, `codex`, `openrouter`, `ollama` — over one of two **wires**:
+`anthropic-messages` or `openai-chat-completions`. `claude` speaks the
+`anthropic-messages` wire; `codex`, `openrouter`, and `ollama` speak the
+`openai-chat-completions` wire. On the OpenAI wire, when no base URL is supplied,
+the harness fills in a per-provider default (`OPENAI_WIRE_DEFAULTS` in
+`agent/harness/providers/registry.ts`):
+
+| Provider | Default wire | Default base URL when none is given |
+|---|---|---|
+| `claude` | `anthropic-messages` | the Anthropic adapter's own default |
+| `codex` | `openai-chat-completions` | `https://api.openai.com/v1` |
+| `openrouter` | `openai-chat-completions` | `https://openrouter.ai/api/v1` |
+| `ollama` | `openai-chat-completions` | none — you **must** supply a base URL |
+
+**Auth routing.** `AGENT_LLM_AUTH_TYPE` is one of `oauth`, `api_key`, or `url`,
+and it is distinct from the provider. It selects *how* the token is presented on
+the wire: `oauth` sends it as a Bearer token, `api_key` as the vendor api-key
+header (`x-api-key` on the Anthropic wire), and `url` carries no credential (as
+with `ollama`, which reaches its endpoint by base URL alone). A `claude`
+connection can be either `oauth` or `api_key`, so the two are kept apart: an
+OAuth Claude credential sent as an api key is **rejected** by the provider, so
+the auth type must match the credential's kind.
+
+**Environment variables.** The harness reads these (each has an equivalent CLI
+flag that takes precedence; `daily-apply.sh` passes the flags explicitly):
+
+| Env var | Meaning |
+|---|---|
+| `AGENT_LLM_PROVIDER` | Logical provider: `claude`, `codex`, `openrouter`, or `ollama`. |
+| `AGENT_LLM_WIRE` | Wire protocol: `anthropic-messages` or `openai-chat-completions`. |
+| `AGENT_LLM_MODEL` | Model identifier requested from the provider. |
+| `AGENT_LLM_API_KEY` | Credential token (api key or OAuth token). May be empty only for `ollama`. Never echoed — the harness redacts it from all output. |
+| `AGENT_LLM_BASE_URL` | Base URL. Required for `ollama`; optional elsewhere (falls back to the per-provider default above). |
+| `AGENT_LLM_AUTH_TYPE` | How to present the token: `oauth`, `api_key`, or `url`. |
+| `AGENT_MAX_TURNS` | Hard turn cap for the agent loop. Defaults to `40`. |
+
+**Harness binary.** `HARNESS_CLI` overrides the path to the compiled entry
+point; it defaults to `/app/agent/dist/harness/cli.js`.
+
+**Exit-code contract.** The harness's exit code is its machine interface, logged
+and propagated verbatim: `0` success, `2` turn cap, `3` provider error, `4` MCP
+connection failure, `5` bad configuration.
+
+**No built-in tools.** The harness ships with **no** built-in tools — there is
+no `Read`, `Write`, `WebSearch`, or `WebFetch`. Every capability the agent has
+comes from the MCP servers declared in [`mcp.json`](mcp.json); if a server is
+not in that config, the agent cannot reach it.
+
 ## Agents page: the schedule and enable switch
 
 The **Agents page** is the source of truth for whether the agent runs and

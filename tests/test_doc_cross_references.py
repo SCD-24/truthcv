@@ -30,9 +30,8 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 
-# Current documentation. Dated design docs under docs/superpowers/ are records of
-# what was decided at the time and are deliberately not held to today's wording,
-# and .aether/.claude hold agent scratch state rather than docs.
+# Current documentation. .aether/.claude hold agent scratch state rather than
+# docs, so they are not held to today's wording either.
 LIVE_DOC_GLOBS = ("*.md", "agent/*.md", "browser/*.md", "docs/architecture/**/*.md",
                   "docs/conventions/**/*.md", "docs/domain/**/*.md")
 
