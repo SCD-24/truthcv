@@ -491,6 +491,7 @@ log "invoking claude... (browser driver: $AGENT_BROWSER_DRIVER)"
     "mcp__truthcv__start_run" \
     "mcp__truthcv__finish_run" \
     "mcp__truthcv__record_run_note" \
+    "mcp__truthcv__record_postings_seen" \
     "${BROWSER_TOOLS[@]}" \
   --dangerously-skip-permissions \
   </dev/null >>"$RUN_LOG" 2>&1

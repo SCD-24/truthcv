@@ -1068,6 +1068,7 @@ class RunModel(_Camel):
     screenings_recorded: int = 0
     blocked_count: int = 0
     applications_submitted: int = 0
+    queued_for_approval: int = 0
     over_cap_writes: int = 0
     stopped_reason: str = ""
     note: str = ""

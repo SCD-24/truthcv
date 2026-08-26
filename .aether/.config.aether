@@ -1888,6 +1888,16 @@
       "from": "application-agent",
       "protocol": "HTTP/MCP (streamable HTTP JSON-RPC)",
       "to": "browser-service"
+    },
+    {
+      "from": "run-store",
+      "protocol": "in-process",
+      "to": "screening-engine"
+    },
+    {
+      "from": "run-store",
+      "protocol": "in-process",
+      "to": "application-tracker"
     }
   ],
   "definitions": [

@@ -180,6 +180,11 @@ class Application:
     updated_at: str = ""
     profile: str = ""
     screening_id: str = ""
+    # The agent run that produced this application. An application recorded
+    # without a screening_id (a free discovery apply) has no screening to
+    # inherit a run from, so the linkage lives here rather than being resolved
+    # through screening_id. Empty means the record belongs to no run.
+    run_id: str = ""
 
     # Fields a client may set directly on create/update (documents are managed
     # by the save-and-render routes, not by generic writes).
@@ -205,6 +210,9 @@ class Application:
         # Dedupe key: lets a re-record of a screening's auto-applied result find
         # the row it already wrote instead of creating a duplicate.
         "screening_id",
+        # Run linkage: what makes the run record's applications-submitted
+        # counter derivable from the applications themselves.
+        "run_id",
     )
 
     # Fields with dedicated (de)serialization below, excluded from the

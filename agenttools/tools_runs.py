@@ -68,11 +68,41 @@ def record_run_note(run_id: str = "", note: str = "") -> dict:
     return {"recorded": True, **record.to_dict()}
 
 
+def record_postings_seen(run_id: str = "", count: int = 0) -> dict:
+    """Report how many job postings you have looked at.
+
+    This is the ONE coverage number that cannot be counted from the records
+    you write: a posting you looked at and skipped — on cooldown, as a
+    duplicate, or because it was already screened — leaves no record behind.
+    Call it as you go with the number of postings you have looked at since
+    your last call: it ADDS to the run's total, it does not set it.
+
+    Everything else — screenings recorded, blocked, queued for approval,
+    applications submitted — is counted automatically from the records you
+    write (provided you pass your run_id on record_screening and
+    record_application) and must not be reported here.
+    """
+    if not run_id or count <= 0:
+        return {"recorded": False}
+    try:
+        record = _runs_store.bump(run_id, postings_seen=count)
+    except Exception:
+        return {"recorded": False}
+    if record is None:
+        return {"recorded": False}
+    return {"recorded": True, **record.to_dict()}
+
+
 def bump_run_counters(run_id: str = "", **counters: int) -> dict:
     """Internal entry point for other tool modules to add to a run's coverage
-    counters (postings_seen, screenings_recorded, blocked_count,
-    applications_submitted, over_cap_writes). Not registered as an agent-
-    facing MCP tool — callers are other tool functions, not the model.
+    counters. Not registered as an agent-facing MCP tool — callers are other
+    tool functions, not the model.
+
+    Only ``over_cap_writes`` (a lease violation, with no derivable source) and
+    ``postings_seen`` (via ``record_postings_seen``) still have callers. The
+    rest — screenings_recorded, blocked_count, queued_for_approval,
+    applications_submitted — are derived on read by ``runs/derive.py`` from
+    the records the run actually produced, and are not incremented here.
     """
     if not run_id or not counters:
         return {"recorded": False}

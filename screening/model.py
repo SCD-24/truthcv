@@ -119,6 +119,13 @@ class Screening:
     # means the item is unclaimed and reclaimable by another run.
     claimed_by_run: str = ""
     claim_expires_at: str = ""
+    # The run that PRODUCED this screening — the opposite of claimed_by_run
+    # above in lifetime. claimed_by_run is an ephemeral lease, cleared on
+    # release and by store._retire; run_id is written once at record time and
+    # must never be cleared, because it is the evidence the run record's
+    # coverage counters are derived from (runs/derive.py). Empty means the
+    # record belongs to no run (manual entry, or the historical import).
+    run_id: str = ""
     created_at: str = ""
     updated_at: str = ""
 
@@ -136,6 +143,9 @@ class Screening:
         "posting_text",
         "posted_date",
         "screening_blocker",
+        # Which run produced this record. Editable so record_screening's
+        # create() call can persist it; only ever set, never cleared.
+        "run_id",
     )
 
     @classmethod

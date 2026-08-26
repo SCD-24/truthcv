@@ -334,7 +334,15 @@ def _mutate(screening_id: str, apply) -> Screening | None:
 
 
 def _apply_editable(screening: Screening, fields: dict) -> None:
-    """Copy only whitelisted fields."""
+    """Copy only whitelisted fields.
+
+    run_id is write-once: it is the durable record of which agent run produced
+    this screening, and the run's derived coverage counters are computed from
+    it, so a later edit must not reassign or blank it once it is set.
+    """
     for key in Screening.EDITABLE:
-        if key in fields and fields[key] is not None:
-            setattr(screening, key, fields[key])
+        if key not in fields or fields[key] is None:
+            continue
+        if key == "run_id" and screening.run_id:
+            continue
+        setattr(screening, key, fields[key])

@@ -59,8 +59,8 @@ def test_mcp_initialize_returns_json_rpc_result(client: TestClient) -> None:
             assert "serverInfo" in body["result"], "Missing serverInfo in result"
 
 
-def test_mcp_tools_list_returns_thirteen_tools(client: TestClient) -> None:
-    """POST /mcp with tools/list returns exactly thirteen tools with descriptions."""
+def test_mcp_tools_list_returns_seventeen_tools(client: TestClient) -> None:
+    """POST /mcp with tools/list returns exactly seventeen tools with descriptions."""
     response = client.post(
         "/mcp",
         json={
@@ -82,7 +82,7 @@ def test_mcp_tools_list_returns_thirteen_tools(client: TestClient) -> None:
     assert "tools" in result, f"Missing tools in result: {result}"
 
     tools = result["tools"]
-    assert len(tools) == 16, f"Expected 16 tools, got {len(tools)}: {[t['name'] for t in tools]}"
+    assert len(tools) == 17, f"Expected 17 tools, got {len(tools)}: {[t['name'] for t in tools]}"
 
     expected_names = {
         "generate_cover_letter",
@@ -101,6 +101,7 @@ def test_mcp_tools_list_returns_thirteen_tools(client: TestClient) -> None:
         "start_run",
         "finish_run",
         "record_run_note",
+        "record_postings_seen",
     }
     actual_names = {t["name"] for t in tools}
     assert actual_names == expected_names, f"Tool names mismatch: {actual_names} vs {expected_names}"

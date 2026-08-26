@@ -67,6 +67,8 @@ graph TD
     renderer -->|in-process| keyword-vocabulary
     renderer -->|in-process| prompt-store
     renderer -->|file I/O| truth-data-volume
+    run-store -->|in-process| application-tracker
+    run-store -->|in-process| screening-engine
     run-store -->|file I/O| truth-data-volume
     screening-engine -->|in-process| agent-config
     screening-engine -->|in-process| application-tracker
@@ -153,6 +155,8 @@ graph TD
 - [renderer → keyword-vocabulary](interactions/renderer--keyword-vocabulary.md) via `in-process`
 - [renderer → prompt-store](interactions/renderer--prompt-store.md) via `in-process`
 - [renderer → truth-data-volume](interactions/renderer--truth-data-volume.md) via `file I/O`
+- [run-store → application-tracker](interactions/run-store--application-tracker.md) via `in-process`
+- [run-store → screening-engine](interactions/run-store--screening-engine.md) via `in-process`
 - [run-store → truth-data-volume](interactions/run-store--truth-data-volume.md) via `file I/O`
 - [screening-engine → agent-config](interactions/screening-engine--agent-config.md) via `in-process`
 - [screening-engine → application-tracker](interactions/screening-engine--application-tracker.md) via `in-process`

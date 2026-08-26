@@ -508,6 +508,9 @@ function RunSummaryRow({ run }: { run: RunRecord }) {
           Blocked: {run.blockedCount}
         </Typography>
         <Typography variant="caption" color="text.secondary">
+          Queued for approval: {run.queuedForApproval}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
           Applied: {capLabel}
         </Typography>
         {run.overCapWrites > 0 && (

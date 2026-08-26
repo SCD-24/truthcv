@@ -57,6 +57,7 @@ from providers.base import supports_effort_levels
 from companyresearch import store as company_findings_store
 from screening import store as screening_store
 from runs import store as runs_store
+from runs.derive import counters_by_run
 from screening.company import company_identity_key
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
@@ -166,6 +167,34 @@ def list_screenings(approval: str | None = None) -> list[ScreeningModel]:
     return [_screening_model(s) for s in screenings]
 
 
+def _run_models(records: list) -> list[RunModel]:
+    """Wire models for run records, with their coverage counters DERIVED.
+
+    screenings_recorded, blocked_count, queued_for_approval and
+    applications_submitted are recomputed from the records each run actually
+    produced and OVERRIDE whatever is stored on the run record; postings_seen,
+    over_cap_writes, stopped_reason, note, status and the timestamps are read
+    from the stored record unchanged. Both run routes go through here so the
+    two surfaces cannot disagree — the same reasoning check_cooldown gives for
+    sharing one function.
+
+    Each store is loaded ONCE for the whole list, not once per run. A run still
+    "running" derives live counts, which is intended: the numbers describe the
+    records that exist right now.
+
+    Derivation is best-effort, in the spirit of the rest of this subsystem: if
+    a store cannot be loaded, the stored values are served rather than failing
+    the request. Only the load is guarded, not the response build.
+    """
+    try:
+        screenings = screening_store.load_all()
+        applications = app_store.load_all()
+    except Exception:
+        return [RunModel(**r.to_dict()) for r in records]
+    counters = counters_by_run([r.id for r in records], screenings, applications)
+    return [RunModel(**{**r.to_dict(), **counters.get(r.id, {})}) for r in records]
+
+
 @router.get("/runs", response_model=RunListResponse)
 def list_runs(limit: int = 50) -> RunListResponse:
     """The most recently started agent runs, newest first.
@@ -175,7 +204,7 @@ def list_runs(limit: int = 50) -> RunListResponse:
     records live on the volume the API already has access to.
     """
     records = runs_store.list_recent(limit=limit)
-    return RunListResponse(runs=[RunModel(**r.to_dict()) for r in records])
+    return RunListResponse(runs=_run_models(records))
 
 
 @router.get("/runs/{run_id}", response_model=RunModel)
@@ -184,7 +213,7 @@ def get_run(run_id: str) -> RunModel:
     record = runs_store.get(run_id)
     if record is None:
         raise HTTPException(status_code=404, detail="run not found")
-    return RunModel(**record.to_dict())
+    return _run_models([record])[0]
 
 
 @router.post("/screenings", response_model=ScreeningModel, status_code=201)
