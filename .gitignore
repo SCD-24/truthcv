@@ -22,3 +22,6 @@ node_modules
 # details. Anchored so they only ever match at the repo root.
 /answers.local.yaml
 /agent/targets.md
+# TypeScript incremental build artifact — rewrites on every build, so
+# committing it produces noisy diffs and conflicts.
+*.tsbuildinfo

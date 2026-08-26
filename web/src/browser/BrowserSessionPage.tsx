@@ -87,6 +87,13 @@ export function BrowserSessionPage() {
   // listener below can tell "operator hit Reload" apart from "the server
   // actually closed the session" — only the latter should end the page.
   const reloadingRef = useRef(false);
+  // Set once a securityfailure has put the page in "unavailable" state, so
+  // the disconnect that noVNC fires right after doesn't clobber it back to
+  // "closed". Deliberately separate from `reloadingRef`: the disconnect
+  // handler CONSUMES that flag (resets it to false), while this one is only
+  // checked, so a Reload after a failed handshake still needs to clear it
+  // itself (done at the top of `connect()`).
+  const failedRef = useRef(false);
 
   // Open the session on mount, and again on every retry (`attempt`).
   useEffect(() => {
@@ -138,6 +145,7 @@ export function BrowserSessionPage() {
   // first live render and to re-attach on Reload — Reload re-makes only
   // this viewer connection, never the session server's session.
   function connect() {
+    failedRef.current = false;
     if (!canvasRef.current) return;
     const wsUrl = `${location.origin.replace(/^http/, "ws")}/api/browser/session/stream`;
     const rfb = new RFB(canvasRef.current, wsUrl);
@@ -153,12 +161,14 @@ export function BrowserSessionPage() {
         reloadingRef.current = false;
         return;
       }
+      if (failedRef.current) return;
       setState("closed");
     });
     // A failed handshake (bad Origin, relay rejection, etc.) previously
     // looked identical to a normal close — the operator saw "Closed" for a
     // session that never actually connected. Surface it distinctly.
     rfb.addEventListener("securityfailure", (e: CustomEvent<{ reason?: string }>) => {
+      failedRef.current = true;
       setState("unavailable");
       setMessage(e.detail?.reason || "The viewport could not connect to the browser.");
     });
