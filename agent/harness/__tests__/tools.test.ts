@@ -3,7 +3,7 @@ import type { McpClientPool, NamespacedTool } from '../mcp/client.js';
 import type { ToolCall } from '../providers/types.js';
 import { buildToolRegistry, executeToolCall, isToolAllowed, type RegisteredTool } from '../tools.js';
 
-/** The 16 truthcv tools granted individually by daily-apply.sh. */
+/** The 17 truthcv tools granted individually by daily-apply.sh. */
 const TRUTHCV_TOOLS = [
   'generate_cover_letter',
   'record_application',
@@ -21,6 +21,7 @@ const TRUTHCV_TOOLS = [
   'start_run',
   'finish_run',
   'record_run_note',
+  'record_postings_seen',
 ];
 
 /** Build a one-entry registry for a (server, tool) pair. */
@@ -37,7 +38,7 @@ function callFor(namespacedName: string): ToolCall {
 }
 
 describe('isToolAllowed', () => {
-  it('grants every one of the 16 named truthcv tools', () => {
+  it('grants every one of the 17 named truthcv tools', () => {
     for (const name of TRUTHCV_TOOLS) {
       expect(isToolAllowed('truthcv', name)).toBe(true);
     }
@@ -45,7 +46,7 @@ describe('isToolAllowed', () => {
 
   it('denies an unlisted truthcv tool', () => {
     expect(isToolAllowed('truthcv', 'delete_everything')).toBe(false);
-    expect(isToolAllowed('truthcv', 'some_unlisted_17th_tool')).toBe(false);
+    expect(isToolAllowed('truthcv', 'some_unlisted_18th_tool')).toBe(false);
   });
 
   it('grants any tool at all from the browser server as a whole-server grant', () => {

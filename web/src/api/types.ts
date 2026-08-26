@@ -443,6 +443,10 @@ export interface RunRecord {
   screeningsRecorded: number;
   blockedCount: number;
   applicationsSubmitted: number;
+  /** How many of the run's screenings landed in the operator's approval queue
+   * — the outcome number for a SEMI-AUTO run, which submits nothing by
+   * design and so would otherwise have no number describing what it did. */
+  queuedForApproval: number;
   /** Submissions that arrived for an item this run had not claimed — flagged,
    * not refused. */
   overCapWrites: number;

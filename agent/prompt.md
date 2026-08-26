@@ -28,7 +28,16 @@ tools:
   cap reached", "browser session died"). A run that ends without calling this
   is indistinguishable from one that crashed.
 - `record_run_note` — leaves a free-text note on the run record for anything
-  that doesn't fit the coverage counters `finish_run` tracks automatically.
+  worth recording that isn't a screening, an application, or a postings-seen
+  count. `finish_run` tracks no counters: screenings recorded, postings
+  blocked, postings queued for approval and applications submitted are all
+  counted automatically from the records you write, PROVIDED you pass your
+  `run_id` on `record_screening` and `record_application`.
+- `record_postings_seen` — reports how many postings you looked at. Postings
+  seen is the one coverage number nothing can count for you — a posting
+  skipped on cooldown or dedupe leaves no record behind — so report it with
+  this tool as you go, passing your `run_id`. Each call ADDS its `count` to
+  the run's running total.
 - `generate_cover_letter` — produces a guardrailed, per-role cover letter.
 - `record_application` — records a submitted application and its evidence.
 - `record_screening` — records a rejected or deferred posting. A deferred

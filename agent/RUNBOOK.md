@@ -27,7 +27,9 @@ Every run is given a run id in its prompt, under "Run identity". Call
 `start_run` with that id ONCE, at the very beginning, before doing anything
 else. Keep passing that same `run_id` on every subsequent tool call that
 accepts one (`get_approved_applications`, `record_application`,
-`record_screening` does not take one).
+`record_screening`, `record_postings_seen`). Pass it on `record_screening`
+too — without it the screening is not attributed to the run, and the run
+record under-reports the work you actually did.
 
 Before you exit — for ANY reason, including stopping early because you hit
 the apply cap, the browser session died, or you ran out of postings — call
@@ -35,8 +37,13 @@ the apply cap, the browser session died, or you ran out of postings — call
 you stopped. **A run that ends without calling `finish_run` is
 indistinguishable from one that crashed.** This is not optional cleanup: it
 is the only honest record of how much of the run's work actually got done.
-`record_run_note` is available for anything you want on the record that
-doesn't fit the coverage counters `finish_run` tracks automatically.
+`record_run_note` is available for anything you want on the record that isn't
+a screening, an application, or a postings-seen count. `finish_run` tracks no
+coverage counters: screenings recorded, postings blocked, postings queued for
+approval and applications submitted are all counted automatically from the
+records you write, provided you pass your `run_id` on `record_screening` and
+`record_application`; postings seen is the one number nothing can count for
+you, so report it with `record_postings_seen` as you go.
 
 ---
 

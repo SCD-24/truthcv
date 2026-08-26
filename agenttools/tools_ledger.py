@@ -195,6 +195,10 @@ def record_application(
         ("capture_method", capture_method),
         ("profile", profile),
         ("notes", notes),
+        # Run linkage, written onto the record itself (before the store write,
+        # not in the accounting block below) so the run's applications-submitted
+        # counter can be derived from the applications this run produced.
+        ("run_id", run_id),
     ):
         if value:
             fields[name] = value
@@ -271,15 +275,16 @@ def record_application(
         # the ledger write above already happened, so nothing here may raise
         # or change the return shape — a real submission must never be lost
         # over an accounting failure.
+        # applications_submitted is NOT bumped here: it is derived on read from
+        # the application records themselves (runs/derive.py), and bumping it
+        # too would double-count. over_cap_writes stays an incremented counter
+        # because it records a lease violation with no derivable source.
         if run_id:
             try:
                 held = _screening_store.get(screening_id)
                 over_cap = bool(held) and held.claimed_by_run != run_id
-                _tools_runs.bump_run_counters(
-                    run_id=run_id,
-                    applications_submitted=1,
-                    **({"over_cap_writes": 1} if over_cap else {}),
-                )
+                if over_cap:
+                    _tools_runs.bump_run_counters(run_id=run_id, over_cap_writes=1)
             except Exception:
                 pass
         _screening_store.mark_applied(screening_id)
@@ -302,9 +307,17 @@ def record_screening(
     posting_text: str = "",
     posted_date: str = "",
     screening_blocker: str = "",
+    run_id: str = "",
     **fields,
 ) -> dict:
     """Persist one screening verdict via ``screening.store.create``.
+
+    ``run_id`` links the screening to the agent run that produced it. It is
+    what makes the run record's coverage counters — screenings recorded,
+    blocked, queued for approval — derivable from real records instead of
+    fabricated: without it the screening is attributed to no run and the run
+    under-reports its own work. Named explicitly for the same schema-visibility
+    reason as every other field below.
 
     The posting's own ``url`` is mandatory: the operator must be able to open
     the posting to act on this verdict, and the agent cannot apply to a
@@ -383,6 +396,7 @@ def record_screening(
         "posting_text": posting_text,
         "posted_date": posted_date,
         "screening_blocker": validated_blocker,
+        "run_id": run_id,
     }
     for name, value in named.items():
         if value:

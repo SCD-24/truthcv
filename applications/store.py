@@ -173,10 +173,19 @@ def delete(app_id: str) -> bool:
 
 
 def _apply_editable(app: Application, fields: dict) -> None:
-    """Copy only whitelisted fields; documents are managed by save_* helpers."""
+    """Copy only whitelisted fields; documents are managed by save_* helpers.
+
+    run_id is write-once: once an application is attributed to the run that
+    produced it, a later re-record (the screening_id dedupe path) or operator
+    edit must not transfer that attribution to another run, because the run's
+    applications-submitted counter is derived from it.
+    """
     for key in Application.EDITABLE:
-        if key in fields and fields[key] is not None:
-            setattr(app, key, fields[key])
+        if key not in fields or fields[key] is None:
+            continue
+        if key == "run_id" and app.run_id:
+            continue
+        setattr(app, key, fields[key])
 
 
 # --- Owned document files ------------------------------------------------------

@@ -17,6 +17,7 @@ function makeRun(overrides: Partial<RunRecord> = {}): RunRecord {
     screeningsRecorded: 8,
     blockedCount: 1,
     applicationsSubmitted: 3,
+    queuedForApproval: 2,
     overCapWrites: 0,
     stoppedReason: "",
     note: "",
@@ -45,6 +46,7 @@ describe("RecentRunsSection", () => {
     expect(screen.getByText(/Postings seen: 10/)).toBeTruthy();
     expect(screen.getByText(/Screenings recorded: 8/)).toBeTruthy();
     expect(screen.getByText(/Blocked: 1/)).toBeTruthy();
+    expect(screen.getByText(/Queued for approval: 2/)).toBeTruthy();
     expect(screen.getByText(/Applied: 3\/5/)).toBeTruthy();
     expect(screen.getByText(/Stopped: apply cap reached/)).toBeTruthy();
   });

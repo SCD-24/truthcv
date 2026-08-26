@@ -482,12 +482,13 @@ esac
 
 # The tool allow-list is NOT passed on the command line any more: it is
 # hardcoded inside the harness (agent/harness/tools.ts), which reproduces this
-# script's former policy exactly — the same 16 named truthcv tools granted
+# script's former policy exactly — the same 17 named truthcv tools granted
 # individually (generate_cover_letter, record_application, record_screening,
 # check_cooldown, get_canonical_cv, get_profile_answers, record_company_board,
 # get_job_profiles, recommend_salary, get_approved_applications,
 # report_apply_failure, record_company_finding, get_company_findings, start_run,
-# finish_run, record_run_note), plus the browser server granted WHOLE. Naming
+# finish_run, record_run_note, record_postings_seen), plus the browser server
+# granted WHOLE. Naming
 # each truthcv tool keeps the blast radius of a new server-side tool at zero
 # until it is granted on purpose; the browser server is upstream @playwright/mcp
 # (browser/Dockerfile) and renames/extends its own tools on version bumps, so it

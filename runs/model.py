@@ -49,6 +49,11 @@ class RunRecord:
     blocked_count: int = 0
     # How many applications were actually submitted this run.
     applications_submitted: int = 0
+    # How many of this run's screenings landed in the operator's approval
+    # queue (approval == "pending") — the outcome that matters for a SEMI-AUTO
+    # run, which submits nothing by design and so would otherwise have no
+    # number describing what it achieved.
+    queued_for_approval: int = 0
     # Submissions that arrived for an item this run had not claimed — flagged,
     # never refused, because the form was already submitted in the real world.
     over_cap_writes: int = 0

@@ -215,7 +215,14 @@ def test_full_nested_evidence_shape_exact_round_trip():
     # each defaulted to "" (profile is pinned by
     # test_legacy_record_without_profile_loads_default). Spelling the delta out
     # here keeps the fixture faithful to what is actually on disk.
-    assert app.to_dict() == {**NORTHWIND_FIXTURE, "profile": "", "screening_id": ""}
+    assert app.to_dict() == {
+        **NORTHWIND_FIXTURE,
+        "profile": "",
+        "screening_id": "",
+        # run_id is likewise absent from this legacy record: it predates run
+        # linkage, so it is attributed to no run and defaults to "".
+        "run_id": "",
+    }
 
 
 # --- Generic editable writes refuse structured fields; setters persist them -

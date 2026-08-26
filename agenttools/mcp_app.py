@@ -28,6 +28,7 @@ from agenttools.tools_research import (
 )
 from agenttools.tools_runs import (
     finish_run as _finish_run,
+    record_postings_seen as _record_postings_seen,
     record_run_note as _record_run_note,
     start_run as _start_run,
 )
@@ -40,7 +41,8 @@ _TOOL_REGISTRY = {
     ),
     "record_application": (
         _record_application,
-        "Records a submitted application and its evidence trail. Pass company and role, or a screening_id to inherit them from the approved queue item.",
+        "Records a submitted application and its evidence trail. Pass company and role, or a screening_id to inherit them from the approved queue item. "
+        "Pass your run_id (from start_run) on every call, so the application is attributed to your run and counted in its coverage numbers.",
     ),
     "record_screening": (
         _record_screening,
@@ -49,7 +51,10 @@ _TOOL_REGISTRY = {
         "verdict is required and must be exactly rejected, passed or deferred — UNLESS the posting could not be read at all (403, login wall, dead link, expired listing), "
         "in which case leave verdict empty and pass screening_blocker instead, set to one of: login_required, unreadable, not_found, expired. "
         "Never guess a verdict for a posting you could not read — that fabricates an evaluation that never happened. "
-        "You must also pass posting_text — the posting exactly as you read it — because the operator will draft the cover letter from it days later, on a page the agent never sees. A 'passed' or 'deferred' verdict is REJECTED, storing nothing, when it has no usable posting text (a real posting body, not a login wall or a 404 page). A posting you could not read takes a screening_blocker instead.",
+        "You must also pass posting_text — the posting exactly as you read it — because the operator will draft the cover letter from it days later, on a page the agent never sees. "
+        "A 'passed' or 'deferred' verdict is REJECTED, storing nothing, when it has no usable posting text (a real posting body, not a login wall or a 404 page). "
+        "A posting you could not read takes a screening_blocker instead. "
+        "Pass your run_id (from start_run) on EVERY call, so this screening is attributed to your run and the run's coverage counters reflect the work you actually did.",
     ),
     "check_cooldown": (
         _check_cooldown,
@@ -126,8 +131,18 @@ _TOOL_REGISTRY = {
     ),
     "record_run_note": (
         _record_run_note,
-        "Leaves a free-text note on the run record for context that does not fit the coverage "
-        "counters (postings seen, screenings recorded, applications submitted, etc).",
+        "Leaves a free-text note on the run record for context that is not captured by the "
+        "run's coverage numbers — the postings-seen count you report with record_postings_seen, "
+        "or the screening and application records the rest is counted from.",
+    ),
+    "record_postings_seen": (
+        _record_postings_seen,
+        "Reports how many job postings you have looked at — the ONE coverage number that cannot "
+        "be counted from the records you write, because a posting you skipped on cooldown, as a "
+        "duplicate, or because it was already screened leaves no record behind. Call it as you "
+        "go with the number seen since your last call: it ADDS to the run total, it does not set "
+        "it. Screenings recorded, blocked, queued for approval and applications submitted are "
+        "counted automatically from your records and must not be reported here.",
     ),
 }
 

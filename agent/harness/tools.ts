@@ -21,7 +21,7 @@ import type { NamespacedTool, McpClientPool } from './mcp/client.js';
 import type { ToolCall, ToolDefinition, ToolResult } from './providers/types.js';
 
 /**
- * The 16 truthcv tools granted individually by `daily-apply.sh`, as their bare
+ * The 17 truthcv tools granted individually by `daily-apply.sh`, as their bare
  * (un-namespaced) tool names.
  *
  * These are enumerated one by one ON PURPOSE: naming each tool keeps the blast
@@ -46,6 +46,7 @@ const TRUTHCV_ALLOWED_TOOL_NAMES = [
   'start_run',
   'finish_run',
   'record_run_note',
+  'record_postings_seen',
 ] as const;
 
 /** The MCP server key of the truthcv tool surface the named grants apply to. */

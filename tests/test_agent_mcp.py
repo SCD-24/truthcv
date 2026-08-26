@@ -1028,3 +1028,87 @@ def test_operator_letter_approvals_not_reachable_by_the_agent():
     for value in mcp_app._TOOL_REGISTRY.values():
         fn = value[0] if isinstance(value, tuple) else value
         assert getattr(fn, "__name__", "") != "generate_cover_letter_for_operator"
+
+
+# --- Run linkage: the coverage counters are derived from linked records -------
+#
+# record_screening/record_application carry a run_id onto the record they
+# write, and record_postings_seen reports the one number that cannot be
+# derived. These append tests pin down that linkage and that no tool inflates a
+# derived counter behind the API's back.
+
+
+def test_record_screening_persists_the_run_id_it_was_given(data_dir):
+    """record_screening writes run_id onto the stored screening, so the run's
+    coverage counters can be derived from the records it produced. A verdict,
+    url, role and company are all required, exactly as the other
+    record_screening tests supply them."""
+    from screening import store as screening_store
+
+    created = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/run-linked-1",
+        role="Applied AI Engineer",
+        company="ExampleCo",
+        verdict="rejected",
+        run_id="r1",
+    )
+
+    stored = [s for s in screening_store.load_all() if s.id == created["id"]]
+    assert len(stored) == 1
+    assert stored[0].run_id == "r1"
+
+
+def test_record_postings_seen_is_registered_with_a_non_empty_input_schema():
+    """The tools/list surface the agent reads must advertise record_postings_seen
+    with a populated inputSchema — an empty property set would leave the agent
+    unable to learn it takes run_id and count."""
+    from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
+
+    assert "record_postings_seen" in _TOOL_REGISTRY
+
+    fn, description = _TOOL_REGISTRY["record_postings_seen"]
+    assert description
+    schema = _input_schema(fn)
+    assert schema["properties"], "record_postings_seen advertises no parameters"
+    assert "run_id" in schema["properties"]
+    assert "count" in schema["properties"]
+
+
+def test_record_postings_seen_accumulates_and_no_ops_on_bad_input(data_dir):
+    """postings_seen is the one counter the agent reports directly, and it ADDS
+    rather than sets: two calls of 3 and 2 leave the run at 5. An empty run_id
+    or a non-positive count records nothing and leaves the total untouched."""
+    import runs.store as runs_store
+    from agenttools.tools_runs import record_postings_seen
+
+    runs_store.start("r1", trigger="scheduled", apply_cap=0)
+
+    assert record_postings_seen(run_id="r1", count=3)["recorded"] is True
+    assert record_postings_seen(run_id="r1", count=2)["recorded"] is True
+    assert runs_store.get("r1").postings_seen == 5
+
+    assert record_postings_seen(run_id="", count=4) == {"recorded": False}
+    assert record_postings_seen(run_id="r1", count=0) == {"recorded": False}
+    assert runs_store.get("r1").postings_seen == 5
+
+
+def test_record_application_leaves_the_stored_counter_at_zero_but_derives_one(data_dir):
+    """record_application must no longer bump applications_submitted: the stored
+    counter stays 0, while the API derives the count from the application the
+    call actually wrote against the run."""
+    import runs.store as runs_store
+
+    client = TestClient(app)
+    runs_store.start("r2", trigger="scheduled", apply_cap=0)
+
+    tools_ledger.record_application(
+        company="Solo Co",
+        role="Engineer",
+        application_url="https://solo.example/apply/1",
+        run_id="r2",
+    )
+
+    assert runs_store.get("r2").applications_submitted == 0
+
+    body = client.get("/api/runs/r2").json()
+    assert body["applicationsSubmitted"] == 1

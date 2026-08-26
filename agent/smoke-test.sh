@@ -283,7 +283,7 @@ if [[ -n "${TRUTHCV_MCP_URL:-}" ]]; then
       "get_canonical_cv", "get_job_profiles", "get_profile_answers",
       "recommend_salary", "record_application", "record_company_board",
       "record_screening", "report_apply_failure",
-      "start_run", "finish_run", "record_run_note",
+      "start_run", "finish_run", "record_run_note", "record_postings_seen",
     ].sort();
 
     (async () => {
