@@ -1,7 +1,7 @@
-# Aether's own runtime state. Regenerated as the app runs; never worth
+# Forestree's own runtime state. Regenerated as the app runs; never worth
 # committing, and a source of constant merge conflicts if it is.
 #
-# The rest of this directory is your PROJECT's architecture — .config.aether,
+# The rest of this directory is your PROJECT's architecture — .config.forestree,
 # checks.json, hooks.json, runbook.json — and IS meant to be committed.
 #
 # drift.json is committed ON PURPOSE: a finding stays in it until a human
