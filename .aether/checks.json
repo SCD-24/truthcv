@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "checks": [
+    {
+      "id": "python-tests",
+      "name": "Python Tests",
+      "kind": "test",
+      "command": "/home/glenn/Documents/truthcv/.venv/bin/pytest",
+      "enabled": true,
+      "scope": "repo"
+    },
+    {
+      "id": "web-ui-tests",
+      "name": "Web UI tests",
+      "kind": "test",
+      "command": "npm --prefix web run test",
+      "enabled": true,
+      "scope": "repo"
+    },
+    {
+      "id": "agent-tests",
+      "name": "Agent tests",
+      "kind": "test",
+      "command": "npm --prefix agent run test",
+      "enabled": true,
+      "scope": "repo"
+    }
+  ]
+}

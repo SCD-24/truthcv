@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "setup": [
+    {
+      "id": "pull",
+      "name": "Pull images",
+      "command": "docker compose pull",
+      "enabled": true
+    }
+  ],
+  "run": [
+    {
+      "id": "up",
+      "name": "Start the stack",
+      "command": "docker compose up",
+      "enabled": true
+    }
+  ]
+}
