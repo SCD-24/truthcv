@@ -162,7 +162,19 @@ services:
       # §1, "There is no daily quota"). Empty/unset must be treated by the
       # run loop (task t-4) as "no cap", not as zero.
       - MAX_APPLICATIONS_PER_RUN=${MAX_APPLICATIONS_PER_RUN:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Provider-neutral credentials for the harness (agent/harness/cli.ts).
+      # GET /api/agent/llm-credentials is the primary source (read by
+      # daily-apply.sh via agent-config.js) — these are only the container-level
+      # fallback used when AGENT_API_TOKEN is unset and the app can't be asked.
+      - AGENT_LLM_PROVIDER=${AGENT_LLM_PROVIDER:-}
+      - AGENT_LLM_MODEL=${AGENT_LLM_MODEL:-}
+      - AGENT_LLM_API_KEY=${AGENT_LLM_API_KEY:-}
+      - AGENT_LLM_BASE_URL=${AGENT_LLM_BASE_URL:-}
+      - AGENT_LLM_AUTH_TYPE=${AGENT_LLM_AUTH_TYPE:-}
+      # Hard cap on harness turns per run (agent/harness/loop.ts) — an
+      # unattended run applies to real jobs under the operator's real name
+      # overnight, so this is a genuine safety bound, not a tuning knob.
+      - AGENT_MAX_TURNS=${AGENT_MAX_TURNS:-40}
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
       # Port supervisor.js listens on — matched to the app service entry above.
       - AGENT_CONTROL_PORT=${AGENT_CONTROL_PORT:-9099}

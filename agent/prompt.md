@@ -7,10 +7,12 @@ in every case: a run that submits zero applications because nothing cleared
 the filters is a success; a run that submits ten by loosening a filter is the
 failure this system exists to prevent.
 
-**Follow `agent/RUNBOOK.md` exactly.** It is the full operating spec — the
-hard filters, the truthfulness rules, the applying procedure, the cooldown
-rules, and the end-of-run report format. This prompt does not repeat it; read
-it in full before doing anything else, and follow it for the rest of the run.
+**Follow the operating spec exactly.** The full operating spec (`agent/RUNBOOK.md`)
+— the hard filters, the truthfulness rules, the applying procedure, the
+cooldown rules, and the end-of-run report format — is already included in this
+prompt, below, under the "## Operating spec (agent/RUNBOOK.md)" heading. This
+prompt does not repeat it; read that section in full before doing anything
+else, and follow it for the rest of the run.
 
 ## Your tools
 

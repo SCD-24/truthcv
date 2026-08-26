@@ -42,6 +42,8 @@ def test_api_key_path(client):
         "model": "claude-opus-4-8",
         # Empty for Anthropic itself: the CLI keeps its built-in endpoint.
         "baseUrl": "",
+        "provider": "claude",
+        "wire": "anthropic-messages",
     }
 
 
@@ -82,10 +84,56 @@ def test_non_ascii_header_404(client):
     assert resp.status_code == 404
 
 
-def test_non_claude_agent_route_409(client):
+def test_codex_route_returns_openai_wire(client):
+    secretstore.set_connection("codex", {"apiKey": "sk-codex-1"})
+    modelrouting.save(Routing(agent=Route("codex", "gpt-5")))
+    body = client.get("/api/agent/llm-credentials", headers=_hdr()).json()
+    assert body == {
+        "authType": "api_key",
+        "token": "sk-codex-1",
+        "model": "gpt-5",
+        "baseUrl": "",
+        "provider": "codex",
+        "wire": "openai-chat-completions",
+    }
+
+
+def test_codex_route_without_key_404(client):
+    modelrouting.save(Routing(agent=Route("codex", "gpt-5")))
+    assert client.get("/api/agent/llm-credentials", headers=_hdr()).status_code == 404
+
+
+def test_openrouter_route_returns_openai_wire(client):
+    secretstore.set_connection("openrouter", {"apiKey": "sk-or-1"})
+    modelrouting.save(Routing(agent=Route("openrouter", "stealth/ox-alpha")))
+    body = client.get("/api/agent/llm-credentials", headers=_hdr()).json()
+    assert body == {
+        "authType": "api_key",
+        "token": "sk-or-1",
+        "model": "stealth/ox-alpha",
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "provider": "openrouter",
+        "wire": "openai-chat-completions",
+    }
+
+
+def test_ollama_route_returns_tokenless_credentials(client):
     secretstore.set_connection("ollama", {"baseUrl": "http://x:11434"})
     modelrouting.save(Routing(agent=Route("ollama", "llama3.1")))
-    assert client.get("/api/agent/llm-credentials", headers=_hdr()).status_code == 409
+    body = client.get("/api/agent/llm-credentials", headers=_hdr()).json()
+    assert body == {
+        "authType": "url",
+        "token": "",
+        "model": "llama3.1",
+        "baseUrl": "http://x:11434",
+        "provider": "ollama",
+        "wire": "openai-chat-completions",
+    }
+
+
+def test_ollama_route_without_base_url_404(client):
+    modelrouting.save(Routing(agent=Route("ollama", "llama3.1")))
+    assert client.get("/api/agent/llm-credentials", headers=_hdr()).status_code == 404
 
 
 def test_nothing_configured_404(client):
@@ -96,27 +144,14 @@ def test_response_shape_matches_agent_parser(client):
     # agent/agent-config.js's llm_credentials verb parses the 200 body by
     # reading exactly these keys, in this shape — a field renamed or dropped
     # here breaks the agent's parser silently. This test is the seam guard
-    # between the two.
+    # between the two. The original four keys (authType, token, model,
+    # baseUrl) still parse for the agent-side reader; provider and wire are
+    # additive.
     secretstore.set_connection("claude", {"apiKey": "sk-ant-agent", "authMode": "apikey"})
     modelrouting.save(Routing(agent=Route("claude", "claude-opus-4-8")))
     body = client.get("/api/agent/llm-credentials", headers=_hdr()).json()
-    assert set(body.keys()) == {"authType", "token", "model", "baseUrl"}
-
-
-def test_openrouter_route_returns_anthropic_compat_base_url(client):
-    # The claude CLI appends /v1/messages to ANTHROPIC_BASE_URL, so the value
-    # handed to it must NOT already end in /v1 — that yields /api/v1/v1/messages
-    # and every request fails.
-    secretstore.set_connection("openrouter", {"apiKey": "sk-or-1"})
-    modelrouting.save(Routing(agent=Route("openrouter", "stealth/ox-alpha")))
-    body = client.get("/api/agent/llm-credentials", headers=_hdr()).json()
-    assert body == {
-        "authType": "api_key",
-        "token": "sk-or-1",
-        "model": "stealth/ox-alpha",
-        "baseUrl": "https://openrouter.ai/api",
-    }
-    assert not body["baseUrl"].endswith("/v1")
+    assert set(body.keys()) == {"authType", "token", "model", "baseUrl", "provider", "wire"}
+    assert {"authType", "token", "model", "baseUrl"} <= set(body.keys())
 
 
 def test_openrouter_route_without_key_404(client):

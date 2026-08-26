@@ -30,6 +30,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **PUT** | `/api/profile/answers` | Partially update the canonical ATS screening answers in truth.answers; returns the merged answers. |
 | **POST** | `/api/screenings/deletions` | Delete many screenings in one call; reports per-id outcomes. Operator-only — not an agent route and not an MCP tool. |
 | **POST** | `/api/upload` | Upload a CV as PDF, DOCX, TXT or Markdown (multipart); backend extracts text per format and stores the file under its own extension. |
+| **GET** | `/api/agent/llm-credentials` | Agent-token-authenticated credential handoff for the unattended agent. Returns provider, wire format, auth type, token, model and base URL for the configured agent route; serves all four connection cards. |
 | **GET** | `/api/settings` | Provider settings status (encryptionAvailable, activeProvider, model, *KeySet booleans, ollamaHost). Never returns raw secrets. |
 | **POST** | `/api/settings` | Save provider selection + API key/model/host; encrypts to ./data/secrets.enc via ENCRYPTION_KEY. Empty apiKey leaves the stored key unchanged. |
 | **POST** | `/api/settings/test` | Test connection: a tiny live provider call with saved/submitted credentials. Returns {ok, detail}. |
