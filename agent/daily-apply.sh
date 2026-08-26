@@ -237,7 +237,10 @@ It enters the operator's approval queue; they draft the letter and decide.
 
 record_screening REJECTS the call and stores nothing unless company, verdict,
 role and url all carry usable values — this applies to every screening you
-record, rejections included, not only to passing ones.
+record, rejections included, not only to passing ones. A \"passed\" verdict
+is also rejected, storing nothing, without usable posting_text — a real
+posting body, not a login wall or a 404 page; a posting you could not read
+takes a screening_blocker instead.
 
 Phase 0 is unchanged: postings the operator already approved ARE applied to,
 using the cover_letter text that arrives with each item, verbatim."
@@ -252,7 +255,10 @@ own URL in url, the full posting text in posting_text, and the employer's
 publication date in posted_date when the board states one.
 
 record_screening REJECTS the call and stores nothing unless company, verdict,
-role and url all carry usable values."
+role and url all carry usable values. A \"passed\" or \"deferred\" verdict is
+also rejected, storing nothing, without usable posting_text — a real posting
+body, not a login wall or a 404 page; a posting you could not read takes a
+screening_blocker instead."
 fi
 
 # jq program rendering one criteria block per configured profile: name,

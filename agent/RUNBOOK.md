@@ -443,7 +443,9 @@ without a usable verdict (and no blocker) is a screening they never see.
 
 Both **raise** and persist nothing, exactly as `url` and `role` do. Put the
 verdict in the named argument — never in `posting_text` prose. `posting_text`
-is the posting, and the operator drafts a letter from it verbatim.
+is the posting, and the operator drafts a letter from it verbatim. A `passed`
+or `deferred` verdict is **rejected**, storing nothing, without usable
+`posting_text` — a real posting body, not a login wall or a 404 page.
 
 ### A posting you could not read is not a verdict
 
@@ -454,8 +456,11 @@ left empty and `screening_blocker` set to one of: `login_required`,
 `unreadable`, `not_found`, `expired`. This is distinct from
 `report_apply_failure`'s `blocker="login_required"` in §4 above, which is for
 an approved posting you already screened but could not submit the form for;
-`screening_blocker` is for a posting you never got to screen at all. Either
-way, the record reaches the operator's approval queue.
+`screening_blocker` is for a posting you never got to screen at all.
+`login_required` and `unreadable` reach the operator's approval queue — they
+can sign in themselves, or you can paste the posting text back in.
+`not_found` and `expired` do not queue: there is nothing the operator can
+decide about, or draft from, a posting that no longer exists.
 
 When `generate_cover_letter` returns `blocked: true`, it means the letter
 contains at least one factual claim its guardrail could not ground in the
