@@ -7,6 +7,7 @@ import EditNoteOutlinedIcon from "@mui/icons-material/EditNoteOutlined";
 import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import InsightsOutlinedIcon from "@mui/icons-material/InsightsOutlined";
 import SmartToyOutlinedIcon from "@mui/icons-material/SmartToyOutlined";
+import WorkOutlineOutlinedIcon from "@mui/icons-material/WorkOutlineOutlined";
 import PlaylistAddCheckOutlinedIcon from "@mui/icons-material/PlaylistAddCheckOutlined";
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
 import TravelExploreOutlinedIcon from "@mui/icons-material/TravelExploreOutlined";
@@ -54,6 +55,22 @@ export function SideNav({
       dataTour: "nav-manual",
     },
     {
+      path: ROUTES.jobBoards,
+      label: "Job boards",
+      // Sites the agent hit a sign-in wall on and cannot get past without
+      // the operator. The Site sign-ins list is empty most of the time, so
+      // without this the one moment it is not is invisible until someone
+      // happens to open the page. A count of sites the agent was BLOCKED on
+      // is the agent's own experience — this is not, and must not become, an
+      // indicator of which sites are signed in.
+      icon: (
+        <Badge badgeContent={signinSites} color="primary">
+          <WorkOutlineOutlinedIcon fontSize="small" />
+        </Badge>
+      ),
+      dataTour: "nav-job-boards",
+    },
+    {
       path: ROUTES.applications,
       label: "Applications",
       icon: <DescriptionOutlinedIcon fontSize="small" />,
@@ -68,17 +85,7 @@ export function SideNav({
     {
       path: ROUTES.agents,
       label: "Agents",
-      // Sites the agent hit a sign-in wall on and cannot get past without
-      // the operator. The Site sign-ins list is empty most of the time, so
-      // without this the one moment it is not is invisible until someone
-      // happens to open the page. A count of sites the agent was BLOCKED on
-      // is the agent's own experience — this is not, and must not become, an
-      // indicator of which sites are signed in.
-      icon: (
-        <Badge badgeContent={signinSites} color="primary">
-          <SmartToyOutlinedIcon fontSize="small" />
-        </Badge>
-      ),
+      icon: <SmartToyOutlinedIcon fontSize="small" />,
       dataTour: "nav-agents",
     },
     {

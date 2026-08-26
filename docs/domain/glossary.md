@@ -135,3 +135,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:start comp:keyword-vocabulary -->
 - **Keyword Vocabulary** (`keyword-vocabulary`) — backend component.
 <!-- generated:end comp:keyword-vocabulary -->
+
+<!-- generated:start comp:browser-service -->
+- **Browser Service** (`browser-service`) — backend component.
+<!-- generated:end comp:browser-service -->

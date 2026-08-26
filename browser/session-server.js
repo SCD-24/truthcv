@@ -449,8 +449,30 @@ async function profileInUse() {
   return hasLiveChrome(out);
 }
 
+// Forwards a spawned Chromium's stdout/stderr line-by-line through log() with
+// a `chrome: ` prefix, plus its exit and spawn-error events — today these are
+// the only signal an operator has that a stalled attended sign-in is really a
+// dead renderer (see launchBrowser's --disable-dev-shm-usage comment) rather
+// than a page waiting on input. Kept separate from launchBrowser to stay
+// under the repo's 25-line function limit.
+function pipeChromeLogs(proc) {
+  const forward = (stream) => {
+    let buf = "";
+    stream.on("data", (chunk) => {
+      buf += chunk.toString("utf8");
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for (const line of lines) if (line) log(`chrome: ${line}`);
+    });
+  };
+  forward(proc.stdout);
+  forward(proc.stderr);
+  proc.on("exit", (code, signal) => log(`chrome exited: code=${code} signal=${signal}`));
+  proc.on("error", (err) => log(`chrome failed to spawn: ${err.message}`));
+}
+
 function launchBrowser(url) {
-  return spawn(
+  const proc = spawn(
     CHROME_BIN,
     [
       `--user-data-dir=${PROFILE_DIR}`,
@@ -461,10 +483,26 @@ function launchBrowser(url) {
       // launches in this same image already carry the equivalent flag.
       "--no-sandbox",
       "--start-maximized",
+      // Docker's 64MB default /dev/shm is exhausted by Chromium's renderer
+      // on a heavy sign-in page; the renderer then dies leaving the last
+      // painted frame on screen, so clicks appear to do nothing.
+      // @playwright/mcp's own launches in this same image escape this only
+      // because Playwright injects this switch itself — the attended path
+      // must do so explicitly. Paired with `shm_size: "2gb"` on the
+      // `browser` service in docker-compose.yml.
+      "--disable-dev-shm-usage",
+      // No gnome-keyring/kwallet exists in this image, and probing for one
+      // can stall the step right after a credential submit.
+      "--password-store=basic",
+      // Matches XVFB_SIZE in browser/entrypoint.sh — --start-maximized alone
+      // depends on openbox winning the race.
+      "--window-size=1920,1080",
       url,
     ],
-    { env: { ...process.env, DISPLAY: process.env.DISPLAY || ":99" }, stdio: "ignore" }
+    { env: { ...process.env, DISPLAY: process.env.DISPLAY || ":99" }, stdio: ["ignore", "pipe", "pipe"] }
   );
+  pipeChromeLogs(proc);
+  return proc;
 }
 
 // ---------------------------------------------------------------------------

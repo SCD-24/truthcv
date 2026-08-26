@@ -1598,6 +1598,14 @@
       "id": "keyword-vocabulary",
       "name": "Keyword Vocabulary",
       "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "id": "browser-service",
+      "name": "Browser Service",
+      "type": "backend"
     }
   ],
   "connections": [
@@ -1870,6 +1878,16 @@
       "from": "renderer",
       "protocol": "in-process",
       "to": "keyword-vocabulary"
+    },
+    {
+      "from": "api",
+      "protocol": "WebSocket (noVNC relay) + HTTP",
+      "to": "browser-service"
+    },
+    {
+      "from": "application-agent",
+      "protocol": "HTTP/MCP (streamable HTTP JSON-RPC)",
+      "to": "browser-service"
     }
   ],
   "definitions": [
@@ -2005,6 +2023,10 @@
     "application-tracker": {
       "x": 1028,
       "y": 428
+    },
+    "browser-service": {
+      "x": 1500,
+      "y": 200
     },
     "company-research": {
       "x": 1324,

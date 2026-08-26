@@ -14,7 +14,7 @@ import {
   Typography,
 } from "@mui/material";
 
-import { getSigninQueue, updateAgentConfig } from "../api/client";
+import { getAgentConfig, getSigninQueue, updateAgentConfig } from "../api/client";
 import type { AgentConfig, JobBoard, SigninQueueSite } from "../api/types";
 import { browserSessionPath } from "../routes";
 
@@ -191,23 +191,35 @@ function AddBoardControl({ onAdd, existing }: { onAdd: (board: JobBoard) => void
  * removed; the "Needs attention" queue is the agent's own experience of
  * being blocked, and it is deliberately the only sign-in status shown here —
  * TruthCV has no way to confirm a session is still valid, so claiming a
- * board is "signed in" would be an assertion nothing checks. */
-export function JobBoardsSection({
-  config,
-  onChange,
-}: {
-  config: AgentConfig;
-  onChange: (config: AgentConfig) => void;
-}) {
+ * board is "signed in" would be an assertion nothing checks.
+ *
+ * Its own top-level page (moved out of Agents): loads its own config on
+ * mount rather than receiving it as a prop, since nothing else on this page
+ * depends on the rest of the agent's configuration. */
+export function JobBoardsPage() {
+  const [config, setConfig] = useState<AgentConfig | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    getAgentConfig()
+      .then((c) => live && setConfig(c))
+      .catch((e: unknown) =>
+        live && setLoadError(e instanceof Error ? e.message : "Couldn't load the job boards."),
+      );
+    return () => {
+      live = false;
+    };
+  }, []);
 
   async function persist(jobBoards: JobBoard[]) {
     setSaving(true);
     setError(null);
     try {
       const fresh = await updateAgentConfig({ jobBoards });
-      onChange(fresh);
+      setConfig(fresh);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't update job boards.");
     } finally {
@@ -216,12 +228,32 @@ export function JobBoardsSection({
   }
 
   function handleRemove(source: string) {
+    if (!config) return;
     persist(config.jobBoards.filter((b) => b.source !== source));
   }
 
   function handleAdd(board: JobBoard) {
+    if (!config) return;
     if (config.jobBoards.some((b) => b.source === board.source)) return;
     persist([...config.jobBoards, board]);
+  }
+
+  if (loadError) {
+    return (
+      <Paper variant="outlined" sx={{ p: 3 }}>
+        <Alert severity="error">{loadError}</Alert>
+      </Paper>
+    );
+  }
+
+  if (!config) {
+    return (
+      <Paper variant="outlined" sx={{ p: 3 }}>
+        <Typography variant="body2" color="text.secondary">
+          Loading job boards…
+        </Typography>
+      </Paper>
+    );
   }
 
   return (
