@@ -614,11 +614,15 @@ function ModeSection({
 
 /** The model the unattended agent runs on — an Anthropic-compatible-only
  * ModelRoutePicker
- * (the agent is a headless Claude Code process — it is the `claude` CLI that
- * drives the containerised Chromium in the sibling `browser` service over
- * MCP, so the only usable connections are the ones serving the Anthropic
- * Messages API: Anthropic itself and OpenRouter, which the CLI reaches via
- * ANTHROPIC_BASE_URL. codex and ollama offer an OpenAI-shaped surface only)
+ * (the agent runs TruthCV's own provider-neutral harness (agent/harness),
+ * which drives the containerised Chromium in the sibling `browser` service
+ * over MCP. The harness can target four providers — claude, codex,
+ * openrouter, ollama — across two wires — anthropic-messages and
+ * openai-chat-completions (see agent/harness/providers/registry.ts) — but
+ * this route is limited to the anthropic-messages wire, so the only usable
+ * connections are the ones serving the Anthropic Messages API: Anthropic
+ * itself and OpenRouter, which the harness reaches via ANTHROPIC_BASE_URL.
+ * codex and ollama speak openai-chat-completions only)
  * saving/clearing the `agent` route.
  * Cleared falls back to the container's ANTHROPIC_API_KEY. */
 function ModelSection({

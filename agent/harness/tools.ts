@@ -2,19 +2,16 @@
  * The merged tool registry and the single permission choke point every tool
  * call in the harness passes through.
  *
- * This reproduces exactly the allow-list policy that `agent/daily-apply.sh`
- * hands the `claude` CLI via `--allowedTools`, but for this harness's own MCP
- * tool surface. There is deliberately no interactive approver: this is an
+ * This allow-list IS the harness's sole authorization boundary over its own
+ * MCP tool surface — the enforcement lives here, in this file, not in any
+ * external CLI flag. There is deliberately no interactive approver: this is an
  * unattended run whose stdin is `/dev/null`, so it cannot block on an approval
- * prompt. The allow-list below IS the complete authorization boundary, exactly
- * as `daily-apply.sh`'s `--dangerously-skip-permissions` comment describes for
- * that run — the flag only stops the run blocking on a question no one is there
- * to answer; the allow-list, not a prompt, is the real boundary.
+ * prompt. With no prompt to fall back on, the allow-list below, and nothing
+ * else, decides what may be called — it is the complete authorization boundary.
  *
- * Unlike `claude`, this harness has NO built-in tools of its own — no Read,
- * Write, WebSearch or WebFetch — so those four `daily-apply.sh` grants are out
- * of scope here and intentionally absent from the allow-list. Only MCP tools
- * exist to be granted.
+ * This harness has NO built-in tools of its own — no Read, Write, WebSearch or
+ * WebFetch — so only MCP tools exist to be granted, and the enumerated list
+ * below is deliberate and exhaustive.
  */
 
 import type { NamespacedTool, McpClientPool } from './mcp/client.js';
