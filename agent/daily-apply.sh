@@ -45,7 +45,18 @@ RUN_LOG="$RUN_LOG_DIR/run_${STAMP}_${TRUTHCV_RUN_ID}.log"
 
 log() { printf '%s  %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$RUN_LOG"; }
 
-abort() { log "ABORT: $*"; exit 1; }
+# Where this run leaves an operator-readable sentence explaining an early exit.
+# agent/supervisor.js reads (and unlinks) it when the child exits and puts it on
+# the run record's stopped_reason. Every abort() below exits 1, so the exit code
+# alone cannot say which precondition failed, and "run aborted, see the log"
+# sends the operator hunting through a file when the sentence already exists.
+REASON_FILE="$RUN_LOG_DIR/${TRUTHCV_RUN_ID}.reason"
+
+# Best-effort, like every other part of run accounting: a run must never fail
+# because it could not explain itself.
+record_reason() { printf '%s\n' "$*" >"$REASON_FILE" 2>/dev/null || true; }
+
+abort() { record_reason "$*"; log "ABORT: $*"; exit 1; }
 
 log "=== daily-apply run $STAMP ==="
 
@@ -199,6 +210,7 @@ log "preconditions OK"
 #   full - discover, screen and apply, the pre-mode behaviour
 AGENT_MODE="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" mode)" || AGENT_MODE=""
 if [[ "$AGENT_MODE" == "off" ]]; then
+  record_reason "the agent is switched off on the Agents page - nothing was searched or submitted"
   log "agent mode is off - skipping run"
   exit 0
 elif [[ "$AGENT_MODE" != "semi" && "$AGENT_MODE" != "full" ]]; then

@@ -166,3 +166,96 @@ def test_agent_status_tolerates_supervisor_payload_missing_run_ids(client, monke
     body = r.json()
     assert body["currentRunId"] is None
     assert body["lastRunId"] is None
+
+
+# --- host-side run accounting -----------------------------------------------
+# POST /api/agent/runs/{id}/start and .../finish exist so a run that dies before
+# the model's first turn still appears in Recent runs. Before them the only way
+# a record came into being was the model calling the start_run MCP tool, so a
+# provider error, an aborted precondition and a run that was never triggered all
+# looked identical: nothing at all.
+
+
+@pytest.fixture()
+def agent_token(monkeypatch):
+    monkeypatch.setenv("AGENT_API_TOKEN", "shared-secret")
+    return {"X-Agent-Token": "shared-secret"}
+
+
+def test_start_then_finish_records_a_run_that_never_reached_the_model(client, agent_token):
+    r = client.post("/api/agent/runs/dead-on-arrival/start", json={"trigger": "manual"}, headers=agent_token)
+    assert r.status_code == 200
+    assert r.json() == {"recorded": True}
+
+    listed = client.get("/api/runs").json()["runs"]
+    assert [run["id"] for run in listed] == ["dead-on-arrival"]
+    assert listed[0]["status"] == "running"
+    assert listed[0]["trigger"] == "manual"
+
+    r = client.post(
+        "/api/agent/runs/dead-on-arrival/finish",
+        json={"status": "failed", "stoppedReason": "the LLM provider rejected every attempt"},
+        headers=agent_token,
+    )
+    assert r.json() == {"recorded": True}
+
+    run = client.get("/api/runs/dead-on-arrival").json()
+    assert run["status"] == "failed"
+    assert run["stoppedReason"] == "the LLM provider rejected every attempt"
+
+
+def test_finish_does_not_overwrite_the_agents_own_stopped_reason(client, agent_token):
+    client.post("/api/agent/runs/r1/start", json={"trigger": "scheduled"}, headers=agent_token)
+    store.finish("r1", status="completed", stopped_reason="apply cap reached")
+
+    r = client.post(
+        "/api/agent/runs/r1/finish",
+        json={"status": "failed", "stoppedReason": "the run exited with code 3"},
+        headers=agent_token,
+    )
+    assert r.json() == {"recorded": False}
+
+    run = client.get("/api/runs/r1").json()
+    assert run["status"] == "completed"
+    assert run["stoppedReason"] == "apply cap reached"
+
+
+def test_the_model_start_run_joins_the_host_created_record(client, agent_token):
+    """runs.store.start is idempotent, so the agent's own start_run lands on the
+    record the supervisor already created rather than resetting it — including
+    the accurate trigger, which start_run could only ever guess."""
+    from agenttools import tools_runs
+
+    client.post("/api/agent/runs/r2/start", json={"trigger": "manual", "applyCap": 4}, headers=agent_token)
+    joined = tools_runs.start_run(run_id="r2", trigger="scheduled", apply_cap=999)
+
+    assert joined["recorded"] is True
+    assert joined["trigger"] == "manual"
+    assert joined["apply_cap"] == 4
+
+
+def test_accounting_routes_are_404_without_the_agent_token(client, agent_token):
+    """404 rather than 403, matching /api/agent/llm-credentials: the response
+    carries no hint that the route exists. These routes write to the ledger the
+    operator reads, so they are deliberately not on the unauthenticated /mcp
+    tool surface."""
+    assert client.post("/api/agent/runs/x/start", json={}).status_code == 404
+    assert client.post("/api/agent/runs/x/finish", json={}).status_code == 404
+    assert (
+        client.post("/api/agent/runs/x/start", json={}, headers={"X-Agent-Token": "wrong"}).status_code
+        == 404
+    )
+    assert client.get("/api/runs").json()["runs"] == []
+
+
+def test_accounting_routes_are_404_when_no_token_is_configured(client, monkeypatch):
+    """An unset shared secret must match nothing, not everything."""
+    monkeypatch.delenv("AGENT_API_TOKEN", raising=False)
+    assert client.post("/api/agent/runs/x/start", json={}, headers={"X-Agent-Token": ""}).status_code == 404
+
+
+def test_finish_rejects_an_unknown_status_instead_of_storing_it(client, agent_token):
+    client.post("/api/agent/runs/r3/start", json={}, headers=agent_token)
+    r = client.post("/api/agent/runs/r3/finish", json={"status": "exploded"}, headers=agent_token)
+    assert r.status_code == 422
+    assert client.get("/api/runs/r3").json()["status"] == "running"

@@ -14,6 +14,9 @@
 // RUN_ONCE=1: run once at startup then exit with the run's status.
 
 import http from "node:http";
+import https from "node:https";
+import fs from "node:fs";
+import path from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
 
@@ -26,6 +29,11 @@ const DAILY_APPLY = process.env.DAILY_APPLY || "/app/agent/daily-apply.sh";
 const AGENT_CONFIG_JS = process.env.AGENT_CONFIG_JS || "/app/agent/agent-config.js";
 const RUN_AT_DEFAULT = (process.env.RUN_AT || "09:00,15:00").trim();
 const RUN_DAYS_DEFAULT = (process.env.RUN_DAYS || "1,2,3,4,5").trim();
+const RUN_LOG_DIR = process.env.RUN_LOG_DIR || "/app/runs";
+// The app's MCP base URL; the run-accounting routes hang off the same origin
+// with the /mcp suffix stripped, exactly as agent-config.js derives
+// /api/agent/config and /api/agent/llm-credentials from it.
+const TRUTHCV_MCP_URL = process.env.TRUTHCV_MCP_URL || "";
 
 // ---------------------------------------------------------------------------
 // Running state
@@ -113,9 +121,120 @@ function tokenOk(given) {
 }
 
 // ---------------------------------------------------------------------------
+// Run accounting
+// ---------------------------------------------------------------------------
+// The durable run record lives in the app (runs/store.py, on the app's data
+// volume, which this container deliberately cannot mount — see the volumes
+// note in docker-compose.yml). Until these calls existed, the record was only
+// ever created by the model calling the `start_run` MCP tool, so a run that
+// died before its first turn left nothing at all in Recent runs: a provider
+// error, an aborted precondition and a container that never started were
+// indistinguishable from a run that had not been triggered.
+//
+// Every call here is best-effort. Accounting must never fail a run, change its
+// exit code, or delay it: failures are logged and dropped.
+
+/** POST `body` as JSON to an app path, resolving to true on 2xx. Never rejects. */
+function postToApp(path_, body) {
+  return new Promise((resolve) => {
+    if (!TRUTHCV_MCP_URL || !TOKEN) return resolve(false);
+    let u;
+    try {
+      u = new URL(TRUTHCV_MCP_URL.replace(/\/mcp\/?$/, "") + path_);
+    } catch {
+      return resolve(false);
+    }
+    const payload = JSON.stringify(body);
+    const mod = u.protocol === "https:" ? https : http;
+    const req = mod.request(
+      u,
+      {
+        method: "POST",
+        timeout: 5000,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+          "X-Agent-Token": TOKEN,
+        },
+      },
+      (res) => {
+        res.resume();
+        res.on("end", () => resolve(res.statusCode >= 200 && res.statusCode < 300));
+      },
+    );
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.end(payload);
+  });
+}
+
+/**
+ * The reason file daily-apply.sh leaves behind when it aborts on a
+ * precondition or skips because the agent is switched off.
+ *
+ * The exit code alone cannot say *which* precondition failed — every abort()
+ * in that script exits 1 — and the run log naming it is a file the operator
+ * has to go and find. Reading it here puts the actual sentence on the run
+ * record. Consumed (unlinked) on read so it can never be attributed to a
+ * later run.
+ */
+function takeReasonFile(runId) {
+  const file = path.join(RUN_LOG_DIR, `${runId}.reason`);
+  try {
+    const text = fs.readFileSync(file, "utf8").trim();
+    fs.unlinkSync(file);
+    return text;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Map a daily-apply.sh exit code to a run status and an operator-readable
+ * reason.
+ *
+ * The harness's codes are its machine contract, documented at its invocation
+ * in daily-apply.sh and produced by exitCodeFor() in agent/harness/cli.ts:
+ * 0 success, 2 turn cap, 3 provider error, 4 MCP connection failure, 5 bad
+ * configuration. 1 is daily-apply.sh's own abort(); 143/137 are the signalled
+ * exits a cancel produces.
+ */
+function outcomeFor(rc, cancelled, reason) {
+  if (cancelled || rc === 143 || rc === 137) {
+    return { status: "cancelled", stoppedReason: reason || "cancelled by the operator" };
+  }
+  if (rc === 0) return { status: "completed", stoppedReason: reason };
+  const known = {
+    1: "run aborted before the agent started — see the run log",
+    2: "stopped at the harness turn cap (AGENT_MAX_TURNS)",
+    3: "the LLM provider rejected every attempt — see the run log for the provider's error",
+    4: "could not connect to an MCP server (the app's tools, or the browser)",
+    5: "the harness was misconfigured — see the run log",
+  };
+  return {
+    status: "failed",
+    stoppedReason: reason || known[rc] || `the run exited with code ${rc}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Runner
 // ---------------------------------------------------------------------------
-function doRun() {
+/**
+ * Start a run.
+ *
+ * @param {string} trigger - what started it ("scheduled", "manual" or
+ *   "startup"), recorded on the run record. The model's own start_run tool
+ *   could only ever guess this, so it always said "scheduled".
+ * @param {(rc: number) => void} [onSettled] - called once the run has exited
+ *   AND its record has been closed out. RUN_ONCE exits the process from here
+ *   rather than from the child's close event, so the finish call is not cut
+ *   off mid-flight.
+ */
+function doRun(trigger = "manual", onSettled) {
   const stamp = new Date()
     .toISOString()
     .replace("T", "_")
@@ -131,6 +250,17 @@ function doRun() {
   runState.lastStartedAt = new Date().toISOString();
   runState.currentRunId = runId;
   runState.lastRunId = runId;
+
+  // Create the run record before the child does anything, so a run that dies
+  // in its preconditions or on its very first model call is still accounted
+  // for. The child's own start_run lands on this same id and joins it
+  // (runs.store.start is idempotent).
+  //
+  // Kept as a promise rather than awaited: doRun must return the child
+  // synchronously for /run and RUN_ONCE. settle() awaits it before closing the
+  // record, so a child that dies instantly cannot have its finish overtake its
+  // start and leave a record stuck at "running".
+  const started = postToApp(`/api/agent/runs/${runId}/start`, { trigger });
 
   // detached: the run is a tree — daily-apply.sh, the Node harness process it
   // spawns, and the stdio MCP servers under it. Its own process group is what
@@ -154,9 +284,10 @@ function doRun() {
       clearTimeout(killTimer);
       killTimer = null;
     }
+    const cancelled = runState.cancelling;
     currentChild = null;
     runState.running = false;
-    runState.lastCancelled = runState.cancelling;
+    runState.lastCancelled = cancelled;
     runState.cancelling = false;
     runState.lastFinishedAt = new Date().toISOString();
     runState.lastExitCode = rc;
@@ -164,6 +295,19 @@ function doRun() {
     // with its durable record; only currentRunId (the "a run is active" flag)
     // is cleared.
     runState.currentRunId = null;
+
+    // Close the record out. This is the ONLY path that sees every ending: a
+    // run SIGKILLed after a cancel, or one whose shell never started, runs no
+    // in-container code of its own. finish_if_running leaves a record the
+    // model already closed with its own finish_run alone — that account names
+    // where the run actually stopped and is the better one.
+    const outcome = outcomeFor(rc, cancelled, takeReasonFile(runId));
+    started
+      .then(() => postToApp(`/api/agent/runs/${runId}/finish`, outcome))
+      .then((ok) => {
+        if (!ok) log(`run ${runId}: could not record the run outcome with the app`);
+      })
+      .finally(() => onSettled?.(rc));
   }
 
   child.on("close", (code, signal) => {
@@ -356,7 +500,7 @@ function schedulerLoop() {
       log("Scheduler: skipping — enabled flag unknown (agent config fetch failed)");
     } else {
       log("Scheduler: triggering run");
-      doRun();
+      doRun("scheduled");
     }
     schedulerLoop();
   }, secs * 1000).unref();
@@ -394,7 +538,7 @@ const server = http.createServer((req, res) => {
     if (runState.running) {
       return jsonReply(res, 200, { started: false, running: true });
     }
-    doRun();
+    doRun("manual");
     return jsonReply(res, 200, { started: true, running: true });
   }
 
@@ -412,9 +556,11 @@ const server = http.createServer((req, res) => {
 if (process.env.RUN_ONCE === "1") {
   // Run once at startup then exit with the run's exit code.
   log("RUN_ONCE set — running immediately then exiting");
-  const child = doRun();
-  child.on("close", (code, signal) => process.exit(code ?? signalExitCode(signal)));
-  child.on("error", () => process.exit(1));
+  // Exit from onSettled, not from the child's own close event: settle() has an
+  // in-flight HTTP call closing the run record out, and exiting on `close`
+  // would kill the process before it lands, leaving the record at "running"
+  // forever. onSettled fires after that call has finished (or failed).
+  doRun("startup", (rc) => process.exit(rc));
 } else {
   server.listen(PORT, "0.0.0.0", () => {
     log(`supervisor control server listening on port ${PORT}`);
