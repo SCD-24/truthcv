@@ -2,6 +2,9 @@
 // has no curl (see daily-apply.sh's note); node is the only HTTP client.
 // Usage: node agent-config.js mode|enabled|run_at|run_days|llm_credentials
 // Errors print nothing and exit 1 — callers fall back to env defaults.
+import nodeHttp from "node:http";
+import nodeHttps from "node:https";
+
 const field = process.argv[2];
 const DAY_NUM = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
 // Stand-in/test hook: FAKE_AGENT_CONFIG, when set, is served as the config
@@ -43,7 +46,7 @@ if (field === "llm_credentials") {
   let cu;
   try { cu = new URL(base.replace(/\/mcp\/?$/, "") + "/api/agent/llm-credentials"); }
   catch { process.exit(1); }
-  const chttp = require(cu.protocol === "https:" ? "https" : "http");
+  const chttp = cu.protocol === "https:" ? nodeHttps : nodeHttp;
   const creq = chttp.get(cu, { timeout: 5000, headers: { "X-Agent-Token": token } }, (res) => {
     if (res.statusCode !== 200) { res.resume(); process.exit(1); }
     let body = "";
@@ -68,7 +71,7 @@ if (field === "llm_credentials") {
 } else {
 let u;
 try { u = new URL(base.replace(/\/mcp\/?$/, "") + "/api/agent/config"); } catch { process.exit(1); }
-const http = require(u.protocol === "https:" ? "https" : "http");
+const http = u.protocol === "https:" ? nodeHttps : nodeHttp;
 const req = http.get(u, { timeout: 5000 }, (res) => {
   if (res.statusCode !== 200) { res.resume(); process.exit(1); }
   let body = "";
