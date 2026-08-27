@@ -1467,9 +1467,26 @@ def _agent_control_url(path: str) -> str:
 def _forward_to_supervisor(path: str, method: str = "GET") -> dict:
     """Forward a request to the agent supervisor.js control server.
 
-    Raises HTTPException(503) when the agent is unreachable.
+    Raises HTTPException(503) when the agent is unreachable, 502 when it
+    answered with an error status (403 = token mismatch), and 500 when this
+    service has no AGENT_API_TOKEN to send. These are kept distinct on purpose:
+    they have three different fixes and used to share one message.
     """
-    token = os.environ.get("AGENT_API_TOKEN", "")
+    token = os.environ.get("AGENT_API_TOKEN", "").strip()
+    # An unset shared secret is not a network problem and never becomes one by
+    # retrying: the supervisor rejects every request and the operator has no
+    # way to tell that from a container that is down. Fail here, before the
+    # dial, so the message names the actual cause.
+    if not token:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "AGENT_API_TOKEN is not set on the app service, so the agent "
+                "will reject every request. Set it in .env (the same value for "
+                "app, agent and browser) and restart the stack."
+            ),
+        )
+
     url = _agent_control_url(path)
     req = urllib.request.Request(
         url,
@@ -1480,6 +1497,24 @@ def _forward_to_supervisor(path: str, method: str = "GET") -> dict:
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        # MUST be caught before URLError: HTTPError subclasses it, so a single
+        # URLError handler renders a 403 as "Agent service unreachable" — the
+        # one message that sends the operator to look at the network when the
+        # supervisor answered perfectly well and refused the token.
+        if exc.code in (401, 403):
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"Agent service refused the request (HTTP {exc.code}): the app "
+                    "and the agent container disagree on AGENT_API_TOKEN. Make both "
+                    "match in .env and restart the stack."
+                ),
+            ) from exc
+        raise HTTPException(
+            status_code=502,
+            detail=f"Agent service returned HTTP {exc.code} for {path}",
+        ) from exc
     except urllib.error.URLError as exc:
         raise HTTPException(status_code=503, detail="Agent service unreachable") from exc
 
@@ -1489,7 +1524,8 @@ def get_agent_status() -> AgentStatus:
     """Return the agent supervisor's running/idle state.
 
     Forwards to supervisor.js GET /status over the compose network.
-    Returns 503 when the agent container is unreachable.
+    Returns 503 when the agent container is unreachable, 502 when it answers
+    with an error (403 = AGENT_API_TOKEN mismatch).
     """
     data = _forward_to_supervisor("/status", method="GET")
     return AgentStatus(
@@ -1528,7 +1564,8 @@ def post_agent_cancel() -> AgentCancelResult:
     Fire-and-forget, like the trigger: the supervisor signals the run's process
     group and answers immediately, so the run may still be tearing down when
     this returns. Poll GET /api/agent/status for the transition to idle.
-    Returns 503 when the agent container is unreachable.
+    Returns 503 when the agent container is unreachable, 502 when it answers
+    with an error (403 = AGENT_API_TOKEN mismatch).
     """
     data = _forward_to_supervisor("/cancel", method="POST")
     return AgentCancelResult(
