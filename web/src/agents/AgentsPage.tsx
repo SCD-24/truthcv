@@ -531,10 +531,31 @@ function RunSummaryRow({ run }: { run: RunRecord }) {
 const MODES = ["off", "semi", "full"] as const;
 type Mode = (typeof MODES)[number];
 
+/**
+ * The modes this UI offers. `full` is deliberately absent.
+ *
+ * Its per-run application cap is only enforced where the agent is HANDED work:
+ * get_approved_applications caps and leases what it returns. A posting the
+ * agent discovers itself in full auto never passes through that hand-out, and
+ * record_application counts an over-cap write rather than refusing it — by then
+ * the form is submitted in the real world. So in full auto the cap is a
+ * sentence in the prompt, not a bound, and the loop's turn budget is 400.
+ *
+ * The backend still understands `full`; only the way to choose it is gone. Add
+ * it back here once discovered postings go through a pre-submit claim gate.
+ */
+const SELECTABLE_MODES: readonly Mode[] = ["off", "semi"];
+
+const MODE_LABEL: Record<Mode, string> = {
+  off: "Off",
+  semi: "Semi-auto",
+  full: "Full auto",
+};
+
 const MODE_HELP: Record<Mode, string> = {
   off: "Scheduled runs wake, log that the agent is off, and exit. Nothing is submitted.",
   semi: "The agent finds and screens roles, then waits. You draft the cover letter and approve; approved roles are applied on the next scheduled run.",
-  full: "The agent finds, screens, writes the letter and applies on its own. Roles it cannot decide alone still wait for you.",
+  full: "The agent finds, screens, writes the letter and applies on its own. Not offered here for now — its per-run application cap is not enforced on roles it finds itself. Move to semi-auto and this setting will not come back.",
 };
 
 /** Agent autonomy slider. Optimistic — moves immediately on commit, reverts
@@ -565,7 +586,15 @@ function ModeSection({
 }) {
   const [error, setError] = useState<string | null>(null);
 
-  const configIndex = Math.max(0, MODES.indexOf(config.mode));
+  // A config already stored as `full` keeps its mark rather than being dropped
+  // from the scale. Without this the thumb would rest on "Off" while the agent
+  // applied on its own — the one thing this control must never show. Because
+  // the mark is only present while that is the stored value, leaving full auto
+  // is a one-way door.
+  const modes = SELECTABLE_MODES.includes(config.mode)
+    ? SELECTABLE_MODES
+    : [...SELECTABLE_MODES, config.mode];
+  const configIndex = Math.max(0, modes.indexOf(config.mode));
   const [localIndex, setLocalIndex] = useState(configIndex);
 
   // Keeps the thumb in sync when the mode changes for a reason other than
@@ -592,15 +621,11 @@ function ModeSection({
       <Slider
         value={localIndex}
         min={0}
-        max={2}
+        max={modes.length - 1}
         step={null}
-        marks={[
-          { value: 0, label: "Off" },
-          { value: 1, label: "Semi-auto" },
-          { value: 2, label: "Full auto" },
-        ]}
+        marks={modes.map((mode, index) => ({ value: index, label: MODE_LABEL[mode] }))}
         onChange={(_e, v) => setLocalIndex(v as number)}
-        onChangeCommitted={(_e, v) => handleMode(MODES[v as number])}
+        onChangeCommitted={(_e, v) => handleMode(modes[v as number])}
         sx={{ maxWidth: 360, ml: 1 }}
         aria-label="Agent autonomy"
       />
