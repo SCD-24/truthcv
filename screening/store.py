@@ -202,6 +202,26 @@ def record_apply_failure(
     return _mutate(screening_id, _bump)
 
 
+def clear_apply_failure(screening_id: str) -> Screening | None:
+    """Clear a stale apply failure's operator-facing text.
+
+    Empties `apply_error`, `apply_blocker`, and `signin_url` only. This is an
+    operator action taken when the recorded failure no longer applies — e.g.
+    the environment fault that caused it (not a fact about the posting or the
+    operator's application) has since been fixed — not a verdict about the
+    screening itself, so `approval`, `apply_attempts`, and claim fields are
+    left untouched: the attempt count is kept deliberately, as history of how
+    many times this item has actually been tried.
+    """
+
+    def _clear(s: Screening) -> None:
+        s.apply_error = ""
+        s.apply_blocker = ""
+        s.signin_url = ""
+
+    return _mutate(screening_id, _clear)
+
+
 def _apply_refusal(screening: Screening) -> str:
     """"" when `screening` may be applied to; a machine-readable reason otherwise.
 

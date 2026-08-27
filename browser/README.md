@@ -35,6 +35,8 @@ Chromium's user profile is mounted at `/browser-profile` as a named Docker volum
 
 The read-only mount `${DATA_DIR:-./data}:/app/data:ro` exists so Playwright's `browser_file_upload` tool can resolve filesystem paths. When the agent calls `get_canonical_cv`, the tool returns an object including `path: /app/data/canonical_cv.pdf`. The browser container sees that same path because it mounts the data directory read-only at the same location the app service uses internally.
 
+**The mount alone is not sufficient.** @playwright/mcp (pinned in browser/Dockerfile) restricts `browser_file_upload` to paths under its own `--output-dir` or the MCP client's advertised workspace root — our agent's HTTP JSON-RPC client advertises no root, and `--output-dir` defaults to a private scratch directory that does not cover `/app/data`. entrypoint.sh passes `--output-dir "$BROWSER_UPLOAD_ROOT_DIR"` (default `/app`, which contains `/app/data`) specifically so the mount above is actually reachable — without it, `browser_file_upload` rejects `/app/data/canonical_cv.pdf` as "outside allowed roots" even though the file is right there. `/app` is used instead of `/app/data` itself because the mount is read-only and `--output-dir` must also stay writable for screenshots and traces.
+
 This is why the browser container mounts the data volume, but the agent container deliberately does not — see agent/README.md.
 
 ## Configuration
@@ -43,6 +45,7 @@ This is why the browser container mounts the data volume, but the agent containe
 |---|---|---|
 | `BROWSER_MCP_PORT` | `8931` | Port the @playwright/mcp HTTP server listens on (internal to compose) |
 | `BROWSER_PROFILE_DIR` | `/browser-profile` | Mounted path of the persistent Chromium profile |
+| `BROWSER_UPLOAD_ROOT_DIR` | `/app` | Passed to @playwright/mcp's `--output-dir`, which doubles as its `browser_file_upload` allow-list root in this version (0.0.79 — see browser/Dockerfile). Must cover `/app/data` or CV uploads are rejected as outside allowed roots. |
 | `TZ` | `UTC` | Container timezone (affects logs and any time-based logic) |
 
 ## Diagnosing a Stalled Attended Sign-In

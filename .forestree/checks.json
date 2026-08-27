@@ -2,6 +2,22 @@
   "version": 2,
   "checks": [
     {
+      "id": "lint",
+      "name": "Typecheck (web + agent)",
+      "kind": "lint",
+      "command": "npm --prefix web run typecheck && npm --prefix agent run typecheck",
+      "enabled": true,
+      "scope": "repo"
+    },
+    {
+      "id": "test",
+      "name": "All tests (python + web + agent)",
+      "kind": "test",
+      "command": "python3 -m pytest -q && npm --prefix web run test && npm --prefix agent run test",
+      "enabled": true,
+      "scope": "repo"
+    },
+    {
       "id": "python-tests",
       "name": "Python Tests",
       "kind": "test",
