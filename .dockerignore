@@ -31,3 +31,10 @@ data/
 venv/
 *.egg-info/
 .pytest_cache/
+
+# The built frontend bundle. Stage 1 builds it fresh into /api/static and
+# stage 2 copies it from there; letting the host's copy in through
+# `COPY api/ ./api/` merges yesterday's hashed assets under the new
+# index.html, so a browser holding a cached index.html keeps loading a stale
+# bundle that still resolves 200 instead of failing.
+api/static/
