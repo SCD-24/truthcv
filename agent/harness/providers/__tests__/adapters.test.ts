@@ -19,6 +19,21 @@ function stubFetch(status: number, payload: unknown): void {
       ok: status >= 200 && status < 300,
       status,
       json: async () => payload,
+      text: async () => JSON.stringify(payload),
+    })),
+  );
+}
+
+/** Build a fetch stub returning a non-2xx with a verbatim body and headers. */
+function stubFetchText(status: number, body: string, headers: Record<string, string> = {}): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => ({}),
+      text: async () => body,
+      headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
     })),
   );
 }
@@ -102,5 +117,127 @@ describe('provider adapters', () => {
       createOpenAiChatCompletionsAdapter({ apiKey: 'k', baseUrl: 'http://x', model: 'gpt' }),
     );
     expect(events).toContainEqual({ type: 'error', message: expect.any(String), retryable: false });
+  });
+
+  it('sends a subscription token with the Claude Code preamble first', async () => {
+    // Without this block the Messages API answers 429 rate_limit_error with the
+    // message "Error" — indistinguishable from an exhausted quota, and not one.
+    stubFetch(200, { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' });
+    await collect(createAnthropicMessagesAdapter({ oauthToken: 'tok', model: 'claude' }));
+    const call = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const init = call[1] as { headers: Record<string, string>; body: string };
+    const body = JSON.parse(init.body) as { system: Array<{ type: string; text: string }> };
+    expect(body.system[0]).toEqual({
+      type: 'text',
+      text: "You are Claude Code, Anthropic's official CLI for Claude.",
+    });
+    expect(body.system[1]).toEqual({ type: 'text', text: 'you are a test' });
+    expect(init.headers['anthropic-beta']).toBe('oauth-2025-04-20');
+    expect(init.headers['authorization']).toBe('Bearer tok');
+    expect(init.headers['x-api-key']).toBeUndefined();
+  });
+
+  it('leaves an API-key request on the plain string system prompt', async () => {
+    stubFetch(200, { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' });
+    await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    const call = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const init = call[1] as { headers: Record<string, string>; body: string };
+    expect(JSON.parse(init.body).system).toBe('you are a test');
+    expect(init.headers['anthropic-beta']).toBeUndefined();
+    expect(init.headers['x-api-key']).toBe('k');
+  });
+
+  it('omits an empty system prompt rather than sending an empty text block', async () => {
+    stubFetch(200, { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' });
+    const adapter = createAnthropicMessagesAdapter({ oauthToken: 'tok', model: 'claude' });
+    for await (const _ of adapter.sendMessage({ ...request, systemPrompt: '' })) void _;
+    const call = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const body = JSON.parse((call[1] as { body: string }).body) as { system: unknown[] };
+    expect(body.system).toHaveLength(1);
+  });
+
+  it("carries the provider's own error message, not just the status", async () => {
+    // Two 429s mean opposite things — wait, or top the account up — and only
+    // the body says which. Reporting the status alone made them identical.
+    stubFetchText(
+      429,
+      JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: "This request would exceed your organization rate limit." } }),
+    );
+    const events = await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    expect(events).toContainEqual({
+      type: 'error',
+      message:
+        "Anthropic request failed with status 429: This request would exceed your organization rate limit.",
+      retryable: true,
+    });
+  });
+
+  it('falls back to the raw body when the error response is not JSON', async () => {
+    stubFetchText(502, '<html>\n  <body>Bad gateway</body>\n</html>');
+    const events = await collect(
+      createOpenAiChatCompletionsAdapter({ apiKey: 'k', baseUrl: 'http://x', model: 'gpt' }),
+    );
+    expect(events).toContainEqual({
+      type: 'error',
+      message: 'OpenAI request failed with status 502: <html> <body>Bad gateway</body> </html>',
+      retryable: true,
+    });
+  });
+
+  it('truncates a long error body rather than flooding the run log', async () => {
+    stubFetchText(500, JSON.stringify({ error: { message: 'x'.repeat(1000) } }));
+    const events = await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    const error = events.find((e) => e.type === 'error');
+    expect(error?.type === 'error' && error.message.length).toBeLessThan(400);
+    expect(error?.type === 'error' && error.message.endsWith('…')).toBe(true);
+  });
+
+  it('degrades to the status alone when the body cannot be read', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 503,
+        json: async () => ({}),
+        text: async () => {
+          throw new Error('connection reset');
+        },
+      })),
+    );
+    const events = await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    expect(events).toContainEqual({
+      type: 'error',
+      message: 'Anthropic request failed with status 503',
+      retryable: true,
+    });
+  });
+
+  it('carries a delta-seconds Retry-After through to the loop', async () => {
+    stubFetchText(429, '{}', { 'retry-after': '42' });
+    const events = await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    const error = events.find((e) => e.type === 'error');
+    expect(error?.type === 'error' && error.retryAfterMs).toBe(42_000);
+    expect(error?.type === 'error' && error.message).toContain('retry-after 42s');
+  });
+
+  it('parses an HTTP-date Retry-After and never yields a negative wait', async () => {
+    stubFetchText(503, '{}', { 'retry-after': 'Wed, 21 Oct 2015 07:28:00 GMT' });
+    const events = await collect(
+      createOpenAiChatCompletionsAdapter({ apiKey: 'k', baseUrl: 'http://x', model: 'gpt' }),
+    );
+    const error = events.find((e) => e.type === 'error');
+    expect(error?.type === 'error' && error.retryAfterMs).toBe(0);
+  });
+
+  it('omits retryAfterMs when the header is absent or unparseable', async () => {
+    stubFetchText(429, '{}');
+    let events = await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    let error = events.find((e) => e.type === 'error');
+    expect(error?.type === 'error' && 'retryAfterMs' in error).toBe(false);
+
+    stubFetchText(429, '{}', { 'retry-after': 'soon-ish' });
+    events = await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    error = events.find((e) => e.type === 'error');
+    expect(error?.type === 'error' && 'retryAfterMs' in error).toBe(false);
   });
 });

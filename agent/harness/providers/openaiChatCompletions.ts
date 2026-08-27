@@ -13,6 +13,8 @@ import type {
   ToolDefinition,
 } from './types.js';
 
+import { providerErrorEvent, readBody, retryAfterMsFrom } from './errors.js';
+
 /** Options for constructing an OpenAI Chat Completions adapter. */
 export interface OpenAiChatCompletionsOptions {
   /** API key sent as a Bearer `authorization` header; omitted when empty. */
@@ -123,20 +125,17 @@ export class OpenAiChatCompletionsAdapter implements ProviderAdapter {
       body: JSON.stringify(buildBody(request, this.opts)),
     });
     if (!response.ok) {
-      yield errorEvent(response.status);
+      yield errorEvent(response.status, await readBody(response), retryAfterMsFrom(response.headers));
       return;
     }
     yield* emitOpenAiEvents(await response.json());
   }
 }
 
-/** Build an error HarnessEvent for a non-2xx status. */
-function errorEvent(status: number): HarnessEvent {
-  return {
-    type: 'error',
-    message: `OpenAI request failed with status ${status}`,
-    retryable: RETRYABLE_STATUS.has(status),
-  };
+/** Build an error HarnessEvent for a non-2xx status, carrying the provider's
+ * own explanation when it sent one. */
+function errorEvent(status: number, body: string, retryAfterMs?: number): HarnessEvent {
+  return providerErrorEvent('OpenAI', status, body, RETRYABLE_STATUS.has(status), retryAfterMs);
 }
 
 /** Yield text, tool-call, usage and done events from a parsed response. */

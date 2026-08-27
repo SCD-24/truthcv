@@ -78,7 +78,10 @@ from .schemas import (
     AgentCancelResult,
     AgentConfigUpdate,
     AgentLlmCredentials,
+    AgentRunAccountingResult,
+    AgentRunFinish,
     AgentRunResult,
+    AgentRunStart,
     AgentStatus,
     AnswersModel,
     AnswersUpdate,
@@ -1456,6 +1459,70 @@ def get_agent_llm_credentials(x_agent_token: str = Header(default="")) -> AgentL
     if resolve is None:
         raise HTTPException(status_code=404)
     return resolve(model)
+
+
+def _agent_token_ok(given: str) -> bool:
+    """Whether `given` matches AGENT_API_TOKEN. Same rule as
+    get_agent_llm_credentials: an unset secret matches nothing."""
+    secret = os.environ.get("AGENT_API_TOKEN", "").strip()
+    if not secret:
+        return False
+    return hmac.compare_digest(
+        given.encode("utf-8", "surrogateescape"), secret.encode("utf-8")
+    )
+
+
+@router.post("/agent/runs/{run_id}/start", response_model=AgentRunAccountingResult)
+def post_agent_run_start(
+    run_id: str,
+    body: AgentRunStart,
+    x_agent_token: str = Header(default=""),
+) -> AgentRunAccountingResult:
+    """Create the run record for `run_id`, before the run does any work.
+
+    Guarded by AGENT_API_TOKEN and 404 on mismatch, matching
+    get_agent_llm_credentials — this writes to the ledger the operator reads,
+    so it is deliberately NOT on the unauthenticated /mcp tool surface and is
+    not a capability the model can reach.
+
+    Until this existed the only way a run record came into being was the model
+    calling the ``start_run`` MCP tool, so a run that failed before its first
+    turn — the LLM provider rejecting every attempt, a precondition abort, an
+    MCP connection failure — left no trace in Recent runs at all. That is the
+    exact case an operator most needs to see.
+
+    ``runs.store.start`` is idempotent, so the model's later ``start_run`` with
+    the same id joins this record rather than resetting it.
+    """
+    if not _agent_token_ok(x_agent_token):
+        raise HTTPException(status_code=404)
+    runs_store.start(run_id, trigger=body.trigger, apply_cap=body.apply_cap)
+    return AgentRunAccountingResult(recorded=True)
+
+
+@router.post("/agent/runs/{run_id}/finish", response_model=AgentRunAccountingResult)
+def post_agent_run_finish(
+    run_id: str,
+    body: AgentRunFinish,
+    x_agent_token: str = Header(default=""),
+) -> AgentRunAccountingResult:
+    """Close out `run_id` — but only while it is still running.
+
+    The supervisor calls this on every child exit, including the ones no
+    in-container code survives (SIGKILL after a cancel, spawn failure). It
+    reports ``recorded=False`` when the model's own ``finish_run`` already
+    closed the record: that account names where the run actually stopped and
+    must win over an exit-code-derived one.
+    """
+    if not _agent_token_ok(x_agent_token):
+        raise HTTPException(status_code=404)
+    try:
+        record = runs_store.finish_if_running(
+            run_id, status=body.status, stopped_reason=body.stopped_reason
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return AgentRunAccountingResult(recorded=record is not None)
 
 
 def _agent_control_url(path: str) -> str:

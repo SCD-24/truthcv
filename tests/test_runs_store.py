@@ -108,3 +108,37 @@ def test_start_run_tool_is_idempotent(data_dir):
     assert second["recorded"] is True
     assert second["postings_seen"] == 5
     assert second["apply_cap"] == 3
+
+
+def test_finish_if_running_closes_a_record_the_agent_never_finished(data_dir):
+    """The case this exists for: a run that died before the model's first turn.
+
+    The host side created the record, the model never got far enough to call
+    finish_run, and without this the record would sit at "running" forever.
+    """
+    store.start("crashed", trigger="manual")
+    record = store.finish_if_running(
+        "crashed", status="failed", stopped_reason="the LLM provider rejected every attempt"
+    )
+    assert record is not None
+    assert record.status == "failed"
+    assert record.stopped_reason == "the LLM provider rejected every attempt"
+    assert record.finished_at
+
+
+def test_finish_if_running_never_overwrites_the_agents_own_account(data_dir):
+    """The model's finish_run names where the run actually stopped; the
+    supervisor's exit-code summary is a fallback and must not replace it."""
+    store.start("honest", trigger="scheduled")
+    store.finish("honest", status="completed", stopped_reason="apply cap reached")
+
+    assert store.finish_if_running("honest", status="failed", stopped_reason="exit 3") is None
+
+    record = store.get("honest")
+    assert record.status == "completed"
+    assert record.stopped_reason == "apply cap reached"
+
+
+def test_finish_if_running_is_a_no_op_for_an_unknown_run(data_dir):
+    assert store.finish_if_running("never-started", status="failed") is None
+    assert store.get("never-started") is None

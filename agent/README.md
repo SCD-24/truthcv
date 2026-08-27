@@ -109,7 +109,7 @@ under the operator's name. Watch it.
 | `TRUTHCV_MCP_URL` | `http://app:8080/mcp` | The `app` service's MCP streamable-HTTP JSON-RPC tool surface (`POST /mcp`, `agenttools/mcp_app.py`). In-network only — not reachable from the host or the internet. |
 | `AGENT_BROWSER_DRIVER` | `browser` | Which browser driver the agent uses. `browser` (the containerised Chromium) is currently the only supported value — kept as a validating seam so a second driver can be added later without every call site needing to change. |
 | `BROWSER_MCP_URL` | `http://browser:8931/mcp` | In-network address of the `browser` compose service's MCP endpoint (see [`browser/README.md`](../browser/README.md)). Also in-network only. Used by the `browser` driver. |
-| `MAX_APPLICATIONS_PER_RUN` | empty | Empty means **no cap**, matching RUNBOOK §1 ("there is no daily quota"). Not zero. |
+| `MAX_APPLICATIONS_PER_RUN` | empty | Fallback only: `maxApplicationsPerRun` on the Agents page takes precedence. Empty in both means **no cap**, matching RUNBOOK §1 ("there is no daily quota"). Not zero. Enforced server-side on the approved-queue path (`get_approved_applications` caps and leases what it hands out); on a posting the agent discovers itself in FULL AUTO it is prompt-level only. |
 | `RUN_LOG_DIR` | `/app/runs` | Where `daily-apply.sh` writes per-run logs. Must stay inside the `agent-runs` volume or logs vanish on restart. |
 
 The agent runs a provider-neutral harness (`agent/harness`, compiled into the image), so the **Model** setting on the Agents page can point at any supported provider — `claude`, `codex`, `openrouter`, or `ollama` — chosen via the connection configured in Settings. The harness's credentials are resolved at run start through `GET /api/agent/llm-credentials`.
@@ -156,7 +156,7 @@ flag that takes precedence; `daily-apply.sh` passes the flags explicitly):
 | `AGENT_LLM_API_KEY` | Credential token (api key or OAuth token). May be empty only for `ollama`. Never echoed — the harness redacts it from all output. |
 | `AGENT_LLM_BASE_URL` | Base URL. Required for `ollama`; optional elsewhere (falls back to the per-provider default above). |
 | `AGENT_LLM_AUTH_TYPE` | How to present the token: `oauth`, `api_key`, or `url`. |
-| `AGENT_MAX_TURNS` | Hard turn cap for the agent loop. Defaults to `40`. |
+| `AGENT_MAX_TURNS` | Runaway backstop on the agent loop's turns. Defaults to `400`. Not the operational bound on how much a run does — that is `maxApplicationsPerRun` on the Agents page. Driving one application form through the browser costs 15-25 turns. The last turns are reserved for the model to wind up in. |
 
 **Harness binary.** `HARNESS_CLI` overrides the path to the compiled entry
 point; it defaults to `/app/agent/dist/harness/cli.js`.

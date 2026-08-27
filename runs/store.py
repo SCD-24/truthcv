@@ -137,6 +137,33 @@ def set_note(run_id: str, note: str) -> RunRecord | None:
         return record
 
 
+def finish_if_running(
+    run_id: str,
+    status: str = "failed",
+    stopped_reason: str = "",
+) -> RunRecord | None:
+    """Close out a run record only while it is still ``running``.
+
+    The host side (agent/supervisor.js) closes every run out when the child
+    exits, so a run that died before the model could call ``finish_run`` still
+    ends with an honest status instead of sitting at "running" forever. But the
+    model's own ``finish_run`` is the better account when it happened — it names
+    where the run actually stopped — so this must never overwrite a record that
+    already reached a terminal status. Returns None when there is no such record
+    or it is already finished; both are no-ops, not errors.
+    """
+    with locked(runs_path()):
+        runs = load_all()
+        record = next((r for r in runs if r.id == run_id), None)
+        if record is None or record.status != "running":
+            return None
+        record.status = validate_status(status)
+        record.finished_at = _now()
+        record.stopped_reason = stopped_reason
+        _write_all(runs)
+        return record
+
+
 def finish(
     run_id: str,
     status: str = "completed",

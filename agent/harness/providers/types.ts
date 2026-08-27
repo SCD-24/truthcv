@@ -66,7 +66,16 @@ export type HarnessEvent =
   /** Terminal event carrying the stop reason and assembled message. */
   | { type: 'done'; stopReason: StopReason; message: ConversationMessage }
   /** A recoverable or fatal error surfaced instead of throwing. */
-  | { type: 'error'; message: string; retryable: boolean };
+  | {
+      type: 'error';
+      message: string;
+      retryable: boolean;
+      /** How long the provider asked us to wait, in ms, from its `Retry-After`
+       * header. Absent when it sent none. The loop prefers this over its own
+       * computed backoff: the provider knows when its limit resets and we do
+       * not. */
+      retryAfterMs?: number;
+    };
 
 /** A normalised request sent to a provider adapter. */
 export interface ModelRequest {

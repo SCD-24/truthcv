@@ -1198,7 +1198,7 @@ function ProfilesSection({
           size="small"
           value={maxApplicationsPerRun}
           onChange={(e) => setMaxApplicationsPerRun(e.target.value)}
-          helperText="Saved here but not yet wired into agent runs — the container's MAX_APPLICATIONS_PER_RUN env var sets the actual per-run cap."
+          helperText="The per-run application cap. Enforced when the agent asks for its approved queue, and MAX_APPLICATIONS_PER_RUN is the fallback only when this is unset."
         />
       </Stack>
       <Box>

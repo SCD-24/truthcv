@@ -1170,6 +1170,47 @@ class AgentCancelResult(_Camel):
     running: bool
 
 
+class AgentRunStart(_Camel):
+    """POST /api/agent/runs/{run_id}/start body — host-side run accounting.
+
+    Called by agent/supervisor.js before it spawns daily-apply.sh, so a run
+    that dies before the model's first turn (provider error, precondition
+    abort, MCP failure) still has a record. Distinct from the model's
+    ``start_run`` MCP tool, which remains and becomes an idempotent join:
+    whichever arrives first creates the record.
+    """
+
+    # What started this run: "scheduled", "manual" (Run now) or "startup"
+    # (RUN_ONCE). The model's start_run could only ever guess this.
+    trigger: str = ""
+    apply_cap: int = 0
+
+
+class AgentRunFinish(_Camel):
+    """POST /api/agent/runs/{run_id}/finish body — host-side run accounting.
+
+    Applied only while the record is still "running" (runs.store
+    .finish_if_running), so the model's own ``finish_run`` — which names where
+    the run actually stopped — is never overwritten by the supervisor's
+    exit-code-derived summary.
+    """
+
+    status: str = "failed"
+    stopped_reason: str = ""
+
+
+class AgentRunAccountingResult(_Camel):
+    """Response for both host-side run accounting routes.
+
+    ``recorded`` is False when there was nothing to do — a finish against a
+    record the model already closed, or against an id no run was started for.
+    It is not an error: this accounting is best-effort by design and must never
+    be able to fail a run.
+    """
+
+    recorded: bool
+
+
 class RoutingUpdate(_Camel):
     """Partial PUT /api/routing body — every field optional.
 
