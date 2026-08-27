@@ -422,19 +422,149 @@ function createEventStream(write: (obj: unknown) => void): (event: HarnessEvent 
 }
 
 /**
+ * Maximum characters of failed-tool `content` copied onto a `toolResult` line.
+ *
+ * A real error message from an MCP server is a sentence or a short stack, far
+ * inside this bound; it exists only so a pathological one — a server echoing a
+ * whole page back as its message — cannot turn a single failed call into a
+ * megabyte of run log. 2000 characters is generous enough that no realistic
+ * message is ever cut, and small enough that even a run failing every turn
+ * stays a readable file.
+ *
+ * The bound is on UTF-16 code units — what `String.length` counts — and not on
+ * bytes, which is what a log file is actually made of. The two differ by up to
+ * a factor of three once the text is not Latin: 2000 CJK characters are 2000
+ * code units but 6028 bytes of UTF-8. A capped line is therefore a few
+ * kilobytes at worst, still small, and the cap is stated in the unit the code
+ * can enforce rather than in one it cannot.
+ */
+const MAX_ERROR_CONTENT_CHARS = 2000;
+
+/** Appended in place of the characters {@link errorContent} dropped. */
+const TRUNCATION_MARKER = '…[truncated]';
+
+/**
  * Emit one `toolResult` line per executed tool call.
  *
  * loop.ts exposes no per-tool-result callback, so these are DERIVED after the
  * run from `LoopResult.messages`: tool-call ids are correlated back to their
  * namespaced names to report which tool produced each result.
+ *
+ * Each line carries `toolCallId` because that correlation is otherwise lost to
+ * a reader of the log: the whole batch is emitted AFTER the loop finishes, so
+ * results do not sit next to the `toolCall` lines they answer, and a run that
+ * calls the same tool ten times produces ten indistinguishable result lines.
+ *
+ * `content` is emitted ONLY when `isError` — deliberately, not by omission. A
+ * successful browser tool result is a full page snapshot running to tens of
+ * kilobytes, and logging those would bloat the log for no diagnostic gain: on
+ * success the interesting fact is simply that the call succeeded.
+ *
+ * On failure what is logged is the ERROR TEXT ALONE, not the raw content: the
+ * browser server attaches the generated Playwright source, the page metadata
+ * and the accessibility snapshot to a failure as well as to a success, and
+ * {@link errorSection} strips those because they carry the operator's personal
+ * data and dwarf the message. The error text that remains is the ONE thing a
+ * post-mortem needs, and its absence has already cost one investigation that
+ * could not say why a run died.
  */
 function emitToolResults(write: (obj: unknown) => void, messages: ConversationMessage[]): void {
   const names = toolCallNames(messages);
   for (const message of messages) {
     for (const result of message.toolResults ?? []) {
-      write({ type: 'toolResult', namespacedName: names.get(result.toolCallId) ?? 'unknown', isError: Boolean(result.isError) });
+      const isError = Boolean(result.isError);
+      const line = {
+        type: 'toolResult',
+        toolCallId: result.toolCallId,
+        namespacedName: names.get(result.toolCallId) ?? 'unknown',
+        isError,
+      };
+      write(isError ? { ...line, content: errorContent(result.content) } : line);
     }
   }
+}
+
+/**
+ * Coerce a failed result's content into a bounded log string.
+ *
+ * This is a logging path that must never be able to fail a run, so anything
+ * that is not a non-empty string — absent, empty, or a non-string a server
+ * returned in spite of the declared type — becomes '' rather than throwing or
+ * serialising to something a reader cannot parse.
+ *
+ * @param content The result content as received, of unknown runtime type.
+ * @returns The message, truncated with {@link TRUNCATION_MARKER} if over the bound.
+ */
+function errorContent(content: unknown): string {
+  if (typeof content !== 'string' || content.length === 0) return '';
+  // Extract THEN truncate, never the reverse: the cap measures the text that is
+  // actually logged. Truncating first would spend the whole budget on sections
+  // about to be discarded — a long `Ran Playwright code` block sits between the
+  // error and the end of the body, so a 2000-character prefix of the raw
+  // content can be all personal data and no error message.
+  return truncate(errorSection(content));
+}
+
+/**
+ * Reduce a sectioned MCP response body to just its `### Error` section.
+ *
+ * The browser MCP server (`@playwright/mcp`) answers with a sequence of
+ * `### <Name>` sections — `Error`, `Result`, `Ran Playwright code`, `Page`,
+ * `Snapshot` — and attaches them to FAILED calls exactly as it does to
+ * successful ones. `Ran Playwright code` is the generated source for the step
+ * that was attempted, so a failed `browser_type` carries the literal value it
+ * was typing: the operator's email, phone number, full name or salary, and a
+ * failed `browser_navigate` carries any token in the URL's query string. The
+ * server is started without `--secrets`, so its own masking has no keys and
+ * masks nothing. Run logs sit on a persistent volume indefinitely, so the
+ * error text is the only section that may be written to one.
+ *
+ * Content with NO `### ` header is returned UNCHANGED: errors from the app's
+ * own MCP tools and from the harness's tool gate are plain sentences, and they
+ * are the reason this content is logged at all.
+ *
+ * Sectioned content with no `Error` section yields '' — every other section is
+ * one of the excluded ones, and the line still carries `isError`, the tool name
+ * and the call id, which is what an unsectioned failure with an empty message
+ * already logs.
+ *
+ * @param content The raw content string of a failed tool result.
+ * @returns The error section's body, or the whole input when it has no sections.
+ */
+function errorSection(content: string): string {
+  const sections = content.split(/^### /m);
+  if (sections.length === 1) return content;
+  for (const section of sections) {
+    const newline = section.indexOf('\n');
+    const name = newline === -1 ? section : section.slice(0, newline);
+    if (name.trim() !== 'Error') continue;
+    // Sections are blank-line separated upstream, so the body would otherwise
+    // end in the separator that precedes the next header.
+    return newline === -1 ? '' : section.slice(newline + 1).trimEnd();
+  }
+  return '';
+}
+
+/**
+ * Cap `text` at {@link MAX_ERROR_CONTENT_CHARS}, marking that it was cut.
+ *
+ * Slicing at a fixed offset can land between the two halves of a surrogate
+ * pair, leaving a lone high surrogate at the end. The line stays valid JSON —
+ * `JSON.stringify` escapes it — but a consumer that parses it back gets an
+ * ill-formed string ending in mojibake, so a trailing unpaired high surrogate
+ * is dropped. `String.prototype.toWellFormed` would do this, but it is an
+ * ES2024 library declaration and this package compiles against the ES2022 lib
+ * (`agent/tsconfig.json`), so the check is written out instead.
+ *
+ * @param text The already-extracted error text.
+ * @returns `text`, or a well-formed prefix of it plus {@link TRUNCATION_MARKER}.
+ */
+function truncate(text: string): string {
+  if (text.length <= MAX_ERROR_CONTENT_CHARS) return text;
+  const cut = text.slice(0, MAX_ERROR_CONTENT_CHARS);
+  const last = cut.charCodeAt(cut.length - 1);
+  const splitPair = last >= 0xd800 && last <= 0xdbff;
+  return `${splitPair ? cut.slice(0, -1) : cut}${TRUNCATION_MARKER}`;
 }
 
 /** Map every tool-call id in the conversation to its namespaced tool name. */
