@@ -69,6 +69,17 @@ tools:
   `screening_blocker` instead. `not_found` and `expired` blockers are
   recorded but are not queued for the operator — there is nothing they can
   decide about a posting that no longer exists.
+  One posting gets ONE record, forever. If a screening already exists for the
+  `url` you pass, nothing is written and the existing record comes back with
+  `"created": false` — the verdict you reached is discarded, because that
+  posting has already been judged and, if the operator rejected it,
+  re-recording it would push it back into their queue. Trailing
+  `/apply`, a trailing slash, and tracking parameters do not make it a
+  different posting. `"created": false` is a normal outcome: count the
+  posting as a skip, do not retry the call, and do not vary the URL to get
+  past it. The one exception is a posting you previously reported as a dead
+  link or an expired listing — that record holds no judgement, so a later
+  real screening of the same URL replaces it.
 - `get_approved_applications` — the postings the operator approved for this
   run. Read-only: it reports their decision, it does not make one.
 - `report_apply_failure` — records why an approved application could not be

@@ -10,8 +10,14 @@ import screening.store as screening_store
 from scripts.repair_screening_roles import main
 
 
-def _make(data_dir, role, company="Acme", url="https://jobs.example.com/1"):
-    """Create a screening record with the given role; returns the Screening."""
+def _make(data_dir, role, company="Acme", url=""):
+    """Create a screening record with the given role; returns the Screening.
+
+    The URL defaults to one per company, because the store holds one record
+    per posting: a shared URL would make every record after the first collapse
+    into it and these tests need several.
+    """
+    url = url or f"https://jobs.example.com/{company.lower()}"
     return screening_store.create(
         {"company": company, "role": role, "url": url, "verdict": "rejected"}
     )

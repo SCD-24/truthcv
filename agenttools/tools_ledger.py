@@ -39,7 +39,7 @@ from screening.model import validate_blocker as _validate_blocker
 from screening.model import validate_verdict as _validate_verdict
 from screening.posting import validate_posting_text as _validate_posting_text
 from screening.role import validate_role_title as _validate_role_title
-from screening.store import create as create_screening
+from screening.store import create_or_get as create_or_get_screening
 from screening.url import validate_posting_url as _validate_posting_url
 from screening.url import normalize_application_url as _normalize_application_url
 from truth.answers import canonical_cv as _canonical_cv
@@ -365,6 +365,14 @@ def record_screening(
     ``screening_blocker``, is exempt and keeps today's lenient behaviour — a
     posting the agent could not read takes a blocker instead of posting_text.
 
+    One posting gets one record, forever. If the store already holds a
+    screening for this ``url``, nothing is written and the EXISTING record is
+    returned with ``created: false`` — the verdict you just reached is
+    discarded, because that posting has already been judged and, if the
+    operator rejected it, re-recording it would put it back in front of them.
+    This is a normal outcome, not an error: do not retry the call, do not
+    vary the URL to get past it, and count the posting as a skip.
+
     Every field above is named explicitly rather than left to ``**fields``,
     because the MCP inputSchema is derived from this signature: a field absent
     from it is invisible to the agent reading the schema, and one model will
@@ -401,8 +409,10 @@ def record_screening(
     for name, value in named.items():
         if value:
             fields[name] = value
-    screening = create_screening(fields)
-    return screening.to_dict()
+    screening, created = create_or_get_screening(fields)
+    result = screening.to_dict()
+    result["created"] = created
+    return result
 
 
 def check_cooldown(company: str, role: str | None = None) -> dict:
