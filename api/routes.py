@@ -226,8 +226,24 @@ def create_screening(body: ScreeningCreate) -> ScreeningModel:
     A screening cannot be created without a resolvable posting URL: the
     requirement is enforced by ``ScreeningCreate``'s ``url`` validator, which
     surfaces an unusable URL as a 422 before this handler runs.
+
+    409 when the store already holds a screening for that posting: one
+    posting gets one record, so a second is refused rather than silently
+    merged into the first, and the existing record's id is returned in the
+    detail so the caller can go and look at it. Delete that record to screen
+    the posting again.
     """
-    screening = screening_store.create(body.model_dump(by_alias=False))
+    screening, created = screening_store.create_or_get(
+        body.model_dump(by_alias=False)
+    )
+    if not created:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This posting has already been screened "
+                f"(screening {screening.id})."
+            ),
+        )
     return _screening_model(screening)
 
 

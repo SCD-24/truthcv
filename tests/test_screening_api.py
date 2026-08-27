@@ -134,7 +134,7 @@ def test_list_screenings_most_recent_first(client):
     ).json()
     second = client.post(
         "/api/screenings",
-        json={"company": "Second", "url": "https://acme.example/jobs/1", "verdict": "passed"},
+        json={"company": "Second", "url": "https://acme.example/jobs/2", "verdict": "passed"},
     ).json()
 
     listed = client.get("/api/screenings").json()

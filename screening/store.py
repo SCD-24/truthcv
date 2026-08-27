@@ -22,6 +22,7 @@ from datafile import atomic_write_text, locked
 from truth.store import data_dir
 
 from .model import APPROVAL_VALUES, Screening, new_id, validate_blocker
+from .url import posting_dedupe_key
 
 # screening_blocker values that stay operator-actionable: the operator can sign
 # in themselves (login_required) or paste the posting text back in
@@ -29,6 +30,15 @@ from .model import APPROVAL_VALUES, Screening, new_id, validate_blocker
 # no decision to make and nothing to draft from a posting that no longer
 # exists, so those records must not reach the approval queue.
 QUEUEING_BLOCKERS = ("login_required", "unreadable")
+
+# screening_blocker values describing a posting that was never evaluated and
+# never put to the operator either: the agent saw a dead link or an expired
+# listing, and (being outside QUEUEING_BLOCKERS) the record did not queue. A
+# record like that holds no judgement, so it must not permanently suppress a
+# re-screen the way a real verdict does — a board that 404s for an afternoon
+# would otherwise blacklist a live posting that nobody ever sees again. See
+# `_is_unread_placeholder`.
+UNREAD_BLOCKERS = ("not_found", "expired")
 
 
 def screenings_path() -> Path:
@@ -76,8 +86,82 @@ def get(screening_id: str) -> Screening | None:
     return next((s for s in load_all() if s.id == screening_id), None)
 
 
-def create(fields: dict) -> Screening:
-    """Create a new screening record from client-supplied editable fields."""
+def find_by_url(url: str) -> Screening | None:
+    """The existing screening for the posting ``url`` names, or None.
+
+    Matches on ``posting_dedupe_key`` rather than the raw string, so the same
+    job arriving from a board listing, a job alert and a direct link is one
+    posting. A blank or unparseable ``url`` has an empty key and matches
+    nothing — two records the store could not resolve to a posting are not
+    thereby the same posting.
+    """
+    key = posting_dedupe_key(url)
+    if not key:
+        return None
+    return _find_by_key(load_all(), key)
+
+
+def _find_by_key(screenings: list[Screening], key: str) -> Screening | None:
+    """First record in ``screenings`` whose url has dedupe key ``key``.
+
+    Split out so ``create_or_get`` can run the lookup against the list it
+    already loaded inside the lock, instead of re-reading the file.
+    """
+    return next((s for s in screenings if posting_dedupe_key(s.url) == key), None)
+
+
+def _is_unread_placeholder(screening: Screening) -> bool:
+    """Whether ``screening`` may be superseded by a fresh screening of the same
+    posting.
+
+    True only for a record that holds nothing anyone could lose: the agent
+    could not read the posting at all (an UNREAD_BLOCKERS blocker), the
+    operator was never asked and never decided (`approval` empty), and no
+    application attempt or run claim was ever made against it. Those last two
+    are already implied by the empty approval — only an approved item is
+    handed out or attempted — and are checked anyway, because this function's
+    caller overwrites the record and the cost of being wrong is a lost
+    application attempt.
+    """
+    return (
+        screening.screening_blocker in UNREAD_BLOCKERS
+        and not screening.approval
+        and not screening.apply_attempts
+        and not screening.claimed_by_run
+    )
+
+
+def create_or_get(fields: dict) -> tuple[Screening, bool]:
+    """Create a screening, or return the one this posting already has.
+
+    Returns ``(record, created)``. ``created`` is False when the store already
+    held a record for this posting URL, in which case that record is returned
+    untouched, nothing is written, and the screening passed in is discarded.
+
+    The one exception is an unread placeholder — a dead-link or expired-listing
+    blocker nobody was ever asked about (``_is_unread_placeholder``) — which is
+    overwritten in place by the new screening, keeping the original record's id
+    and created_at. It is still ``created=False``: no record was added. This is
+    what stops a board that 404s for an afternoon from permanently suppressing
+    a live posting, which would be invisible because such records never queue.
+
+    One posting, one record — forever, whatever either record's verdict or
+    approval says. That is the point: an operator who rejected a posting had
+    the same posting re-screened and re-queued on every subsequent run,
+    because the operator's rejection is recorded as ``approval`` on one record
+    and nothing anywhere compared URLs. Enforced here, at the single write
+    path all three callers share (the agent's ``record_screening``, ``POST
+    /api/screenings``, and the historical importer), so no caller can route
+    around it.
+
+    The lookup and the append happen under one lock, which is what makes this
+    a claim rather than a request: two runs recording the same posting at the
+    same moment cannot both create a record.
+
+    Deleting a screening is the deliberate escape hatch — it drops the record
+    and with it the block, so a posting genuinely re-listed under the same URL
+    can be screened again.
+    """
     now = _now()
     screening = Screening(id=new_id(), created_at=now, updated_at=now)
     _apply_editable(screening, fields)
@@ -101,11 +185,39 @@ def create(fields: dict) -> Screening:
         screening.approval = "pending"
     elif screening.verdict == "passed" and _agent_config_load().mode == "semi":
         screening.approval = "pending"
+    key = posting_dedupe_key(screening.url)
     with locked(screenings_path()):
         screenings = load_all()
+        if key:
+            existing = _find_by_key(screenings, key)
+            if existing is not None:
+                if not _is_unread_placeholder(existing):
+                    return existing, False
+                # Supersede: the new screening takes the old record's identity
+                # so nothing referring to it by id is orphaned, and keeps the
+                # run that first recorded the posting when this call names
+                # none. Every other field on `existing` is a default —
+                # `_is_unread_placeholder` established that — so replacing the
+                # record wholesale loses nothing.
+                screening.id = existing.id
+                screening.created_at = existing.created_at
+                screening.run_id = screening.run_id or existing.run_id
+                screenings[screenings.index(existing)] = screening
+                _write_all(screenings)
+                return screening, False
         screenings.append(screening)
         _write_all(screenings)
-    return screening
+    return screening, True
+
+
+def create(fields: dict) -> Screening:
+    """Create a new screening record from client-supplied editable fields.
+
+    Delegates to ``create_or_get`` and discards the created flag: a caller
+    that needs to tell a fresh record from an existing one for this posting
+    must call that instead.
+    """
+    return create_or_get(fields)[0]
 
 
 def update(screening_id: str, patch: dict) -> Screening | None:
