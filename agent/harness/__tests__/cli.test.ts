@@ -185,12 +185,17 @@ describe('runCli tool result logging', () => {
   });
 
   it('emits the call id but NO content for a successful tool call', async () => {
-    const line = await toolResultLine({ content: 'a very large page snapshot', isError: false });
+    // A realistic success payload: a snapshot far over the error cap, so a line
+    // that carried it (whole, capped, or under any other key) is detectable.
+    const snapshot = `page snapshot ${'s'.repeat(9000)}`;
+    const line = await toolResultLine({ content: snapshot, isError: false });
 
     expect(line.isError).toBe(false);
     expect(line.toolCallId).toBe(A_TOOL_CALL.id);
     // Success content is deliberately dropped: snapshots run to tens of kB.
     expect('content' in line).toBe(false);
+    expect(Object.keys(line).sort()).toEqual(['isError', 'namespacedName', 'toolCallId', 'type']);
+    expect(JSON.stringify(line)).not.toContain('page snapshot');
   });
 
   it('truncates over-long error content and marks the truncation', async () => {
@@ -202,16 +207,77 @@ describe('runCli tool result logging', () => {
     expect(content).not.toContain('x'.repeat(2001));
   });
 
-  it.each([
-    ['missing', undefined],
-    ['empty', ''],
-    ['non-string', { message: 'oops' }],
-  ])('emits a valid line without throwing when error content is %s', async (_label, content) => {
-    const line = await toolResultLine({ content, isError: true });
+  it('emits a valid line with empty content when the error content is empty', async () => {
+    // Reachable: an MCP result whose content array is empty joins to ''.
+    const line = await toolResultLine({ content: '', isError: true });
 
     expect(line.isError).toBe(true);
     expect(line.content).toBe('');
     expect(line.toolCallId).toBe(A_TOOL_CALL.id);
+  });
+
+  it('logs a JSON-text error body verbatim, having no sections to strip', async () => {
+    // What a "non-string" server payload actually looks like by the time it
+    // reaches here: stringifyContent has already serialised it to a string.
+    const line = await toolResultLine({ content: '{"a":1}', isError: true });
+
+    expect(line.isError).toBe(true);
+    expect(line.content).toBe('{"a":1}');
+  });
+
+  it('logs only the error section, never the generated code, for a sectioned failure', async () => {
+    const content = [
+      '### Error',
+      'Error: locator.fill: Timeout 5000ms exceeded.',
+      '',
+      '### Ran Playwright code',
+      '```js',
+      "await page.getByRole('textbox', { name: 'Email' }).fill('canary@example.invalid');",
+      '```',
+      '',
+      '### Page',
+      '- Page URL: https://example.invalid/apply',
+      '',
+      '### Snapshot',
+      '- textbox "Email": canary@example.invalid',
+    ].join('\n');
+
+    const line = await toolResultLine({ content, isError: true });
+
+    expect(line.content).toBe('Error: locator.fill: Timeout 5000ms exceeded.');
+    expect(line.content).not.toContain('canary@example.invalid');
+    expect(JSON.stringify(line)).not.toContain('canary@example.invalid');
+    expect(JSON.stringify(line)).not.toContain('Ran Playwright code');
+  });
+
+  it('extracts the error section before truncating, not after', async () => {
+    const content = `### Error\nboom\n\n### Ran Playwright code\n${'c'.repeat(9000)}`;
+
+    const line = await toolResultLine({ content, isError: true });
+
+    expect(line.content).toBe('boom');
+    expect(line.content).not.toContain('[truncated]');
+  });
+
+  it('emits empty content for a sectioned failure with no error section', async () => {
+    const content = '### Result\ndone\n\n### Ran Playwright code\nawait page.goto(\'https://x.invalid\');';
+
+    const line = await toolResultLine({ content, isError: true });
+
+    expect(line.isError).toBe(true);
+    expect(line.content).toBe('');
+  });
+
+  it('does not split a surrogate pair when truncating', async () => {
+    const content = `${'a'.repeat(1999)}😀${'b'.repeat(1000)}`;
+
+    const line = await toolResultLine({ content, isError: true });
+
+    const truncated = line.content as string;
+    expect(truncated).toContain('[truncated]');
+    expect(truncated.startsWith('a'.repeat(1999))).toBe(true);
+    // The emoji's high surrogate must not survive on its own.
+    expect(truncated).not.toContain('\ud83d');
   });
 
   it('still resolves namespacedName from the tool-call id', async () => {
