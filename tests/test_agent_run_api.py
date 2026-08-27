@@ -37,6 +37,18 @@ def _make_url_error():
     return urllib.error.URLError("Connection refused")
 
 
+def _make_http_error(code: int):
+    """Return an HTTPError as raised when the supervisor answers with `code`.
+
+    HTTPError subclasses URLError, which is the whole point of the tests below:
+    a handler that only catches URLError swallows this and reports it as a
+    connection failure.
+    """
+    return urllib.error.HTTPError(
+        url="http://agent:9099/status", code=code, msg="Forbidden", hdrs=None, fp=None
+    )
+
+
 # ---------------------------------------------------------------------------
 # GET /api/agent/status
 # ---------------------------------------------------------------------------
@@ -272,3 +284,77 @@ class TestAgentStatusCancelFields:
         body = r.json()
         assert body["cancelling"] is False
         assert body["lastCancelled"] is False
+
+
+# ---------------------------------------------------------------------------
+# Upstream error statuses vs. an unreachable upstream
+# ---------------------------------------------------------------------------
+
+class TestSupervisorErrorsAreDistinguished:
+    """A supervisor that answers 403 is not a supervisor that is down.
+
+    urllib.error.HTTPError subclasses URLError, so catching only URLError
+    renders every upstream error status as "Agent service unreachable" — the
+    one message that sends an operator to look at the compose network when the
+    real cause is a token the two services disagree about.
+    """
+
+    @pytest.mark.parametrize("path,method", [("/api/agent/status", "get"), ("/api/agent/run", "post"), ("/api/agent/cancel", "post")])
+    def test_403_reports_token_mismatch_not_unreachable(self, client, data_dir, monkeypatch, path, method):
+        monkeypatch.setenv("AGENT_API_TOKEN", "app-side-token")
+        with patch("urllib.request.urlopen", side_effect=_make_http_error(403)):
+            r = getattr(client, method)(path)
+        assert r.status_code == 502
+        detail = r.json()["detail"]
+        assert "unreachable" not in detail
+        assert "AGENT_API_TOKEN" in detail
+        assert "403" in detail
+
+    def test_401_is_treated_the_same_as_403(self, client, data_dir, monkeypatch):
+        monkeypatch.setenv("AGENT_API_TOKEN", "app-side-token")
+        with patch("urllib.request.urlopen", side_effect=_make_http_error(401)):
+            r = client.get("/api/agent/status")
+        assert r.status_code == 502
+        assert "AGENT_API_TOKEN" in r.json()["detail"]
+
+    def test_other_http_error_names_its_status(self, client, data_dir, monkeypatch):
+        """A 500 from the supervisor is neither a token problem nor a network one."""
+        monkeypatch.setenv("AGENT_API_TOKEN", "app-side-token")
+        with patch("urllib.request.urlopen", side_effect=_make_http_error(500)):
+            r = client.post("/api/agent/run")
+        assert r.status_code == 502
+        detail = r.json()["detail"]
+        assert "500" in detail
+        assert "unreachable" not in detail
+
+    def test_unreachable_still_reports_unreachable(self, client, data_dir, monkeypatch):
+        """The URLError path is unchanged — this is the regression guard for it."""
+        monkeypatch.setenv("AGENT_API_TOKEN", "app-side-token")
+        with patch("urllib.request.urlopen", side_effect=_make_url_error()):
+            r = client.get("/api/agent/status")
+        assert r.status_code == 503
+        assert r.json()["detail"] == "Agent service unreachable"
+
+
+class TestMissingAgentApiToken:
+    """An empty AGENT_API_TOKEN on the app side is a permanent, silent 403.
+
+    Retrying cannot fix it and the network is fine, so it must not be reported
+    as either an outage or a mismatch — and it must not reach the supervisor.
+    """
+
+    @pytest.mark.parametrize("path,method", [("/api/agent/status", "get"), ("/api/agent/run", "post"), ("/api/agent/cancel", "post")])
+    def test_unset_token_fails_before_dialling(self, client, data_dir, monkeypatch, path, method):
+        monkeypatch.delenv("AGENT_API_TOKEN", raising=False)
+        with patch("urllib.request.urlopen") as urlopen:
+            r = getattr(client, method)(path)
+        assert r.status_code == 500
+        assert "AGENT_API_TOKEN" in r.json()["detail"]
+        urlopen.assert_not_called()
+
+    def test_whitespace_only_token_counts_as_unset(self, client, data_dir, monkeypatch):
+        monkeypatch.setenv("AGENT_API_TOKEN", "   ")
+        with patch("urllib.request.urlopen") as urlopen:
+            r = client.get("/api/agent/status")
+        assert r.status_code == 500
+        urlopen.assert_not_called()
