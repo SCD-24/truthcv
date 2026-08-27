@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import re
 
-from truth.store import data_dir
+from storage import data_dir
 from vocabulary.match import ABSENT, ALIAS_ONLY, EXACT, INTERLEAVED, match_keyword
 
 # Headings no ATS reviewer should warn about. The built-in set covers the

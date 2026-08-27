@@ -57,6 +57,8 @@ Use these exact names and ids when discussing the architecture.
 | Run Store | `run-store` | backend |
 | Screening Engine | `screening-engine` | backend |
 | Secret Store | `secret-store` | backend |
+| Services Layer | `services-layer` | backend |
+| Storage | `storage-leaf` | backend |
 | Tailor Engine | `tailor-engine` | backend |
 | Truth Data Volume | `truth-data-volume` | storage |
 | Truth Store | `truth-store` | backend |
@@ -66,5 +68,5 @@ Use these exact names and ids when discussing the architecture.
 <!-- generated:start cap:system-boundary -->
 ## System Boundary
 
-The declared system consists of 23 component(s) and 59 connection(s) — see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
+The declared system consists of 25 component(s) and 84 connection(s) — see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
 <!-- generated:end cap:system-boundary -->

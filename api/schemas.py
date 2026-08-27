@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 from agentconfig.store import AgentConfig
+from screening.company import validate_company_name
+from screening.model import validate_verdict
+from screening.posting import validate_posting_text
 from screening.role import normalize_role_title, validate_role_title
 from screening.url import validate_posting_url
 
@@ -968,13 +971,19 @@ class ScreeningCreate(_Camel):
     a screening cannot be created without one.
     """
 
-    company: str = ""
+    # validate_default=True so an entirely omitted `company` key is rejected
+    # the same as an explicit empty string.
+    company: str = Field(default="", validate_default=True)
     role: str = ""
     # validate_default=True so an entirely omitted `url` key is rejected the
     # same as an explicit empty string — the validator below must run either way.
     url: str = Field(default="", validate_default=True)
     screened_date: str = ""
-    verdict: str = ""
+    # validate_default=True so an entirely omitted `verdict` key is rejected
+    # the same as an explicit empty string, matching record_screening's
+    # requirement that a verdict is mandatory (there is no blocker on this
+    # route to exempt it).
+    verdict: str = Field(default="", validate_default=True)
     failing_criterion: str = ""
     reason: str = ""
     cooldown_expires: str = ""
@@ -991,6 +1000,28 @@ class ScreeningCreate(_Camel):
     @classmethod
     def _normalize_role(cls, v: str) -> str:
         return normalize_role_title(v)
+
+    @field_validator("company")
+    @classmethod
+    def _validate_company(cls, v: str) -> str:
+        return validate_company_name(v)
+
+    @field_validator("verdict")
+    @classmethod
+    def _validate_verdict(cls, v: str) -> str:
+        # Route-side blocker is never supplied here (screening_blocker is not
+        # part of this schema — see the plan's out-of-scope note), so a
+        # verdict is always required, matching the MCP tool's non-blocker path.
+        return validate_verdict(v, blocker="")
+
+    @model_validator(mode="after")
+    def _validate_posting_text_when_queueing(self) -> "ScreeningCreate":
+        # Only a validated "passed"/"deferred" verdict is about to queue for
+        # the operator's decision; a "rejected" verdict is exempt, matching
+        # record_screening's semantics (there is no blocker on this route).
+        if self.verdict in ("passed", "deferred"):
+            self.posting_text = validate_posting_text(self.posting_text)
+        return self
 
 
 class CooldownResult(_Camel):

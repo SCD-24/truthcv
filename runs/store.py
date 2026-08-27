@@ -18,8 +18,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from datafile import atomic_write_text, locked
-from truth.store import data_dir
+from storage import atomic_write_text, locked
+from storage import data_dir
 
 from .model import RunRecord, new_id, validate_status
 

@@ -15,7 +15,7 @@ import yaml
 
 from modelrouting import store as modelrouting
 from truth import store as truth_store
-from truth.store import data_dir
+from storage import data_dir
 
 
 def _state_path() -> Path:

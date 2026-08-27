@@ -99,6 +99,57 @@ def test_create_screening_without_role_still_succeeds(client):
     assert r.json()["role"] == ""
 
 
+def test_create_screening_with_blank_company_is_rejected(client):
+    r = client.post(
+        "/api/screenings",
+        json={"company": "   ", "url": "https://acme.example/jobs/9", "verdict": "rejected"},
+    )
+    assert r.status_code == 422, r.text
+
+
+def test_create_screening_with_placeholder_company_is_rejected(client):
+    r = client.post(
+        "/api/screenings",
+        json={"company": "Unknown", "url": "https://acme.example/jobs/9", "verdict": "rejected"},
+    )
+    assert r.status_code == 422, r.text
+
+
+def test_create_screening_without_verdict_is_rejected(client):
+    r = client.post(
+        "/api/screenings",
+        json={"company": "Acme", "url": "https://acme.example/jobs/9"},
+    )
+    assert r.status_code == 422, r.text
+
+
+def test_create_screening_with_unknown_verdict_is_rejected(client):
+    r = client.post(
+        "/api/screenings",
+        json={"company": "Acme", "url": "https://acme.example/jobs/9", "verdict": "maybe"},
+    )
+    assert r.status_code == 422, r.text
+
+
+def test_create_screening_rejected_verdict_with_empty_posting_text_still_accepted(client):
+    """The posting_text gate only applies to a queueing (passed/deferred)
+    verdict — a rejected verdict is exempt, matching record_screening."""
+    r = client.post(
+        "/api/screenings",
+        json={"company": "Acme", "url": "https://acme.example/jobs/9", "verdict": "rejected"},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["postingText"] == ""
+
+
+def test_create_screening_passed_verdict_without_posting_text_is_rejected(client):
+    r = client.post(
+        "/api/screenings",
+        json={"company": "Acme", "url": "https://acme.example/jobs/9", "verdict": "passed"},
+    )
+    assert r.status_code == 422, r.text
+
+
 def test_create_list_screening_carries_posting_text_and_posted_date(client):
     # Regression test: ScreeningModel omitted posting_text/posted_date, so
     # Pydantic's extra="ignore" silently dropped both from the response even
@@ -110,31 +161,41 @@ def test_create_list_screening_carries_posting_text_and_posted_date(client):
             "role": "Engineer",
             "url": "https://acme.example/jobs/1",
             "verdict": "passed",
-            "postingText": "We are hiring an Engineer.",
+            "postingText": "We are hiring an Engineer. " * 10,
             "postedDate": "2026-07-01",
         },
     )
     assert r.status_code == 201, r.text
     body = r.json()
-    assert body["postingText"] == "We are hiring an Engineer."
+    assert body["postingText"] == ("We are hiring an Engineer. " * 10).strip()
     assert body["postedDate"] == "2026-07-01"
     screening_id = body["id"]
 
     r = client.get("/api/screenings")
     assert r.status_code == 200
     listed = next(s for s in r.json() if s["id"] == screening_id)
-    assert listed["postingText"] == "We are hiring an Engineer."
+    assert listed["postingText"] == ("We are hiring an Engineer. " * 10).strip()
     assert listed["postedDate"] == "2026-07-01"
 
 
 def test_list_screenings_most_recent_first(client):
     first = client.post(
         "/api/screenings",
-        json={"company": "First", "url": "https://acme.example/jobs/1", "verdict": "passed"},
+        json={
+            "company": "First",
+            "url": "https://acme.example/jobs/1",
+            "verdict": "passed",
+            "postingText": "We are hiring for this role at First. " * 6,
+        },
     ).json()
     second = client.post(
         "/api/screenings",
-        json={"company": "Second", "url": "https://acme.example/jobs/2", "verdict": "passed"},
+        json={
+            "company": "Second",
+            "url": "https://acme.example/jobs/2",
+            "verdict": "passed",
+            "postingText": "We are hiring for this role at Second. " * 6,
+        },
     ).json()
 
     listed = client.get("/api/screenings").json()
@@ -151,7 +212,12 @@ def test_delete_unknown_screening_returns_404(client):
 def test_delete_already_deleted_screening_returns_404(client):
     screening_id = client.post(
         "/api/screenings",
-        json={"company": "Acme", "url": "https://acme.example/jobs/1", "verdict": "passed"},
+        json={
+            "company": "Acme",
+            "url": "https://acme.example/jobs/1",
+            "verdict": "passed",
+            "postingText": "We are hiring an Engineer at Acme. " * 6,
+        },
     ).json()["id"]
     assert client.delete(f"/api/screenings/{screening_id}").status_code == 204
     r = client.delete(f"/api/screenings/{screening_id}")

@@ -48,7 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import applications.store as app_store  # noqa: E402
 from applications.model import flatten_notes  # noqa: E402
 import screening.store as screening_store  # noqa: E402
-from truth.store import data_dir  # noqa: E402
+from storage import data_dir  # noqa: E402
 
 MANIFEST_NAME = "jobs_migration_manifest.json"
 

@@ -8,7 +8,7 @@ from pathlib import Path
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
-from .store import data_dir
+from storage import data_dir
 
 
 class DocumentExtractError(ValueError):

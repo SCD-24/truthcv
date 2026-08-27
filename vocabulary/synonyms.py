@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 
-from truth.store import data_dir
+from storage import data_dir
 
 # Per-data_dir cache of the parsed synonym groups; initialised lazily by
 # synonym_groups() so import order never touches the filesystem. A test may

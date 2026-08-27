@@ -42,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from applications.store import applications_path
 from companyresearch import store as findings_store
 from companyresearch.model import UNCITED
-from datafile import atomic_write_text, locked
+from storage import atomic_write_text, locked
 from screening.company import validate_company_name
 
 CLAIM_ENTITY = "employment_entity"

@@ -1,9 +1,9 @@
-<!-- generated:start edge:tailor-engine→truth-data-volume -->
-# Interaction: Tailor Engine → Truth Data Volume
+<!-- generated:start edge:services-layer→truth-store -->
+# Interaction: Services Layer → Truth Store
 
-- **Participants:** `tailor-engine` → `truth-data-volume`
-- **Transport:** `file I/O`
-<!-- generated:end edge:tailor-engine→truth-data-volume -->
+- **Participants:** `services-layer` → `truth-store`
+- **Transport:** `in-process`
+<!-- generated:end edge:services-layer→truth-store -->
 
 ## Contract
 

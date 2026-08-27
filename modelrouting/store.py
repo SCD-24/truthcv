@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from truth.store import data_dir
+from storage import atomic_write_text, data_dir
 
 TASK_NAMES = ("truth_extract", "keywords", "tailor", "infer", "cover_letter")
 
@@ -83,9 +83,7 @@ def load() -> Routing:
 
 def save(r: Routing) -> Routing:
     p = routing_path()
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(r.to_dict(), indent=2), encoding="utf-8")
-    tmp.replace(p)
+    atomic_write_text(p, json.dumps(r.to_dict(), indent=2))
     return r
 
 

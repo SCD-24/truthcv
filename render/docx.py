@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from truth.store import data_dir
+from storage import data_dir
 
 from .pdf import RenderUnavailable
 

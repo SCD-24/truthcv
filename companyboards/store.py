@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from truth.store import data_dir
+from storage import atomic_write_text, data_dir
 from screening.company import company_identity_key
 import json
 
@@ -125,19 +125,10 @@ def _pick_richer(a: CompanyBoard, b: CompanyBoard) -> CompanyBoard:
 
 
 def save(boards: dict[str, CompanyBoard]) -> None:
-    """Atomically save boards to storage using tmp + replace."""
+    """Atomically save boards to storage."""
     path = board_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-
     data = {name: board.to_dict() for name, board in boards.items()}
-    tmp_path = path.parent / (path.name + ".tmp")
-    try:
-        tmp_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp_path.replace(path)
-    except Exception:
-        if tmp_path.exists():
-            tmp_path.unlink()
-        raise
+    atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def _normalize_company(name: str) -> str:

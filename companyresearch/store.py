@@ -13,9 +13,9 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from datafile import atomic_write_text, locked
+from storage import atomic_write_text, locked
 from screening.company import company_identity_key
-from truth.store import data_dir
+from storage import data_dir
 
 from .model import (
     RESOLUTION_VALUES,

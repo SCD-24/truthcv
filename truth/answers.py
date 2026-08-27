@@ -15,7 +15,7 @@ from pathlib import Path
 
 import yaml
 
-from .store import data_dir
+from storage import atomic_write_text, data_dir
 
 
 @dataclass
@@ -133,12 +133,9 @@ def load() -> Answers:
 def save(answers: Answers) -> Answers:
     """Atomically write the canonical ATS answers to answers.yaml. Returns it."""
     p = answers_path()
-    tmp = p.with_suffix(".yaml.tmp")
-    tmp.write_text(
-        yaml.safe_dump(answers.to_dict(), sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
+    atomic_write_text(
+        p, yaml.safe_dump(answers.to_dict(), sort_keys=False, allow_unicode=True)
     )
-    tmp.replace(p)
     return answers
 
 

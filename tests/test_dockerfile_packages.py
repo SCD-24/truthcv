@@ -15,9 +15,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DOCKERFILE = REPO_ROOT / "Dockerfile"
 
-# datafile.py is a single-module helper, not a package (no __init__.py), but
-# it is imported like one and copied explicitly in the Dockerfile.
-EXTRA_LOCAL_MODULES = {"datafile"}
+EXTRA_LOCAL_MODULES: set[str] = set()
 
 
 def _local_packages() -> set[str]:

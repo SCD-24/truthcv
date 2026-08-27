@@ -1663,6 +1663,22 @@
       "id": "browser-service",
       "name": "Browser Service",
       "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "id": "storage-leaf",
+      "name": "Storage",
+      "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "id": "services-layer",
+      "name": "Services Layer",
+      "type": "backend"
     }
   ],
   "connections": [
@@ -1847,16 +1863,6 @@
       "to": "agent-config"
     },
     {
-      "from": "guardrail-validator",
-      "protocol": "file I/O",
-      "to": "truth-data-volume"
-    },
-    {
-      "from": "tailor-engine",
-      "protocol": "file I/O",
-      "to": "truth-data-volume"
-    },
-    {
       "from": "api",
       "protocol": "in-process",
       "to": "screening-engine"
@@ -1960,6 +1966,141 @@
       "from": "application-agent",
       "protocol": "HTTPS",
       "to": "llm-provider-service"
+    },
+    {
+      "from": "storage-leaf",
+      "protocol": "file I/O",
+      "to": "truth-data-volume"
+    },
+    {
+      "from": "truth-store",
+      "protocol": "in-process",
+      "to": "storage-leaf"
+    },
+    {
+      "from": "guardrail-validator",
+      "protocol": "in-process",
+      "to": "storage-leaf"
+    },
+    {
+      "from": "renderer",
+      "protocol": "in-process",
+      "to": "storage-leaf"
+    },
+    {
+      "from": "tailor-engine",
+      "protocol": "in-process",
+      "to": "storage-leaf"
+    },
+    {
+      "from": "application-tracker",
+      "protocol": "in-process",
+      "to": "storage-leaf"
+    },
+    {
+      "from": "screening-engine",
+      "protocol": "in-process",
+      "to": "storage-leaf"
+    },
+    {
+      "from": "agent-config",
+      "protocol": "in-process",
+      "to": "storage-leaf"
+    },
+    {
+      "from": "secret-store",
+      "protocol": "in-process",
+      "to": "storage-leaf"
+    },
+    {
+      "from": "cover-letter-engine",
+      "protocol": "in-process",
+      "to": "storage-leaf"
+    },
+    {
+      "from": "run-store",
+      "protocol": "in-process",
+      "to": "storage-leaf"
+    },
+    {
+      "from": "company-research",
+      "protocol": "in-process",
+      "to": "storage-leaf"
+    },
+    {
+      "from": "keyword-vocabulary",
+      "protocol": "in-process",
+      "to": "storage-leaf"
+    },
+    {
+      "from": "onboarding-store",
+      "protocol": "in-process",
+      "to": "storage-leaf"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "truth-store"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "tailor-engine"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "guardrail-validator"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "renderer"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "cover-letter-engine"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "application-tracker"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "screening-engine"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "agent-config"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "llm-provider-layer"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "company-research"
+    },
+    {
+      "from": "api",
+      "protocol": "in-process",
+      "to": "services-layer"
+    },
+    {
+      "from": "api",
+      "protocol": "in-process",
+      "to": "storage-leaf"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "storage-leaf"
     }
   ],
   "definitions": [
@@ -2068,7 +2209,9 @@
         "agent-config",
         "company-research",
         "run-store",
-        "keyword-vocabulary"
+        "keyword-vocabulary",
+        "storage-leaf",
+        "services-layer"
       ],
       "name": "TruthCV Container (single Docker image)",
       "w": 1861.8301559792023,
@@ -4612,6 +4755,14 @@
     "secret-store": {
       "x": 1858,
       "y": 442
+    },
+    "services-layer": {
+      "x": 460,
+      "y": 200
+    },
+    "storage-leaf": {
+      "x": 200,
+      "y": 200
     },
     "tailor-engine": {
       "x": 26.670876085240735,

@@ -19,17 +19,19 @@ from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 import tailor as tailor_engine
-from guardrail import Scope, validate
 from providers import ProviderError, get_provider
-from render import lint, render_docx, render_html, render_pdf, verify_pdf
+from render import render_docx, render_pdf
 from render.pdf import RenderUnavailable
-from render.verify import default_max_pages
 from truth import load, persist_source_hash, save
 from truth.answers import Answers
 from truth.answers import load as load_answers
 from truth.answers import save as save_answers
 from truth.document import extract_document_text, extension_for
-from truth.extract import build_truth_from_text, write_confirmed
+from truth.extract import build_truth_from_text
+from services.inferences import confirm_inferences as confirm_inferences_service
+import services.screenings as screenings_service
+import services.agent_config as agent_config_service
+import services.applications as applications_service
 from truth.model import Truth
 from truth.pdf import (
     DocumentExtractError,
@@ -42,6 +44,14 @@ from truth.pdf import (
 import applications as app_store
 import modelrouting
 import secretstore
+from services.render_cv import (
+    DraftMissing,
+    _claim_id,
+    _contact_line,
+    _require_application,
+    render_cv,
+)
+from services.cover_letter import generate_cover_letter
 from onboarding import store as onboarding_store
 from agentconfig import store as agent_config_store
 from connections import catalog
@@ -235,7 +245,7 @@ def create_screening(body: ScreeningCreate) -> ScreeningModel:
     detail so the caller can go and look at it. Delete that record to screen
     the posting again.
     """
-    screening, created = screening_store.create_or_get(
+    screening, created = screenings_service.create_screening(
         body.model_dump(by_alias=False)
     )
     if not created:
@@ -305,11 +315,10 @@ def mark_screening_applied(screening_id: str) -> ApplicationModel:
     # two tabs, or one slow response and a second click, was enough. Ordering
     # it this way also means a crash between the two writes leaves a retired
     # screening with no row (visible, fixable) rather than a duplicate row.
-    screening = screening_store.claim_for_apply(screening_id)
-    if screening is None:
-        refused = screening_store.get(screening_id)
-        reason = screening_store._apply_refusal(refused) if refused else "already_applied"
-        if reason == "contradictory_research":
+    result = screenings_service.claim_screening_for_apply(screening_id)
+    if result.refused:
+        if result.reason == "contradictory_research":
+            refused = result.refused_screening
             raise HTTPException(
                 status_code=409,
                 detail=(
@@ -320,6 +329,7 @@ def mark_screening_applied(screening_id: str) -> ApplicationModel:
         raise HTTPException(
             status_code=409, detail="This screening has already been applied to."
         )
+    screening = result.screening
 
     app = app_store.create(
         {
@@ -710,7 +720,7 @@ def tailor_route(body: TailorRequest) -> TailorResult:
             status_code=502,
             detail=f"The language model call failed: {type(e).__name__}: {e}",
         ) from e
-    from truth.store import data_dir
+    from storage import data_dir
 
     (data_dir() / "posting.txt").write_text(body.posting, encoding="utf-8")
     return TailorResult.model_validate(
@@ -720,201 +730,47 @@ def tailor_route(body: TailorRequest) -> TailorResult:
 
 @router.post("/confirm-inferences", status_code=204)
 def confirm_inferences(body: ConfirmInferencesRequest) -> None:
-    # Prefer the user-edited claims: the Confirm step lets the user reword an
-    # inferred claim (and re-target its experience) before it becomes a fact, so
-    # what they typed is what we persist. Fall back to the deprecated
-    # approved_ids path, which writes each id's original draft claim.
-    if body.approved:
-        # A re-targeted experienceId the client made up (not in the draft) is
-        # dropped to "" so write_confirmed attaches it to a safe default rather
-        # than trusting an id that points nowhere.
-        known = tailor_engine.valid_experience_ids()
-        claims = [
-            (a.experience_id if a.experience_id in known else "", a.claim)
-            for a in body.approved
-        ]
-    else:
-        claims = tailor_engine.claims_for_ids(body.approved_ids)
-    write_confirmed(claims)
-
-
-def _claim_id(scope_id: str, text: str) -> str:
-    """Deterministic id for a blocked claim so the UI can round-trip decisions."""
-    import hashlib
-
-    return hashlib.sha256(f"{scope_id}\n{text}".encode("utf-8")).hexdigest()[:16]
-
-
-def _contact_line(profile) -> str:
-    """Compose the header's single contact line from identity fields.
-
-    Identity is guardrail-exempt, so this is presentation only: email, phone,
-    location and any link urls, joined with a middot, skipping blanks.
-    """
-    parts = [profile.email, profile.phone, profile.location]
-    parts += [link.url for link in profile.links if link.url]
-    return " · ".join(p for p in parts if p)
-
-
-def _render_scopes(draft, truth) -> list[Scope]:
-    """One guardrail scope per draft block, keyed by its truth source id."""
-    exp_by_id = {e.id: e for e in truth.experiences}
-    edu_by_id = {e.id: e for e in truth.education}
-    scopes: list[Scope] = []
-    for de in draft.experiences:
-        te = exp_by_id.get(de.source_id)
-        allowed = (
-            [te.role, te.company, te.start, te.end] + [b.value for b in te.bullets]
-            if te else []
-        )
-        scopes.append(
-            Scope(id=de.source_id, texts=[de.role, de.company, de.dates, *de.bullets], allowed=allowed)
-        )
-    for de in draft.education:
-        te = edu_by_id.get(de.source_id)
-        allowed = [te.degree, te.school, te.start, te.end] if te else []
-        scopes.append(Scope(id=de.source_id, texts=[de.degree, de.school, de.dates], allowed=allowed))
-    scopes.append(Scope(id="skills", texts=list(draft.skills), allowed=[s.value for s in truth.skills]))
-    # The profile summary is a claim: validate it (in its own scope) against
-    # every truth fact it may legitimately draw on — role/company/dates/bullets
-    # across all experiences and education. Identity fields (name/contact/links)
-    # are exempt and never enter a scope. Skills flow in via global_values.
-    summary = truth.profile.summary.strip()
-    if summary:
-        allowed_summary: list[str] = []
-        for te in truth.experiences:
-            allowed_summary += [te.role, te.company, te.start, te.end]
-            allowed_summary += [b.value for b in te.bullets]
-        for te in truth.education:
-            allowed_summary += [te.degree, te.school, te.start, te.end]
-        scopes.append(Scope(id="summary", texts=[summary], allowed=allowed_summary))
-    return scopes
-
-
-def _apply_approvals(scopes: list[Scope], approved: set[str], denied: set[str]) -> None:
-    """Render-scoped only: approve => allow the claim's text here (NO truth
-    write); deny => remove it from the draft texts so it can't ship."""
-    for scope in scopes:
-        kept: list[str] = []
-        for text in scope.texts:
-            cid = _claim_id(scope.id, text)
-            if cid in denied:
-                continue  # dropped from this render entirely
-            if cid in approved:
-                scope.allowed.append(text)  # traceable for THIS render only
-            kept.append(text)
-        scope.texts = kept
-
-
-def _filter_denied_draft(draft, denied: set[str]):
-    """Rebuild the draft without denied claims so the rendered CV omits them."""
-    from copy import deepcopy
-
-    out = deepcopy(draft)
-    for de in out.experiences:
-        de.bullets = [b for b in de.bullets if _claim_id(de.source_id, b) not in denied]
-    out.skills = [s for s in out.skills if _claim_id("skills", s) not in denied]
-    return out
-
-
-def _require_application(app_id: str | None) -> str | None:
-    """Validate an optional application id at an entry point.
-
-    Returns None unchanged for a falsy id (the unattached-preview case), and
-    the id unchanged once confirmed to exist. Raises 404 for a non-empty id
-    that does not resolve to a real application, so a stale/typo'd id fails
-    loudly instead of silently falling back to a shared scratch preview.
-    """
-    if not app_id:
-        return None
-    if app_store.get(app_id) is None:
-        raise HTTPException(status_code=404, detail="Application not found.")
-    return app_id
+    confirm_inferences_service(body.approved, body.approved_ids)
 
 
 @router.post("/render", response_model=RenderResult)
 def render_route(body: RenderRequest | None = None) -> RenderResult:
-    _require_application(body.application_id if body else None)
-    draft = tailor_engine.load_draft()
-    if draft is None:
-        raise HTTPException(status_code=400, detail="Tailor a posting before rendering.")
-
-    truth = load()
-    skill_values = [s.value for s in truth.skills]
-
+    # Thin marshalling: pull the request-derived arguments, run the framework-
+    # free render workflow, and translate its outcome (or its DraftMissing) into
+    # the HTTP response. All business logic — the guardrail, scope-building and
+    # approval-filtering — lives in services/render_cv.py.
+    app_id = body.application_id if body else None
     approved: set[str] = set()
     denied: set[str] = set()
     if body and body.approvals:
         approved = set(body.approvals.approved_claim_ids)
         denied = set(body.approvals.denied_claim_ids)
 
-    scopes = _render_scopes(draft, truth)
-    _apply_approvals(scopes, approved, denied)
+    try:
+        outcome = render_cv(application_id=app_id, approved=approved, denied=denied)
+    except DraftMissing:
+        raise HTTPException(
+            status_code=400, detail="Tailor a posting before rendering."
+        ) from None
 
-    # Guardrail FIRST — nothing renders unless it passes.
-    result = validate(scopes, global_values=skill_values)
-    if not result.ok:
-        # Return whole flagged claims (bullets), each with a stable id, so the
-        # download step can offer per-claim approve/deny instead of dead-ending.
+    if outcome.blocked:
         blocked = [
             BlockedClaimModel(
-                claim_id=_claim_id(c.scope_id, c.text),
-                experience_id=c.scope_id,
+                claim_id=c.claim_id,
+                experience_id=c.experience_id,
                 text=c.text,
                 tokens=c.tokens,
             )
-            for c in result.blocked_claims
+            for c in outcome.blocked_claims
         ]
-        return RenderResult(blocked=True, unverifiable=result.unverifiable, blocked_claims=blocked)
-
-    draft = _filter_denied_draft(draft, denied)
-    html = render_html(
-        draft,
-        name=truth.profile.name or "Your Name",
-        contact=_contact_line(truth.profile),
-        summary=truth.profile.summary,
-        email=truth.profile.email,
-        phone=truth.profile.phone,
-        location=truth.profile.location,
-        links=[{"label": link.label, "url": link.url} for link in truth.profile.links],
-    )
-    ats = [AtsWarning(**w) for w in lint(html, draft.keywords, draft.keyword_aliases)]
-
-    # Attach to an application when asked: render to that application's own files
-    # (retained + traceable) and persist the CV document; otherwise use the
-    # shared scratch filenames (today's preview behavior). The id was already
-    # validated at entry, so a truthy app_id here is known to exist.
-    app_id = body.application_id if body else None
-    if app_id:
-        pdf_name, docx_name = app_store.cv_filenames(app_id)
-    else:
-        pdf_name, docx_name = "cv.pdf", "cv.docx"
-
-    # When attaching to an application, record the CV FIRST so the link always
-    # persists; then render best-effort.
-    if app_id:
-        app_store.save_cv_document(app_id, html)
-
-    pdf_url = docx_url = None
-    try:
-        pdf_path = render_pdf(html, pdf_name)
-        pdf_url = f"/api/download/{pdf_path.name}"
-        try:
-            ats.extend(AtsWarning(**w) for w in verify_pdf(pdf_path, html, default_max_pages()))
-        except Exception:  # noqa: BLE001 — verification must never cost the render
-            pass
-    except RenderUnavailable:
-        pass
-    try:
-        docx_path = render_docx(html, docx_name)
-        docx_url = f"/api/download/{docx_path.name}"
-    except RenderUnavailable:
-        pass
+        return RenderResult(
+            blocked=True, unverifiable=outcome.unverifiable, blocked_claims=blocked
+        )
 
     # A pure wizard preview (no application) has no saved document to fall back
     # on, so an unavailable backend is still a hard error there. An attached
     # render keeps its saved link even when nothing could be produced.
-    if pdf_url is None and docx_url is None and not app_id:
+    if outcome.pdf_url is None and outcome.docx_url is None and not app_id:
         raise HTTPException(
             status_code=500,
             detail="Rendering backend unavailable (WeasyPrint/pandoc not installed).",
@@ -922,13 +778,11 @@ def render_route(body: RenderRequest | None = None) -> RenderResult:
 
     return RenderResult(
         blocked=False,
-        ats_warnings=ats,
-        pdf_url=pdf_url,
-        docx_url=docx_url,
-        html=html,
-        # Attached save that produced no file: the CV source is recorded but its
-        # links are null, so tell the UI rather than silently show no download.
-        render_unavailable=bool(app_id) and pdf_url is None and docx_url is None,
+        ats_warnings=[AtsWarning(**w) for w in outcome.ats_warnings],
+        pdf_url=outcome.pdf_url,
+        docx_url=outcome.docx_url,
+        html=outcome.html,
+        render_unavailable=outcome.render_unavailable,
     )
 
 
@@ -940,7 +794,7 @@ def _download_url(name: str) -> str | None:
     """
     if not name:
         return None
-    from truth.store import data_dir
+    from storage import data_dir
 
     return f"/api/download/{name}" if (data_dir() / name).exists() else None
 
@@ -977,93 +831,8 @@ def _application_model(app) -> ApplicationModel:
 @router.get("/applications", response_model=list[ApplicationModel])
 def list_applications() -> list[ApplicationModel]:
     """Every tracked job application, most recent first."""
-    apps = sorted(app_store.load_all(), key=lambda a: a.created_at, reverse=True)
+    apps = applications_service.list_applications()
     return [_application_model(a) for a in apps]
-
-
-_EXPORT_COLUMNS = (
-    "company",
-    "application_date",
-    "website",
-    "application_url",
-    "submitted",
-    "submission_type",
-    "reached_out",
-    "to_who",
-    "response_received",
-    "method",
-    "notes",
-    "posting",
-    "documents",
-)
-
-
-def _app_document_files(app) -> list[str]:
-    """Names of this application's rendered files that exist on the volume."""
-    from truth.store import data_dir
-
-    names = [*app_store.cv_filenames(app.id), *app_store.cover_letter_filenames(app.id)]
-    return [n for n in names if (data_dir() / n).exists()]
-
-
-def _app_csv_row(app) -> list[str]:
-    """One CSV row: editable fields plus a summary of attached document files."""
-    docs = "; ".join(_app_document_files(app))
-    values = {f: getattr(app, f) for f in app.EDITABLE}
-    values["documents"] = docs
-    return [str(values.get(col, "")) for col in _EXPORT_COLUMNS]
-
-
-def _safe_folder(name: str, fallback: str, used: set[str]) -> str:
-    """A filesystem-safe, unique folder name for a company (fallback if empty)."""
-    import re
-
-    base = re.sub(r'[<>:"/\\|?*]+', "_", (name or "").strip()) or fallback
-    candidate, n = base, 2
-    while candidate in used:
-        candidate, n = f"{base} ({n})", n + 1
-    used.add(candidate)
-    return candidate
-
-
-def _write_csv(zf, apps) -> None:
-    """Write applications.csv (header + one row per application) into the zip."""
-    import csv
-    import io
-
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(_EXPORT_COLUMNS)
-    for app in apps:
-        writer.writerow(_app_csv_row(app))
-    zf.writestr("applications.csv", buffer.getvalue())
-
-
-def _write_documents(zf, apps) -> None:
-    """Add each application's existing files under a per-company folder."""
-    from truth.store import data_dir
-
-    used: set[str] = set()
-    for app in apps:
-        files = _app_document_files(app)
-        if not files:
-            continue
-        folder = _safe_folder(app.company, app.id, used)
-        for name in files:
-            zf.write(str(data_dir() / name), arcname=f"{folder}/{name}")
-
-
-def _build_export_zip(apps):
-    """Build the export zip in memory and return a rewound BytesIO stream."""
-    import io
-    import zipfile
-
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        _write_csv(zf, apps)
-        _write_documents(zf, apps)
-    buffer.seek(0)
-    return buffer
 
 
 @router.get("/applications/export")
@@ -1074,8 +843,8 @@ def export_applications() -> StreamingResponse:
     tracker: the table as `applications.csv`, and each application's rendered
     files grouped under a folder named for its company.
     """
-    apps = sorted(app_store.load_all(), key=lambda a: a.created_at, reverse=True)
-    archive = _build_export_zip(apps)
+    apps = applications_service.list_applications()
+    archive = applications_service.build_export_zip(apps)
     headers = {"Content-Disposition": 'attachment; filename="applications.zip"'}
     return StreamingResponse(archive, media_type="application/zip", headers=headers)
 
@@ -1083,7 +852,7 @@ def export_applications() -> StreamingResponse:
 @router.post("/applications", response_model=ApplicationModel, status_code=201)
 def create_application(body: ApplicationCreate) -> ApplicationModel:
     """Create a new application record from client-supplied fields."""
-    app = app_store.create(body.model_dump(by_alias=False))
+    app = applications_service.create_application_record(body.model_dump(by_alias=False))
     return _application_model(app)
 
 
@@ -1091,7 +860,7 @@ def create_application(body: ApplicationCreate) -> ApplicationModel:
 def update_application(app_id: str, body: ApplicationUpdate) -> ApplicationModel:
     """Patch an application's editable fields (None fields are left unchanged)."""
     patch = body.model_dump(by_alias=False, exclude_none=True)
-    app = app_store.update(app_id, patch)
+    app = applications_service.update_application_record(app_id, patch)
     if app is None:
         raise HTTPException(status_code=404, detail="Application not found.")
     return _application_model(app)
@@ -1438,31 +1207,8 @@ def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:
     beside a "saved" indicator. They are re-applied explicitly below, still
     only when the client actually sent the key.
     """
-    from agentconfig import boards
-
     sent = body.model_dump(exclude_unset=True, by_alias=False)
-    if "job_boards" in sent and sent["job_boards"] is not None:
-        normalised = []
-        for item in sent["job_boards"]:
-            source = item.get("source", "")
-            signin_url = item.get("signin_url", "")
-            if boards.is_default_source(source) and not signin_url.strip():
-                continue
-            normalised.append({"source": source, "signin_url": signin_url})
-        sent["job_boards"] = normalised
-    merged = agent_config_store.load().to_dict()
-    merged.update({k: v for k, v in sent.items() if v is not None})
-    for nullable in (
-        "cooldown_days",
-        "cooldown_days_same_role",
-        "cooldown_days_same_company",
-        "max_applications_per_run",
-        "max_posting_age_days",
-    ):
-        if nullable in sent and sent[nullable] is None:
-            merged[nullable] = None
-    cfg = agent_config_store.AgentConfig.from_dict(merged)
-    saved = agent_config_store.save(cfg)
+    saved = agent_config_service.update_agent_config(sent)
     data = saved.to_dict()
     data["job_boards"] = _resolved_job_boards(saved)
     return AgentConfigModel.model_validate(data)
@@ -1868,87 +1614,33 @@ def delete_browser_session() -> BrowserSessionClosed:
     )
 
 
-def _letter_approvals(
-    approvals: CoverLetterApprovals | None,
-    posting: str,
-) -> tuple[set[str], set[str], list[dict] | None]:
-    """Resolve blocked-claim ids to claim texts against the CACHED letter draft.
-
-    Mirrors /api/render: ids are recomputed from the persisted paragraphs (same
-    LETTER_SCOPE_ID + _claim_id hash), so a decision the UI made on a blocked
-    attempt re-validates the exact letter the user saw. Returns
-    (approved_texts, denied_texts, paragraphs); paragraphs is None on a first
-    generate so build_letter produces and caches a fresh letter. The cached
-    draft is looked up by ``posting`` so a draft generated for a different
-    posting is never reused for this approve/deny re-check.
-    """
-    if not approvals or not (approvals.approved_claim_ids or approvals.denied_claim_ids):
-        return set(), set(), None
-
-    from coverletter import LETTER_SCOPE_ID, load_letter_draft
-
-    paragraphs = load_letter_draft(posting)
-    if paragraphs is None:
-        return set(), set(), None
-
-    approved_ids = set(approvals.approved_claim_ids)
-    denied_ids = set(approvals.denied_claim_ids)
-    approved: set[str] = set()
-    denied: set[str] = set()
-    for para in paragraphs:
-        for claim in para.get("claims", []):
-            cid = _claim_id(LETTER_SCOPE_ID, claim)
-            if cid in approved_ids:
-                approved.add(claim)
-            if cid in denied_ids:
-                denied.add(claim)
-    return approved, denied, paragraphs
-
-
 @router.post("/cover-letter", response_model=CoverLetterResult)
 def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
+    # Thin marshalling: validate the id (404 on miss), run the framework-free
+    # cover-letter workflow, and translate its outcome — or its DraftMissing, or
+    # an LLM failure — into the HTTP response. All business logic (posting
+    # resolution, render-scoped approvals, the guardrail and best-effort render)
+    # lives in services/cover_letter.py.
     _require_application(body.application_id)
-    from truth.store import data_dir
 
-    # The caller supplies the posting this letter is about; data/posting.txt
-    # (the last posting written by /api/tailor) is only the fallback for
-    # callers — like the wizard's Letter tab — that do not send one. This
-    # route never writes posting.txt itself.
-    posting = (body.posting or "").strip()
-    if not posting:
-        posting_file = data_dir() / "posting.txt"
-        if posting_file.exists():
-            posting = posting_file.read_text(encoding="utf-8").strip()
-    if not posting:
+    approved_ids = set(body.approvals.approved_claim_ids) if body.approvals else set()
+    denied_ids = set(body.approvals.denied_claim_ids) if body.approvals else set()
+    app_id = body.application_id if body.application_id else None
+
+    try:
+        outcome = generate_cover_letter(
+            application_id=app_id,
+            posting=body.posting,
+            tone=body.tone,
+            length=body.length,
+            provider=get_provider("cover_letter"),
+            approved_ids=approved_ids,
+            denied_ids=denied_ids,
+        )
+    except DraftMissing:
         raise HTTPException(
             status_code=400, detail="Tailor a posting before generating a cover letter."
-        )
-
-    from coverletter import build_letter, load_letter_draft
-    from render.cover_letter import render_letter_html
-    from truth.answers import load as load_answers
-
-    approved_texts, denied_texts, paragraphs = _letter_approvals(body.approvals, posting)
-
-    # The profile answers (Agents page) are handed to the writer as allowed
-    # claim sources for this generation only, never written to truth.
-    answers = load_answers()
-    try:
-        letter = build_letter(
-            posting,
-            body.tone,
-            body.length,
-            load(),
-            get_provider("cover_letter"),
-            approved_texts=approved_texts,
-            denied_texts=denied_texts,
-            paragraphs=paragraphs,
-            answers=answers,
-            # The operator's name from the Agents page signs the letter. Their
-            # truth-store profile name is the fallback, so a letter is never
-            # left unsigned just because that field has not been filled in.
-            sign_off_name=answers.name or load().profile.name,
-        )
+        ) from None
     except ProviderError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001
@@ -1957,65 +1649,35 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
             detail=f"The language model call failed: {type(e).__name__}: {e}",
         ) from e
 
-    if letter["blocked"]:
+    if outcome.blocked:
         blocked_claims = [
             BlockedClaimModel(
-                claim_id=_claim_id(c.scope_id, c.text),
-                experience_id=c.scope_id,
+                claim_id=c.claim_id,
+                experience_id=c.experience_id,
                 text=c.text,
                 tokens=c.tokens,
             )
-            for c in letter["blocked_claims"]
+            for c in outcome.blocked_claims
         ]
         return CoverLetterResult(
             blocked=True,
-            unverifiable=letter["unverifiable"],
+            unverifiable=outcome.unverifiable,
             blocked_claims=blocked_claims,
         )
 
-    _profile = load().profile
-    html = render_letter_html(
-        letter["text"],
-        name=_profile.name or "Your Name",
-        contact=_contact_line(_profile),
-    )
-
-    # Attach to an application when asked (per-application files + persisted
-    # document); otherwise render to the shared scratch filenames. The id was
-    # already validated at entry, so a truthy app_id here is known to exist.
-    app_id = body.application_id if body.application_id else None
-    if app_id:
-        pdf_name, docx_name = app_store.cover_letter_filenames(app_id)
-    else:
-        pdf_name, docx_name = "cover_letter.pdf", "cover_letter.docx"
-
-    # Record the cover letter FIRST when attaching, so its link always
-    # persists; then render best-effort.
-    if app_id:
-        app_store.save_cover_letter_document(app_id, letter["text"])
-
-    pdf_url = docx_url = None
-    try:
-        pdf_url = f"/api/download/{render_pdf(html, pdf_name).name}"
-    except RenderUnavailable:
-        pass
-    try:
-        docx_url = f"/api/download/{render_docx(html, docx_name).name}"
-    except RenderUnavailable:
-        pass
     # Only a pure preview (no application) hard-errors on an unavailable backend;
     # an attached save keeps its recorded link.
-    if pdf_url is None and docx_url is None and not app_id:
+    if outcome.pdf_url is None and outcome.docx_url is None and not app_id:
         raise HTTPException(
             status_code=500,
             detail="Rendering backend unavailable (WeasyPrint/pandoc not installed).",
         )
     return CoverLetterResult(
         blocked=False,
-        pdf_url=pdf_url,
-        docx_url=docx_url,
-        text=letter["text"],
-        render_unavailable=bool(app_id) and pdf_url is None and docx_url is None,
+        pdf_url=outcome.pdf_url,
+        docx_url=outcome.docx_url,
+        text=outcome.text,
+        render_unavailable=outcome.render_unavailable,
     )
 
 

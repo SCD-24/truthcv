@@ -8,7 +8,7 @@ from pathlib import Path
 
 from agentconfig.boards import DEFAULT_BOARD_SOURCES
 from screening.company import company_identity_key
-from truth.store import data_dir
+from storage import data_dir
 
 
 def config_path() -> Path:
