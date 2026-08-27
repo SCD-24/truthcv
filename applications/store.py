@@ -14,7 +14,7 @@ import os
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from truth.store import data_dir
+from storage import data_dir
 
 from .model import (
     Application,
@@ -27,7 +27,7 @@ from .model import (
 )
 
 
-from datafile import atomic_write_text, locked
+from storage import atomic_write_text, locked
 
 
 def applications_path() -> Path:

@@ -15,7 +15,8 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from agenttools.server import router as mcp_router
 from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
-from truth.store import data_dir
+from services.errors import Conflict, NotFound, Refused, ServiceError, Unavailable
+from storage import data_dir
 
 from .config import cors_origins, port, public_url, static_dir
 from .routes import router
@@ -131,6 +132,32 @@ app.add_middleware(
 
 app.include_router(router)
 app.include_router(mcp_router)
+
+
+# services/* raises framework-free domain exceptions; map them to the HTTP
+# status codes and structured details the existing routes already promised.
+# The MCP adapter needs no equivalent handler: _handle_call_tool (above)
+# already catches any Exception and turns it into an isError=True result.
+@app.exception_handler(ServiceError)
+async def _service_error_handler(request: Request, exc: ServiceError):
+    from fastapi.responses import JSONResponse
+
+    if isinstance(exc, NotFound):
+        status_code = 404
+        detail = str(exc)
+    elif isinstance(exc, Conflict):
+        status_code = 409
+        detail = exc.payload
+    elif isinstance(exc, Refused):
+        status_code = 422
+        detail = exc.payload
+    elif isinstance(exc, Unavailable):
+        status_code = 503
+        detail = str(exc)
+    else:  # pragma: no cover - defensive: an unmapped ServiceError subclass
+        status_code = 500
+        detail = str(exc)
+    return JSONResponse(status_code=status_code, content={"detail": detail})
 
 from api.browser_stream import relay as _browser_relay  # noqa: E402
 

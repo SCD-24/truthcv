@@ -256,7 +256,7 @@ class TestMarkScreeningApplied:
             "company": "Contoso Labs",
             "role": "Staff AI Engineer",
             "url": "https://contoso.example/jobs/1",
-            "postingText": "Staff AI Engineer, Germany (Remote).",
+            "postingText": "Staff AI Engineer, Germany (Remote). " * 6,
             "verdict": "passed",
             **overrides,
         }
@@ -272,7 +272,7 @@ class TestMarkScreeningApplied:
         assert app["company"] == "Contoso Labs"
         assert app["role"] == "Staff AI Engineer"
         assert app["applicationUrl"] == "https://contoso.example/jobs/1"
-        assert app["posting"] == "Staff AI Engineer, Germany (Remote)."
+        assert app["posting"] == ("Staff AI Engineer, Germany (Remote). " * 6).strip()
         assert app["submitted"] is True
         assert app["status"] == "Applied"
         assert app["captureMethod"] == "manual"

@@ -21,15 +21,12 @@ import json
 import agentconfig.store as _agentconfig_store
 from agentconfig.salary import clamp_ask as _clamp_ask
 from agentconfig.salary import format_ask as _format_ask
-from companyresearch.store import open_contradictions as _open_contradictions
 from applications.model import Attachment, Confirmation, FieldSubmitted, Screening
-from applications.store import create as create_application
 from applications.store import save_attachments as _save_attachments
 from applications.store import save_confirmation as _save_confirmation
 from applications.store import save_fields_submitted as _save_fields_submitted
 from applications.store import save_screening as _save_screening
 import applications.store as _apps_store
-import coverletter.store as _letter_store
 import screening.store as _screening_store
 import agenttools.tools_runs as _tools_runs
 from screening.company import company_identity_key as _company_identity_key
@@ -39,9 +36,9 @@ from screening.model import validate_blocker as _validate_blocker
 from screening.model import validate_verdict as _validate_verdict
 from screening.posting import validate_posting_text as _validate_posting_text
 from screening.role import validate_role_title as _validate_role_title
-from screening.store import create_or_get as create_or_get_screening
+from services.screenings import create_screening as create_or_get_screening
+import services.applications as _applications_service
 from screening.url import validate_posting_url as _validate_posting_url
-from screening.url import normalize_application_url as _normalize_application_url
 from truth.answers import canonical_cv as _canonical_cv
 from truth.answers import load as _load_answers
 from truth.emailalias import alias_email as _alias_email
@@ -253,9 +250,9 @@ def record_application(
             # fields so the re-record improves the record instead of being
             # silently dropped. Use `fields`, not `backfilled`, so inherited
             # values the caller did not actually send are not reintroduced.
-            app = _apps_store.update(app.id, fields) or app
+            app = _applications_service.update_application_record(app.id, fields) or app
     else:
-        app = create_application(backfilled)
+        app = _applications_service.create_application_record(backfilled)
         created = True
 
     if parsed_fields_submitted is not None:
@@ -551,17 +548,6 @@ def recommend_salary(profile_name: str, proposed: int | None = None) -> dict:
     }
 
 
-def _is_submission(app) -> bool:
-    """Whether a ledger row records an application that was actually sent.
-
-    ``submitted`` is the field that means this, but it defaults to False on the
-    dataclass and predates ``record_application`` naming it, so a row that was
-    genuinely submitted can still carry False. Confirmation text is accepted as
-    the corroborating evidence: nothing writes it but a captured confirmation.
-    """
-    return bool(app.submitted or app.confirmation.text.strip())
-
-
 # How long a hand-out claim holds before another run may reclaim the item —
 # long enough to cover one application's browser interaction, short enough
 # that a crashed run's work comes back reasonably soon.
@@ -625,18 +611,6 @@ def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:
       draft was since blanked or deleted comes back with ``blocked_reason`` set
       to "no_letter" rather than reaching the agent with nothing to send.
     """
-    applied_urls = {
-        norm
-        for a in _apps_store.load_all()
-        if _is_submission(a)
-        for norm in (_normalize_application_url(a.application_url),)
-        if norm
-    }
-    applied_screening_ids = {
-        a.screening_id
-        for a in _apps_store.load_all()
-        if _is_submission(a) and a.screening_id
-    }
     cap = 0
     if limit and limit > 0:
         cap = limit
@@ -644,32 +618,14 @@ def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:
         cfg = _agentconfig_store.load()
         cap = getattr(cfg, "max_applications_per_run", None) or 0
 
+    # The reusable reads and the blocked-reason cascade live in the service; the
+    # per-run cap and the claim-lease below are agent-only and stay here, since
+    # only the agent claims work.
     items = []
     claimed_count = 0
-    for s in _screening_store.load_all():
-        if s.approval != "approved":
-            continue
-        draft = _letter_store.load(s.id)
-        status = _cooldown(s.company, s.role or None)
-        contradictions = [
-            {"claim": g["claim"], "findings": [f.to_dict() for f in g["findings"]]}
-            for g in _open_contradictions(s.company)
-        ]
-        # already_applied and contradictory_research outrank the rest: those
-        # two describe an item that must not go out at all, the others one
-        # that cannot go out yet.
-        if s.id in applied_screening_ids or (s.url and _normalize_application_url(s.url) in applied_urls):
-            blocked_reason = "already_applied"
-        elif contradictions:
-            blocked_reason = "contradictory_research"
-        elif status.blocked:
-            blocked_reason = "cooldown"
-        elif not s.url.strip():
-            blocked_reason = "no_url"
-        elif draft is None or not draft.text.strip():
-            blocked_reason = "no_letter"
-        else:
-            blocked_reason = ""
+    for entry in _applications_service.gather_approvable_screenings():
+        s = entry["screening"]
+        blocked_reason = entry["blocked_reason"]
 
         claimed_by_run = s.claimed_by_run
         if not blocked_reason and run_id:
@@ -693,9 +649,9 @@ def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:
                 "url": s.url,
                 "attempts": s.apply_attempts,
                 "blocked_reason": blocked_reason,
-                "contradictions": contradictions,
-                "cover_letter": draft.text if draft else "",
-                "letter_source": draft.source if draft else "",
+                "contradictions": entry["contradictions"],
+                "cover_letter": entry["cover_letter"],
+                "letter_source": entry["letter_source"],
                 "claimed_by_run": claimed_by_run,
             }
         )

@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 from providers.base import LLMProvider
 from truth.model import Truth
-from truth.store import data_dir
+from storage import atomic_write_text, data_dir
 
 from .infer import detect_inferences
 from .keywords import extract_keywords_with_aliases
@@ -40,7 +40,7 @@ def _draft_path() -> Path:
 
 def save_draft(draft: Draft) -> Path:
     p = _draft_path()
-    p.write_text(json.dumps(draft.to_dict(), indent=2), encoding="utf-8")
+    atomic_write_text(p, json.dumps(draft.to_dict(), indent=2))
     return p
 
 

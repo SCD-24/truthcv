@@ -42,6 +42,6 @@ from secretstore import encryption_key, secrets_path  # noqa: E402,F401
 
 
 def profile_pdf_path() -> Path:
-    from truth.store import data_dir
+    from storage import data_dir
 
     return data_dir() / "profile.pdf"

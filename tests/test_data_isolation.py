@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 import companyboards.store as company_boards_store
-import truth.store
+import storage
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _REAL_COMPANY_BOARDS_JSON = _REPO_ROOT / "data" / "company_boards.json"
@@ -19,7 +19,7 @@ def test_data_dir_is_isolated_without_opting_in():
 
     Proves isolation is automatic (autouse), not something each test must opt into.
     """
-    resolved = truth.store.data_dir().resolve()
+    resolved = storage.data_dir().resolve()
     assert resolved != (_REPO_ROOT / "data").resolve()
     assert resolved.is_relative_to(Path(tempfile.gettempdir()).resolve())
 

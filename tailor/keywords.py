@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from providers.base import LLMProvider
-from truth.store import data_dir
+from storage import data_dir
 
 import prompts
 

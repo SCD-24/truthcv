@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from truth.store import data_dir
+from storage import atomic_write_text, data_dir
 
 from .model import GmailSuggestion, GmailSyncState
 
@@ -17,9 +17,7 @@ def suggestions_path() -> Path:
 
 
 def _write_json(path: Path, payload) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(path)
+    atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False))
 
 
 def load_sync_state() -> GmailSyncState:

@@ -1,9 +1,9 @@
-<!-- generated:start edge:guardrail-validator→truth-data-volume -->
-# Interaction: Guardrail Validator → Truth Data Volume
+<!-- generated:start edge:storage-leaf→truth-data-volume -->
+# Interaction: Storage → Truth Data Volume
 
-- **Participants:** `guardrail-validator` → `truth-data-volume`
+- **Participants:** `storage-leaf` → `truth-data-volume`
 - **Transport:** `file I/O`
-<!-- generated:end edge:guardrail-validator→truth-data-volume -->
+<!-- generated:end edge:storage-leaf→truth-data-volume -->
 
 ## Contract
 

@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api.routes as routes
+import services.render_cv as render_cv
 from api.main import app
 from providers.fake import FakeProvider
 
@@ -397,9 +398,9 @@ def test_render_merges_pdf_verification_findings_into_ats_warnings(client, monke
     from pathlib import Path
 
     _seed_truth_with_summary("Engineer at Acme, strong in Python")
-    monkeypatch.setattr(routes, "render_pdf", lambda html, name: Path("/fake/cv.pdf"))
+    monkeypatch.setattr(render_cv, "render_pdf", lambda html, name: Path("/fake/cv.pdf"))
     monkeypatch.setattr(
-        routes, "verify_pdf", lambda *a, **k: [{"code": "pdf-split-word", "message": "x"}]
+        render_cv, "verify_pdf", lambda *a, **k: [{"code": "pdf-split-word", "message": "x"}]
     )
 
     r = client.post("/api/render")
@@ -415,12 +416,12 @@ def test_render_survives_a_broken_verifier(client, monkeypatch):
     from pathlib import Path
 
     _seed_truth_with_summary("Engineer at Acme, strong in Python")
-    monkeypatch.setattr(routes, "render_pdf", lambda html, name: Path("/fake/cv.pdf"))
+    monkeypatch.setattr(render_cv, "render_pdf", lambda html, name: Path("/fake/cv.pdf"))
 
     def _boom(*a, **k):
         raise RuntimeError("verification exploded")
 
-    monkeypatch.setattr(routes, "verify_pdf", _boom)
+    monkeypatch.setattr(render_cv, "verify_pdf", _boom)
 
     r = client.post("/api/render")
     assert r.status_code == 200

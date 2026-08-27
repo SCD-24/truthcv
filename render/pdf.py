@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from truth.store import data_dir
+from storage import data_dir
 
 
 class RenderUnavailable(RuntimeError):

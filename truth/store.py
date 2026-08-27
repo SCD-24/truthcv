@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 from pathlib import Path
 
 import yaml
@@ -11,18 +10,15 @@ import yaml
 from .model import SOURCE_VALUES, Truth
 
 
-def data_dir() -> Path:
-    """The mounted data volume (env DATA_DIR, default ./data)."""
-    d = Path(os.environ.get("DATA_DIR", "./data"))
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
 def truth_path() -> Path:
+    from storage import data_dir
+
     return data_dir() / "truth.yaml"
 
 
 def _meta_path() -> Path:
+    from storage import data_dir
+
     return data_dir() / "truth.meta.yaml"
 
 
@@ -113,12 +109,11 @@ def load() -> Truth:
 
 def save(truth: Truth) -> Truth:
     """Validate then atomically write the truth to truth.yaml. Returns it."""
+    from storage import atomic_write_text
+
     validate(truth)
     p = truth_path()
-    tmp = p.with_suffix(".yaml.tmp")
-    tmp.write_text(
-        yaml.safe_dump(truth.to_dict(), sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
+    atomic_write_text(
+        p, yaml.safe_dump(truth.to_dict(), sort_keys=False, allow_unicode=True)
     )
-    tmp.replace(p)
     return truth

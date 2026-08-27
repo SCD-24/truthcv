@@ -357,7 +357,7 @@ def test_export_returns_zip_with_csv_and_company_folders(client):
     import io
     import zipfile
 
-    from truth.store import data_dir
+    from storage import data_dir
 
     import applications as app_store
 
@@ -400,7 +400,7 @@ def test_cover_letter_attaches_to_application(client, monkeypatch):
 
     # A posting must exist for /cover-letter; fake the letter build to a truthful
     # single claim so the guardrail passes deterministically.
-    from truth.store import data_dir
+    from storage import data_dir
 
     (data_dir() / "posting.txt").write_text("Senior Engineer", encoding="utf-8")
     monkeypatch.setattr(
@@ -419,7 +419,7 @@ def test_cover_letter_attaches_to_application(client, monkeypatch):
 
 def test_cover_letter_rejects_unknown_application_id(client, monkeypatch):
     """An unknown applicationId must 404 before any provider call is made."""
-    from truth.store import data_dir
+    from storage import data_dir
 
     _seed_truth()
     (data_dir() / "posting.txt").write_text("Senior Engineer", encoding="utf-8")
@@ -439,7 +439,7 @@ def test_cover_letter_rejects_unknown_application_id(client, monkeypatch):
 
 def test_render_rejects_unknown_application_id(client):
     """An unknown applicationId must 404 and write no files."""
-    from truth.store import data_dir
+    from storage import data_dir
 
     before = {p.name for p in data_dir().glob("cv.*")}
 

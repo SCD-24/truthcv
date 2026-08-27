@@ -11,7 +11,7 @@ from applications.store import (
     create_for_screening,
     cv_filenames,
 )
-from truth.store import data_dir
+from storage import data_dir
 
 
 def test_empty_when_no_file(data_dir):

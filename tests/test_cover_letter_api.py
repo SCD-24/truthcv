@@ -41,7 +41,7 @@ def client(data_dir, monkeypatch):
             ],
         )
     )
-    from truth.store import data_dir as dd
+    from storage import data_dir as dd
 
     (dd() / "posting.txt").write_text("Python role at a startup")
     return TestClient(app)
@@ -69,7 +69,7 @@ def test_cover_letter_blocks_fabrication(data_dir, monkeypatch):
 
     monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
     save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
-    from truth.store import data_dir as dd
+    from storage import data_dir as dd
 
     (dd() / "posting.txt").write_text("a role")
     c = TestClient(app)
@@ -87,7 +87,7 @@ def _fabricating_client(data_dir, monkeypatch):
 
     monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
     save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
-    from truth.store import data_dir as dd
+    from storage import data_dir as dd
 
     (dd() / "posting.txt").write_text("a role")
     return TestClient(app)
@@ -160,7 +160,7 @@ def _answer_claiming_client(data_dir, monkeypatch):
 
     monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
     save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
-    from truth.store import data_dir as dd
+    from storage import data_dir as dd
 
     (dd() / "posting.txt").write_text("a role")
     return TestClient(app)
@@ -219,7 +219,7 @@ def test_cover_letter_uses_body_posting_over_stale_file(data_dir, monkeypatch):
 
     monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
     save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
-    from truth.store import data_dir as dd
+    from storage import data_dir as dd
 
     (dd() / "posting.txt").write_text("STALE old posting about a bakery job")
     c = TestClient(app)

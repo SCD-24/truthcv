@@ -23,7 +23,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from truth.store import data_dir
+from storage import data_dir
 from vocabulary.synonyms import synonym_groups
 
 # Connective/function words that carry no factual content. Rephrasing may freely

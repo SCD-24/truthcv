@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from applications import store as app_store  # noqa: E402
 from applications.log_render import RenderRefused, render_log, write_log  # noqa: E402
 from companyresearch import store as findings_store  # noqa: E402
-from truth.store import data_dir  # noqa: E402
+from storage import data_dir  # noqa: E402
 
 
 def default_log_path() -> Path:

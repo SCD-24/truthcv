@@ -18,7 +18,7 @@ from guardrail import BlockedClaim, Scope, validate
 from providers.base import LLMProvider
 from truth.answers import Answers
 from truth.model import Truth
-from truth.store import data_dir
+from storage import atomic_write_text, data_dir
 
 import prompts
 
@@ -49,7 +49,7 @@ def save_letter_draft(paragraphs: list[dict], posting: str | None = None) -> Pat
     """
     p = _letter_draft_path()
     envelope = {"postingHash": _posting_hash(posting), "paragraphs": paragraphs}
-    p.write_text(json.dumps(envelope, indent=2), encoding="utf-8")
+    atomic_write_text(p, json.dumps(envelope, indent=2))
     return p
 
 

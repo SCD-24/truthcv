@@ -85,7 +85,7 @@ def test_routes_pass_task_names(data_dir, monkeypatch):
     import api.routes as routes
     from truth import save
     from truth.model import Experience, Skill, Truth
-    from truth.store import data_dir as dd
+    from storage import data_dir as dd
 
     monkeypatch.setattr(routes, "get_provider", fake_get_provider)
     save(

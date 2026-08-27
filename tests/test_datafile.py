@@ -11,7 +11,7 @@ import threading
 
 import pytest
 
-from datafile import atomic_write_text, locked
+from storage import atomic_write_text, locked
 
 
 class TestAtomicWriteText:

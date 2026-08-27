@@ -139,3 +139,11 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:start comp:browser-service -->
 - **Browser Service** (`browser-service`) — backend component.
 <!-- generated:end comp:browser-service -->
+
+<!-- generated:start comp:storage-leaf -->
+- **Storage** (`storage-leaf`) — backend component.
+<!-- generated:end comp:storage-leaf -->
+
+<!-- generated:start comp:services-layer -->
+- **Services Layer** (`services-layer`) — backend component.
+<!-- generated:end comp:services-layer -->

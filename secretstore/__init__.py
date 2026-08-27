@@ -34,7 +34,7 @@ def encryption_key() -> str:
 
 def secrets_path() -> Path:
     """Location of the encrypted secrets blob on the data volume."""
-    from truth.store import data_dir
+    from storage import data_dir
 
     return data_dir() / "secrets.enc"
 

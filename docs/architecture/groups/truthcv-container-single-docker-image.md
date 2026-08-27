@@ -1,7 +1,7 @@
 <!-- generated:start group:truthcv-container-single-docker-image -->
 # Logical Group: TruthCV Container (single Docker image)
 - **Identifier**: `truthcv-container-single-docker-image`
-- **Members**: 13
+- **Members**: 15
 
 > A logical grouping of components (deployment boundary, bounded context, or scope marker). Groups have no connections of their own.
 
@@ -20,6 +20,8 @@
 - **Company Research** (`company-research`)
 - **Run Store** (`run-store`)
 - **Keyword Vocabulary** (`keyword-vocabulary`)
+- **Storage** (`storage-leaf`)
+- **Services Layer** (`services-layer`)
 
 *No specific widgets have been placed in this group yet. Define guidelines, stack tech, or schemas in the workspace.*
 <!-- generated:end group:truthcv-container-single-docker-image -->

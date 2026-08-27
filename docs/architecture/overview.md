@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-23 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+25 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -174,3 +174,11 @@ Owns the unattended agent's configuration (agentconfig/): autonomy mode, schedul
 <!-- generated:start comp:browser-service -->
 ## Browser Service (`browser-service`, BACKEND)
 <!-- generated:end comp:browser-service -->
+
+<!-- generated:start comp:storage-leaf -->
+## Storage (`storage-leaf`, BACKEND)
+<!-- generated:end comp:storage-leaf -->
+
+<!-- generated:start comp:services-layer -->
+## Services Layer (`services-layer`, BACKEND)
+<!-- generated:end comp:services-layer -->
