@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from uuid import uuid4
+
+from storage import data_dir
 
 from .html import _env
 from .pdf import render_pdf
@@ -21,11 +24,14 @@ def render_letter_pdf(
 ) -> Path | None:
     """Render letter prose to a PDF on the data volume, or None if it could not be.
 
-    Written to a temporary name and moved into place, because the renderer
-    writes straight through to its destination: a failure part-way leaves a
-    truncated file behind, and a caller that treats "the file exists" as "the
-    render succeeded" would hand that stump to an employer. After this, the
-    destination either does not exist or is a complete render.
+    Rendered under a name unique to this write and moved into place, for the
+    two reasons ``storage/atomic.py`` records for the JSON stores: the renderer
+    writes straight through to its destination, so a failure part-way leaves a
+    truncated file a caller would mistake for a finished one; and a temp name
+    shared between writers is worse than no temp name at all, because two
+    concurrent renders truncate each other's buffer and the survivor is a
+    splice of both. After this, the destination is either absent or a complete
+    render, whoever else is rendering.
 
     Best-effort by design: the caller is the agent tool surface, where a
     missing rendering backend must degrade to "no file to upload" rather than
@@ -33,9 +39,13 @@ def render_letter_pdf(
     it means the letter exists only as text.
     """
     html = render_letter_html(text, name=name, contact=contact)
+    stage_name = f"{filename}.{uuid4().hex}.part"
     try:
-        staged = render_pdf(html, f"{filename}.part")
+        staged = render_pdf(html, stage_name)
     except Exception:  # noqa: BLE001 — see docstring: no render must fail an application
+        # The renderer may have created the stage before failing. Nothing else
+        # can be holding this name, so removing it cannot cost another writer.
+        (data_dir() / stage_name).unlink(missing_ok=True)
         return None
     final = staged.with_name(filename)
     try:

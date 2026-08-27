@@ -11,6 +11,8 @@ for, and that nothing here can fail a queue read.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 import coverletter.store as letters
@@ -56,7 +58,8 @@ def _approved_with_letter(text="Dear team, I am applying.", source="generated"):
 
 
 def _pdfs(data_dir):
-    return sorted(p.name for p in data_dir.glob("*.pdf"))
+    """Every file this feature can leave behind — renders and staging alike."""
+    return sorted(p.name for p in data_dir.glob("*.pdf*"))
 
 
 def test_approved_item_carries_a_letter_file(data_dir, fake_renderer):
@@ -120,12 +123,14 @@ def test_generated_letters_are_never_rendered(data_dir, fake_renderer):
     assert _pdfs(data_dir) == []
 
 
-def test_editing_the_letter_renders_a_new_file_and_keeps_the_old_one(
+def test_editing_the_letter_renders_a_new_file_and_sweeps_the_old(
     data_dir, fake_renderer
 ):
     """The name carries a digest of the text, so an edit cannot overwrite a
-    good render — and the old file survives because an application already
-    submitted cites its path in `attachments` as evidence."""
+    good render. The superseded file is then swept: nothing dereferences it —
+    an application records the filenames it read off the employer's form, not
+    a path on this volume — so left alone it would accumulate one copy of the
+    operator's private letter per edit, forever."""
     s = _approved_with_letter(text="First draft.")
     first = get_approved_applications()[0]["cover_letter_path"]
 
@@ -134,9 +139,18 @@ def test_editing_the_letter_renders_a_new_file_and_keeps_the_old_one(
 
     assert first != second
     assert "Second draft." in fake_renderer[1][1]
-    from pathlib import Path
+    assert _pdfs(data_dir) == [Path(second).name]
 
-    assert Path(first).exists() and Path(second).exists()
+
+def test_deleting_a_draft_sweeps_every_render_of_it(data_dir, fake_renderer):
+    s = _approved_with_letter(text="First draft.")
+    get_approved_applications()
+    letters.save(s.id, letters.CoverLetterDraft(text="Second draft."))
+    get_approved_applications()
+
+    assert letters.delete(s.id) is True
+
+    assert _pdfs(data_dir) == []
 
 
 def test_an_identical_letter_is_not_re_rendered(data_dir, fake_renderer):
@@ -149,19 +163,19 @@ def test_an_identical_letter_is_not_re_rendered(data_dir, fake_renderer):
     assert len(fake_renderer) == 1
 
 
-def test_a_reverted_edit_reuses_the_original_render(data_dir, fake_renderer):
-    """Content addressing, not timestamps: text that has been seen before is
-    already on disk under its own name, whatever the draft's mtime says."""
+def test_a_reverted_edit_renders_again_under_its_own_name(data_dir, fake_renderer):
+    """Content addressing, not timestamps: reverted text renders to the name
+    it had before, and is served from there whatever the draft's mtime says."""
     s = _approved_with_letter(text="First draft.")
-    get_approved_applications()
+    original = get_approved_applications()[0]["cover_letter_path"]
     letters.save(s.id, letters.CoverLetterDraft(text="Second draft."))
     get_approved_applications()
 
     letters.save(s.id, letters.CoverLetterDraft(text="First draft."))
     item = get_approved_applications()[0]
 
-    assert len(fake_renderer) == 2
-    assert item["cover_letter_path"] == str(letters.pdf_path(s.id, "First draft."))
+    assert item["cover_letter_path"] == original
+    assert _pdfs(data_dir) == [Path(original).name]
 
 
 def test_a_failed_render_leaves_no_file_to_mistake_for_one(data_dir, monkeypatch):
@@ -260,3 +274,36 @@ def test_letter_file_is_never_written_outside_the_volume(data_dir, fake_renderer
     assert letter_files.render_screening_letter("../escape", "hi") == letter_files.NO_FILE
     assert fake_renderer == []
     assert not (data_dir.parent / "escape").exists()
+
+
+def test_two_concurrent_renders_both_produce_a_file(data_dir, monkeypatch):
+    """`storage/atomic.py` records what a shared staging name costs: whichever
+    writer renames second finds the source already gone. A queue read with no
+    run_id claims nothing, so two overlapping runs can render the same letter
+    at the same moment — and a run that rendered successfully must not be told
+    there is no file. Each write gets its own staging name."""
+    import threading
+
+    start = threading.Barrier(2)
+
+    def _slow_render(html, filename="cv.pdf"):
+        out = _data_dir() / filename
+        out.write_bytes(b"%PDF-1.4 fake")
+        start.wait(timeout=5)
+        return out
+
+    monkeypatch.setattr(render_letter, "render_pdf", _slow_render)
+    results: list[dict] = []
+
+    def _render():
+        results.append(letter_files.render_screening_letter("s1", "Shared text."))
+
+    threads = [threading.Thread(target=_render) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    assert len(results) == 2
+    assert all(r["path"] for r in results), "a completed render reported no file"
+    assert _pdfs(data_dir) == [letters.pdf_filename("s1", "Shared text.")]

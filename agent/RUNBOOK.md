@@ -52,7 +52,13 @@ you, so report it with `record_postings_seen` as you go.
 Call `get_approved_applications` before anything else. It returns the postings
 the operator approved on the Approvals page since the last run, each with a
 `screening_id`, `company`, `role`, `url`, `attempts`, `blocked_reason`,
-`cover_letter`, and `letter_source`.
+`cover_letter`, `letter_source`, and — for an item that is going out —
+`cover_letter_asset_id`, `cover_letter_path` and `cover_letter_download_url`.
+
+`cover_letter_path` is a PDF of the approved text on the data volume: the
+approved queue is the ONLY place a letter arrives as a file, so this is the
+only path on which anything is uploaded as a cover letter. Read §5 "Both
+documents go up" before attaching it — attaching it wrongly costs the CV.
 
 These are already decided. Apply to them before spending the run's time — and
 its browser — on discovery.
@@ -332,6 +338,10 @@ does not go up.** An application with a CV and no letter is incomplete; an
 application with a letter filed as the résumé and no CV is worse than not
 applying, and it is unrecoverable once submitted.
 
+**Only an approved queue item (§0) carries a file.** A letter you generated
+this run is text, and on that path the shapes below collapse to one: paste it
+where the form takes text, and if it takes only an upload, say so in `notes`.
+
 **Every form puts the letter somewhere different, and no rule here tells you
 which one you are looking at — read the form and work it out.** Take a snapshot
 after the CV is attached and find where the letter goes before deciding it has
@@ -339,13 +349,18 @@ nowhere to go. Four shapes are common; there are others.
 
 - A **second, separately labelled control** ("Cover letter", "Additional
   documents", "Add another file") — use it. Prefer this whenever it exists.
-- **One control that genuinely takes several files.** Uploading a second file
-  through the control that already holds the CV is safe ONLY where the page
-  shows evidence that it accumulates: a list of attached filenames rather than
-  one, an "Add another" affordance, or an input marked to accept multiple
-  files. Where the control shows a single filename and offers no such
-  evidence, treat it as single-slot: it will replace the CV, so leave the CV
-  in it and use the textarea or the notes route below.
+- **One control that visibly takes several files.** Re-using the control that
+  already holds the CV is safe ONLY on evidence you can see BEFORE uploading —
+  in practice one thing: an explicit affordance to add another file ("Add
+  another", "+", "Attach another document") that is still present now that the
+  CV is attached. Anything else is not evidence. A control showing a single
+  filename shows that whether or not it accumulates, so it decides nothing;
+  and whether an input accepts multiple files is not something the page tells
+  you. **Never re-use a control labelled for the CV** ("Resume", "CV",
+  "Lebenslauf") whatever else it shows: many parse the file they hold to
+  autofill the form, and feeding it the letter rewrites those fields from the
+  wrong document. Without that affordance, treat the control as single-slot:
+  leave the CV in it and use the textarea or the notes route below.
 - A **textarea** — paste the letter text verbatim. Nothing is uploaded in that
   case, and that is correct. This is also the fallback whenever an upload would
   cost the CV.
@@ -367,8 +382,10 @@ Whichever shape it turned out to be:
 - **Verify what the page holds before submitting.** Read the attachment list
   back off the page and confirm the CV is still there, under the field it
   belongs to, before confirming anything about the letter. If the CV's filename
-  is gone or has been replaced by the letter's, re-attach the CV and do not
-  retry the letter through that control.
+  is gone or has been replaced by the letter's, re-attach the CV, do not retry
+  the letter through that control, and **re-read every field on the form**: a
+  control that swapped the file may also have re-parsed it into the answers,
+  so what you typed earlier is no longer what the form contains.
 - Record in `attachments` only what you **read back off the page** — one entry
   per filename the form actually shows, as `{kind, path}`, exactly as
   "Record what the form contains, before submitting" requires for

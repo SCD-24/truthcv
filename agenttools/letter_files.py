@@ -19,7 +19,9 @@ letter into a file.
 Files are content-addressed: the name carries a digest of the text it renders,
 so a file that exists is a file whose contents are known, and an edited letter
 renders to a different name rather than overwriting a good file with a bad one.
-There is no timestamp comparison anywhere here, on purpose.
+There is no timestamp comparison anywhere here, on purpose. An edit's
+predecessor is swept once its replacement is on disk, so one screening keeps
+one file.
 
 Every function is best-effort. When no rendering backend is installed — or any
 part of rendering fails — the returned path is None, which means "this letter
@@ -31,9 +33,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from coverletter.store import pdf_filename, pdf_path
-from render.cover_letter import render_letter_pdf
-from services.render_cv import _contact_line as contact_line
+from coverletter.store import pdf_filename, pdf_path, prune_pdfs
 from truth.store import load as load_truth
 
 NO_FILE = {"asset_id": None, "path": None, "download_url": None}
@@ -53,10 +53,13 @@ def render_screening_letter(screening_id: str, text: str) -> dict:
     """Render an approved queue item's letter, reusing an identical render.
 
     The reuse test is the filename itself: it carries a digest of ``text``, so
-    an existing file cannot be a render of anything else. Editing the letter
-    changes the name, which is why no staleness check is needed and why the
-    previous render is left alone rather than overwritten — an application
-    already submitted cites it in its ``attachments`` as evidence.
+    an existing file cannot be a render of anything else — with the one caveat
+    that an empty file is no render at all, which is why size is checked: a
+    zero-byte file at the digest name would otherwise be served forever, with
+    no path by which anything could replace it.
+
+    Editing the letter changes the name rather than overwriting the old file,
+    and the predecessor is swept once the replacement is on disk.
     """
     if not text.strip():
         return dict(NO_FILE)
@@ -65,9 +68,15 @@ def render_screening_letter(screening_id: str, text: str) -> dict:
         path = pdf_path(screening_id, text)
     except ValueError:
         return dict(NO_FILE)
-    if path.exists():
+    if path.exists() and path.stat().st_size > 0:
         return _asset(filename, path)
     try:
+        # Imported here, not at module scope: this is the only function that
+        # renders, and at module scope it would make all 17 tools fail to
+        # import if the renderer's Jinja environment could not be built.
+        from render.cover_letter import render_letter_pdf
+        from services.render_cv import _contact_line as contact_line
+
         truth = load_truth()
         # Header composed exactly as the wizard's own renders compose it
         # (services/render_cv.py), so the letter an employer receives from the
@@ -78,4 +87,7 @@ def render_screening_letter(screening_id: str, text: str) -> dict:
         )
     except Exception:  # noqa: BLE001 — a bad truth store must not fail the queue read
         return dict(NO_FILE)
+    if rendered is None:
+        return dict(NO_FILE)
+    prune_pdfs(screening_id, keep=filename)
     return _asset(filename, rendered)

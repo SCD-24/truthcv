@@ -15,7 +15,7 @@ The Application Tracker (`applications/`) is not a network peer of the Truth Dat
 
 - **Files the Application Tracker writes to the volume:**
   - `applications.json` — the entire list of `Application` records, one JSON array. Shape per record is `Application.to_dict()` (`applications/model.py`): `id`, `company`, `website`, `application_url`, `submitted`, `submission_type`, `reached_out`, `to_who`, `response_received`, `method`, `posting`, `application_date`, `notes`, plus nested `cv_document` / `cover_letter_document` (each `{source, pdf_filename, docx_filename, updated_at}` or `null`), plus `created_at` / `updated_at`.
-  - Per-application rendered documents: `cv_{app_id}.pdf` / `cv_{app_id}.docx` and `cover_letter_{app_id}.pdf` / `cover_letter_{app_id}.docx` (`cv_filenames`, `cover_letter_filenames`). These live alongside `truth`'s own files (`truth.yaml`, `truth.meta.yaml`, `profile.pdf`, `posting.txt`, scratch `cv.pdf`/`cover_letter.pdf`) in the same flat directory.
+  - Per-application rendered documents: `cv_{app_id}.pdf` / `cv_{app_id}.docx` and `cover_letter_{app_id}.pdf` / `cover_letter_{app_id}.docx` (`cv_filenames`, `cover_letter_filenames`). These live alongside `truth`'s own files (`truth.yaml`, `truth.meta.yaml`, `profile.pdf`, `posting.txt`, scratch `cv.pdf`/`cover_letter.pdf`) and the per-screening agent renders (`cover_letter_screening_{screening_id}_{digest}.pdf`, owned by `coverletter.store`) in the same flat directory.
 
 - **Write invariants:**
   - **Atomic writes.** `_write_all` writes `applications.json.tmp` then `Path.replace()`s it over `applications.json`, mirroring `truth.store.save`'s `.yaml.tmp`→replace, so a crash mid-write cannot corrupt the list.

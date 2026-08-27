@@ -84,12 +84,10 @@ def pdf_filename(screening_id: str, text: str) -> str:
     The name carries a digest of the text it renders, so a file that exists is
     a file whose contents are known: an edited letter renders to a new name
     instead of overwriting the old one, and no reader needs to compare
-    timestamps to decide whether a render is current. Editing therefore leaves
-    the previous render in place — deliberately, since an application already
-    submitted cites that path in its `attachments` as evidence of what was
-    sent. The `screening` segment namespaces these against the wizard's
-    per-application `cover_letter_{app_id}.pdf`, drawn from the same 12-hex id
-    space.
+    timestamps to decide whether a render is current. Superseded renders are
+    swept by `prune_pdfs`, so one screening keeps one file. The `screening`
+    segment namespaces these against the wizard's per-application
+    `cover_letter_{app_id}.pdf`, drawn from the same 12-hex id space.
     """
     if not screening_id or "/" in screening_id or "\\" in screening_id or screening_id.startswith("."):
         raise ValueError(f"Unsafe screening id '{screening_id}'.")
@@ -100,6 +98,38 @@ def pdf_filename(screening_id: str, text: str) -> str:
 def pdf_path(screening_id: str, text: str) -> Path:
     """Filesystem path of the rendered letter for one screening's text."""
     return data_dir() / pdf_filename(screening_id, text)
+
+
+def pdf_glob(screening_id: str) -> str:
+    """Every rendered letter belonging to one screening, current or superseded."""
+    if not screening_id or "/" in screening_id or "\\" in screening_id or screening_id.startswith("."):
+        raise ValueError(f"Unsafe screening id '{screening_id}'.")
+    return f"cover_letter_screening_{screening_id}_*.pdf"
+
+
+def prune_pdfs(screening_id: str, keep: str = "") -> int:
+    """Delete this screening's rendered letters, except ``keep``. Returns the count.
+
+    Renders are content-addressed, so an edited letter leaves its predecessor
+    behind under the old digest. Nothing dereferences those: an application
+    records the filenames it read off the employer's form, not a path on this
+    volume. Left alone they would accumulate one private cover letter per edit,
+    forever, with no route by which the operator could see or remove them.
+    """
+    try:
+        pattern = pdf_glob(screening_id)
+    except ValueError:
+        return 0
+    removed = 0
+    for stale in data_dir().glob(pattern):
+        if stale.name == keep:
+            continue
+        try:
+            stale.unlink()
+        except OSError:  # a concurrent sweep got there first; nothing to repair
+            continue
+        removed += 1
+    return removed
 
 
 def load(screening_id: str) -> CoverLetterDraft | None:
@@ -144,6 +174,10 @@ def delete(screening_id: str) -> bool:
     except ValueError:
         return False
     if not p.exists():
+        # The draft may already be gone while its renders are not — sweep them
+        # anyway, so a lost JSON file cannot strand a letter on the volume.
+        prune_pdfs(screening_id)
         return False
     p.unlink()
+    prune_pdfs(screening_id)
     return True
