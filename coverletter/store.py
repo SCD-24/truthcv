@@ -1,7 +1,7 @@
 """Per-screening cover letter drafts on the data volume.
 
 One JSON file per screening under data/letters/, plus — once something has
-rendered it — the PDF of that text flat in data/ (see `pdf_filename`), which is
+rendered it — a PDF of that text flat in data/ (see `pdf_filename`), which is
 the file the unattended agent uploads to an employer. Kept out of screenings.json
 because the letter is rewritten repeatedly and dwarfs the record it belongs to,
 and that file is loaded in full on every screening read.
@@ -13,6 +13,7 @@ human rewrote it and the guardrail no longer vouches for it.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -73,24 +74,32 @@ def draft_path(screening_id: str) -> Path:
     return letters_dir() / f"{screening_id}.json"
 
 
-def pdf_filename(screening_id: str) -> str:
-    """The rendered-letter filename for one screening, on the data volume.
+def pdf_filename(screening_id: str, text: str) -> str:
+    """The rendered-letter filename for one screening's current text.
 
     Flat in data_dir() rather than under letters/ because /api/download/{name}
-    rejects any name with a separator, and this file is the one the unattended
-    agent uploads to an employer — it must also be downloadable by the
-    operator. The ``screening`` segment namespaces it against the wizard's
-    per-application ``cover_letter_{app_id}.pdf``, which is drawn from the same
-    12-hex id space.
+    rejects any name with a separator, and this file is both what the agent
+    uploads to an employer and what the operator downloads to see what went.
+
+    The name carries a digest of the text it renders, so a file that exists is
+    a file whose contents are known: an edited letter renders to a new name
+    instead of overwriting the old one, and no reader needs to compare
+    timestamps to decide whether a render is current. Editing therefore leaves
+    the previous render in place — deliberately, since an application already
+    submitted cites that path in its `attachments` as evidence of what was
+    sent. The `screening` segment namespaces these against the wizard's
+    per-application `cover_letter_{app_id}.pdf`, drawn from the same 12-hex id
+    space.
     """
     if not screening_id or "/" in screening_id or "\\" in screening_id or screening_id.startswith("."):
         raise ValueError(f"Unsafe screening id '{screening_id}'.")
-    return f"cover_letter_screening_{screening_id}.pdf"
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    return f"cover_letter_screening_{screening_id}_{digest}.pdf"
 
 
-def pdf_path(screening_id: str) -> Path:
-    """Filesystem path of the rendered letter for one screening."""
-    return data_dir() / pdf_filename(screening_id)
+def pdf_path(screening_id: str, text: str) -> Path:
+    """Filesystem path of the rendered letter for one screening's text."""
+    return data_dir() / pdf_filename(screening_id, text)
 
 
 def load(screening_id: str) -> CoverLetterDraft | None:
@@ -137,12 +146,4 @@ def delete(screening_id: str) -> bool:
     if not p.exists():
         return False
     p.unlink()
-    # The rendered PDF is a view of the draft. Leaving it behind would let a
-    # later run upload a letter whose text no longer exists.
-    try:
-        pdf = pdf_path(screening_id)
-    except ValueError:
-        return True
-    if pdf.exists():
-        pdf.unlink()
     return True

@@ -653,9 +653,7 @@ def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:
         # a blocked item is reported, never applied to, so rendering it would
         # buy nothing and cost a WeasyPrint pass per blocked item per run.
         letter_file = (
-            _render_screening_letter(
-                s.id, entry["cover_letter"], entry["letter_updated_at"]
-            )
+            _render_screening_letter(s.id, entry["cover_letter"])
             if not blocked_reason
             else dict(_NO_LETTER_FILE)
         )

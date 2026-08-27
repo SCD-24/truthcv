@@ -1,10 +1,12 @@
 """The cover letter as an uploadable file, for ATS forms that want a document.
 
-An application that uploaded only the CV is half-finished: most ATS forms take
-the letter as a second upload through the same control. These tests pin down
-that the two tools carrying guardrail-vouched letter text also hand the agent a
-path to upload, that a blocked letter never gets one, and that a missing
-rendering backend degrades to "text only" instead of failing an application.
+An application that uploaded only the CV is half-finished: many ATS forms take
+the letter as a second document. These tests pin down that the operator's
+approved letter reaches the agent as a file, that a letter generated in-run
+does NOT (the guardrail validates a paragraph's declared claims, never its
+prose, so rendering there would turn an unchecked paragraph into a document),
+that a file which exists is always a complete render of the text it is named
+for, and that nothing here can fail a queue read.
 """
 
 from __future__ import annotations
@@ -14,11 +16,9 @@ import pytest
 import coverletter.store as letters
 import render.cover_letter as render_letter
 import screening.store as store
-from agenttools import letter_files, tools_letter
+from agenttools import letter_files
 from agenttools.tools_ledger import get_approved_applications
-from providers.fake import FakeProvider
-from truth.model import Bullet, Experience, Skill, Truth
-from truth.store import save as save_truth
+from storage import data_dir as _data_dir
 
 
 @pytest.fixture
@@ -32,39 +32,13 @@ def fake_renderer(monkeypatch, data_dir):
     rendered = []
 
     def _render_pdf(html, filename="cv.pdf"):
-        out = data_dir / filename
+        out = _data_dir() / filename
         out.write_bytes(b"%PDF-1.4 fake")
         rendered.append((filename, html))
         return out
 
     monkeypatch.setattr(render_letter, "render_pdf", _render_pdf)
     return rendered
-
-
-def _seed_truth() -> None:
-    save_truth(
-        Truth(
-            experiences=[
-                Experience(
-                    id="exp-acme-1",
-                    role="Senior Engineer",
-                    company="Acme Corp",
-                    start="2020",
-                    end="2023",
-                    source="linkedin-pdf",
-                    bullets=[
-                        Bullet(
-                            id="exp-acme-1-b1",
-                            value="Built a payments API",
-                            source="linkedin-pdf",
-                        )
-                    ],
-                )
-            ],
-            education=[],
-            skills=[Skill(id="skill-py-1", value="Python", source="linkedin-pdf")],
-        )
-    )
 
 
 def _approved_with_letter(text="Dear team, I am applying.", source="generated"):
@@ -81,85 +55,8 @@ def _approved_with_letter(text="Dear team, I am applying.", source="generated"):
     return s
 
 
-def test_generated_letter_comes_with_a_file_to_upload(data_dir, fake_renderer):
-    _seed_truth()
-    fake = FakeProvider(
-        json_responses=[
-            {"paragraphs": [{"text": "I worked at Acme Corp.", "claims": ["Acme Corp"]}]}
-        ]
-    )
-
-    result = tools_letter.generate_cover_letter(
-        "A posting", "Professional", "Short", provider=fake
-    )
-
-    assert result["blocked"] is False
-    assert result["letter_path"] == str(data_dir / result["letter_asset_id"])
-    assert (data_dir / result["letter_asset_id"]).exists()
-    assert result["letter_download_url"] == f"/api/download/{result['letter_asset_id']}"
-    # The file is a render of the letter that was actually returned, not of
-    # some other text: uploading a document that disagrees with the submitted
-    # text is exactly the failure the guardrail exists to prevent.
-    _, html = fake_renderer[0]
-    assert "I worked at Acme Corp." in html
-
-
-def test_two_letters_do_not_share_a_file(data_dir, fake_renderer):
-    """generate_cover_letter is stateless by design; naming the file after the
-    letter's own text is what keeps N concurrent applications from uploading
-    each other's letter."""
-    _seed_truth()
-
-    def _letter(marker, claim):
-        return tools_letter.generate_cover_letter(
-            "A posting",
-            "Professional",
-            "Short",
-            provider=FakeProvider(
-                json_responses=[{"paragraphs": [{"text": marker, "claims": [claim]}]}]
-            ),
-        )
-
-    a = _letter("I worked at Acme Corp.", "Acme Corp")
-    b = _letter("I use Python daily.", "Python")
-
-    assert a["letter_asset_id"] != b["letter_asset_id"]
-
-
-def test_blocked_letter_is_never_rendered(data_dir, fake_renderer):
-    """A file is an upload. Rendering text the guardrail refused would put an
-    ungrounded claim in front of an employer through the back door."""
-    _seed_truth()
-    fake = FakeProvider(
-        json_responses=[
-            {"paragraphs": [{"text": "I led a 400-person org.", "claims": ["400-person org"]}]}
-        ]
-    )
-
-    result = tools_letter.generate_cover_letter(
-        "A posting", "Professional", "Short", provider=fake
-    )
-
-    assert result["blocked"] is True
-    assert result["letter_path"] is None
-    assert result["letter_asset_id"] is None
-    assert fake_renderer == []
-
-
-def test_blocked_company_returns_no_file(data_dir, fake_renderer):
-    import agentconfig.store as agentconfig
-
-    cfg = agentconfig.load()
-    cfg.blocked_companies = ["Contoso Labs"]
-    agentconfig.save(cfg)
-
-    result = tools_letter.generate_cover_letter(
-        "A posting", "Professional", "Short", company="Contoso Labs"
-    )
-
-    assert result["blocked_reason"] == "company_blocked"
-    assert result["letter_path"] is None
-    assert fake_renderer == []
+def _pdfs(data_dir):
+    return sorted(p.name for p in data_dir.glob("*.pdf"))
 
 
 def test_approved_item_carries_a_letter_file(data_dir, fake_renderer):
@@ -168,14 +65,81 @@ def test_approved_item_carries_a_letter_file(data_dir, fake_renderer):
     item = get_approved_applications()[0]
 
     assert item["blocked_reason"] == ""
-    assert item["cover_letter_asset_id"] == f"cover_letter_screening_{s.id}.pdf"
-    assert item["cover_letter_path"] == str(letters.pdf_path(s.id))
-    assert letters.pdf_path(s.id).exists()
+    assert item["cover_letter_asset_id"] == letters.pdf_filename(s.id, "My own words.")
+    assert item["cover_letter_path"] == str(letters.pdf_path(s.id, "My own words."))
+    assert letters.pdf_path(s.id, "My own words.").exists()
     _, html = fake_renderer[0]
     assert "My own words." in html
 
 
-def test_approved_item_reuses_an_up_to_date_render(data_dir, fake_renderer):
+def test_generated_letters_are_never_rendered(data_dir, fake_renderer):
+    """`generate_cover_letter` takes caller-supplied `paragraphs` and the
+    guardrail only validates each paragraph's declared `claims`, never its
+    prose — so a paragraph with an empty claims list passes. Rendering there
+    would turn text the guardrail never checked into a document an employer
+    receives as vouched-for. It must stay text."""
+    from agenttools import tools_letter
+    from providers.fake import FakeProvider
+    from truth.model import Bullet, Experience, Skill, Truth
+    from truth.store import save as save_truth
+
+    save_truth(
+        Truth(
+            experiences=[
+                Experience(
+                    id="exp-acme-1",
+                    role="Senior Engineer",
+                    company="Acme Corp",
+                    start="2020",
+                    end="2023",
+                    source="linkedin-pdf",
+                    bullets=[
+                        Bullet(id="exp-acme-1-b1", value="Built an API", source="linkedin-pdf")
+                    ],
+                )
+            ],
+            education=[],
+            skills=[Skill(id="skill-py-1", value="Python", source="linkedin-pdf")],
+        )
+    )
+
+    result = tools_letter.generate_cover_letter(
+        "A posting",
+        "Professional",
+        "Short",
+        # The bypass shape: prose the guardrail never sees, because it declares
+        # no claims. It passes validation and must still produce no file.
+        paragraphs=[{"text": "I led a 400-person org at NASA.", "claims": []}],
+        provider=FakeProvider(json_responses=[{"paragraphs": []}]),
+    )
+
+    assert result["blocked"] is False
+    assert "400-person org" in result["text"]
+    assert "letter_path" not in result
+    assert fake_renderer == []
+    assert _pdfs(data_dir) == []
+
+
+def test_editing_the_letter_renders_a_new_file_and_keeps_the_old_one(
+    data_dir, fake_renderer
+):
+    """The name carries a digest of the text, so an edit cannot overwrite a
+    good render — and the old file survives because an application already
+    submitted cites its path in `attachments` as evidence."""
+    s = _approved_with_letter(text="First draft.")
+    first = get_approved_applications()[0]["cover_letter_path"]
+
+    letters.save(s.id, letters.CoverLetterDraft(text="Second draft.", source="operator"))
+    second = get_approved_applications()[0]["cover_letter_path"]
+
+    assert first != second
+    assert "Second draft." in fake_renderer[1][1]
+    from pathlib import Path
+
+    assert Path(first).exists() and Path(second).exists()
+
+
+def test_an_identical_letter_is_not_re_rendered(data_dir, fake_renderer):
     """A queue read must not pay for a render per approved item per run."""
     _approved_with_letter()
 
@@ -185,16 +149,52 @@ def test_approved_item_reuses_an_up_to_date_render(data_dir, fake_renderer):
     assert len(fake_renderer) == 1
 
 
-def test_edited_letter_is_re_rendered(data_dir, fake_renderer):
-    """A stale PDF would upload text the operator has already replaced."""
+def test_a_reverted_edit_reuses_the_original_render(data_dir, fake_renderer):
+    """Content addressing, not timestamps: text that has been seen before is
+    already on disk under its own name, whatever the draft's mtime says."""
     s = _approved_with_letter(text="First draft.")
     get_approved_applications()
-
-    letters.save(s.id, letters.CoverLetterDraft(text="Second draft.", source="operator"))
+    letters.save(s.id, letters.CoverLetterDraft(text="Second draft."))
     get_approved_applications()
 
+    letters.save(s.id, letters.CoverLetterDraft(text="First draft."))
+    item = get_approved_applications()[0]
+
     assert len(fake_renderer) == 2
-    assert "Second draft." in fake_renderer[1][1]
+    assert item["cover_letter_path"] == str(letters.pdf_path(s.id, "First draft."))
+
+
+def test_a_failed_render_leaves_no_file_to_mistake_for_one(data_dir, monkeypatch):
+    """The renderer writes straight through to its destination, so a failure
+    part-way leaves a truncated file. Staged writes mean the destination either
+    does not exist or is a complete render — otherwise the next run would find
+    a stump, treat it as done, and upload it to an employer."""
+    s = _approved_with_letter()
+
+    def _truncate_then_die(html, filename="cv.pdf"):
+        out = _data_dir() / filename
+        out.write_bytes(b"%PDF-1.4 trunc")
+        raise RuntimeError("renderer died mid-write")
+
+    monkeypatch.setattr(render_letter, "render_pdf", _truncate_then_die)
+
+    first = get_approved_applications()[0]
+    assert first["cover_letter_path"] is None
+    assert not letters.pdf_path(s.id, first["cover_letter"]).exists()
+    assert _pdfs(data_dir) == []
+
+    # And the next run, with a healthy backend, still renders.
+    rendered = []
+
+    def _ok(html, filename="cv.pdf"):
+        out = _data_dir() / filename
+        out.write_bytes(b"%PDF-1.4 fake")
+        rendered.append(filename)
+        return out
+
+    monkeypatch.setattr(render_letter, "render_pdf", _ok)
+    assert get_approved_applications()[0]["cover_letter_path"] is not None
+    assert len(rendered) == 1
 
 
 def test_blocked_item_gets_no_file(data_dir, fake_renderer):
@@ -207,17 +207,6 @@ def test_blocked_item_gets_no_file(data_dir, fake_renderer):
     assert item["blocked_reason"] == "no_letter"
     assert item["cover_letter_path"] is None
     assert fake_renderer == []
-
-
-def test_deleting_a_draft_removes_its_rendered_file(data_dir, fake_renderer):
-    """Otherwise a later run uploads a letter whose text no longer exists."""
-    s = _approved_with_letter()
-    get_approved_applications()
-    assert letters.pdf_path(s.id).exists()
-
-    assert letters.delete(s.id) is True
-
-    assert not letters.pdf_path(s.id).exists()
 
 
 def test_no_rendering_backend_degrades_to_text_only(data_dir, monkeypatch):
@@ -239,12 +228,35 @@ def test_no_rendering_backend_degrades_to_text_only(data_dir, monkeypatch):
     assert item["cover_letter_asset_id"] is None
 
 
-def test_letter_file_is_never_written_outside_the_volume(data_dir):
+def test_an_unreadable_truth_store_does_not_fail_the_queue(data_dir, fake_renderer):
+    """Rendering reads the truth store for the letter's header. Before this
+    feature the approved queue never touched that file, and a raise here would
+    strand every item the run had already claimed on a 900s lease."""
+    _approved_with_letter()
+
+    def _boom():
+        raise ValueError("Duplicate truth id: 's1'")
+
+    import agenttools.letter_files as lf
+
+    original = lf.load_truth
+    lf.load_truth = _boom
+    try:
+        item = get_approved_applications()[0]
+    finally:
+        lf.load_truth = original
+
+    assert item["blocked_reason"] == ""
+    assert item["cover_letter"] == "Dear team, I am applying."
+    assert item["cover_letter_path"] is None
+
+
+def test_letter_file_is_never_written_outside_the_volume(data_dir, fake_renderer):
     """The screening id reaches the filename builder from stored state; a
     traversal in it must not steer a write out of the data directory."""
     with pytest.raises(ValueError):
-        letters.pdf_filename("../escape")
-    assert (
-        letter_files.render_screening_letter("../escape", "hi", "")
-        == letter_files.NO_FILE
-    )
+        letters.pdf_filename("../escape", "hi")
+
+    assert letter_files.render_screening_letter("../escape", "hi") == letter_files.NO_FILE
+    assert fake_renderer == []
+    assert not (data_dir.parent / "escape").exists()

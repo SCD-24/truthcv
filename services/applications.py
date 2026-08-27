@@ -155,8 +155,7 @@ def gather_approvable_screenings() -> list[dict]:
     it combines the ledger, cover-letter, cooldown and company-research reads
     into the "why is this screening not currently approvable" cascade, and
     returns one entry per approved screening with its ``blocked_reason`` and the
-    metadata the caller reports, including the letter's ``letter_updated_at``
-    so the caller can tell whether its own render of that letter is stale. It performs NO claiming and consumes no per-run
+    metadata the caller reports. It performs NO claiming and consumes no per-run
     cap — the agent tool layers ``_CLAIM_LEASE_SECONDS`` and ``claim_for_run``
     on top of what this returns, because only the agent claims work.
 
@@ -214,10 +213,6 @@ def gather_approvable_screenings() -> list[dict]:
                 "contradictions": contradictions,
                 "cover_letter": draft.text if draft else "",
                 "letter_source": draft.source if draft else "",
-                # Carried so the agent tool can tell whether a previously
-                # rendered PDF of this letter is still current. Rendering
-                # itself stays out of this read: only the agent uploads files.
-                "letter_updated_at": draft.updated_at if draft else "",
             }
         )
     return results

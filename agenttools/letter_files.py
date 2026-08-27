@@ -1,50 +1,42 @@
-"""The letter as a *file*, for tools that hand the agent something to upload.
+"""The letter as a *file*, for the tool that hands the agent something to upload.
 
 Most ATS forms take the cover letter as an upload rather than a textarea, and
 the browser container can only upload a path that exists on the shared data
-volume. So the two tools that already carry guardrail-vouched letter text —
-`generate_cover_letter` and `get_approved_applications` — render that exact
-text to a PDF here and return its path alongside it.
+volume. So `get_approved_applications` — the one tool that carries letter text
+the operator has approved — renders that exact text to a PDF here and returns
+its path alongside it.
 
-Rendering lives behind those two tools ON PURPOSE, and there is deliberately no
-"render this text" tool: a tool that turned arbitrary model-supplied prose into
-an uploadable file would be a complete bypass of the cover-letter guardrail.
-The only files that exist are renders of text the guardrail passed or the
-operator wrote.
+Only that path renders. `generate_cover_letter` deliberately does NOT: it
+accepts a caller-supplied `paragraphs` argument (that is its documented retry
+route), and the guardrail validates each paragraph's declared `claims`, never
+its prose. Rendering there would let the agent turn a paragraph carrying an
+empty claims list into a signed, letterheaded PDF the guardrail never checked —
+a bypass in the one direction that matters, because a document reaches an
+employer looking vouched for. A letter generated in-run therefore reaches the
+form as text only. The operator's approval, between runs, is what turns a
+letter into a file.
 
-Every function here is best-effort. When no rendering backend is installed the
-returned path is None, which means "this letter exists only as text" — never an
-error.
+Files are content-addressed: the name carries a digest of the text it renders,
+so a file that exists is a file whose contents are known, and an edited letter
+renders to a different name rather than overwriting a good file with a bad one.
+There is no timestamp comparison anywhere here, on purpose.
+
+Every function is best-effort. When no rendering backend is installed — or any
+part of rendering fails — the returned path is None, which means "this letter
+exists only as text", never an error. A read of the approved queue must not be
+able to fail because a PDF could not be produced.
 """
 
 from __future__ import annotations
 
-import hashlib
-from datetime import datetime
 from pathlib import Path
 
 from coverletter.store import pdf_filename, pdf_path
 from render.cover_letter import render_letter_pdf
 from services.render_cv import _contact_line as contact_line
-from truth.answers import load as load_answers
 from truth.store import load as load_truth
 
 NO_FILE = {"asset_id": None, "path": None, "download_url": None}
-
-
-def _header() -> tuple[str, str]:
-    """The name and contact line the letter's header carries.
-
-    Same rule the wizard and `generate_cover_letter`'s sign-off use: the
-    operator's Agents-page name, falling back to the truth-store profile. The
-    contact line is the real, un-aliased address — the per-company `tcv_`
-    tracking address is for form fields, not for the document itself, and it is
-    composed by the same helper the wizard's own renders use, so an agent-sent
-    letter and an operator-sent one carry an identical header.
-    """
-    truth = load_truth()
-    answers = load_answers()
-    return (answers.name or truth.profile.name or "Your Name"), contact_line(truth.profile)
 
 
 def _asset(filename: str, path: Path | None) -> dict:
@@ -57,53 +49,33 @@ def _asset(filename: str, path: Path | None) -> dict:
     }
 
 
-def render_generated_letter(text: str) -> dict:
-    """Render a just-generated letter, named by a digest of its own text.
+def render_screening_letter(screening_id: str, text: str) -> dict:
+    """Render an approved queue item's letter, reusing an identical render.
 
-    Content-addressed rather than named after the application, because
-    `generate_cover_letter` is stateless by design: it is handed no id it could
-    name a file after, and N concurrent applications must not clobber one
-    another's file. Two calls that produce the same letter produce the same
-    file, which is idempotent rather than a collision.
-    """
-    if not text.strip():
-        return dict(NO_FILE)
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
-    filename = f"cover_letter_draft_{digest}.pdf"
-    name, contact = _header()
-    return _asset(filename, render_letter_pdf(text, filename, name=name, contact=contact))
-
-
-def _is_stale(path: Path, updated_at: str) -> bool:
-    """True when the rendered file predates the draft it was rendered from."""
-    if not updated_at:
-        return False
-    try:
-        stamp = datetime.fromisoformat(updated_at).timestamp()
-    except ValueError:
-        # An unparseable stamp must not pin a stale PDF in place forever.
-        return True
-    return path.stat().st_mtime < stamp
-
-
-def render_screening_letter(screening_id: str, text: str, updated_at: str) -> dict:
-    """Render an approved queue item's stored letter, reusing the last render.
-
-    Takes the letter's text and timestamp rather than the draft object because
-    the approved-queue read has already loaded it — see
-    ``services.applications.gather_approvable_screenings``. Re-rendered only
-    when the file is missing or older than the draft, so a queue read does not
-    pay for WeasyPrint once per approved item per run.
+    The reuse test is the filename itself: it carries a digest of ``text``, so
+    an existing file cannot be a render of anything else. Editing the letter
+    changes the name, which is why no staleness check is needed and why the
+    previous render is left alone rather than overwritten — an application
+    already submitted cites it in its ``attachments`` as evidence.
     """
     if not text.strip():
         return dict(NO_FILE)
     try:
-        filename, path = pdf_filename(screening_id), pdf_path(screening_id)
+        filename = pdf_filename(screening_id, text)
+        path = pdf_path(screening_id, text)
     except ValueError:
         return dict(NO_FILE)
-    if path.exists() and not _is_stale(path, updated_at):
+    if path.exists():
         return _asset(filename, path)
-    name, contact = _header()
-    return _asset(
-        filename, render_letter_pdf(text, filename, name=name, contact=contact)
-    )
+    try:
+        truth = load_truth()
+        # Header composed exactly as the wizard's own renders compose it
+        # (services/render_cv.py), so the letter an employer receives from the
+        # agent and the operator's own copy of it carry the same header.
+        name = truth.profile.name or "Your Name"
+        rendered = render_letter_pdf(
+            text, filename, name=name, contact=contact_line(truth.profile)
+        )
+    except Exception:  # noqa: BLE001 — a bad truth store must not fail the queue read
+        return dict(NO_FILE)
+    return _asset(filename, rendered)

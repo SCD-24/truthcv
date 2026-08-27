@@ -698,11 +698,6 @@ def test_generate_cover_letter_refuses_blocked_company(data_dir):
         "unverifiable": [],
         "paragraphs": [],
         "blocked_reason": "company_blocked",
-        # Refused before any text exists, so there is nothing to render and no
-        # file for the agent to upload.
-        "letter_asset_id": None,
-        "letter_path": None,
-        "letter_download_url": None,
     }
 
 

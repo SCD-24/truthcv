@@ -311,41 +311,49 @@ employer's own site, per item 1 below.
    the operator's actual work — outside this tool, a letter has no guardrail
    behind it at all. See §6 for what to do when it comes back blocked. Always
    pass `company` (the name as posted) to `generate_cover_letter` so the
-   blocklist can refuse before any text is generated. An unblocked result also
-   carries `letter_path` — a PDF of that exact text on the data volume — and an
-   approved queue item carries the same thing as `cover_letter_path`. That file
-   is what you upload wherever the form wants the letter as a document; see
-   "Both documents go up" below.
+   blocklist can refuse before any text is generated. A letter generated this way
+   reaches the form as **text**: paste it. Only an approved queue item carries a
+   file — `cover_letter_path`, a PDF of the text the operator approved — and
+   only that file is ever uploaded as a cover letter; see "Both documents go up"
+   below.
 
    There is no tool that turns text you wrote into an uploadable file, and that
-   is deliberate: the only letter files that exist are renders of text the
-   guardrail passed or the operator wrote. Never upload any other file as a
-   cover letter.
+   is deliberate. Never upload any other file as a cover letter, and never treat
+   a letter you generated this run as though it were a document.
 
-### Both documents go up — the CV **and** the letter
+### Both documents go up — the CV **and** the letter, but never at the CV's cost
 
-The CV is not the whole submission. Unless the form genuinely offers nowhere to
-put it, the letter goes up too.
+The CV is not the whole submission. Unless the form offers nowhere to put it,
+the letter goes up too — subject to one rule that outranks everything else in
+this section:
+
+**The CV must survive. If attaching the letter would replace the CV, the letter
+does not go up.** An application with a CV and no letter is incomplete; an
+application with a letter filed as the résumé and no CV is worse than not
+applying, and it is unrecoverable once submitted.
 
 **Every form puts the letter somewhere different, and no rule here tells you
 which one you are looking at — read the form and work it out.** Take a snapshot
 after the CV is attached and find where the letter goes before deciding it has
 nowhere to go. Four shapes are common; there are others.
 
-- A **second, separately labelled upload control** ("Cover letter", "Additional
-  documents") — use it. This is as common as the shared control below.
-- **One shared upload control** that takes several files, one per click
-  ("Attach", "Upload document", a drop zone). Uploading the CV does not consume
-  it: open it again and upload the letter. An application that carried only the
-  CV because the second click was not obvious is a half-finished application,
-  not a completed one.
+- A **second, separately labelled control** ("Cover letter", "Additional
+  documents", "Add another file") — use it. Prefer this whenever it exists.
+- **One control that genuinely takes several files.** Uploading a second file
+  through the control that already holds the CV is safe ONLY where the page
+  shows evidence that it accumulates: a list of attached filenames rather than
+  one, an "Add another" affordance, or an input marked to accept multiple
+  files. Where the control shows a single filename and offers no such
+  evidence, treat it as single-slot: it will replace the CV, so leave the CV
+  in it and use the textarea or the notes route below.
 - A **textarea** — paste the letter text verbatim. Nothing is uploaded in that
-  case, and that is correct.
-- **Nothing at all**: no second upload slot, no letter field. Submit the CV
-  alone and say so in `notes` on the `record_application` call — but only after
-  looking, including behind an "Add" / "+" / "Optional documents" control that
-  reveals the field on click. A field you did not look for is not a field that
-  is absent.
+  case, and that is correct. This is also the fallback whenever an upload would
+  cost the CV.
+- **Nothing at all**: no second control, no letter field, nothing that
+  accumulates. Submit the CV alone and say so in `notes` on the
+  `record_application` call — after looking, including behind an "Add" / "+" /
+  "Optional documents" control that reveals a field on click, but without
+  forcing the letter into a slot that belongs to the CV.
 
 Whichever shape it turned out to be:
 
@@ -353,14 +361,21 @@ Whichever shape it turned out to be:
   exists only as text: paste it if there is a field for it, and if the only
   route is an upload, say so in `notes`. Never substitute another file, and
   never retype the letter into an unrelated field.
-- **Verify both filenames before submitting.** Read the attachment list back off
-  the page and confirm the CV *and* the letter are both listed, each against the
-  field it belongs to. Two failures look identical until you check: a shared
-  widget showing one filename after two uploads has replaced the CV rather than
-  added to it, and a letter uploaded into the CV control has done the same.
-  Fix it through the right control instead of submitting.
-- Record every file that actually went up in `attachments`: `{kind: "cv", path}`
-  and `{kind: "cover_letter", path}`, using the paths the tools returned.
+- **When an upload is refused** — wrong file type, size limit — do not retry it
+  into a different control. Paste the text if there is a field for it, and
+  record what was refused in `notes`.
+- **Verify what the page holds before submitting.** Read the attachment list
+  back off the page and confirm the CV is still there, under the field it
+  belongs to, before confirming anything about the letter. If the CV's filename
+  is gone or has been replaced by the letter's, re-attach the CV and do not
+  retry the letter through that control.
+- Record in `attachments` only what you **read back off the page** — one entry
+  per filename the form actually shows, as `{kind, path}`, exactly as
+  "Record what the form contains, before submitting" requires for
+  `fields_submitted`. Never record a file because a tool returned
+  its path or because you called an upload: this record is the operator's only
+  evidence of what the employer received, and a letter entry for a letter that
+  did not attach is a false record of a complete application.
 
 **Browser tooling is whatever this environment provides; nothing in this
 runbook depends on the details.** Use the browser tools you have been
