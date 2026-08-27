@@ -36,7 +36,12 @@ import type {
   ApplicationDocument,
 } from "../api/types";
 import { DocumentAttachModal } from "./DocumentAttachModal";
-import { COLUMN_DEFS, compareApplications } from "./sorting";
+import {
+  COLUMN_DEFS,
+  DEFAULT_SORT_COLUMN,
+  DEFAULT_SORT_DIRECTION,
+  compareApplications,
+} from "./sorting";
 import type { ColumnDef, SortDirection } from "./sorting";
 import { filledFormPath } from "../routes";
 import { safeHref } from "../utils/safeUrl";
@@ -95,8 +100,10 @@ export function ApplicationsPage({
   );
   // The application whose job posting is open in the view/edit modal.
   const [posting, setPosting] = useState<Application | null>(null);
-  const [sortCol, setSortCol] = useState<ColumnDef | null>(null);
-  const [sortDir, setSortDir] = useState<SortDirection>("asc");
+  // Newest applications first on load. The header reflects it, so the order is
+  // visible and can be changed like any other column's.
+  const [sortCol, setSortCol] = useState<ColumnDef | null>(DEFAULT_SORT_COLUMN);
+  const [sortDir, setSortDir] = useState<SortDirection>(DEFAULT_SORT_DIRECTION);
 
   /** Replace an application in the list after a document is attached/edited. */
   function applyAttached(updated: Application) {

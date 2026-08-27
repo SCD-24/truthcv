@@ -5,6 +5,16 @@ export type ColumnDef = {
   label: string;
   sortable: boolean;
   compare?: (a: Application, b: Application) => number;
+  /**
+   * Rows this reports true for sort last in BOTH directions.
+   *
+   * The plain comparators put blanks last ascending and let the descending
+   * negation flip them to the top, which is fine for a column you sorted by
+   * hand. It is not fine for Date, which is the table's default order: undated
+   * records would fill the top of a "most recent first" table, above the most
+   * recent one.
+   */
+  blank?: (a: Application) => boolean;
 };
 
 // Order applications by status; lower index sorts first. Unlisted/unset
@@ -47,7 +57,14 @@ const host = (url: string | null | undefined): string => {
 
 export const COLUMN_DEFS: ColumnDef[] = [
   { label: "Company", sortable: true, compare: text((a) => a.company) },
-  { label: "Date", sortable: true, compare: text((a) => a.applicationDate) }, // ISO strings: lexicographic = chronological
+  // ISO strings: lexicographic = chronological. `blank` keeps undated rows at
+  // the bottom of the default newest-first order rather than the top.
+  {
+    label: "Date",
+    sortable: true,
+    compare: text((a) => a.applicationDate),
+    blank: (a) => !(a.applicationDate ?? "").trim(),
+  },
   { label: "Website", sortable: true, compare: text((a) => host(a.website)) },
   { label: "URL", sortable: true, compare: presence((a) => a.applicationUrl) },
   { label: "Submitted", sortable: true, compare: bool((a) => a.submitted) },
@@ -68,6 +85,14 @@ export function defaultCompare(a: Application, b: Application): number {
   return statusRank(a.status) - statusRank(b.status);
 }
 
+/** The column the table sorts by on load, with {@link DEFAULT_SORT_DIRECTION}:
+ * most recently applied first, which is what an operator scanning this page is
+ * almost always looking for. */
+export const DEFAULT_SORT_COLUMN: ColumnDef =
+  COLUMN_DEFS.find((c) => c.label === "Date") ?? COLUMN_DEFS[0];
+
+export const DEFAULT_SORT_DIRECTION: SortDirection = "desc";
+
 export function compareApplications(
   a: Application,
   b: Application,
@@ -75,6 +100,12 @@ export function compareApplications(
   dir: SortDirection,
 ): number {
   if (!col?.compare) return defaultCompare(a, b);
+  if (col.blank) {
+    // Decided before the direction is applied, so the negation below cannot
+    // lift blanks to the top of a descending sort.
+    const aBlank = col.blank(a);
+    if (aBlank !== col.blank(b)) return aBlank ? 1 : -1;
+  }
   const r = col.compare(a, b);
   return dir === "desc" ? -r : r;
 }

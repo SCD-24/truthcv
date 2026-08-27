@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
-/** The autonomy slider: off / semi-auto / full auto. Stubbing follows
+/** The autonomy slider: off / semi-auto. Full auto is no longer selectable —
+ * its per-run application cap is unenforced on roles the agent finds itself —
+ * but a config already stored as `full` still gets its mark. Stubbing follows
  * AgentsPage.model.test.tsx — mock the API client module, render with jsdom. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -200,9 +202,37 @@ describe("AgentsPage autonomy slider", () => {
 
   it("moving it writes the new mode", async () => {
     await renderWithMode("semi");
-    vi.mocked(updateAgentConfig).mockResolvedValue(makeConfig({ mode: "full" }));
-    moveSliderTo(2);
-    await waitFor(() => expect(updateAgentConfig).toHaveBeenCalledWith({ mode: "full" }));
+    vi.mocked(updateAgentConfig).mockResolvedValue(makeConfig({ mode: "off", enabled: false }));
+    moveSliderTo(0);
+    await waitFor(() => expect(updateAgentConfig).toHaveBeenCalledWith({ mode: "off" }));
+  });
+
+  it("offers only off and semi-auto — full auto cannot be chosen", async () => {
+    await renderWithMode("semi");
+    const slider = screen.getByRole("slider", { name: "Agent autonomy" });
+    expect(slider.getAttribute("max")).toBe("1");
+    expect(screen.queryByText("Full auto")).toBeNull();
+  });
+
+  it("keeps the full-auto mark for a config already stored that way", async () => {
+    // Dropping it would rest the thumb on "Off" while the agent applied on its
+    // own, which is the one state this control must never misreport.
+    await renderWithMode("full");
+    const slider = screen.getByRole("slider", { name: "Agent autonomy" });
+    expect(slider.getAttribute("value")).toBe("2");
+    expect(screen.getByText("Full auto")).toBeTruthy();
+    expect(screen.getByText(/Not offered here for now/)).toBeTruthy();
+  });
+
+  it("leaving full auto is a one-way door", async () => {
+    await renderWithMode("full");
+    vi.mocked(updateAgentConfig).mockResolvedValue(makeConfig({ mode: "semi" }));
+    moveSliderTo(1);
+    await waitFor(() => expect(updateAgentConfig).toHaveBeenCalledWith({ mode: "semi" }));
+    await waitFor(() =>
+      expect(screen.getByRole("slider", { name: "Agent autonomy" }).getAttribute("max")).toBe("1"),
+    );
+    expect(screen.queryByText("Full auto")).toBeNull();
   });
 
   it("off is reachable and explains that nothing is submitted", async () => {
@@ -216,7 +246,7 @@ describe("AgentsPage autonomy slider", () => {
   it("reverts to the previous mode when the save fails", async () => {
     await renderWithMode("semi");
     vi.mocked(updateAgentConfig).mockRejectedValue(new Error("nope"));
-    moveSliderTo(2);
+    moveSliderTo(0);
     expect(await screen.findByText("nope")).toBeTruthy();
     await waitFor(() =>
       expect(screen.getByRole("slider", { name: "Agent autonomy" }).getAttribute("value")).toBe("1"),
