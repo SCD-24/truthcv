@@ -44,6 +44,7 @@ graph TD
     api -->|in-process| screening-engine
     api -->|in-process| secret-store
     api -->|in-process| services-layer
+    api -->|in-process| storage-leaf
     api -->|in-process| tailor-engine
     api -->|in-process| truth-store
     application-agent -->|HTTP/REST| agent-config
@@ -97,6 +98,7 @@ graph TD
     services-layer -->|in-process| llm-provider-layer
     services-layer -->|in-process| renderer
     services-layer -->|in-process| screening-engine
+    services-layer -->|in-process| storage-leaf
     services-layer -->|in-process| tailor-engine
     services-layer -->|in-process| truth-store
     storage-leaf -->|file I/O| truth-data-volume
@@ -158,6 +160,7 @@ graph TD
 - [api → screening-engine](interactions/api--screening-engine.md) via `in-process`
 - [api → secret-store](interactions/api--secret-store.md) via `in-process`
 - [api → services-layer](interactions/api--services-layer.md) via `in-process`
+- [api → storage-leaf](interactions/api--storage-leaf.md) via `in-process`
 - [api → tailor-engine](interactions/api--tailor-engine.md) via `in-process`
 - [api → truth-store](interactions/api--truth-store.md) via `in-process`
 - [application-agent → agent-config](interactions/application-agent--agent-config.md) via `HTTP/REST`
@@ -211,6 +214,7 @@ graph TD
 - [services-layer → llm-provider-layer](interactions/services-layer--llm-provider-layer.md) via `in-process`
 - [services-layer → renderer](interactions/services-layer--renderer.md) via `in-process`
 - [services-layer → screening-engine](interactions/services-layer--screening-engine.md) via `in-process`
+- [services-layer → storage-leaf](interactions/services-layer--storage-leaf.md) via `in-process`
 - [services-layer → tailor-engine](interactions/services-layer--tailor-engine.md) via `in-process`
 - [services-layer → truth-store](interactions/services-layer--truth-store.md) via `in-process`
 - [storage-leaf → truth-data-volume](interactions/storage-leaf--truth-data-volume.md) via `file I/O`

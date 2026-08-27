@@ -2091,6 +2091,16 @@
       "from": "api",
       "protocol": "in-process",
       "to": "services-layer"
+    },
+    {
+      "from": "api",
+      "protocol": "in-process",
+      "to": "storage-leaf"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "storage-leaf"
     }
   ],
   "definitions": [
