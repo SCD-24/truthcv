@@ -543,6 +543,10 @@ class CoverLetterRequest(_Camel):
     # Decisions on claims a previous attempt blocked, so the user can approve
     # and continue (or decline) instead of dead-ending.
     approvals: CoverLetterApprovals | None = None
+    # The posting this letter is about, supplied by the caller. When omitted,
+    # data/posting.txt (the last posting written by /api/tailor) is used as a
+    # fallback for callers that do not send one.
+    posting: str | None = None
 
 
 class CoverLetterResult(_Camel):

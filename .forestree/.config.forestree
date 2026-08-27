@@ -2076,101 +2076,2558 @@
       "y": 30
     }
   ],
+  "layoutV2": {
+    "edgeRoutes": {
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-agent-config=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume#16": {
+        "junctions": [
+          {
+            "x": 1628,
+            "y": 684
+          }
+        ],
+        "points": [
+          {
+            "x": 909,
+            "y": 684
+          },
+          {
+            "x": 1628,
+            "y": 684
+          },
+          {
+            "x": 1628,
+            "y": 820
+          },
+          {
+            "x": 2078,
+            "y": 820
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-agent-config::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-agent-config#15": {
+        "junctions": [
+          {
+            "x": 699,
+            "y": 684
+          }
+        ],
+        "points": [
+          {
+            "x": 689,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 684
+          },
+          {
+            "x": 709,
+            "y": 684
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-agent-config::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-tracker#13": {
+        "junctions": [
+          {
+            "x": 919,
+            "y": 548
+          }
+        ],
+        "points": [
+          {
+            "x": 689,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 89
+          },
+          {
+            "x": 919,
+            "y": 89
+          },
+          {
+            "x": 919,
+            "y": 548
+          },
+          {
+            "x": 929,
+            "y": 548
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-tracker::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-browser-service#32": {
+        "junctions": [
+          {
+            "x": 1139,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 625
+          }
+        ],
+        "points": [
+          {
+            "x": 689,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 615
+          },
+          {
+            "x": 1628,
+            "y": 615
+          },
+          {
+            "x": 1628,
+            "y": 357
+          },
+          {
+            "x": 1638,
+            "y": 357
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-browser-service::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-company-research#17": {
+        "junctions": [
+          {
+            "x": 1139,
+            "y": 567
+          }
+        ],
+        "points": [
+          {
+            "x": 689,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 89
+          },
+          {
+            "x": 1139,
+            "y": 89
+          },
+          {
+            "x": 1139,
+            "y": 567
+          },
+          {
+            "x": 1149,
+            "y": 567
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-company-research::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-connections#13": {
+        "junctions": [
+          {
+            "x": 1139,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 625
+          },
+          {
+            "x": 1628,
+            "y": 610
+          }
+        ],
+        "points": [
+          {
+            "x": 689,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 615
+          },
+          {
+            "x": 1628,
+            "y": 615
+          },
+          {
+            "x": 1628,
+            "y": 610
+          },
+          {
+            "x": 1638,
+            "y": 610
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-connections::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-cover-letter-engine#6": {
+        "junctions": [],
+        "points": [
+          {
+            "x": 689,
+            "y": 431
+          },
+          {
+            "x": 709,
+            "y": 431
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-cover-letter-engine::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-gmail-api#11": {
+        "junctions": [
+          {
+            "x": 1139,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 625
+          }
+        ],
+        "points": [
+          {
+            "x": 689,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 615
+          },
+          {
+            "x": 1628,
+            "y": 615
+          },
+          {
+            "x": 1628,
+            "y": 431
+          },
+          {
+            "x": 1848,
+            "y": 431
+          },
+          {
+            "x": 1848,
+            "y": 610
+          },
+          {
+            "x": 1858,
+            "y": 610
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-gmail-api::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-guardrail-validator#2": {
+        "junctions": [
+          {
+            "x": 919,
+            "y": 89
+          },
+          {
+            "x": 919,
+            "y": 236
+          }
+        ],
+        "points": [
+          {
+            "x": 689,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 89
+          },
+          {
+            "x": 919,
+            "y": 89
+          },
+          {
+            "x": 919,
+            "y": 236
+          },
+          {
+            "x": 929,
+            "y": 236
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-guardrail-validator::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-onboarding-store#25": {
+        "junctions": [
+          {
+            "x": 1139,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 625
+          },
+          {
+            "x": 1628,
+            "y": 820
+          },
+          {
+            "x": 1848,
+            "y": 820
+          }
+        ],
+        "points": [
+          {
+            "x": 689,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 615
+          },
+          {
+            "x": 1628,
+            "y": 615
+          },
+          {
+            "x": 1628,
+            "y": 820
+          },
+          {
+            "x": 1848,
+            "y": 820
+          },
+          {
+            "x": 1848,
+            "y": 762
+          },
+          {
+            "x": 1858,
+            "y": 762
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-onboarding-store::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-renderer#3": {
+        "junctions": [
+          {
+            "x": 699,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 489
+          }
+        ],
+        "points": [
+          {
+            "x": 689,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 431
+          },
+          {
+            "x": 1149,
+            "y": 431
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-renderer::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-run-store#19": {
+        "junctions": [
+          {
+            "x": 699,
+            "y": 548
+          }
+        ],
+        "points": [
+          {
+            "x": 689,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 548
+          },
+          {
+            "x": 709,
+            "y": 548
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-run-store::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-screening-engine#23": {
+        "junctions": [
+          {
+            "x": 1139,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 625
+          }
+        ],
+        "points": [
+          {
+            "x": 689,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 615
+          },
+          {
+            "x": 1628,
+            "y": 615
+          },
+          {
+            "x": 1628,
+            "y": 820
+          },
+          {
+            "x": 210,
+            "y": 820
+          },
+          {
+            "x": 210,
+            "y": 852
+          },
+          {
+            "x": 200,
+            "y": 852
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-screening-engine::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-secret-store#7": {
+        "junctions": [
+          {
+            "x": 1139,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 625
+          },
+          {
+            "x": 1628,
+            "y": 431
+          }
+        ],
+        "points": [
+          {
+            "x": 689,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 615
+          },
+          {
+            "x": 1628,
+            "y": 615
+          },
+          {
+            "x": 1628,
+            "y": 431
+          },
+          {
+            "x": 1848,
+            "y": 431
+          },
+          {
+            "x": 1848,
+            "y": 490
+          },
+          {
+            "x": 1858,
+            "y": 490
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-secret-store::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-tailor-engine#0": {
+        "junctions": [
+          {
+            "x": 1139,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 625
+          },
+          {
+            "x": 1628,
+            "y": 43
+          },
+          {
+            "x": 1628,
+            "y": 615
+          }
+        ],
+        "points": [
+          {
+            "x": 689,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 489
+          },
+          {
+            "x": 919,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 615
+          },
+          {
+            "x": 1628,
+            "y": 615
+          },
+          {
+            "x": 1628,
+            "y": 43
+          },
+          {
+            "x": 200,
+            "y": 43
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-tailor-engine::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-store#1": {
+        "junctions": [
+          {
+            "x": 699,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 89
+          }
+        ],
+        "points": [
+          {
+            "x": 689,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 431
+          },
+          {
+            "x": 699,
+            "y": 89
+          },
+          {
+            "x": 1139,
+            "y": 89
+          },
+          {
+            "x": 1139,
+            "y": 178
+          },
+          {
+            "x": 1149,
+            "y": 178
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-store::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-agent=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-agent-config#20": {
+        "junctions": [
+          {
+            "x": 259,
+            "y": 694
+          },
+          {
+            "x": 259,
+            "y": 684
+          }
+        ],
+        "points": [
+          {
+            "x": 200,
+            "y": 694
+          },
+          {
+            "x": 259,
+            "y": 694
+          },
+          {
+            "x": 259,
+            "y": 684
+          },
+          {
+            "x": 709,
+            "y": 684
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-agent::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-agent-config::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-agent=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-api#12": {
+        "junctions": [
+          {
+            "x": 210,
+            "y": 431
+          }
+        ],
+        "points": [
+          {
+            "x": 200,
+            "y": 694
+          },
+          {
+            "x": 210,
+            "y": 694
+          },
+          {
+            "x": 210,
+            "y": 431
+          },
+          {
+            "x": 489,
+            "y": 431
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-agent::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-agent=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-browser-service#33": {
+        "junctions": [
+          {
+            "x": 210,
+            "y": 694
+          },
+          {
+            "x": 1628,
+            "y": 357
+          }
+        ],
+        "points": [
+          {
+            "x": 200,
+            "y": 694
+          },
+          {
+            "x": 210,
+            "y": 694
+          },
+          {
+            "x": 210,
+            "y": 43
+          },
+          {
+            "x": 1628,
+            "y": 43
+          },
+          {
+            "x": 1628,
+            "y": 357
+          },
+          {
+            "x": 1638,
+            "y": 357
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-agent::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-browser-service::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-agent=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-service#35": {
+        "junctions": [],
+        "points": [
+          {
+            "x": 200,
+            "y": 694
+          },
+          {
+            "x": 210,
+            "y": 694
+          },
+          {
+            "x": 210,
+            "y": 43
+          },
+          {
+            "x": 1638,
+            "y": 43
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-agent::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-service::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-agent=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-run-store#30": {
+        "junctions": [
+          {
+            "x": 210,
+            "y": 684
+          }
+        ],
+        "points": [
+          {
+            "x": 200,
+            "y": 694
+          },
+          {
+            "x": 210,
+            "y": 694
+          },
+          {
+            "x": 210,
+            "y": 684
+          },
+          {
+            "x": 699,
+            "y": 684
+          },
+          {
+            "x": 699,
+            "y": 548
+          },
+          {
+            "x": 709,
+            "y": 548
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-agent::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-run-store::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-tracker=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-company-research#18": {
+        "junctions": [],
+        "points": [
+          {
+            "x": 1129,
+            "y": 548
+          },
+          {
+            "x": 1139,
+            "y": 548
+          },
+          {
+            "x": 1139,
+            "y": 567
+          },
+          {
+            "x": 1149,
+            "y": 567
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-tracker::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-company-research::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-tracker=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-renderer#14": {
+        "junctions": [
+          {
+            "x": 1139,
+            "y": 548
+          }
+        ],
+        "points": [
+          {
+            "x": 1129,
+            "y": 548
+          },
+          {
+            "x": 1139,
+            "y": 548
+          },
+          {
+            "x": 1139,
+            "y": 431
+          },
+          {
+            "x": 1149,
+            "y": 431
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-tracker::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-renderer::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-tracker=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume#10": {
+        "junctions": [
+          {
+            "x": 1628,
+            "y": 625
+          }
+        ],
+        "points": [
+          {
+            "x": 1129,
+            "y": 548
+          },
+          {
+            "x": 1139,
+            "y": 548
+          },
+          {
+            "x": 1139,
+            "y": 625
+          },
+          {
+            "x": 1628,
+            "y": 625
+          },
+          {
+            "x": 1628,
+            "y": 820
+          },
+          {
+            "x": 2078,
+            "y": 820
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-tracker::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-company-research=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume#26": {
+        "junctions": [
+          {
+            "x": 1628,
+            "y": 567
+          }
+        ],
+        "points": [
+          {
+            "x": 1349,
+            "y": 567
+          },
+          {
+            "x": 1628,
+            "y": 567
+          },
+          {
+            "x": 1628,
+            "y": 431
+          },
+          {
+            "x": 2068,
+            "y": 431
+          },
+          {
+            "x": 2068,
+            "y": 820
+          },
+          {
+            "x": 2078,
+            "y": 820
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-company-research::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-connections=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-gmail-api#15": {
+        "junctions": [],
+        "points": [
+          {
+            "x": 1838,
+            "y": 610
+          },
+          {
+            "x": 1858,
+            "y": 610
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-connections::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-gmail-api::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-connections=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-secret-store#14": {
+        "junctions": [
+          {
+            "x": 1848,
+            "y": 610
+          }
+        ],
+        "points": [
+          {
+            "x": 1838,
+            "y": 610
+          },
+          {
+            "x": 1848,
+            "y": 610
+          },
+          {
+            "x": 1848,
+            "y": 490
+          },
+          {
+            "x": 1858,
+            "y": 490
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-connections::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-secret-store::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-cover-letter-engine=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-guardrail-validator#8": {
+        "junctions": [
+          {
+            "x": 919,
+            "y": 431
+          }
+        ],
+        "points": [
+          {
+            "x": 909,
+            "y": 431
+          },
+          {
+            "x": 919,
+            "y": 431
+          },
+          {
+            "x": 919,
+            "y": 236
+          },
+          {
+            "x": 929,
+            "y": 236
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-cover-letter-engine::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-guardrail-validator::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-cover-letter-engine=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-layer#7": {
+        "junctions": [],
+        "points": [
+          {
+            "x": 909,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 236
+          },
+          {
+            "x": 1359,
+            "y": 236
+          },
+          {
+            "x": 1359,
+            "y": 178
+          },
+          {
+            "x": 1369,
+            "y": 178
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-cover-letter-engine::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-layer::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-cover-letter-engine=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-prompt-store#12": {
+        "junctions": [
+          {
+            "x": 1139,
+            "y": 431
+          }
+        ],
+        "points": [
+          {
+            "x": 909,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 236
+          },
+          {
+            "x": 1359,
+            "y": 236
+          },
+          {
+            "x": 1359,
+            "y": 279
+          },
+          {
+            "x": 1369,
+            "y": 279
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-cover-letter-engine::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-prompt-store::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-cover-letter-engine=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-renderer#10": {
+        "junctions": [],
+        "points": [
+          {
+            "x": 909,
+            "y": 431
+          },
+          {
+            "x": 1149,
+            "y": 431
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-cover-letter-engine::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-renderer::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-cover-letter-engine=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-store#9": {
+        "junctions": [],
+        "points": [
+          {
+            "x": 909,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 431
+          },
+          {
+            "x": 1139,
+            "y": 178
+          },
+          {
+            "x": 1149,
+            "y": 178
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-cover-letter-engine::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-store::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-guardrail-validator=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-keyword-vocabulary#20": {
+        "junctions": [
+          {
+            "x": 1359,
+            "y": 236
+          }
+        ],
+        "points": [
+          {
+            "x": 1129,
+            "y": 236
+          },
+          {
+            "x": 1359,
+            "y": 236
+          },
+          {
+            "x": 1359,
+            "y": 431
+          },
+          {
+            "x": 1369,
+            "y": 431
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-guardrail-validator::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-keyword-vocabulary::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-guardrail-validator=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume#21": {
+        "junctions": [
+          {
+            "x": 1628,
+            "y": 236
+          }
+        ],
+        "points": [
+          {
+            "x": 1129,
+            "y": 236
+          },
+          {
+            "x": 1628,
+            "y": 236
+          },
+          {
+            "x": 1628,
+            "y": 314
+          },
+          {
+            "x": 1848,
+            "y": 314
+          },
+          {
+            "x": 1848,
+            "y": 431
+          },
+          {
+            "x": 2068,
+            "y": 431
+          },
+          {
+            "x": 2068,
+            "y": 820
+          },
+          {
+            "x": 2078,
+            "y": 820
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-guardrail-validator::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-guardrail-validator=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-store#5": {
+        "junctions": [
+          {
+            "x": 1139,
+            "y": 236
+          }
+        ],
+        "points": [
+          {
+            "x": 1129,
+            "y": 236
+          },
+          {
+            "x": 1139,
+            "y": 236
+          },
+          {
+            "x": 1139,
+            "y": 178
+          },
+          {
+            "x": 1149,
+            "y": 178
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-guardrail-validator::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-store::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-keyword-vocabulary=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume#29": {
+        "junctions": [],
+        "points": [
+          {
+            "x": 1569,
+            "y": 431
+          },
+          {
+            "x": 2068,
+            "y": 431
+          },
+          {
+            "x": 2068,
+            "y": 820
+          },
+          {
+            "x": 2078,
+            "y": 820
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-keyword-vocabulary::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-layer=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-service#5": {
+        "junctions": [
+          {
+            "x": 1628,
+            "y": 178
+          }
+        ],
+        "points": [
+          {
+            "x": 1569,
+            "y": 178
+          },
+          {
+            "x": 1628,
+            "y": 178
+          },
+          {
+            "x": 1628,
+            "y": 43
+          },
+          {
+            "x": 1638,
+            "y": 43
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-layer::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-service::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-layer=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-secret-store#8": {
+        "junctions": [
+          {
+            "x": 1628,
+            "y": 314
+          },
+          {
+            "x": 1848,
+            "y": 314
+          },
+          {
+            "x": 1848,
+            "y": 490
+          }
+        ],
+        "points": [
+          {
+            "x": 1569,
+            "y": 178
+          },
+          {
+            "x": 1628,
+            "y": 178
+          },
+          {
+            "x": 1628,
+            "y": 314
+          },
+          {
+            "x": 1848,
+            "y": 314
+          },
+          {
+            "x": 1848,
+            "y": 490
+          },
+          {
+            "x": 1858,
+            "y": 490
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-layer::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-secret-store::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-onboarding-store=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume#24": {
+        "junctions": [
+          {
+            "x": 2068,
+            "y": 762
+          }
+        ],
+        "points": [
+          {
+            "x": 2058,
+            "y": 762
+          },
+          {
+            "x": 2068,
+            "y": 762
+          },
+          {
+            "x": 2068,
+            "y": 820
+          },
+          {
+            "x": 2078,
+            "y": 820
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-onboarding-store::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-renderer=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-keyword-vocabulary#21": {
+        "junctions": [],
+        "points": [
+          {
+            "x": 1349,
+            "y": 431
+          },
+          {
+            "x": 1369,
+            "y": 431
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-renderer::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-keyword-vocabulary::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-renderer=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-prompt-store#16": {
+        "junctions": [],
+        "points": [
+          {
+            "x": 1349,
+            "y": 431
+          },
+          {
+            "x": 1359,
+            "y": 431
+          },
+          {
+            "x": 1359,
+            "y": 279
+          },
+          {
+            "x": 1369,
+            "y": 279
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-renderer::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-prompt-store::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-renderer=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume#4": {
+        "junctions": [
+          {
+            "x": 1628,
+            "y": 489
+          }
+        ],
+        "points": [
+          {
+            "x": 1349,
+            "y": 431
+          },
+          {
+            "x": 1359,
+            "y": 431
+          },
+          {
+            "x": 1359,
+            "y": 489
+          },
+          {
+            "x": 1628,
+            "y": 489
+          },
+          {
+            "x": 1628,
+            "y": 431
+          },
+          {
+            "x": 2068,
+            "y": 431
+          },
+          {
+            "x": 2068,
+            "y": 820
+          },
+          {
+            "x": 2078,
+            "y": 820
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-renderer::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-run-store=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-tracker#22": {
+        "junctions": [],
+        "points": [
+          {
+            "x": 909,
+            "y": 548
+          },
+          {
+            "x": 929,
+            "y": 548
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-run-store::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-tracker::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-run-store=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-screening-engine#34": {
+        "junctions": [
+          {
+            "x": 919,
+            "y": 625
+          },
+          {
+            "x": 1628,
+            "y": 635
+          }
+        ],
+        "points": [
+          {
+            "x": 909,
+            "y": 548
+          },
+          {
+            "x": 919,
+            "y": 548
+          },
+          {
+            "x": 919,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 635
+          },
+          {
+            "x": 1628,
+            "y": 635
+          },
+          {
+            "x": 1628,
+            "y": 820
+          },
+          {
+            "x": 210,
+            "y": 820
+          },
+          {
+            "x": 210,
+            "y": 852
+          },
+          {
+            "x": 200,
+            "y": 852
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-run-store::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-screening-engine::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-run-store=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume#28": {
+        "junctions": [
+          {
+            "x": 919,
+            "y": 625
+          }
+        ],
+        "points": [
+          {
+            "x": 909,
+            "y": 548
+          },
+          {
+            "x": 919,
+            "y": 548
+          },
+          {
+            "x": 919,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 625
+          },
+          {
+            "x": 1579,
+            "y": 635
+          },
+          {
+            "x": 1628,
+            "y": 635
+          },
+          {
+            "x": 1628,
+            "y": 820
+          },
+          {
+            "x": 2078,
+            "y": 820
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-run-store::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-screening-engine=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-agent-config#17": {
+        "junctions": [
+          {
+            "x": 259,
+            "y": 694
+          },
+          {
+            "x": 259,
+            "y": 684
+          }
+        ],
+        "points": [
+          {
+            "x": 200,
+            "y": 820
+          },
+          {
+            "x": 210,
+            "y": 820
+          },
+          {
+            "x": 210,
+            "y": 694
+          },
+          {
+            "x": 259,
+            "y": 694
+          },
+          {
+            "x": 259,
+            "y": 684
+          },
+          {
+            "x": 709,
+            "y": 684
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-screening-engine::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-agent-config::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-screening-engine=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-tracker#18": {
+        "junctions": [
+          {
+            "x": 210,
+            "y": 820
+          },
+          {
+            "x": 210,
+            "y": 714
+          },
+          {
+            "x": 919,
+            "y": 742
+          }
+        ],
+        "points": [
+          {
+            "x": 200,
+            "y": 820
+          },
+          {
+            "x": 210,
+            "y": 820
+          },
+          {
+            "x": 210,
+            "y": 714
+          },
+          {
+            "x": 259,
+            "y": 714
+          },
+          {
+            "x": 259,
+            "y": 684
+          },
+          {
+            "x": 699,
+            "y": 684
+          },
+          {
+            "x": 699,
+            "y": 742
+          },
+          {
+            "x": 919,
+            "y": 742
+          },
+          {
+            "x": 919,
+            "y": 548
+          },
+          {
+            "x": 929,
+            "y": 548
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-screening-engine::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-tracker::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-screening-engine=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-company-research#27": {
+        "junctions": [
+          {
+            "x": 210,
+            "y": 704
+          },
+          {
+            "x": 259,
+            "y": 704
+          }
+        ],
+        "points": [
+          {
+            "x": 200,
+            "y": 820
+          },
+          {
+            "x": 210,
+            "y": 820
+          },
+          {
+            "x": 210,
+            "y": 704
+          },
+          {
+            "x": 259,
+            "y": 704
+          },
+          {
+            "x": 259,
+            "y": 684
+          },
+          {
+            "x": 699,
+            "y": 684
+          },
+          {
+            "x": 699,
+            "y": 742
+          },
+          {
+            "x": 1139,
+            "y": 742
+          },
+          {
+            "x": 1139,
+            "y": 567
+          },
+          {
+            "x": 1149,
+            "y": 567
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-screening-engine::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-company-research::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-screening-engine=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume#19": {
+        "junctions": [],
+        "points": [
+          {
+            "x": 200,
+            "y": 820
+          },
+          {
+            "x": 2078,
+            "y": 820
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-screening-engine::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-secret-store=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume#9": {
+        "junctions": [
+          {
+            "x": 2068,
+            "y": 490
+          }
+        ],
+        "points": [
+          {
+            "x": 2058,
+            "y": 490
+          },
+          {
+            "x": 2068,
+            "y": 490
+          },
+          {
+            "x": 2068,
+            "y": 820
+          },
+          {
+            "x": 2078,
+            "y": 820
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-secret-store::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-tailor-engine=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-keyword-vocabulary#31": {
+        "junctions": [
+          {
+            "x": 210,
+            "y": 119
+          },
+          {
+            "x": 1359,
+            "y": 431
+          }
+        ],
+        "points": [
+          {
+            "x": 200,
+            "y": 75
+          },
+          {
+            "x": 210,
+            "y": 75
+          },
+          {
+            "x": 210,
+            "y": 119
+          },
+          {
+            "x": 259,
+            "y": 119
+          },
+          {
+            "x": 259,
+            "y": 89
+          },
+          {
+            "x": 1359,
+            "y": 89
+          },
+          {
+            "x": 1359,
+            "y": 431
+          },
+          {
+            "x": 1369,
+            "y": 431
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-tailor-engine::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-keyword-vocabulary::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-tailor-engine=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-layer#1": {
+        "junctions": [
+          {
+            "x": 210,
+            "y": 109
+          },
+          {
+            "x": 259,
+            "y": 109
+          },
+          {
+            "x": 1359,
+            "y": 178
+          }
+        ],
+        "points": [
+          {
+            "x": 200,
+            "y": 75
+          },
+          {
+            "x": 210,
+            "y": 75
+          },
+          {
+            "x": 210,
+            "y": 109
+          },
+          {
+            "x": 259,
+            "y": 109
+          },
+          {
+            "x": 259,
+            "y": 89
+          },
+          {
+            "x": 1359,
+            "y": 89
+          },
+          {
+            "x": 1359,
+            "y": 178
+          },
+          {
+            "x": 1369,
+            "y": 178
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-tailor-engine::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-layer::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-tailor-engine=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-prompt-store#6": {
+        "junctions": [
+          {
+            "x": 210,
+            "y": 99
+          },
+          {
+            "x": 259,
+            "y": 99
+          },
+          {
+            "x": 259,
+            "y": 89
+          },
+          {
+            "x": 1359,
+            "y": 279
+          }
+        ],
+        "points": [
+          {
+            "x": 200,
+            "y": 75
+          },
+          {
+            "x": 210,
+            "y": 75
+          },
+          {
+            "x": 210,
+            "y": 99
+          },
+          {
+            "x": 259,
+            "y": 99
+          },
+          {
+            "x": 259,
+            "y": 89
+          },
+          {
+            "x": 1359,
+            "y": 89
+          },
+          {
+            "x": 1359,
+            "y": 279
+          },
+          {
+            "x": 1369,
+            "y": 279
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-tailor-engine::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-prompt-store::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-tailor-engine=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume#22": {
+        "junctions": [
+          {
+            "x": 210,
+            "y": 75
+          },
+          {
+            "x": 210,
+            "y": 43
+          },
+          {
+            "x": 1848,
+            "y": 431
+          },
+          {
+            "x": 2068,
+            "y": 820
+          }
+        ],
+        "points": [
+          {
+            "x": 200,
+            "y": 75
+          },
+          {
+            "x": 210,
+            "y": 75
+          },
+          {
+            "x": 210,
+            "y": 43
+          },
+          {
+            "x": 1628,
+            "y": 43
+          },
+          {
+            "x": 1628,
+            "y": 0
+          },
+          {
+            "x": 1848,
+            "y": 0
+          },
+          {
+            "x": 1848,
+            "y": 431
+          },
+          {
+            "x": 2068,
+            "y": 431
+          },
+          {
+            "x": 2068,
+            "y": 820
+          },
+          {
+            "x": 2078,
+            "y": 820
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-tailor-engine::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-tailor-engine=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-store#2": {
+        "junctions": [
+          {
+            "x": 210,
+            "y": 89
+          },
+          {
+            "x": 1139,
+            "y": 89
+          },
+          {
+            "x": 1139,
+            "y": 178
+          }
+        ],
+        "points": [
+          {
+            "x": 200,
+            "y": 75
+          },
+          {
+            "x": 210,
+            "y": 75
+          },
+          {
+            "x": 210,
+            "y": 89
+          },
+          {
+            "x": 1139,
+            "y": 89
+          },
+          {
+            "x": 1139,
+            "y": 178
+          },
+          {
+            "x": 1149,
+            "y": 178
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-tailor-engine::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-store::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-store=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-layer#4": {
+        "junctions": [],
+        "points": [
+          {
+            "x": 1349,
+            "y": 178
+          },
+          {
+            "x": 1369,
+            "y": 178
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-store::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-layer::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-store=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-prompt-store#11": {
+        "junctions": [],
+        "points": [
+          {
+            "x": 1349,
+            "y": 178
+          },
+          {
+            "x": 1359,
+            "y": 178
+          },
+          {
+            "x": 1359,
+            "y": 279
+          },
+          {
+            "x": 1369,
+            "y": 279
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-store::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-prompt-store::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-store=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume#3": {
+        "junctions": [
+          {
+            "x": 1359,
+            "y": 119
+          },
+          {
+            "x": 1628,
+            "y": 119
+          }
+        ],
+        "points": [
+          {
+            "x": 1349,
+            "y": 178
+          },
+          {
+            "x": 1359,
+            "y": 178
+          },
+          {
+            "x": 1359,
+            "y": 119
+          },
+          {
+            "x": 1628,
+            "y": 119
+          },
+          {
+            "x": 1628,
+            "y": 0
+          },
+          {
+            "x": 1848,
+            "y": 0
+          },
+          {
+            "x": 1848,
+            "y": 431
+          },
+          {
+            "x": 2068,
+            "y": 431
+          },
+          {
+            "x": 2068,
+            "y": 820
+          },
+          {
+            "x": 2078,
+            "y": 820
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-store::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume::in"
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-web-ui=>node-652384b2-fef2-4000-aaa2-95577cbd4cae-api#0": {
+        "junctions": [
+          {
+            "x": 479,
+            "y": 431
+          }
+        ],
+        "points": [
+          {
+            "x": 469,
+            "y": 490
+          },
+          {
+            "x": 479,
+            "y": 490
+          },
+          {
+            "x": 479,
+            "y": 431
+          },
+          {
+            "x": 489,
+            "y": 431
+          }
+        ],
+        "sourcePort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-web-ui::out",
+        "targetPort": "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::in"
+      }
+    },
+    "groupBounds": {
+      "truthcv-container-single-docker-image": {
+        "height": 714,
+        "width": 1388,
+        "x": 225,
+        "y": 53
+      }
+    },
+    "layoutVersion": 3,
+    "ports": {
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-agent-config::in": {
+        "x": 709,
+        "y": 684
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-agent-config::out": {
+        "x": 909,
+        "y": 684
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::in": {
+        "x": 489,
+        "y": 431
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-api::out": {
+        "x": 689,
+        "y": 431
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-agent::in": {
+        "x": 0,
+        "y": 694
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-agent::out": {
+        "x": 200,
+        "y": 694
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-tracker::in": {
+        "x": 929,
+        "y": 548
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-application-tracker::out": {
+        "x": 1129,
+        "y": 548
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-browser-service::in": {
+        "x": 1638,
+        "y": 357
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-browser-service::out": {
+        "x": 1638,
+        "y": 389
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-company-research::in": {
+        "x": 1149,
+        "y": 567
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-company-research::out": {
+        "x": 1349,
+        "y": 567
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-connections::in": {
+        "x": 1638,
+        "y": 610
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-connections::out": {
+        "x": 1838,
+        "y": 610
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-cover-letter-engine::in": {
+        "x": 709,
+        "y": 431
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-cover-letter-engine::out": {
+        "x": 909,
+        "y": 431
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-gmail-api::in": {
+        "x": 1858,
+        "y": 610
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-gmail-api::out": {
+        "x": 1858,
+        "y": 642
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-guardrail-validator::in": {
+        "x": 929,
+        "y": 236
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-guardrail-validator::out": {
+        "x": 1129,
+        "y": 236
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-keyword-vocabulary::in": {
+        "x": 1369,
+        "y": 431
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-keyword-vocabulary::out": {
+        "x": 1569,
+        "y": 431
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-layer::in": {
+        "x": 1369,
+        "y": 178
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-layer::out": {
+        "x": 1569,
+        "y": 178
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-service::in": {
+        "x": 1638,
+        "y": 43
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-llm-provider-service::out": {
+        "x": 1638,
+        "y": 75
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-onboarding-store::in": {
+        "x": 1858,
+        "y": 762
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-onboarding-store::out": {
+        "x": 2058,
+        "y": 762
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-prompt-store::in": {
+        "x": 1369,
+        "y": 279
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-prompt-store::out": {
+        "x": 1369,
+        "y": 311
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-renderer::in": {
+        "x": 1149,
+        "y": 431
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-renderer::out": {
+        "x": 1349,
+        "y": 431
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-run-store::in": {
+        "x": 709,
+        "y": 548
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-run-store::out": {
+        "x": 909,
+        "y": 548
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-screening-engine::in": {
+        "x": 200,
+        "y": 852
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-screening-engine::out": {
+        "x": 200,
+        "y": 820
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-secret-store::in": {
+        "x": 1858,
+        "y": 490
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-secret-store::out": {
+        "x": 2058,
+        "y": 490
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-tailor-engine::in": {
+        "x": 200,
+        "y": 43
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-tailor-engine::out": {
+        "x": 200,
+        "y": 75
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume::in": {
+        "x": 2078,
+        "y": 820
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-data-volume::out": {
+        "x": 2078,
+        "y": 852
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-store::in": {
+        "x": 1149,
+        "y": 178
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-truth-store::out": {
+        "x": 1349,
+        "y": 178
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-web-ui::in": {
+        "x": 269,
+        "y": 490
+      },
+      "node-652384b2-fef2-4000-aaa2-95577cbd4cae-web-ui::out": {
+        "x": 469,
+        "y": 490
+      }
+    }
+  },
   "projectName": "Aether Agent Workspace",
   "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
   "systemIntent": "TruthCV is a self-hostable, single-user web application that generates ATS-passing, truthful CVs tailored to a specific job posting. Every fact originates exclusively from a per-user \"truth file\" (truth.yaml) derived from the user's LinkedIn profile; the app may reword and reorder those facts freely, but any new claim must be explicitly confirmed by the user before it can enter a CV — enforced mechanically by a deterministic guardrail that diffs every factual token against the truth file. It is bring-your-own-API-key, Docker-deployable (docker compose up → localhost:8080), needs no database or accounts, and renders both PDF and DOCX from one ATS-safe source.",
   "topologyLayout": {
     "agent-config": {
-      "x": 1028,
-      "y": 140
+      "x": 709,
+      "y": 636
     },
     "api": {
-      "x": 436,
-      "y": 284
+      "x": 489,
+      "y": 383
     },
     "application-agent": {
-      "x": 100,
-      "y": 920
+      "x": 0,
+      "y": 646
     },
     "application-tracker": {
-      "x": 1028,
-      "y": 428
+      "x": 929,
+      "y": 500
     },
     "browser-service": {
-      "x": 1500,
-      "y": 200
+      "x": 1638,
+      "y": 325
     },
     "company-research": {
-      "x": 1324,
-      "y": 284
+      "x": 1149,
+      "y": 519
     },
     "connections": {
-      "x": 396,
-      "y": 704
+      "x": 1638,
+      "y": 562
     },
     "cover-letter-engine": {
-      "x": 732,
-      "y": 212
+      "x": 709,
+      "y": 383
     },
     "gmail-api": {
-      "x": 692,
-      "y": 920
+      "x": 1858,
+      "y": 578
     },
     "guardrail-validator": {
-      "x": 1028,
-      "y": 284
+      "x": 929,
+      "y": 188
     },
     "keyword-vocabulary": {
-      "x": 1620,
-      "y": 428
+      "x": 1369,
+      "y": 383
     },
     "llm-provider-layer": {
-      "x": 1620,
-      "y": 140
+      "x": 1369,
+      "y": 130
     },
     "llm-provider-service": {
-      "x": 988,
-      "y": 848
+      "x": 1638,
+      "y": 11
     },
     "onboarding-store": {
-      "x": 396,
-      "y": 848
+      "x": 1858,
+      "y": 714
     },
     "prompt-store": {
-      "x": 1620,
-      "y": 284
+      "x": 1369,
+      "y": 247
     },
     "renderer": {
-      "x": 1324,
-      "y": 428
+      "x": 1149,
+      "y": 383
     },
     "run-store": {
-      "x": 732,
-      "y": 356
+      "x": 709,
+      "y": 500
     },
     "screening-engine": {
-      "x": 396,
-      "y": 992
+      "x": 0,
+      "y": 788
     },
     "secret-store": {
-      "x": 988,
-      "y": 992
+      "x": 1858,
+      "y": 442
     },
     "tailor-engine": {
-      "x": 396,
-      "y": 1136
+      "x": 26.670876085240735,
+      "y": 74.34333070244656
     },
     "truth-data-volume": {
-      "x": 1284,
-      "y": 920
+      "x": 2078,
+      "y": 788
     },
     "truth-store": {
-      "x": 1324,
-      "y": 140
+      "x": 1149,
+      "y": 130
     },
     "web-ui": {
-      "x": 140,
-      "y": 284
+      "x": 269,
+      "y": 442
     }
   },
   "version": "1.0.0"
