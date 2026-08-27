@@ -281,6 +281,115 @@ fi
 
 rm -f "$_CFG_STUB" "$_CFG_OUT" "$_CFG_ERR" "/tmp/agent-config-stub-$$.log"
 
+# --- Scheduler honours the enabled toggle -------------------------------------
+
+# The agent-level `enabled` flag lives on the Agents page and is fetched by
+# supervisor.js via agent-config.js. Nothing inside the container used to read
+# it: the scheduler called doRun() unconditionally, so turning the agent off
+# stopped nothing. `node --check` cannot see that, and neither can a status
+# probe - the only evidence that discriminates is whether a scheduled slot
+# actually fires. So this runs two supervisors against the SAME slot, one
+# behind a config stub saying enabled:false and one saying enabled:true, and
+# insists they disagree. A pass needs both halves: the true side proves the
+# slot really came round, without which the false side's silence means nothing.
+_GATE_OK=1
+_GATE_STUB="/tmp/agent-gate-stub-$$.mjs"
+
+# Slot = the minute containing now+70s, so the wait below is 18-78s.
+_GATE_TS=$(( $(date +%s) + 70 ))
+_GATE_HHMM=$(date -d "@$_GATE_TS" +%H:%M)
+_GATE_SLOT=$(date -d "$(date -d "@$_GATE_TS" +%Y-%m-%dT%H:%M:00)" +%s)
+
+cat >"$_GATE_STUB" <<'GATESTUB'
+import http from "node:http";
+// runDays covers all seven days: the slot is minutes away, and the smoke test
+// must not pass vacuously by landing on a day the schedule excludes.
+const CONFIG = {
+  mode: "semi",
+  enabled: process.env.STUB_ENABLED === "true",
+  runAt: [process.env.STUB_RUN_AT],
+  runDays: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+};
+http.createServer((req, res) => {
+  if (req.url === "/api/agent/config") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(CONFIG));
+    return;
+  }
+  res.writeHead(404); res.end();
+}).listen(Number(process.env.STUB_PORT), "127.0.0.1");
+GATESTUB
+
+# start_gate_side <enabled> <stub-port> <supervisor-port> -> echoes "stubpid superpid"
+start_gate_side() {
+  local want="$1" cfg_port="$2" sup_port="$3"
+  STUB_ENABLED="$want" STUB_PORT="$cfg_port" STUB_RUN_AT="$_GATE_HHMM" \
+    node "$_GATE_STUB" >"/tmp/agent-gate-stub-$want-$$.log" 2>&1 &
+  local stub_pid=$!
+  sleep 1
+  AGENT_API_TOKEN="gate-token-$$" \
+  AGENT_CONTROL_PORT="$sup_port" \
+  AGENT_CONFIG_JS="$AGENT_DIR/agent-config.js" \
+  TRUTHCV_MCP_URL="http://127.0.0.1:$cfg_port/mcp" \
+  RUN_ONCE="" \
+  DAILY_APPLY="/bin/true" \
+    node "$AGENT_DIR/supervisor.js" >"/tmp/agent-gate-super-$want-$$.log" 2>&1 &
+  echo "$stub_pid $!"
+}
+
+# gate_started <supervisor-port> -> prints "true"/"false"/"error:..."
+gate_started() {
+  GATE_PORT="$1" GATE_TOKEN="gate-token-$$" node -e '
+    const http = require("http");
+    const opts = {
+      hostname: "127.0.0.1", port: Number(process.env.GATE_PORT),
+      path: "/status", method: "GET",
+      headers: { "x-agent-token": process.env.GATE_TOKEN },
+    };
+    const r = http.request(opts, (res) => {
+      let b = ""; res.on("data", (c) => b += c);
+      res.on("end", () => {
+        if (res.statusCode !== 200) { console.log("error:HTTP " + res.statusCode); return; }
+        try { console.log(String(JSON.parse(b).lastStartedAt !== null)); }
+        catch { console.log("error:status not JSON"); }
+      });
+    });
+    r.on("error", (e) => console.log("error:" + e.message));
+    r.end();
+  ' 2>/dev/null
+}
+
+read -r _GATE_OFF_STUB _GATE_OFF_SUP <<<"$(start_gate_side false 19096 19094)"
+read -r _GATE_ON_STUB  _GATE_ON_SUP  <<<"$(start_gate_side true  19097 19095)"
+
+# +8s past the slot: the scheduler arms a setTimeout for it, so the run starts
+# within milliseconds of the slot, not on the next poll.
+_GATE_WAIT=$(( _GATE_SLOT + 8 - $(date +%s) ))
+[[ $_GATE_WAIT -gt 0 ]] && sleep "$_GATE_WAIT"
+
+_GATE_OFF_RAN=$(gate_started 19094)
+_GATE_ON_RAN=$(gate_started 19095)
+
+kill "$_GATE_OFF_SUP" "$_GATE_ON_SUP" "$_GATE_OFF_STUB" "$_GATE_ON_STUB" 2>/dev/null
+wait "$_GATE_OFF_SUP" "$_GATE_ON_SUP" "$_GATE_OFF_STUB" "$_GATE_ON_STUB" 2>/dev/null
+
+if [[ "$_GATE_ON_RAN" == "true" ]]; then
+  ok "scheduler fires the $_GATE_HHMM slot when the agent config says enabled:true"
+else
+  bad "scheduler did NOT fire the $_GATE_HHMM slot with enabled:true (got '$_GATE_ON_RAN') - the enabled:false result below proves nothing; see /tmp/agent-gate-super-true-$$.log"
+  _GATE_OK=0
+fi
+
+if [[ "$_GATE_OFF_RAN" == "false" ]]; then
+  [[ $_GATE_OK -eq 1 ]] \
+    && ok "scheduler holds the same slot when the agent config says enabled:false" \
+    || bad "enabled:false did not run, but the enabled:true control did not run either - result is not evidence"
+else
+  bad "scheduler ran with enabled:false (got '$_GATE_OFF_RAN') - the Agents page toggle does not stop unattended runs; see /tmp/agent-gate-super-false-$$.log"
+fi
+
+rm -f "$_GATE_STUB" "/tmp/agent-gate-stub-true-$$.log" "/tmp/agent-gate-stub-false-$$.log"
+
 # --- Reachability ------------------------------------------------------------
 
 # This only proves the `browser` compose service is accepting connections and
