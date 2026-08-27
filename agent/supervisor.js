@@ -77,6 +77,14 @@ let scheduleRunAt = RUN_AT_DEFAULT;
 let scheduleRunDays = RUN_DAYS_DEFAULT;
 let scheduleRefreshedAt = 0; // epoch ms of last successful refresh
 
+// The agent-level enabled toggle from the Agents page. Three-valued on
+// purpose: null means "never successfully fetched", which is NOT the same as
+// false and must not be logged as if the operator had turned the agent off.
+// Only `true` lets the scheduler fire — see schedulerLoop. Unlike RUN_AT and
+// RUN_DAYS there is no env fallback, because there is no env answer to "did
+// the operator switch this off"; the app is the only source.
+let scheduleEnabled = null;
+
 // ---------------------------------------------------------------------------
 // Logging
 // ---------------------------------------------------------------------------
@@ -249,13 +257,22 @@ function refreshSchedule() {
 
   const at = fetchField("run_at");
   const days = fetchField("run_days");
+  const enabled = fetchField("enabled");
 
   scheduleRunAt = at || RUN_AT_DEFAULT;
   scheduleRunDays = days || RUN_DAYS_DEFAULT;
+  // Keep the last known value when the fetch fails rather than flipping to
+  // false: one flaky request should not read as "the operator disabled it".
+  // A run needs the app anyway (daily-apply.sh aborts without its job config),
+  // so a persistently unreachable app leaves this null and the scheduler holds.
+  if (enabled === "true" || enabled === "false") scheduleEnabled = enabled === "true";
   scheduleRefreshedAt = Date.now();
 
   const src = at ? "config" : "env";
-  log(`schedule refreshed (source=${src}): RUN_AT=${scheduleRunAt} RUN_DAYS=${scheduleRunDays}`);
+  log(
+    `schedule refreshed (source=${src}): RUN_AT=${scheduleRunAt} RUN_DAYS=${scheduleRunDays} ` +
+      `enabled=${scheduleEnabled === null ? "unknown" : scheduleEnabled}`,
+  );
 }
 
 /**
@@ -331,11 +348,15 @@ function schedulerLoop() {
   log(`next scheduled run in ${secs}s (${nextDate.toISOString().replace("T", " ").slice(0, 16)} UTC)`);
 
   setTimeout(() => {
-    if (!runState.running) {
+    if (runState.running) {
+      log("Scheduler: skipping — a run is already active");
+    } else if (scheduleEnabled === false) {
+      log("Scheduler: skipping — the agent is disabled on the Agents page");
+    } else if (scheduleEnabled === null) {
+      log("Scheduler: skipping — enabled flag unknown (agent config fetch failed)");
+    } else {
       log("Scheduler: triggering run");
       doRun();
-    } else {
-      log("Scheduler: skipping — a run is already active");
     }
     schedulerLoop();
   }, secs * 1000).unref();
@@ -360,10 +381,16 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === "GET" && req.url === "/status") {
-    return jsonReply(res, 200, { ...runState });
+    // scheduleEnabled is the scheduler's gate, reported so an operator (and
+    // agent/smoke-test.sh) can see which way it is set without reading logs.
+    return jsonReply(res, 200, { ...runState, scheduleEnabled });
   }
 
   if (req.method === "POST" && req.url === "/run") {
+    // Deliberately NOT gated on scheduleEnabled. This route is only reached
+    // from the Agents page's Run-now button — an explicit operator action, in
+    // front of them, now. The toggle governs unattended runs, which is the
+    // thing nobody is watching.
     if (runState.running) {
       return jsonReply(res, 200, { started: false, running: true });
     }
