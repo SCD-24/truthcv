@@ -37,7 +37,10 @@ from agenttools.tools_runs import (
 _TOOL_REGISTRY = {
     "generate_cover_letter": (
         _generate_cover_letter,
-        "Generates a guardrailed, per-role cover letter.",
+        "Generates a guardrailed, per-role cover letter. When it is not blocked, the same text is also "
+        "rendered to a PDF on the data volume and returned as letter_path — upload that file wherever the "
+        "form takes the cover letter as a document rather than a textarea. A null letter_path means no "
+        "file could be rendered, so the letter exists only as text; it is not an error.",
     ),
     "record_application": (
         _record_application,
@@ -86,7 +89,10 @@ _TOOL_REGISTRY = {
         "by it — a shorter list than you expected means the per-run cap was reached, not that "
         "work was lost; call it again on a later run for the rest. "
         "An entry with a non-empty blocked_reason must NOT be applied to — report it instead, "
-        "and it never counts against the cap.",
+        "and it never counts against the cap. "
+        "Every entry that is going out carries the operator's letter twice: cover_letter (the text, to be "
+        "submitted verbatim) and cover_letter_path (a PDF of that same text on the data volume, to upload "
+        "where the form takes a document). A null cover_letter_path means the letter exists only as text.",
     ),
     "report_apply_failure": (
         _report_apply_failure,

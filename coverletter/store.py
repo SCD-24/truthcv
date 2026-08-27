@@ -1,6 +1,8 @@
 """Per-screening cover letter drafts on the data volume.
 
-One JSON file per screening under data/letters/. Kept out of screenings.json
+One JSON file per screening under data/letters/, plus — once something has
+rendered it — the PDF of that text flat in data/ (see `pdf_filename`), which is
+the file the unattended agent uploads to an employer. Kept out of screenings.json
 because the letter is rewritten repeatedly and dwarfs the record it belongs to,
 and that file is loaded in full on every screening read.
 
@@ -71,6 +73,26 @@ def draft_path(screening_id: str) -> Path:
     return letters_dir() / f"{screening_id}.json"
 
 
+def pdf_filename(screening_id: str) -> str:
+    """The rendered-letter filename for one screening, on the data volume.
+
+    Flat in data_dir() rather than under letters/ because /api/download/{name}
+    rejects any name with a separator, and this file is the one the unattended
+    agent uploads to an employer — it must also be downloadable by the
+    operator. The ``screening`` segment namespaces it against the wizard's
+    per-application ``cover_letter_{app_id}.pdf``, which is drawn from the same
+    12-hex id space.
+    """
+    if not screening_id or "/" in screening_id or "\\" in screening_id or screening_id.startswith("."):
+        raise ValueError(f"Unsafe screening id '{screening_id}'.")
+    return f"cover_letter_screening_{screening_id}.pdf"
+
+
+def pdf_path(screening_id: str) -> Path:
+    """Filesystem path of the rendered letter for one screening."""
+    return data_dir() / pdf_filename(screening_id)
+
+
 def load(screening_id: str) -> CoverLetterDraft | None:
     """The stored draft, or None when there is none or the file is unreadable."""
     try:
@@ -115,4 +137,12 @@ def delete(screening_id: str) -> bool:
     if not p.exists():
         return False
     p.unlink()
+    # The rendered PDF is a view of the draft. Leaving it behind would let a
+    # later run upload a letter whose text no longer exists.
+    try:
+        pdf = pdf_path(screening_id)
+    except ValueError:
+        return True
+    if pdf.exists():
+        pdf.unlink()
     return True

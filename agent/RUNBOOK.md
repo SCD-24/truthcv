@@ -311,7 +311,56 @@ employer's own site, per item 1 below.
    the operator's actual work — outside this tool, a letter has no guardrail
    behind it at all. See §6 for what to do when it comes back blocked. Always
    pass `company` (the name as posted) to `generate_cover_letter` so the
-   blocklist can refuse before any text is generated.
+   blocklist can refuse before any text is generated. An unblocked result also
+   carries `letter_path` — a PDF of that exact text on the data volume — and an
+   approved queue item carries the same thing as `cover_letter_path`. That file
+   is what you upload wherever the form wants the letter as a document; see
+   "Both documents go up" below.
+
+   There is no tool that turns text you wrote into an uploadable file, and that
+   is deliberate: the only letter files that exist are renders of text the
+   guardrail passed or the operator wrote. Never upload any other file as a
+   cover letter.
+
+### Both documents go up — the CV **and** the letter
+
+The CV is not the whole submission. Unless the form genuinely offers nowhere to
+put it, the letter goes up too.
+
+**Every form puts the letter somewhere different, and no rule here tells you
+which one you are looking at — read the form and work it out.** Take a snapshot
+after the CV is attached and find where the letter goes before deciding it has
+nowhere to go. Four shapes are common; there are others.
+
+- A **second, separately labelled upload control** ("Cover letter", "Additional
+  documents") — use it. This is as common as the shared control below.
+- **One shared upload control** that takes several files, one per click
+  ("Attach", "Upload document", a drop zone). Uploading the CV does not consume
+  it: open it again and upload the letter. An application that carried only the
+  CV because the second click was not obvious is a half-finished application,
+  not a completed one.
+- A **textarea** — paste the letter text verbatim. Nothing is uploaded in that
+  case, and that is correct.
+- **Nothing at all**: no second upload slot, no letter field. Submit the CV
+  alone and say so in `notes` on the `record_application` call — but only after
+  looking, including behind an "Add" / "+" / "Optional documents" control that
+  reveals the field on click. A field you did not look for is not a field that
+  is absent.
+
+Whichever shape it turned out to be:
+
+- **When the path is null** — no rendering backend produced a file — the letter
+  exists only as text: paste it if there is a field for it, and if the only
+  route is an upload, say so in `notes`. Never substitute another file, and
+  never retype the letter into an unrelated field.
+- **Verify both filenames before submitting.** Read the attachment list back off
+  the page and confirm the CV *and* the letter are both listed, each against the
+  field it belongs to. Two failures look identical until you check: a shared
+  widget showing one filename after two uploads has replaced the CV rather than
+  added to it, and a letter uploaded into the CV control has done the same.
+  Fix it through the right control instead of submitting.
+- Record every file that actually went up in `attachments`: `{kind: "cv", path}`
+  and `{kind: "cover_letter", path}`, using the paths the tools returned.
 
 **Browser tooling is whatever this environment provides; nothing in this
 runbook depends on the details.** Use the browser tools you have been
