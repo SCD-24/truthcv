@@ -10,6 +10,7 @@ whether it is time to run.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -21,7 +22,13 @@ import pytest
 
 SCRIPT = Path("agent/agent-config.js").resolve()
 
-pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+# Resolved rather than spelled "node", because the environment handed to the
+# subprocess is not the caller's: on CI node lives in a toolcache directory, so
+# a hardcoded PATH finds nothing while shutil.which (which reads the real PATH)
+# says it is installed — the skip does not fire and every test errors.
+NODE = shutil.which("node")
+
+pytestmark = pytest.mark.skipif(NODE is None, reason="node is not installed")
 
 CONFIG = {
     "mode": "full",
@@ -68,9 +75,12 @@ def server():
 
 
 def _run(base: str, field: str) -> subprocess.CompletedProcess:
+    # The caller's environment is inherited so node finds its own runtime;
+    # TRUTHCV_MCP_URL is the only thing this path reads from it.
+    env = {**os.environ, "TRUTHCV_MCP_URL": base}
     return subprocess.run(
-        ["node", str(SCRIPT), field],
-        env={"TRUTHCV_MCP_URL": base, "PATH": "/usr/bin:/bin"},
+        [NODE, str(SCRIPT), field],
+        env=env,
         capture_output=True,
         text=True,
     )
