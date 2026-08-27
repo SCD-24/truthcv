@@ -152,6 +152,75 @@ describe('runCli bad configuration', () => {
   });
 });
 
+/**
+ * Drive one tool call whose MCP result is `result` through the CLI and return
+ * the single emitted `toolResult` line. The first turn calls the tool, the
+ * second ends the run.
+ */
+async function toolResultLine(result: { content: unknown; isError: boolean }): Promise<Record<string, unknown>> {
+  const pool = fakePool();
+  (pool.callTool as ReturnType<typeof vi.fn>).mockImplementation(async () => result);
+  const adapter = scriptedAdapter([
+    [{ type: 'toolCall', toolCall: A_TOOL_CALL }, doneToolCalls('')],
+    [doneEnd],
+  ]);
+  const { deps, stdout } = harness(adapter, pool);
+
+  await runCli([...BASE_ARGS, 'go'], {}, deps);
+
+  const lines = stdout.map((line) => JSON.parse(line) as Record<string, unknown>);
+  const results = lines.filter((e) => e.type === 'toolResult');
+  expect(results).toHaveLength(1);
+  return results[0];
+}
+
+describe('runCli tool result logging', () => {
+  it('emits the error message, the call id and isError for a failed tool call', async () => {
+    const line = await toolResultLine({ content: 'element not found: ref e42', isError: true });
+
+    expect(line.isError).toBe(true);
+    expect(line.content).toBe('element not found: ref e42');
+    expect(line.toolCallId).toBe(A_TOOL_CALL.id);
+    expect(line.namespacedName).toBe(A_TOOL_CALL.name);
+  });
+
+  it('emits the call id but NO content for a successful tool call', async () => {
+    const line = await toolResultLine({ content: 'a very large page snapshot', isError: false });
+
+    expect(line.isError).toBe(false);
+    expect(line.toolCallId).toBe(A_TOOL_CALL.id);
+    // Success content is deliberately dropped: snapshots run to tens of kB.
+    expect('content' in line).toBe(false);
+  });
+
+  it('truncates over-long error content and marks the truncation', async () => {
+    const line = await toolResultLine({ content: 'x'.repeat(9000), isError: true });
+
+    const content = line.content as string;
+    expect(content.startsWith('x'.repeat(2000))).toBe(true);
+    expect(content).toContain('[truncated]');
+    expect(content).not.toContain('x'.repeat(2001));
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['non-string', { message: 'oops' }],
+  ])('emits a valid line without throwing when error content is %s', async (_label, content) => {
+    const line = await toolResultLine({ content, isError: true });
+
+    expect(line.isError).toBe(true);
+    expect(line.content).toBe('');
+    expect(line.toolCallId).toBe(A_TOOL_CALL.id);
+  });
+
+  it('still resolves namespacedName from the tool-call id', async () => {
+    const line = await toolResultLine({ content: 'ok', isError: false });
+
+    expect(line.namespacedName).toBe('truthcv__start_run');
+  });
+});
+
 describe('runCli token redaction', () => {
   it('never echoes the raw token even when an error message embeds it', async () => {
     const token = 'SUPERSECRET-TOKEN-123';

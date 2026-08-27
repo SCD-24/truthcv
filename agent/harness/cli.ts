@@ -422,19 +422,70 @@ function createEventStream(write: (obj: unknown) => void): (event: HarnessEvent 
 }
 
 /**
+ * Maximum characters of failed-tool `content` copied onto a `toolResult` line.
+ *
+ * A real error message from an MCP server is a sentence or a short stack, far
+ * inside this bound; it exists only so a pathological one — a server echoing a
+ * whole page back as its message — cannot turn a single failed call into a
+ * megabyte of run log. 2000 characters is generous enough that no realistic
+ * message is ever cut, and small enough that even a run failing every turn
+ * stays a readable file.
+ */
+const MAX_ERROR_CONTENT_CHARS = 2000;
+
+/** Appended in place of the characters {@link errorContent} dropped. */
+const TRUNCATION_MARKER = '…[truncated]';
+
+/**
  * Emit one `toolResult` line per executed tool call.
  *
  * loop.ts exposes no per-tool-result callback, so these are DERIVED after the
  * run from `LoopResult.messages`: tool-call ids are correlated back to their
  * namespaced names to report which tool produced each result.
+ *
+ * Each line carries `toolCallId` because that correlation is otherwise lost to
+ * a reader of the log: the whole batch is emitted AFTER the loop finishes, so
+ * results do not sit next to the `toolCall` lines they answer, and a run that
+ * calls the same tool ten times produces ten indistinguishable result lines.
+ *
+ * `content` is emitted ONLY when `isError` — deliberately, not by omission. A
+ * successful browser tool result is a full page snapshot running to tens of
+ * kilobytes, and logging those would bloat the log for no diagnostic gain: on
+ * success the interesting fact is simply that the call succeeded. On failure
+ * the message is both small and the ONE thing a post-mortem needs, and its
+ * absence has already cost one investigation that could not say why a run died.
  */
 function emitToolResults(write: (obj: unknown) => void, messages: ConversationMessage[]): void {
   const names = toolCallNames(messages);
   for (const message of messages) {
     for (const result of message.toolResults ?? []) {
-      write({ type: 'toolResult', namespacedName: names.get(result.toolCallId) ?? 'unknown', isError: Boolean(result.isError) });
+      const isError = Boolean(result.isError);
+      const line = {
+        type: 'toolResult',
+        toolCallId: result.toolCallId,
+        namespacedName: names.get(result.toolCallId) ?? 'unknown',
+        isError,
+      };
+      write(isError ? { ...line, content: errorContent(result.content) } : line);
     }
   }
+}
+
+/**
+ * Coerce a failed result's content into a bounded log string.
+ *
+ * This is a logging path that must never be able to fail a run, so anything
+ * that is not a non-empty string — absent, empty, or a non-string a server
+ * returned in spite of the declared type — becomes '' rather than throwing or
+ * serialising to something a reader cannot parse.
+ *
+ * @param content The result content as received, of unknown runtime type.
+ * @returns The message, truncated with {@link TRUNCATION_MARKER} if over the bound.
+ */
+function errorContent(content: unknown): string {
+  if (typeof content !== 'string' || content.length === 0) return '';
+  if (content.length <= MAX_ERROR_CONTENT_CHARS) return content;
+  return `${content.slice(0, MAX_ERROR_CONTENT_CHARS)}${TRUNCATION_MARKER}`;
 }
 
 /** Map every tool-call id in the conversation to its namespaced tool name. */
