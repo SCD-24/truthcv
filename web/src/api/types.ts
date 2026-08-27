@@ -496,13 +496,24 @@ export interface JobProfile {
  * `source`/`signinUrl` are the operator's stored input (an override, if
  * set). `domain`, `effectiveSigninUrl` and `isDefault` are resolved
  * server-side (like `companyBoards` on `AgentConfig`, readonly): `isDefault`
- * means the board is always searched and cannot be removed. */
+ * means the board is always searched and cannot be removed, `isApi` means the
+ * board is pulled from over its HTTP API with a saved key instead of being
+ * signed in to in a browser — `effectiveSigninUrl` is always "" for those. */
 export interface JobBoard {
   source: string;
   signinUrl: string;
   readonly domain: string;
   readonly effectiveSigninUrl: string;
   readonly isDefault: boolean;
+  readonly isApi: boolean;
+}
+
+/** Whether an API-backed board has a key saved. The key is never returned. */
+export interface JobBoardKeyStatus {
+  source: string;
+  keySet: boolean;
+  /** False when ENCRYPTION_KEY is unset — the key cannot be saved at all. */
+  encryptionAvailable: boolean;
 }
 
 /** Resolved company board entry. */

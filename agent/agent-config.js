@@ -23,6 +23,8 @@ if (process.env.FAKE_AGENT_CONFIG && field !== "llm_credentials") {
         maxPostingAgeDays: cfg.maxPostingAgeDays,
         companyBoards: cfg.companyBoards || [],
         searchQueries: cfg.searchQueries || [],
+        feedPostings: cfg.feedPostings || [],
+        feedError: cfg.feedError || "",
       })
     );
     process.exit(0);
@@ -70,9 +72,20 @@ if (field === "llm_credentials") {
   creq.on("timeout", () => { creq.destroy(); process.exit(1); });
 } else {
 let u;
-try { u = new URL(base.replace(/\/mcp\/?$/, "") + "/api/agent/config"); } catch { process.exit(1); }
+// include_feed is requested ONLY for job_config, the one field that renders
+// feed postings. The other fields (mode, enabled, run_at, run_days) are polled
+// by the scheduler and must not make the app call a third-party API each time.
+const wantsFeed = field === "job_config" ? "?include_feed=true" : "";
+try { u = new URL(base.replace(/\/mcp\/?$/, "") + "/api/agent/config" + wantsFeed); } catch { process.exit(1); }
 const http = u.protocol === "https:" ? nodeHttps : nodeHttp;
-const req = http.get(u, { timeout: 5000 }, (res) => {
+// job_config is the one field the app may spend time on: it pulls postings
+// from API-backed job boards (jobfeeds.remoterocketship.BUDGET_SECONDS bounds
+// that at 12s server-side). 5s here would time out on a slow-but-working feed
+// and the run would abort on "config fetch failed" — the exact outcome the
+// feed's own never-raise handling exists to prevent. The scheduler's polls
+// keep the short timeout; they do no such work.
+const timeout = field === "job_config" ? 30000 : 5000;
+const req = http.get(u, { timeout }, (res) => {
   if (res.statusCode !== 200) { res.resume(); process.exit(1); }
   let body = "";
   res.on("data", (c) => (body += c));
@@ -102,6 +115,12 @@ const req = http.get(u, { timeout: 5000 }, (res) => {
           maxPostingAgeDays: cfg.maxPostingAgeDays,
           companyBoards: cfg.companyBoards || [],
           searchQueries: cfg.searchQueries || [],
+          // Postings pulled from API-backed boards (Remote Rocketship). Only
+          // present because job_config asks for them with include_feed — the
+          // web UI's own fetches of this endpoint must not trigger an
+          // outbound call, so the parameter is opt-in per caller.
+          feedPostings: cfg.feedPostings || [],
+          feedError: cfg.feedError || "",
         };
         process.stdout.write(JSON.stringify(payload));
       }

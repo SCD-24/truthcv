@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from urllib.parse import quote_plus
 
-from agentconfig.boards import DEFAULT_BOARD_DOMAINS, SOURCE_DOMAINS, resolve_domain
+from agentconfig.boards import DEFAULT_BOARD_DOMAINS, SOURCE_DOMAINS, is_api_source, resolve_domain
 from agentconfig.store import JobProfile
 
 MAX_QUERIES = 24
@@ -55,10 +55,18 @@ def _resolve_sources(sources: list[str] | None) -> list[str]:
     passes the operator's configured board sources (or None), and the four
     default boards are searched on EVERY run regardless of what is
     configured, with the caller's recognised extras following, de-duplicated.
+
+    API-backed boards (agentconfig.boards.API_BOARD_SOURCES) are SKIPPED here.
+    Their postings are pulled from the board's own API in jobfeeds/ and handed
+    to the agent as concrete URLs; composing a `site:` dork for one would send
+    it to the aggregator's listing pages instead, which is strictly worse than
+    the feed it already has.
     """
     domains = list(DEFAULT_BOARD_DOMAINS)
     seen = set(domains)
     for source in sources or []:
+        if is_api_source(source):
+            continue
         domain = resolve_domain(source)
         if domain is not None and domain not in seen:
             seen.add(domain)

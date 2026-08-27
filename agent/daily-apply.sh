@@ -361,6 +361,29 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
       PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$QUERIES"$'\n'
     fi
 
+    # Postings pulled from API-backed job boards (Remote Rocketship) by the
+    # app, using the saved API key. Unlike the composed queries above these are
+    # already-matched postings, not entry points to search from — each line is
+    # a URL the agent can open and screen directly. The feed is a discovery
+    # channel like any other: a posting still passes the full profile criteria
+    # before it drives an application.
+    # Field names are the API's camelCase wire shape (api/schemas.py emits by
+    # alias), not jobfeeds' snake_case dataclass fields — agent-config.js
+    # passes the response through untouched.
+    FEED="$(jq -r '.feedPostings[]? | "  - [\(.profile)] \(.title)\(if (.company // "") != "" then " — " + .company else "" end)\(if (.salaryRange // "") != "" then " (" + .salaryRange + ")" else "" end)\n    \(.url)"' <<<"$JOB_CONFIG")"
+    if [[ -n "$FEED" ]]; then
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Postings pulled from your API-backed job boards (already filtered by profile keywords, locations and salary floor; open and screen these directly — they are still subject to every profile criterion below):"$'\n'
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$FEED"$'\n'
+    fi
+
+    # A feed failure is rendered rather than swallowed: an empty feed and a
+    # rejected API key look identical in the prompt otherwise, and the agent
+    # would silently apply to fewer jobs with nothing in the run log saying why.
+    FEED_ERROR="$(jq -r '.feedError // ""' <<<"$JOB_CONFIG")"
+    if [[ -n "$FEED_ERROR" ]]; then
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Job board feed warning: ${FEED_ERROR} Continue the run using the other discovery channels; do not treat this as a reason to stop."$'\n'
+    fi
+
     PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Cooldown days (stale company filter): $(jq -r '.cooldownDays // "not configured"' <<<"$JOB_CONFIG")"$'\n'
 
     # Discovery freshness window. Rendered as a hard filter rather than only
