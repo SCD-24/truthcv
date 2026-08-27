@@ -258,11 +258,12 @@ export function generateCoverLetter(
   length: string,
   approvals?: CoverLetterApprovals,
   applicationId?: string,
+  posting?: string,
 ): Promise<CoverLetterResult> {
   return request("/api/cover-letter", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tone, length, approvals, applicationId }),
+    body: JSON.stringify({ tone, length, approvals, applicationId, posting }),
   });
 }
 
