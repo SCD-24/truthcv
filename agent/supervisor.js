@@ -13,11 +13,9 @@
 //
 // RUN_ONCE=1: run once at startup then exit with the run's status.
 
-"use strict";
-
-const http = require("http");
-const { spawnSync, spawn } = require("child_process");
-const crypto = require("crypto");
+import http from "node:http";
+import { spawnSync, spawn } from "node:child_process";
+import crypto from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // Config
