@@ -120,6 +120,45 @@ def test_filters_ask_for_newest_first_and_invent_no_date_filter():
 # --- fetching --------------------------------------------------------------
 
 
+def test_the_endpoint_url_carries_the_trailing_slash_the_host_requires():
+    """Without it the host answers every POST with a 308 to the slashed form
+    and the request never reaches the handler. The published docs give the
+    un-slashed path, so this is easy to "correct" back into a total outage."""
+    assert rr.API_URL.endswith("/jobs/")
+
+
+def test_a_redirect_is_followed_rather_than_reported_as_a_failure(mock_http):
+    """Belt to the trailing slash's braces: if the host moves the path again,
+    the feed should follow it instead of failing every request. A 308 preserves
+    the method and body, so the POST survives the hop."""
+    seen = []
+
+    def handler(request):
+        seen.append(request.url.path)
+        if not request.url.path.endswith("/moved/"):
+            return httpx.Response(308, headers={"Location": "/api/openclaw/moved/"})
+        return httpx.Response(200, json={"jobOpenings": [_opening()]})
+
+    mock_http(handler)
+    result = rr.fetch_postings([_profile()], "k", now=NOW)
+
+    assert len(seen) == 2
+    assert result.error == ""
+    assert len(result.postings) == 1
+
+
+def test_check_key_follows_a_redirect_too(mock_http):
+    """The Test button must not report a healthy key as broken."""
+    def handler(request):
+        if not request.url.path.endswith("/moved/"):
+            return httpx.Response(308, headers={"Location": "/api/openclaw/moved/"})
+        return httpx.Response(200, json={"jobOpenings": []})
+
+    mock_http(handler)
+    ok, _ = rr.check_key("k")
+    assert ok
+
+
 def test_no_key_returns_empty_without_calling_out(mock_http):
     def handler(request):  # pragma: no cover — must never run
         raise AssertionError("fetch_postings called the API without a key")
