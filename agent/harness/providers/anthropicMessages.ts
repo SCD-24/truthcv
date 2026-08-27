@@ -13,6 +13,8 @@ import type {
   ToolDefinition,
 } from './types.js';
 
+import { providerErrorEvent, readBody, retryAfterMsFrom } from './errors.js';
+
 /** Options for constructing an Anthropic Messages adapter. */
 export interface AnthropicMessagesOptions {
   /** API key sent as the `x-api-key` header. */
@@ -28,15 +30,56 @@ export interface AnthropicMessagesOptions {
 /** HTTP statuses worth retrying. */
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 
+/**
+ * Preamble a Claude subscription (OAuth) token requires as its FIRST system
+ * block. Without it the Messages API rejects the request — as a 429
+ * `rate_limit_error` whose message is the bare string "Error", which reads
+ * exactly like an exhausted quota and is not one: the same token, in the same
+ * second, answers 200 when the block is present.
+ *
+ * Must stay byte-identical to CLAUDE_CODE_PREAMBLE in connections/auth/claude.py,
+ * which is what the app's own provider (providers/anthropic_provider.py
+ * _system_param) sends. tests/test_anthropic_oauth_preamble.py pins the two
+ * together.
+ */
+const CLAUDE_CODE_PREAMBLE = "You are Claude Code, Anthropic's official CLI for Claude.";
+
+/** Whether these options authenticate with a subscription token rather than an
+ * API key. The two need different headers AND a different system-prompt shape. */
+function isOauth(opts: AnthropicMessagesOptions): boolean {
+  return Boolean(opts.oauthToken);
+}
+
 /** Build the request headers, choosing api-key or OAuth auth. */
 function buildHeaders(opts: AnthropicMessagesOptions): Record<string, string> {
   const headers: Record<string, string> = {
     'anthropic-version': '2023-06-01',
     'content-type': 'application/json',
   };
-  if (opts.oauthToken) headers['authorization'] = `Bearer ${opts.oauthToken}`;
-  else if (opts.apiKey) headers['x-api-key'] = opts.apiKey;
+  if (isOauth(opts)) {
+    headers['authorization'] = `Bearer ${opts.oauthToken}`;
+    // Matches providers/anthropic_provider.py's default_headers. The preamble
+    // is what the API actually gates on, but this is the shape the app already
+    // sends successfully and the two should not diverge.
+    headers['anthropic-beta'] = 'oauth-2025-04-20';
+  } else if (opts.apiKey) {
+    headers['x-api-key'] = opts.apiKey;
+  }
   return headers;
+}
+
+/**
+ * The `system` field: a plain string for an API key, and the preamble-first
+ * block array a subscription token requires.
+ *
+ * An empty prompt contributes no block: the API rejects a text block whose
+ * text is empty, and appending one would trade this bug for another.
+ */
+function buildSystem(systemPrompt: string, opts: AnthropicMessagesOptions): unknown {
+  if (!isOauth(opts)) return systemPrompt;
+  const blocks: unknown[] = [{ type: 'text', text: CLAUDE_CODE_PREAMBLE }];
+  if (systemPrompt) blocks.push({ type: 'text', text: systemPrompt });
+  return blocks;
 }
 
 /** Map one normalised message to an Anthropic role/content-block pair. */
@@ -66,11 +109,11 @@ function toAnthropicTools(tools: ToolDefinition[]): unknown[] {
 }
 
 /** Assemble the full Anthropic request body from a ModelRequest. */
-function buildBody(request: ModelRequest, model: string): unknown {
+function buildBody(request: ModelRequest, opts: AnthropicMessagesOptions): unknown {
   return {
-    model,
+    model: opts.model,
     max_tokens: request.maxTokens ?? 4096,
-    system: request.systemPrompt,
+    system: buildSystem(request.systemPrompt, opts),
     messages: request.messages.map(toAnthropicMessage),
     tools: toAnthropicTools(request.tools),
   };
@@ -119,23 +162,20 @@ export class AnthropicMessagesAdapter implements ProviderAdapter {
     const response = await fetch(`${baseUrl}/v1/messages`, {
       method: 'POST',
       headers: buildHeaders(this.opts),
-      body: JSON.stringify(buildBody(request, this.opts.model)),
+      body: JSON.stringify(buildBody(request, this.opts)),
     });
     if (!response.ok) {
-      yield errorEvent(response.status);
+      yield errorEvent(response.status, await readBody(response), retryAfterMsFrom(response.headers));
       return;
     }
     yield* emitAnthropicEvents(await response.json());
   }
 }
 
-/** Build an error HarnessEvent for a non-2xx status. */
-function errorEvent(status: number): HarnessEvent {
-  return {
-    type: 'error',
-    message: `Anthropic request failed with status ${status}`,
-    retryable: RETRYABLE_STATUS.has(status),
-  };
+/** Build an error HarnessEvent for a non-2xx status, carrying the provider's
+ * own explanation when it sent one. */
+function errorEvent(status: number, body: string, retryAfterMs?: number): HarnessEvent {
+  return providerErrorEvent('Anthropic', status, body, RETRYABLE_STATUS.has(status), retryAfterMs);
 }
 
 /** Shape of the fields we read from an Anthropic Messages response. */
