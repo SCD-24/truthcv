@@ -25,3 +25,8 @@ node_modules
 # TypeScript incremental build artifact — rewrites on every build, so
 # committing it produces noisy diffs and conflicts.
 *.tsbuildinfo
+
+# Build artifact: `npm run build` in web/ emits the hashed bundle here, and the
+# Docker image builds its own. Committing it means old hashed assets accumulate
+# and keep serving a stale frontend to any browser with a cached index.html.
+/api/static/

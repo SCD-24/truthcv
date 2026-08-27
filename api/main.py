@@ -215,13 +215,18 @@ def _mount_static() -> None:
         # Don't serve SPA for /api or /mcp paths
         if full_path.startswith("api/") or full_path.startswith("mcp"):
             raise HTTPException(status_code=404, detail="Not found")
-        candidate = root / full_path
-        if full_path and candidate.is_file():
-            return FileResponse(str(candidate))
         index = root / "index.html"
+        candidate = root / full_path
+        if full_path and candidate.is_file() and candidate != index:
+            return FileResponse(str(candidate))
         if not index.exists():
             raise HTTPException(status_code=404, detail="Frontend bundle not built.")
-        return FileResponse(str(index))
+        # index.html names the hashed asset files, so a browser that caches it
+        # keeps loading whichever bundle was current when it was cached — a
+        # deployed fix then never reaches the page. The assets themselves are
+        # content-hashed and stay cacheable; only this document must be
+        # re-fetched.
+        return FileResponse(str(index), headers={"Cache-Control": "no-store"})
 
 
 _mount_static()
