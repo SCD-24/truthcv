@@ -231,7 +231,9 @@ export function ManualPage() {
         />
       )}
 
-      {showLetter && <LetterSection applicationId={applicationId} />}
+      {showLetter && (
+        <LetterSection applicationId={applicationId} posting={posting.trim()} />
+      )}
     </section>
   );
 }
@@ -538,7 +540,13 @@ function CvSection({
  * tone/length pickers, the blocked-claims re-check flow, and an
  * application-locked editor for the generated letter.
  */
-function LetterSection({ applicationId }: { applicationId?: string }) {
+function LetterSection({
+  applicationId,
+  posting,
+}: {
+  applicationId?: string;
+  posting: string;
+}) {
   const [tone, setTone] = useState<Tone>("Professional");
   const [length, setLength] = useState<Length>("Standard");
   const [coverLetter, setCoverLetter] = useState<CoverLetterResult | null>(null);
@@ -558,6 +566,7 @@ function LetterSection({ applicationId }: { applicationId?: string }) {
         length.toLowerCase(),
         approvals,
         applicationId,
+        posting,
       );
       setCoverLetter(r);
     } catch (e) {

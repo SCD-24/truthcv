@@ -2,10 +2,26 @@
   "version": 2,
   "checks": [
     {
+      "id": "lint",
+      "name": "Typecheck (web + agent)",
+      "kind": "lint",
+      "command": "bash scripts/check.sh lint",
+      "enabled": true,
+      "scope": "repo"
+    },
+    {
+      "id": "test",
+      "name": "Tests (python + web + agent)",
+      "kind": "test",
+      "command": "bash scripts/check.sh test",
+      "enabled": true,
+      "scope": "repo"
+    },
+    {
       "id": "python-tests",
       "name": "Python Tests",
       "kind": "test",
-      "command": "V=\"$(dirname \"$(git rev-parse --git-common-dir)\")/.venv/bin/pytest\"; if [ -x \"$V\" ]; then \"$V\"; else python3 -m pytest; fi",
+      "command": "bash scripts/check.sh test-python",
       "enabled": true,
       "scope": "repo"
     },
@@ -13,7 +29,7 @@
       "id": "web-ui-tests",
       "name": "Web UI tests",
       "kind": "test",
-      "command": "npm --prefix web run test",
+      "command": "bash scripts/check.sh test-web",
       "enabled": true,
       "scope": "repo"
     },
@@ -21,7 +37,7 @@
       "id": "agent-tests",
       "name": "Agent tests",
       "kind": "test",
-      "command": "npm --prefix agent run test",
+      "command": "bash scripts/check.sh test-agent",
       "enabled": true,
       "scope": "repo"
     }

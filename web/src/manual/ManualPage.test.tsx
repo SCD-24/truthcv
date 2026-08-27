@@ -158,6 +158,7 @@ describe("ManualPage", () => {
         "standard",
         undefined,
         "app-123",
+        "Senior engineer wanted",
       ),
     );
     expect(apiRender).toHaveBeenCalledWith(undefined, "app-123");
@@ -175,8 +176,31 @@ describe("ManualPage", () => {
         "standard",
         undefined,
         undefined,
+        "Senior engineer wanted",
       ),
     );
     expect(apiRender).toHaveBeenCalledWith(undefined, undefined);
+  });
+
+  it("sends the typed posting even on the letter-only path (no tailor call)", async () => {
+    render(<ManualPage />);
+    fillForm();
+    fireEvent.click(checkbox("Tailor my CV")); // uncheck CV
+    fireEvent.click(checkbox("Write a cover letter")); // check letter
+    fireEvent.click(submitButton());
+
+    await screen.findByRole("button", { name: "Generate cover letter" });
+    fireEvent.click(screen.getByRole("button", { name: "Generate cover letter" }));
+
+    await waitFor(() =>
+      expect(generateCoverLetter).toHaveBeenCalledWith(
+        "professional",
+        "standard",
+        undefined,
+        undefined,
+        "Senior engineer wanted",
+      ),
+    );
+    expect(tailor).not.toHaveBeenCalled();
   });
 });

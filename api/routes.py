@@ -1668,6 +1668,7 @@ def delete_browser_session() -> BrowserSessionClosed:
 
 def _letter_approvals(
     approvals: CoverLetterApprovals | None,
+    posting: str,
 ) -> tuple[set[str], set[str], list[dict] | None]:
     """Resolve blocked-claim ids to claim texts against the CACHED letter draft.
 
@@ -1675,14 +1676,16 @@ def _letter_approvals(
     LETTER_SCOPE_ID + _claim_id hash), so a decision the UI made on a blocked
     attempt re-validates the exact letter the user saw. Returns
     (approved_texts, denied_texts, paragraphs); paragraphs is None on a first
-    generate so build_letter produces and caches a fresh letter.
+    generate so build_letter produces and caches a fresh letter. The cached
+    draft is looked up by ``posting`` so a draft generated for a different
+    posting is never reused for this approve/deny re-check.
     """
     if not approvals or not (approvals.approved_claim_ids or approvals.denied_claim_ids):
         return set(), set(), None
 
     from coverletter import LETTER_SCOPE_ID, load_letter_draft
 
-    paragraphs = load_letter_draft()
+    paragraphs = load_letter_draft(posting)
     if paragraphs is None:
         return set(), set(), None
 
@@ -1705,8 +1708,16 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
     _require_application(body.application_id)
     from truth.store import data_dir
 
-    posting_file = data_dir() / "posting.txt"
-    if not posting_file.exists():
+    # The caller supplies the posting this letter is about; data/posting.txt
+    # (the last posting written by /api/tailor) is only the fallback for
+    # callers — like the wizard's Letter tab — that do not send one. This
+    # route never writes posting.txt itself.
+    posting = (body.posting or "").strip()
+    if not posting:
+        posting_file = data_dir() / "posting.txt"
+        if posting_file.exists():
+            posting = posting_file.read_text(encoding="utf-8").strip()
+    if not posting:
         raise HTTPException(
             status_code=400, detail="Tailor a posting before generating a cover letter."
         )
@@ -1715,14 +1726,14 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
     from render.cover_letter import render_letter_html
     from truth.answers import load as load_answers
 
-    approved_texts, denied_texts, paragraphs = _letter_approvals(body.approvals)
+    approved_texts, denied_texts, paragraphs = _letter_approvals(body.approvals, posting)
 
     # The profile answers (Agents page) are handed to the writer as allowed
     # claim sources for this generation only, never written to truth.
     answers = load_answers()
     try:
         letter = build_letter(
-            posting_file.read_text(encoding="utf-8"),
+            posting,
             body.tone,
             body.length,
             load(),

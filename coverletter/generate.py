@@ -8,6 +8,7 @@ unverifiable the letter is blocked and nothing is returned as text.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -32,19 +33,43 @@ def _letter_draft_path() -> Path:
     return data_dir() / "cover_letter_draft.json"
 
 
-def save_letter_draft(paragraphs: list[dict]) -> Path:
-    """Cache the generated paragraphs so approvals can round-trip by claim id."""
+def _posting_hash(posting: str | None) -> str | None:
+    """Stable hash identifying which posting a cached draft belongs to."""
+    if posting is None:
+        return None
+    return hashlib.sha256(posting.strip().encode("utf-8")).hexdigest()
+
+
+def save_letter_draft(paragraphs: list[dict], posting: str | None = None) -> Path:
+    """Cache the generated paragraphs so approvals can round-trip by claim id.
+
+    The cache is bound to the posting it was generated for via a hash of the
+    posting text, so a later ``load_letter_draft`` for a *different* posting
+    never reuses a stale letter drafted for a job it no longer describes.
+    """
     p = _letter_draft_path()
-    p.write_text(json.dumps(paragraphs, indent=2), encoding="utf-8")
+    envelope = {"postingHash": _posting_hash(posting), "paragraphs": paragraphs}
+    p.write_text(json.dumps(envelope, indent=2), encoding="utf-8")
     return p
 
 
-def load_letter_draft() -> list[dict] | None:
-    """Reload the last generated letter's paragraphs, or None if absent."""
+def load_letter_draft(posting: str | None = None) -> list[dict] | None:
+    """Reload the last generated letter's paragraphs for ``posting``.
+
+    Returns None if no draft is cached, if the cached draft is the legacy
+    bare-list format (stale, predates posting binding, forces regeneration),
+    or if the cached draft's postingHash does not match ``posting`` (it was
+    generated for a different job posting).
+    """
     p = _letter_draft_path()
     if not p.exists():
         return None
-    return json.loads(p.read_text(encoding="utf-8"))
+    data = json.loads(p.read_text(encoding="utf-8"))
+    if isinstance(data, list):
+        return None
+    if data.get("postingHash") != _posting_hash(posting):
+        return None
+    return data.get("paragraphs")
 
 _SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -169,7 +194,7 @@ def build_letter(
     """
     if paragraphs is None:
         paragraphs = _generate_paragraphs(posting, tone, length, truth, provider, answers)
-        save_letter_draft(paragraphs)
+        save_letter_draft(paragraphs, posting)
 
     shown = _excise_denied(paragraphs, denied_texts or set())
     scope = _letter_scope(shown, truth, approved_texts or set(), denied_texts or set(), answers)

@@ -200,3 +200,56 @@ def test_route_without_stored_answers_still_blocks_answer_claims(data_dir, monke
     b = r.json()
     assert b["blocked"] is True
     assert any(tok in b["unverifiable"] for tok in ("staff", "engineer"))
+
+
+def test_cover_letter_uses_body_posting_over_stale_file(data_dir, monkeypatch):
+    """A stale data/posting.txt (left by an earlier /api/tailor call for a
+    different job) must not leak into the letter when the request carries its
+    own posting: the prompt seen by the LLM reflects the body posting, not the
+    file."""
+    seen_prompts = []
+
+    def router(system, messages, schema):
+        seen_prompts.append(str(messages) + str(system))
+        return {
+            "paragraphs": [
+                {"text": "I use Python at Acme Corp.", "claims": ["Python", "Acme Corp"]}
+            ]
+        }
+
+    monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
+    save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
+    from truth.store import data_dir as dd
+
+    (dd() / "posting.txt").write_text("STALE old posting about a bakery job")
+    c = TestClient(app)
+    r = c.post(
+        "/api/cover-letter",
+        json={
+            "tone": "Professional",
+            "length": "Short",
+            "posting": "FRESH new posting about a software job",
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert len(seen_prompts) == 1
+    assert "FRESH new posting about a software job" in seen_prompts[0]
+    assert "STALE old posting about a bakery job" not in seen_prompts[0]
+
+
+def test_cover_letter_body_posting_works_without_file(data_dir, monkeypatch):
+    """The letter-only manual path: no /api/tailor ever ran (no posting.txt),
+    but a body posting is enough to generate — no 400."""
+
+    def router(system, messages, schema):
+        return {"paragraphs": [{"text": "I use Python daily.", "claims": ["Python"]}]}
+
+    monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
+    save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
+    c = TestClient(app)
+    r = c.post(
+        "/api/cover-letter",
+        json={"tone": "Professional", "length": "Short", "posting": "A fresh role"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["blocked"] is False

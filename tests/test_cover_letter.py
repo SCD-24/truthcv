@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from coverletter.generate import build_letter
+from coverletter.generate import build_letter, load_letter_draft, save_letter_draft
 from providers.fake import FakeProvider
 from truth.answers import Answers
 from truth.model import Bullet, Experience, Profile, Skill, Truth
@@ -201,3 +201,30 @@ def test_canonical_cv_asset_id_never_allowed(data_dir):
     )
     assert out["blocked"] is True
     assert "cv-12345" in out["unverifiable"]
+
+
+def test_letter_draft_not_reused_across_postings(data_dir):
+    """A draft cached for one posting is never returned for a different one."""
+    paragraphs = [{"text": "Some letter text.", "claims": []}]
+    save_letter_draft(paragraphs, "posting A")
+    assert load_letter_draft("posting B") is None
+
+
+def test_letter_draft_reused_for_same_posting(data_dir):
+    """A draft cached for a posting is returned when reloaded for that same
+    posting."""
+    paragraphs = [{"text": "Some letter text.", "claims": []}]
+    save_letter_draft(paragraphs, "posting A")
+    assert load_letter_draft("posting A") == paragraphs
+
+
+def test_legacy_bare_list_draft_is_treated_as_stale(data_dir):
+    """A cover_letter_draft.json written before posting-binding (a bare JSON
+    list, with no postingHash envelope) is stale and forces regeneration
+    rather than being returned as-is."""
+    from coverletter.generate import _letter_draft_path
+    import json
+
+    p = _letter_draft_path()
+    p.write_text(json.dumps([{"text": "Old letter.", "claims": []}]), encoding="utf-8")
+    assert load_letter_draft("posting A") is None
