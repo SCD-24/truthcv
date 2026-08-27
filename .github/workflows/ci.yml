@@ -39,3 +39,41 @@ jobs:
       - name: Build
         working-directory: web
         run: npm run build
+
+  # agent/smoke-test.sh is the only gate that can catch the class of defect
+  # `node --check` structurally cannot see — an ESM `require()` inside an
+  # unexercised branch, a scheduler that ignores the enabled toggle — because
+  # it RUNS the agent's wiring instead of parsing it. It only means anything
+  # against the real images, so this job builds them and runs the script inside
+  # the agent container exactly as agent/README.md documents.
+  agent-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Compose interpolates these; without them every `${VAR:-}` reference
+      # logs a warning and AGENT_API_TOKEN would reach the container empty.
+      # A throwaway value is correct here: nothing in this job authenticates
+      # against anything real, and the smoke test mints its own token for the
+      # supervisor instance it starts.
+      AGENT_API_TOKEN: ci-smoke-token
+      DATA_DIR: ./data
+    steps:
+      - uses: actions/checkout@v4
+      # data/ is gitignored, so the checkout has no such directory and compose
+      # would create it root-owned. Make it first so the bind mount lines up.
+      - name: Create the data volume directory
+        run: mkdir -p data
+      - name: Build images
+        run: docker compose build app browser agent
+      # `docker compose run` honours depends_on, so this starts `app` and waits
+      # on the `browser` healthcheck before the script runs — the same gate the
+      # real agent service goes through. The script's TRUTHCV_MCP_URL and
+      # BROWSER_MCP_URL probes need both of them actually serving.
+      - name: Run agent smoke test
+        run: docker compose run --rm --entrypoint /app/agent/smoke-test.sh agent
+      - name: Service logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail 200
+      - name: Tear down
+        if: always()
+        run: docker compose down -v --remove-orphans
