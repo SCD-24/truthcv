@@ -48,6 +48,30 @@ const DEFAULT_MAX_RETRIES = 8;
 const BASE_RETRY_DELAY_MS = 1_000;
 
 /**
+ * Default number of turns reserved at the end of the budget for the model to
+ * wind up in.
+ *
+ * Without this the loop simply stops mid-action: the run's last observed
+ * behaviour was a half-filled application form, abandoned with no account of
+ * what was left undone. Two turns is enough to abandon cleanly and make the
+ * closing tool calls, and cheap against any realistic cap.
+ */
+const DEFAULT_WRAP_UP_TURNS = 2;
+
+/**
+ * What the model is told when it enters the wrap-up window.
+ *
+ * Deliberately names no specific tool: this loop is provider- and
+ * application-neutral, and the run's own prompt is what tells it which call
+ * records a stopped run.
+ */
+const WRAP_UP_MESSAGE =
+  'You are close to this run\'s turn limit and will be stopped shortly. Do NOT begin any new ' +
+  'work, and do not start or continue filling in a form you cannot finish in the next turn or ' +
+  'two. Abandon anything half-done, then make your closing tool calls now: record where you ' +
+  'stopped and what you left unfinished, honestly, so the next run can pick it up.';
+
+/**
  * Loop tuning. `maxTurns` is REQUIRED and is the hard cap: there is deliberately
  * no unbounded default, because this loop runs unattended overnight and must
  * stop on its own.
@@ -61,6 +85,12 @@ export interface LoopConfig {
   maxRetryDelayMs?: number;
   /** Cap on consecutive retryable-error retries within one turn. Defaults to 8. */
   maxConsecutiveRetries?: number;
+  /**
+   * Turns reserved at the end of `maxTurns` for the model to wind up in.
+   * Defaults to 2. Zero disables the warning entirely — the loop then stops
+   * mid-action as it did before.
+   */
+  wrapUpTurns?: number;
 }
 
 /**
@@ -89,7 +119,7 @@ export interface LoopEvent {
   /** Discriminant marking this as a loop event to an `onEvent` consumer. */
   type: 'loopEvent';
   /** What happened. */
-  kind: 'compaction' | 'retry' | 'reflection' | 'turnCapReached' | 'stop';
+  kind: 'compaction' | 'retry' | 'reflection' | 'turnCapReached' | 'wrapUp' | 'stop';
   /** The turn number this event relates to, when applicable. */
   turn?: number;
   /** Human-readable detail for a log line. */
@@ -132,6 +162,9 @@ interface LoopState {
   turns: number;
   reflections: number;
   retries: number;
+  /** Whether the wrap-up instruction has already been delivered, so entering
+   * the window repeatedly cannot append it on every remaining turn. */
+  wrapUpSent: boolean;
 }
 
 /** Per-iteration context handed to the outcome handlers. */
@@ -202,7 +235,7 @@ export function backoffDelay(attempt: number, maxRetryDelayMs: number): number {
 export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
   const { adapter, pool, systemPrompt, initialMessages, config, compactionConfig, onEvent } = opts;
   const sleep = opts.sleep ?? defaultSleep;
-  const state: LoopState = { messages: [...initialMessages], turns: 0, reflections: 0, retries: 0 };
+  const state: LoopState = { messages: [...initialMessages], turns: 0, reflections: 0, retries: 0, wrapUpSent: false };
   while (true) {
     const registry = await refreshRegistry(pool);
     state.messages = maybeCompact(state.messages, compactionConfig, onEvent);
@@ -269,7 +302,7 @@ async function applyError(error: ErrorEvent, state: LoopState, ctx: LoopContext)
   if (!isRetryable(cls)) return finish('error', state, ctx, `non-retryable error: ${cls}`);
   const maxRetries = ctx.config.maxConsecutiveRetries ?? DEFAULT_MAX_RETRIES;
   if (state.retries >= maxRetries) return finish('error', state, ctx, 'retry limit exceeded');
-  await backoff(state, ctx);
+  await backoff(state, ctx, error);
   return undefined;
 }
 
@@ -287,12 +320,21 @@ function reflect(error: ErrorEvent, state: LoopState, ctx: LoopContext): LoopRes
   return undefined;
 }
 
-/** Wait out a capped backoff for a retryable error; the turn is not advanced. */
-async function backoff(state: LoopState, ctx: LoopContext): Promise<void> {
+/**
+ * Wait out a capped backoff for a retryable error; the turn is not advanced.
+ *
+ * A provider that sent `Retry-After` knows when its own limit resets and we do
+ * not, so its number wins over the computed curve — still clamped by
+ * `maxRetryDelayMs`, because a header asking for four hours must not park an
+ * unattended run for four hours.
+ */
+async function backoff(state: LoopState, ctx: LoopContext, error: ErrorEvent): Promise<void> {
   const cap = ctx.config.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
-  const delay = backoffDelay(state.retries, cap);
+  const asked = error.retryAfterMs;
+  const delay = asked === undefined ? backoffDelay(state.retries, cap) : Math.min(asked, cap);
+  const source = asked === undefined ? '' : ' (provider Retry-After)';
   state.retries += 1;
-  ctx.onEvent?.(loopEvent('retry', state.turns, `retrying after ${Math.round(delay)}ms`));
+  ctx.onEvent?.(loopEvent('retry', state.turns, `retrying after ${Math.round(delay)}ms${source}`));
   await ctx.sleep(delay);
 }
 
@@ -342,13 +384,41 @@ async function handleLength(done: DoneEvent, state: LoopState, ctx: LoopContext)
   return capOrContinue(state, ctx);
 }
 
-/** Stop with `turnCapReached` if the hard cap is now met, else continue. */
+/** Stop with `turnCapReached` if the hard cap is now met, else continue —
+ * warning the model once when it enters the wrap-up window. */
 function capOrContinue(state: LoopState, ctx: LoopContext): LoopResult | undefined {
   if (state.turns >= ctx.config.maxTurns) {
     ctx.onEvent?.(loopEvent('turnCapReached', state.turns, `hard turn cap of ${ctx.config.maxTurns} reached`));
     return { stopReason: 'turnCapReached', messages: state.messages, turns: state.turns };
   }
+  maybeWarnWrapUp(state, ctx);
   return undefined;
+}
+
+/**
+ * Tell the model once that it is nearly out of turns.
+ *
+ * Delivered as its own user message rather than as text on the tool-results
+ * message: the Anthropic Messages API requires a `tool_use` to be answered by
+ * `tool_result` blocks immediately after, so text sharing that message ahead of
+ * them is a 400. A separate following message is accepted.
+ *
+ * The warning does not extend the budget — `maxTurns` still stops the loop. It
+ * only buys the model notice, so its last turns are a deliberate wind-down
+ * instead of an arbitrary cut.
+ */
+function maybeWarnWrapUp(state: LoopState, ctx: LoopContext): void {
+  const reserved = ctx.config.wrapUpTurns ?? DEFAULT_WRAP_UP_TURNS;
+  // A reserve at or beyond the whole budget would fire on turn one and make
+  // every run a wind-down; a zero reserve disables the warning by request.
+  if (reserved <= 0 || reserved >= ctx.config.maxTurns) return;
+  if (state.wrapUpSent) return;
+  if (state.turns < ctx.config.maxTurns - reserved) return;
+  state.wrapUpSent = true;
+  state.messages.push({ role: 'user', content: WRAP_UP_MESSAGE });
+  ctx.onEvent?.(
+    loopEvent('wrapUp', state.turns, `${ctx.config.maxTurns - state.turns} turn(s) left — told the model to wind up`),
+  );
 }
 
 /** Execute each allowed tool call in order through the choke point. */

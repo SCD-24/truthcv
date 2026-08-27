@@ -173,3 +173,123 @@ describe('runLoop', () => {
     expect(calls()).toBeLessThanOrEqual(3);
   });
 });
+
+describe('Retry-After', () => {
+  /** Capture the delays a run actually waited, instead of sleeping. */
+  function recordingRun(adapter: ProviderAdapter, config: Parameters<typeof runLoop>[0]['config']) {
+    const slept: number[] = [];
+    const events: Array<HarnessEvent | { type: 'loopEvent'; kind: string; detail?: string }> = [];
+    const { pool } = fakePool();
+    const result = runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: [{ role: 'user', content: 'apply to jobs' }],
+      config,
+      sleep: async (ms: number) => {
+        slept.push(ms);
+      },
+      onEvent: (e) => events.push(e),
+    });
+    return { result, slept, events };
+  }
+
+  it("waits the provider's Retry-After instead of the computed curve", async () => {
+    // The curve's first delay is ~1000-2000ms; the header asks for 30s.
+    const { adapter } = scriptedAdapter([
+      [{ type: 'error', message: '429 rate limit', retryable: true, retryAfterMs: 30_000 }],
+      [doneEnd],
+    ]);
+    const { result, slept } = recordingRun(adapter, { maxTurns: 5 });
+    await result;
+    expect(slept[0]).toBe(30_000);
+  });
+
+  it('clamps a Retry-After that would park an unattended run', async () => {
+    const { adapter } = scriptedAdapter([
+      [{ type: 'error', message: '429 rate limit', retryable: true, retryAfterMs: 4 * 60 * 60 * 1000 }],
+      [doneEnd],
+    ]);
+    const { result, slept } = recordingRun(adapter, { maxTurns: 5, maxRetryDelayMs: 60_000 });
+    await result;
+    expect(slept[0]).toBe(60_000);
+  });
+
+  it('falls back to exponential backoff when the provider sent no header', async () => {
+    const { adapter } = scriptedAdapter([[retryableError], [doneEnd]]);
+    const { result, slept } = recordingRun(adapter, { maxTurns: 5 });
+    await result;
+    expect(slept[0]).toBeGreaterThanOrEqual(1_000);
+    expect(slept[0]).toBeLessThanOrEqual(2_000);
+  });
+
+  it('honours a zero Retry-After rather than treating it as absent', async () => {
+    const { adapter } = scriptedAdapter([
+      [{ type: 'error', message: '429 rate limit', retryable: true, retryAfterMs: 0 }],
+      [doneEnd],
+    ]);
+    const { result, slept } = recordingRun(adapter, { maxTurns: 5 });
+    await result;
+    expect(slept[0]).toBe(0);
+  });
+});
+
+describe('wrap-up window', () => {
+  /** Collect the user-role messages a finished run accumulated. */
+  const userTexts = (messages: ConversationMessage[]) =>
+    messages.filter((m) => m.role === 'user').map((m) => m.content);
+
+  it('warns the model once, two turns before the cap', async () => {
+    const { adapter } = scriptedAdapter([[doneToolCalls()]]);
+    const { pool } = fakePool();
+    const events: Array<{ kind?: string }> = [];
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: [{ role: 'user', content: 'apply to jobs' }],
+      config: { maxTurns: 5 },
+      sleep: noSleep,
+      onEvent: (e) => events.push(e as { kind?: string }),
+    });
+    expect(result.stopReason).toBe('turnCapReached');
+    const warnings = userTexts(result.messages).filter((t) => t.includes('close to this run'));
+    expect(warnings).toHaveLength(1);
+    expect(events.filter((e) => e.kind === 'wrapUp')).toHaveLength(1);
+  });
+
+  it('does not extend the budget — the cap still stops the loop', async () => {
+    const { adapter, calls } = scriptedAdapter([[doneToolCalls()]]);
+    const { pool } = fakePool();
+    const result = await run(adapter, pool, { maxTurns: 4 });
+    expect(result.turns).toBe(4);
+    expect(calls()).toBe(4);
+  });
+
+  it('stays silent when wrapUpTurns is 0', async () => {
+    const { adapter } = scriptedAdapter([[doneToolCalls()]]);
+    const { pool } = fakePool();
+    const result = await run(adapter, pool, { maxTurns: 4, wrapUpTurns: 0 });
+    expect(userTexts(result.messages).filter((t) => t.includes('close to this run'))).toHaveLength(0);
+  });
+
+  it('stays silent when the reserve would swallow the whole budget', async () => {
+    // Otherwise a tiny cap would make every run a wind-down from turn one.
+    const { adapter } = scriptedAdapter([[doneToolCalls()]]);
+    const { pool } = fakePool();
+    const result = await run(adapter, pool, { maxTurns: 2, wrapUpTurns: 2 });
+    expect(userTexts(result.messages).filter((t) => t.includes('close to this run'))).toHaveLength(0);
+  });
+
+  it('delivers the warning as its own message, never appended to tool results', async () => {
+    // The Messages API 400s when text precedes the tool_result blocks answering
+    // a tool_use, so the warning must not share that message.
+    const { adapter } = scriptedAdapter([[doneToolCalls()]]);
+    const { pool } = fakePool();
+    const result = await run(adapter, pool, { maxTurns: 3 });
+    const warned = result.messages.find((m) => m.content.includes('close to this run'));
+    expect(warned).toBeDefined();
+    expect(warned?.role).toBe('user');
+    expect(warned?.toolResults).toBeUndefined();
+  });
+});
