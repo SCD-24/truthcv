@@ -168,6 +168,119 @@ fi
 kill "$_SUPER_PID" 2>/dev/null
 wait "$_SUPER_PID" 2>/dev/null
 
+# --- Agent config fetch --------------------------------------------------------
+
+# agent-config.js sits in agent/, whose package.json declares "type": "module",
+# so node loads it as an ES module and a `require()` inside it is a runtime
+# ReferenceError, never a syntax error - `node --check` is structurally unable
+# to see that class of defect.  The require sites were inside the two HTTP
+# branches, so importing the file was not enough either: the only gate that
+# discriminates is to RUN it down both fetch paths.  A stub server on an
+# ephemeral port stands in for the app service, so this needs no app, no
+# network egress and no curl/nc.
+_CFG_PORT=19098
+_CFG_TOKEN="smoke-config-token-$$"
+_CFG_STUB="/tmp/agent-config-stub-$$.mjs"
+_CFG_OUT="/tmp/agent-config-smoke-$$.out"
+_CFG_ERR="/tmp/agent-config-smoke-$$.err"
+_CFG_BASE="http://127.0.0.1:$_CFG_PORT/mcp"
+
+# .mjs, not .js: /tmp has no package.json, so a .js file there would be loaded
+# as CommonJS and the `import` below would fail for reasons of its own.
+cat >"$_CFG_STUB" <<'STUB'
+import http from "node:http";
+const TOKEN = process.env.STUB_TOKEN;
+const CONFIG = { mode: "semi", enabled: true, runAt: ["09:00", "15:00"], runDays: ["mon", "wed", "fri"] };
+const CREDS = {
+  authType: "api_key", token: "stub-credential", model: "stub-model",
+  baseUrl: "", provider: "anthropic", wire: "messages",
+};
+http.createServer((req, res) => {
+  if (req.url === "/api/agent/config") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(CONFIG));
+    return;
+  }
+  if (req.url === "/api/agent/llm-credentials") {
+    // Mirrors the app service: the shared secret has to arrive in the header,
+    // so a 200 here also proves agent-config.js forwarded it.
+    if (req.headers["x-agent-token"] !== TOKEN) { res.writeHead(403); res.end(); return; }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(CREDS));
+    return;
+  }
+  res.writeHead(404); res.end();
+}).listen(Number(process.env.STUB_PORT), "127.0.0.1");
+STUB
+
+STUB_TOKEN="$_CFG_TOKEN" STUB_PORT="$_CFG_PORT" \
+  node "$_CFG_STUB" >/tmp/agent-config-stub-$$.log 2>&1 &
+_CFG_PID=$!
+
+# Give the stub a moment to start
+sleep 1
+
+# The `config` endpoint path.  Note FAKE_AGENT_CONFIG is deliberately NOT set:
+# it short-circuits before the HTTP branch and would make this check vacuous.
+TRUTHCV_MCP_URL="$_CFG_BASE" node "$AGENT_DIR/agent-config.js" mode >"$_CFG_OUT" 2>"$_CFG_ERR"
+_CFG_RC=$?
+if [[ $_CFG_RC -eq 0 ]] && [[ "$(cat "$_CFG_OUT")" == "semi" ]] && [[ ! -s "$_CFG_ERR" ]]; then
+  ok "agent-config.js mode -> 'semi' over HTTP (config fetch path runs clean)"
+else
+  bad "agent-config.js mode failed: exit $_CFG_RC, stdout '$(cat "$_CFG_OUT")', stderr '$(tr '\n' ' ' <"$_CFG_ERR")'"
+fi
+
+TRUTHCV_MCP_URL="$_CFG_BASE" node "$AGENT_DIR/agent-config.js" run_at >"$_CFG_OUT" 2>"$_CFG_ERR"
+_CFG_RC=$?
+if [[ $_CFG_RC -eq 0 ]] && [[ "$(cat "$_CFG_OUT")" == "09:00,15:00" ]] && [[ ! -s "$_CFG_ERR" ]]; then
+  ok "agent-config.js run_at -> '09:00,15:00' over HTTP"
+else
+  bad "agent-config.js run_at failed: exit $_CFG_RC, stdout '$(cat "$_CFG_OUT")', stderr '$(tr '\n' ' ' <"$_CFG_ERR")'"
+fi
+
+# The `llm-credentials` endpoint path - a separate branch with its own fetch.
+# daily-apply.sh reads the result by line position, so the line count is part
+# of the contract, not a detail.
+AGENT_API_TOKEN="$_CFG_TOKEN" TRUTHCV_MCP_URL="$_CFG_BASE" \
+  node "$AGENT_DIR/agent-config.js" llm_credentials >"$_CFG_OUT" 2>"$_CFG_ERR"
+_CFG_RC=$?
+_CFG_NL=$(wc -l <"$_CFG_OUT")
+if [[ $_CFG_RC -eq 0 ]] && [[ "$_CFG_NL" -eq 6 ]] \
+   && [[ "$(sed -n 1p "$_CFG_OUT")" == "api_key" ]] \
+   && [[ "$(sed -n 5p "$_CFG_OUT")" == "anthropic" ]] \
+   && [[ ! -s "$_CFG_ERR" ]]; then
+  ok "agent-config.js llm_credentials -> 6 lines, token forwarded in X-Agent-Token"
+else
+  bad "agent-config.js llm_credentials failed: exit $_CFG_RC, $_CFG_NL line(s), stderr '$(tr '\n' ' ' <"$_CFG_ERR")'"
+fi
+
+# Missing shared secret must be exit 2, distinct from the exit 1 every other
+# failure uses, and must print nothing on either stream.
+env -u AGENT_API_TOKEN TRUTHCV_MCP_URL="$_CFG_BASE" \
+  node "$AGENT_DIR/agent-config.js" llm_credentials >"$_CFG_OUT" 2>"$_CFG_ERR"
+_CFG_RC=$?
+if [[ $_CFG_RC -eq 2 ]] && [[ ! -s "$_CFG_OUT" ]] && [[ ! -s "$_CFG_ERR" ]]; then
+  ok "agent-config.js llm_credentials without AGENT_API_TOKEN -> exit 2, silent"
+else
+  bad "agent-config.js llm_credentials without a token: expected silent exit 2, got exit $_CFG_RC, stdout '$(cat "$_CFG_OUT")', stderr '$(tr '\n' ' ' <"$_CFG_ERR")'"
+fi
+
+kill "$_CFG_PID" 2>/dev/null
+wait "$_CFG_PID" 2>/dev/null
+
+# With the stub gone the same port refuses connections, which is the caller
+# contract's error path: nothing on stdout, nothing on stderr, exit 1.  An
+# unhandled exception would satisfy the exit code and fail the stderr check.
+TRUTHCV_MCP_URL="$_CFG_BASE" node "$AGENT_DIR/agent-config.js" mode >"$_CFG_OUT" 2>"$_CFG_ERR"
+_CFG_RC=$?
+if [[ $_CFG_RC -eq 1 ]] && [[ ! -s "$_CFG_OUT" ]] && [[ ! -s "$_CFG_ERR" ]]; then
+  ok "agent-config.js unreachable app -> exit 1 with both streams silent"
+else
+  bad "agent-config.js unreachable app: expected silent exit 1, got exit $_CFG_RC, stdout '$(cat "$_CFG_OUT")', stderr '$(tr '\n' ' ' <"$_CFG_ERR")'"
+fi
+
+rm -f "$_CFG_STUB" "$_CFG_OUT" "$_CFG_ERR" "/tmp/agent-config-stub-$$.log"
+
 # --- Reachability ------------------------------------------------------------
 
 # This only proves the `browser` compose service is accepting connections and
