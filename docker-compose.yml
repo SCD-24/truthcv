@@ -78,6 +78,11 @@ services:
       # Read-only app data volume — so Playwright's browser_file_upload can
       # resolve paths get_canonical_cv returns (e.g. /app/data/canonical_cv.pdf).
       # The app service sets DATA_DIR=/app/data, so the paths line up.
+      # The mount alone is not enough: @playwright/mcp@0.0.79 (pinned in
+      # browser/Dockerfile) also restricts browser_file_upload to paths under
+      # its --output-dir. browser/entrypoint.sh passes
+      # --output-dir "$BROWSER_UPLOAD_ROOT_DIR" (default /app) so this mount
+      # is inside the allowed root — see browser/README.md "Data Volume".
       - ${DATA_DIR:-./data}:/app/data:ro
     environment:
       - BROWSER_MCP_PORT=8931

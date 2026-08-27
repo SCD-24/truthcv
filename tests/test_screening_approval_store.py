@@ -84,6 +84,29 @@ def test_record_apply_failure_increments_and_keeps_approval(data_dir):
     assert reloaded.approval == "approved"
 
 
+def test_clear_apply_failure_empties_error_fields(data_dir):
+    s = store.create({"company": "Contoso", "verdict": "deferred"})
+    store.set_approval(s.id, "approved")
+    store.record_apply_failure(
+        s.id, "outside allowed roots", blocker="login_required", signin_url="https://x/signin"
+    )
+    updated = store.clear_apply_failure(s.id)
+    assert updated.apply_error == ""
+    assert updated.apply_blocker == ""
+    assert updated.signin_url == ""
+    # Approval and the attempt count are history, not part of what a cleared
+    # error touches.
+    assert updated.approval == "approved"
+    assert updated.apply_attempts == 1
+    reloaded = store.get(s.id)
+    assert reloaded.apply_error == ""
+    assert reloaded.apply_attempts == 1
+
+
+def test_clear_apply_failure_unknown_id_returns_none(data_dir):
+    assert store.clear_apply_failure("nope") is None
+
+
 def test_mark_applied(data_dir):
     s = store.create({"company": "Contoso", "verdict": "deferred"})
     store.set_approval(s.id, "approved")

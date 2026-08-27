@@ -300,7 +300,12 @@ employer's own site, per item 1 below.
 2. Call `get_canonical_cv` and attach the CV it returns. If it comes back with
    `asset_id` and `path` both `None`, no canonical CV is registered — stop,
    do not fabricate or substitute another file, and raise it as an open issue
-   in the §9 report instead of applying.
+   in the §9 report instead of applying. If instead the attach itself is
+   refused — e.g. `browser_file_upload` reports the path "outside allowed
+   roots" — that is an environment fault, not a missing file: do not
+   fabricate or substitute another file here either. Report it as an open
+   issue in the §9 report (the operator fix lives in browser/README.md's
+   "Data Volume" section) and move on.
 3. **Never write a cover letter free-hand.** Call `generate_cover_letter` with
    the posting text, a tone, and a length to get a per-role letter grounded in
    the operator's actual work — outside this tool, a letter has no guardrail

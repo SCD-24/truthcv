@@ -47,7 +47,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install @playwright/mcp globally — the Playwright image ships node,
 # so `npm install -g` works immediately.
-RUN npm install -g @playwright/mcp@latest
+#
+# Pinned (not @latest): this package's CLI is the sandbox that decides which
+# filesystem paths browser_file_upload may resolve (see entrypoint.sh), and an
+# unpinned upgrade can silently change that surface under us — which is
+# exactly what broke the /app/data/canonical_cv.pdf upload this pin fixes.
+# Bump deliberately; re-check `npx @playwright/mcp@<version> --help` for the
+# file-access options (currently --output-dir and
+# --allow-unrestricted-file-access; there is no explicit allow-roots flag) and
+# re-verify browser_file_upload against /app/data before rolling the pin.
+RUN npm install -g @playwright/mcp@0.0.79
 
 # Then install the Chromium build that THIS @playwright/mcp expects.
 #
@@ -73,6 +82,14 @@ RUN npx --yes playwright-core@$(node -p "require('/usr/lib/node_modules/@playwri
 #   /app/data:        read-only mount of the app's data directory
 #                     (so Playwright's browser_file_upload can resolve
 #                      paths get_canonical_cv returns, e.g. /app/data/canonical_cv.pdf)
+#
+# The mount alone does not make /app/data reachable to browser_file_upload:
+# @playwright/mcp@0.0.79 (pinned above) only allows uploads from under its
+# --output-dir (or the MCP client's advertised workspace root, which our
+# client never advertises). entrypoint.sh launches the server with
+# --output-dir "$BROWSER_UPLOAD_ROOT_DIR" (default /app) precisely so this
+# mount sits inside the allowed root — see browser/README.md's "Data Volume"
+# section for the full mechanism.
 RUN mkdir -p /browser-profile /app/data
 
 # Expose ports:

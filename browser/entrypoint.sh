@@ -135,12 +135,41 @@ if ! kill -0 "$SESSION_PID" 2>/dev/null; then
 fi
 log "session server running on PID $SESSION_PID"
 
+# @playwright/mcp@0.0.79's file-access sandbox (playwright-core's checkFile)
+# only allows a resolved path through when it falls under EITHER its
+# --output-dir OR the MCP client's first advertised "root" (via the client
+# capability/roots protocol, exposed here as clientInfo.cwd). Our agent's HTTP
+# JSON-RPC client does not implement that roots capability, so clientInfo.cwd
+# is empty and --output-dir is the only lever available. `--help` (0.0.79)
+# describes the two relevant options as:
+#
+#   --allow-unrestricted-file-access      allow access to files outside of the
+#                                          workspace roots. Also allows
+#                                          unrestricted access to file:// URLs.
+#                                          By default access to file system is
+#                                          restricted to workspace root
+#                                          directories (or cwd if no roots are
+#                                          configured) only, and navigation to
+#                                          file:// URLs is blocked.
+#   --output-dir <path>                   path to the directory for output
+#                                          files.
+#
+# There is no explicit allow-list/roots flag in this version — --output-dir is
+# it. --allow-unrestricted-file-access would also work but disables the
+# sandbox entirely, which is more than this needs. Pointing --output-dir at
+# /app (not /app/data, which is mounted read-only and must stay writable-free)
+# makes /app/data reachable as a subdirectory of the allowed root without
+# widening access past the app's own tree.
+BROWSER_UPLOAD_ROOT_DIR="${BROWSER_UPLOAD_ROOT_DIR:-/app}"
+log "playwright/mcp upload/output root: $BROWSER_UPLOAD_ROOT_DIR (covers /app/data)"
+
 log "starting @playwright/mcp on port $BROWSER_MCP_PORT..."
 exec env DISPLAY="$DISPLAY" \
-  npx @playwright/mcp \
+  npx @playwright/mcp@0.0.79 \
     --browser chromium \
     --port "$BROWSER_MCP_PORT" \
     --host "$BROWSER_MCP_HOST" \
     --user-data-dir "$BROWSER_PROFILE_DIR" \
     --viewport-size "$BROWSER_VIEWPORT_SIZE" \
-    --allowed-hosts "$BROWSER_ALLOWED_HOSTS"
+    --allowed-hosts "$BROWSER_ALLOWED_HOSTS" \
+    --output-dir "$BROWSER_UPLOAD_ROOT_DIR"
