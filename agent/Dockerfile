@@ -66,7 +66,7 @@ WORKDIR /app/agent
 # run. Copy the manifest + lockfile first so this layer only rebuilds when
 # dependencies actually change.
 COPY --chown=node:node agent/package.json agent/package-lock.json ./
-RUN npm ci
+RUN npm ci --include=dev
 COPY --chown=node:node agent/tsconfig.json ./
 COPY --chown=node:node agent/harness ./harness
 RUN npm run build && npm prune --omit=dev
