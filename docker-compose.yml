@@ -176,10 +176,21 @@ services:
       - AGENT_LLM_API_KEY=${AGENT_LLM_API_KEY:-}
       - AGENT_LLM_BASE_URL=${AGENT_LLM_BASE_URL:-}
       - AGENT_LLM_AUTH_TYPE=${AGENT_LLM_AUTH_TYPE:-}
-      # Hard cap on harness turns per run (agent/harness/loop.ts) — an
-      # unattended run applies to real jobs under the operator's real name
-      # overnight, so this is a genuine safety bound, not a tuning knob.
-      - AGENT_MAX_TURNS=${AGENT_MAX_TURNS:-40}
+      # Runaway backstop on harness turns per run (agent/harness/loop.ts).
+      # NOT the operational bound on how much a run does: that is
+      # maxApplicationsPerRun on the Agents page, which get_approved_applications
+      # enforces server-side by capping and leasing the items it hands out
+      # (agenttools/tools_ledger.py). At 40 this was the effective limit —
+      # driving one application form through the browser costs 15-25 turns, so
+      # runs stopped mid-form. It is set high enough that reaching it means
+      # something is looping, and the last turns are reserved for the model to
+      # wind up in (loop.ts DEFAULT_WRAP_UP_TURNS).
+      #
+      # NOTE: the application cap is only server-enforced on the approved-queue
+      # path used by SEMI-AUTO. In FULL AUTO a posting the agent discovers
+      # itself never passes through that hand-out, so its cap is prompt-level
+      # only — see agent/RUNBOOK.md.
+      - AGENT_MAX_TURNS=${AGENT_MAX_TURNS:-400}
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
       # Port supervisor.js listens on — matched to the app service entry above.
       - AGENT_CONTROL_PORT=${AGENT_CONTROL_PORT:-9099}
