@@ -26,7 +26,11 @@ from agentconfig.store import JobProfile
 
 SOURCE = "remoterocketship"
 
-API_URL = "https://www.remoterocketship.com/api/openclaw/jobs"
+# Trailing slash is REQUIRED. The docs give this path without one, but the
+# host answers that with a 308 to the slashed form, and httpx does not follow
+# redirects unless told to — so the un-slashed URL fails every request with
+# "Remote Rocketship returned HTTP 308" and never reaches the handler.
+API_URL = "https://www.remoterocketship.com/api/openclaw/jobs/"
 
 # The board's own per-request ceiling (docs: "clamped to 1..50"). Asking for
 # more is silently clamped, so ask for exactly the ceiling.
@@ -257,7 +261,7 @@ def fetch_postings(
     }
 
     try:
-        with httpx.Client(timeout=TIMEOUT_SECONDS) as client:
+        with httpx.Client(timeout=TIMEOUT_SECONDS, follow_redirects=True) as client:
             for profile in profiles:
                 if not profile.enabled or not profile.keywords:
                     continue
@@ -328,7 +332,7 @@ def check_key(key: str) -> tuple[bool, str]:
 
     body = {"filters": {"page": 1, "itemsPerPage": 1}, "includeJobDescription": False}
     try:
-        with httpx.Client(timeout=TIMEOUT_SECONDS) as client:
+        with httpx.Client(timeout=TIMEOUT_SECONDS, follow_redirects=True) as client:
             response = client.post(
                 API_URL,
                 headers={"Authorization": f"Bearer {key.strip()}", "Content-Type": "application/json"},
