@@ -16,7 +16,22 @@ SOURCE_DOMAINS: dict[str, str] = {
     "personio": "jobs.personio.de",
     "linkedin": "linkedin.com/jobs",
     "workday": "myworkdayjobs.com",
+    "remoterocketship": "remoterocketship.com",
 }
+
+# Boards reached through an HTTP API with a saved key instead of a browser
+# sign-in. They are configured like any other board and shown in the same
+# list, but two things differ and both are load-bearing:
+#
+#   - Discovery does NOT emit a Google `site:` dork for them. The feed is
+#     pulled directly (see jobfeeds/), and a dork would send the agent to the
+#     aggregator's own listing pages instead of the postings the API returns.
+#   - There is no sign-in URL, so the Job boards page offers an API key field
+#     where every other board offers a "Sign in" button.
+#
+# Their SOURCE_DOMAINS entry exists only so the UI has a domain to label the
+# row with; nothing composes a search from it.
+API_BOARD_SOURCES: list[str] = ["remoterocketship"]
 
 DEFAULT_BOARD_DOMAINS: list[str] = [
     "jobs.ashbyhq.com",
@@ -41,6 +56,20 @@ SIGNIN_URLS: dict[str, str] = {
 DEFAULT_BOARD_SOURCES: list[str] = ["ashby", "greenhouse", "lever", "workday"]
 
 
+def is_api_source(source: str) -> bool:
+    """Check whether source is an API-backed board (key saved, never signed in to).
+
+    Matches the catalog key AND the board's domain, because the "add a board"
+    control also accepts a raw domain: an operator who types
+    "remoterocketship.com" instead of picking it from the list must get the
+    same board, not a Google dork against the aggregator's listing pages and a
+    sign-in button for a session that cannot authenticate anything.
+    """
+    key = source.strip().casefold()
+    domains = {SOURCE_DOMAINS[s].casefold() for s in API_BOARD_SOURCES if s in SOURCE_DOMAINS}
+    return key in {s.casefold() for s in API_BOARD_SOURCES} or key in domains
+
+
 def resolve_domain(source: str) -> str | None:
     """Resolve a board source to a site: domain, or None if unrecognised.
 
@@ -55,10 +84,14 @@ def resolve_domain(source: str) -> str | None:
 def resolve_signin_url(source: str, override: str = "") -> str:
     """Resolve the sign-in URL for a board source.
 
-    Precedence: an explicit override wins; else the catalog's known sign-in
-    page for that source; else, for a raw domain, "https://" + the domain;
-    else "" when nothing is known.
+    Precedence: an API-backed board never has one (it is authenticated with a
+    saved key, not a browser session), so it returns "" even if an override was
+    somehow stored; then an explicit override wins; else the catalog's known
+    sign-in page for that source; else, for a raw domain, "https://" + the
+    domain; else "" when nothing is known.
     """
+    if is_api_source(source):
+        return ""
     if override.strip():
         return override.strip()
     key = source.strip().casefold()

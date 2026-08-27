@@ -104,6 +104,8 @@ from .schemas import (
     CoverLetterRequest,
     CooldownResult,
     CoverLetterResult,
+    JobBoardKeyStatus,
+    JobBoardKeyUpdate,
     ModelInfo,
     ModelList,
     BlockedClaimModel,
@@ -1294,15 +1296,87 @@ def _resolved_job_boards(cfg: agent_config_store.AgentConfig) -> list[dict]:
             "domain": boards.resolve_domain(source) or "",
             "effective_signin_url": boards.resolve_signin_url(source, override),
             "is_default": boards.is_default_source(source),
+            "is_api": boards.is_api_source(source),
         })
     return result
 
 
+def _fetch_feed_postings(cfg):
+    """Pull postings for every API-backed board the operator has configured.
+
+    Only Remote Rocketship exists today; the resolved-source check is what
+    keeps it opt-in, so an operator who has not added the board pays no
+    request even with a key sitting in secrets.enc. The check goes through
+    boards.is_api_source rather than comparing to the catalog key, so a board
+    added as a raw domain reaches the feed like any other.
+    """
+    from agentconfig import boards
+    from jobfeeds import remoterocketship
+
+    if not any(boards.is_api_source(source) for source in cfg.resolved_board_sources()):
+        return remoterocketship.FeedResult()
+    return remoterocketship.fetch_postings(
+        cfg.profiles, remoterocketship.api_key(), cfg.max_posting_age_days
+    )
+
+
+@router.get("/job-boards/{source}/key", response_model=JobBoardKeyStatus)
+def get_job_board_key(source: str) -> JobBoardKeyStatus:
+    """Whether an API-backed board has a key saved. The key itself is never returned."""
+    from agentconfig import boards
+    from jobfeeds import remoterocketship
+
+    if not boards.is_api_source(source):
+        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board.")
+    return JobBoardKeyStatus(
+        source=remoterocketship.SOURCE,
+        key_set=bool(remoterocketship.api_key()),
+        encryption_available=secretstore.encryption_available(),
+    )
+
+
+@router.put("/job-boards/{source}/key", response_model=JobBoardKeyStatus)
+def put_job_board_key(source: str, body: JobBoardKeyUpdate) -> JobBoardKeyStatus:
+    """Save (or, with an empty string, clear) an API-backed board's key."""
+    from agentconfig import boards
+    from jobfeeds import remoterocketship
+
+    if not boards.is_api_source(source):
+        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board.")
+    if not secretstore.encryption_available():
+        raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
+    value = body.api_key.strip()
+    secretstore.set_connection(remoterocketship.SOURCE, {"apiKey": value or None})
+    return JobBoardKeyStatus(
+        source=remoterocketship.SOURCE,
+        key_set=bool(remoterocketship.api_key()),
+        encryption_available=True,
+    )
+
+
+@router.post("/job-boards/{source}/key/test", response_model=TestResult)
+def test_job_board_key(source: str) -> TestResult:
+    """Verify the saved key with one live request against the board's API."""
+    from agentconfig import boards
+    from jobfeeds import remoterocketship
+
+    if not boards.is_api_source(source):
+        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board.")
+    ok, detail = remoterocketship.check_key(remoterocketship.api_key())
+    return TestResult(ok=ok, detail=detail)
+
+
 @router.get("/agent/config", response_model=AgentConfigModel)
-def get_agent_config() -> AgentConfigModel:
+def get_agent_config(include_feed: bool = False) -> AgentConfigModel:
     """Fetch agent config with resolved company boards and composed search queries.
-    
+
     Prunes board entries for companies no longer on the target watchlist.
+
+    ``include_feed`` opts into pulling postings from the configured API-backed
+    boards, which means an outbound HTTP call. It is off by default and only
+    the agent asks for it: the web UI loads this endpoint on two pages, and
+    making every page load wait on a third-party API — or fail with it — is a
+    cost paid for nothing, since the browser never renders the postings.
     """
     from companyboards import store as board_store
     from agentconfig.dorks import compose_queries
@@ -1331,7 +1405,15 @@ def get_agent_config() -> AgentConfigModel:
     # the composed URLs here rather than stored on them, so changing the
     # setting takes effect on the next fetch with no stored state to migrate.
     data["search_queries"] = compose_queries(cfg.profiles, cfg.max_posting_age_days, cfg.resolved_board_sources())
-    
+
+    # Postings from API-backed boards, on request only. fetch_postings never
+    # raises, so a Remote Rocketship outage degrades this response to the
+    # config it always carried rather than failing the agent's config fetch.
+    if include_feed:
+        feed = _fetch_feed_postings(cfg)
+        data["feed_postings"] = [p.to_dict() for p in feed.postings]
+        data["feed_error"] = feed.error
+
     return AgentConfigModel.model_validate(data)
 
 

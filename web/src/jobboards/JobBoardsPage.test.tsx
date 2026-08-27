@@ -3,15 +3,34 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
-import { getAgentConfig, getSigninQueue, updateAgentConfig } from "../api/client";
+import {
+  getAgentConfig,
+  getJobBoardKey,
+  getSigninQueue,
+  saveJobBoardKey,
+  testJobBoardKey,
+  updateAgentConfig,
+} from "../api/client";
 import type { AgentConfig, JobBoard } from "../api/types";
 import { JobBoardsPage } from "./JobBoardsPage";
 
 vi.mock("../api/client", () => ({
   getAgentConfig: vi.fn(),
+  getJobBoardKey: vi.fn(),
   getSigninQueue: vi.fn(),
+  saveJobBoardKey: vi.fn(),
+  testJobBoardKey: vi.fn(),
   updateAgentConfig: vi.fn(),
 }));
+
+const REMOTE_ROCKETSHIP: JobBoard = {
+  source: "remoterocketship",
+  signinUrl: "",
+  domain: "remoterocketship.com",
+  effectiveSigninUrl: "",
+  isDefault: false,
+  isApi: true,
+};
 
 afterEach(() => {
   cleanup();
@@ -19,10 +38,10 @@ afterEach(() => {
 });
 
 const DEFAULT_BOARDS: JobBoard[] = [
-  { source: "ashby", signinUrl: "", domain: "jobs.ashbyhq.com", effectiveSigninUrl: "https://jobs.ashbyhq.com", isDefault: true },
-  { source: "greenhouse", signinUrl: "", domain: "job-boards.greenhouse.io", effectiveSigninUrl: "https://job-boards.greenhouse.io", isDefault: true },
-  { source: "lever", signinUrl: "", domain: "jobs.lever.co", effectiveSigninUrl: "https://jobs.lever.co", isDefault: true },
-  { source: "workday", signinUrl: "", domain: "myworkdayjobs.com", effectiveSigninUrl: "https://www.myworkdayjobs.com", isDefault: true },
+  { source: "ashby", signinUrl: "", domain: "jobs.ashbyhq.com", effectiveSigninUrl: "https://jobs.ashbyhq.com", isDefault: true, isApi: false },
+  { source: "greenhouse", signinUrl: "", domain: "job-boards.greenhouse.io", effectiveSigninUrl: "https://job-boards.greenhouse.io", isDefault: true, isApi: false },
+  { source: "lever", signinUrl: "", domain: "jobs.lever.co", effectiveSigninUrl: "https://jobs.lever.co", isDefault: true, isApi: false },
+  { source: "workday", signinUrl: "", domain: "myworkdayjobs.com", effectiveSigninUrl: "https://www.myworkdayjobs.com", isDefault: true, isApi: false },
 ];
 
 function makeConfig(jobBoards: JobBoard[]): AgentConfig {
@@ -81,6 +100,7 @@ describe("JobBoardsPage", () => {
       domain: "linkedin.com/jobs",
       effectiveSigninUrl: "https://www.linkedin.com/login",
       isDefault: false,
+      isApi: false,
     };
     const config = makeConfig([...DEFAULT_BOARDS, linkedin]);
     vi.mocked(updateAgentConfig).mockResolvedValue(makeConfig(DEFAULT_BOARDS));
@@ -101,6 +121,7 @@ describe("JobBoardsPage", () => {
       domain: "custom.example.com",
       effectiveSigninUrl: "",
       isDefault: false,
+      isApi: false,
     };
     await renderPage(makeConfig([board]));
 
@@ -122,7 +143,7 @@ describe("JobBoardsPage", () => {
       expect(updateAgentConfig).toHaveBeenCalledWith({
         jobBoards: [
           ...DEFAULT_BOARDS,
-          { source: "linkedin", signinUrl: "", domain: "", effectiveSigninUrl: "", isDefault: false },
+          { source: "linkedin", signinUrl: "", domain: "", effectiveSigninUrl: "", isDefault: false, isApi: false },
         ],
       }),
     );
@@ -152,6 +173,7 @@ describe("JobBoardsPage", () => {
             domain: "custom.example.com",
             effectiveSigninUrl: "https://custom.example.com/login",
             isDefault: false,
+            isApi: false,
           },
         ],
       }),
@@ -175,6 +197,64 @@ describe("JobBoardsPage", () => {
     await screen.findByText(/3 postings waiting/);
     expect(screen.getByText(/Acme/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sign in to jobs.ashbyhq.com" })).toBeTruthy();
+  });
+
+  it("offers an API key field instead of a Sign in button for an API-backed board", async () => {
+    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
+    vi.mocked(getJobBoardKey).mockResolvedValue({
+      source: "remoterocketship",
+      keySet: false,
+      encryptionAvailable: true,
+    });
+    await renderPage(makeConfig([REMOTE_ROCKETSHIP]));
+
+    // The regression this guards: an API board rendering the sign-in flow.
+    // There is no session to open, so a Sign in button would send the operator
+    // to a browser page that can never authenticate the feed.
+    await screen.findByLabelText("API key");
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+    expect(screen.getByText("Remote Rocketship")).toBeTruthy();
+    expect(screen.getByText("API")).toBeTruthy();
+  });
+
+  it("saves an API key and clears the field", async () => {
+    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
+    vi.mocked(getJobBoardKey).mockResolvedValue({
+      source: "remoterocketship",
+      keySet: false,
+      encryptionAvailable: true,
+    });
+    vi.mocked(saveJobBoardKey).mockResolvedValue({
+      source: "remoterocketship",
+      keySet: true,
+      encryptionAvailable: true,
+    });
+    await renderPage(makeConfig([REMOTE_ROCKETSHIP]));
+
+    const field = await screen.findByLabelText("API key");
+    fireEvent.change(field, { target: { value: "rr_secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
+
+    await waitFor(() =>
+      expect(saveJobBoardKey).toHaveBeenCalledWith("remoterocketship", "rr_secret"),
+    );
+    // The field is emptied after a save: the key is write-only, and leaving
+    // it on screen would imply it can be read back.
+    await waitFor(() => expect((field as HTMLInputElement).value).toBe(""));
+  });
+
+  it("surfaces a failed key test as an error", async () => {
+    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
+    vi.mocked(getJobBoardKey).mockResolvedValue({
+      source: "remoterocketship",
+      keySet: true,
+      encryptionAvailable: true,
+    });
+    vi.mocked(testJobBoardKey).mockResolvedValue({ ok: false, detail: "Invalid API key" });
+    await renderPage(makeConfig([REMOTE_ROCKETSHIP]));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Test" }));
+    await screen.findByText("Invalid API key");
   });
 
   it("shows an error when the config fails to load", async () => {

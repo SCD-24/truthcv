@@ -31,6 +31,10 @@ def test_get_returns_defaults(client, data_dir):
         "companyBoards": [],
         "mode": "full",
         "searchQueries": [],
+        # Feed postings are opt-in (?include_feed=true) — a plain GET carries the
+        # empty shape and never calls out to an API-backed board.
+        "feedPostings": [],
+        "feedError": "",
     }
     got = r.json()
     job_boards = got.pop("jobBoards")

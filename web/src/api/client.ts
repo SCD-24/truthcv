@@ -35,6 +35,7 @@ import type {
   Routing,
   RoutingUpdate,
   SigninQueue,
+  JobBoardKeyStatus,
   BrowserSession,
   CompanyFinding,
   ContradictionGroup,
@@ -670,6 +671,25 @@ export function updateRouting(body: RoutingUpdate): Promise<Routing> {
 }
 
 /** Sites the agent could not get past a sign-in wall on. */
+/** Whether an API-backed job board has a key saved. The key is never returned. */
+export function getJobBoardKey(source: string): Promise<JobBoardKeyStatus> {
+  return request(`/api/job-boards/${encodeURIComponent(source)}/key`);
+}
+
+/** Save an API-backed job board's key, or clear it by passing an empty string. */
+export function saveJobBoardKey(source: string, apiKey: string): Promise<JobBoardKeyStatus> {
+  return request(`/api/job-boards/${encodeURIComponent(source)}/key`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey }),
+  });
+}
+
+/** Verify the saved key with one live request against the board's API. */
+export function testJobBoardKey(source: string): Promise<TestResult> {
+  return request(`/api/job-boards/${encodeURIComponent(source)}/key/test`, { method: "POST" });
+}
+
 export function getSigninQueue(): Promise<SigninQueue> {
   return request("/api/browser/signin-queue");
 }

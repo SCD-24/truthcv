@@ -336,10 +336,11 @@ class JobBoardModel(_Camel):
     """One job board the agent searches AND a site the operator signs in to.
 
     ``source``/``signin_url`` are the operator's stored input. ``domain``,
-    ``effective_signin_url`` and ``is_default`` are response-only, resolved
-    server-side by the routes from agentconfig/boards.py and stripped on a
-    PUT — ``is_default`` marks a board that is always searched and cannot be
-    removed.
+    ``effective_signin_url``, ``is_default`` and ``is_api`` are response-only,
+    resolved server-side by the routes from agentconfig/boards.py and stripped
+    on a PUT — ``is_default`` marks a board that is always searched and cannot
+    be removed, ``is_api`` a board reached with a saved API key rather than a
+    browser sign-in (``effective_signin_url`` is always "" for those).
     """
 
     source: str = ""
@@ -347,6 +348,36 @@ class JobBoardModel(_Camel):
     domain: str = ""
     effective_signin_url: str = ""
     is_default: bool = False
+    is_api: bool = False
+
+
+class FeedPostingModel(_Camel):
+    """One posting pulled from an API-backed board (response-only)."""
+
+    profile: str = ""
+    source: str = ""
+    title: str = ""
+    company: str = ""
+    url: str = ""
+    employment_type: str = ""
+    salary_range: str = ""
+    posted_at: str = ""
+
+
+class JobBoardKeyStatus(_Camel):
+    """Whether an API-backed board has a key saved — never the key itself."""
+
+    source: str
+    key_set: bool = False
+    encryption_available: bool = True
+
+
+class JobBoardKeyUpdate(_Camel):
+    """PUT body for an API-backed board's key. An empty string clears it."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, alias_generator=to_camel)
+
+    api_key: str
 
 
 class CompanyBoardModel(_Camel):
@@ -389,6 +420,13 @@ class AgentConfigModel(_Camel):
     max_posting_age_days: int | None = None
     company_boards: list[CompanyBoardModel] = Field(default_factory=list)
     search_queries: list[SearchQueryModel] = Field(default_factory=list)
+    # Postings pulled from API-backed boards. Populated only when the caller
+    # asks for them (GET /agent/config?include_feed=true) — the web UI does
+    # not, so loading a page never waits on a third-party API. feed_error
+    # carries the first failure, so the Job boards page can say why the feed
+    # is empty instead of implying there are no matching jobs.
+    feed_postings: list[FeedPostingModel] = Field(default_factory=list)
+    feed_error: str = ""
 
 
 class AgentConfigUpdate(_Camel):

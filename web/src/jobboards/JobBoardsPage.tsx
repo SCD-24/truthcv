@@ -14,14 +14,38 @@ import {
   Typography,
 } from "@mui/material";
 
-import { getAgentConfig, getSigninQueue, updateAgentConfig } from "../api/client";
-import type { AgentConfig, JobBoard, SigninQueueSite } from "../api/types";
+import {
+  getAgentConfig,
+  getJobBoardKey,
+  getSigninQueue,
+  saveJobBoardKey,
+  testJobBoardKey,
+  updateAgentConfig,
+} from "../api/client";
+import type { AgentConfig, JobBoard, JobBoardKeyStatus, SigninQueueSite } from "../api/types";
 import { browserSessionPath } from "../routes";
 
 // Known board keys offered by the "add a board" control. This carries no
 // sign-in URLs or domains — those are resolved server-side per board — it
 // only lists the catalog keys a user can pick instead of typing a domain.
-const KNOWN_BOARDS = ["ashby", "greenhouse", "lever", "personio", "linkedin", "workday"];
+const KNOWN_BOARDS = [
+  "ashby",
+  "greenhouse",
+  "lever",
+  "personio",
+  "linkedin",
+  "workday",
+  "remoterocketship",
+];
+
+// Display labels for board keys whose raw catalog key reads badly. Absent
+// keys fall back to the key itself, so adding a board never requires an entry
+// here.
+const BOARD_LABELS: Record<string, string> = { remoterocketship: "Remote Rocketship" };
+
+function boardLabel(board: JobBoard): string {
+  return BOARD_LABELS[board.source.toLowerCase()] ?? (board.domain || board.source);
+}
 
 function hostLabel(iso: string): string {
   if (!iso) return "";
@@ -82,39 +106,136 @@ function NeedsAttention() {
   );
 }
 
+/** The credential control for an API-backed board: a write-only API key field
+ * where every other board gets a "Sign in" button. The key is never read back
+ * from the server — the status only says whether one is saved — so the field
+ * always starts blank and submitting a blank one clears the stored key. */
+function ApiKeyControl({ source }: { source: string }) {
+  const [status, setStatus] = useState<JobBoardKeyStatus | null>(null);
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    getJobBoardKey(source)
+      .then((s) => live && setStatus(s))
+      .catch((e: Error) => live && setError(e.message));
+    return () => {
+      live = false;
+    };
+  }, [source]);
+
+  async function handleSave() {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      setStatus(await saveJobBoardKey(source, value));
+      setValue("");
+      setNotice("Saved.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't save the API key.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleTest() {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await testJobBoardKey(source);
+      if (result.ok) setNotice(result.detail);
+      else setError(result.detail);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't reach the board.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const encryptionOff = status !== null && !status.encryptionAvailable;
+
+  return (
+    <Stack spacing={1} sx={{ pl: 2 }}>
+      {encryptionOff && (
+        <Alert severity="warning">Set ENCRYPTION_KEY in .env before saving an API key.</Alert>
+      )}
+      {error && <Alert severity="error">{error}</Alert>}
+      {notice && <Alert severity="success">{notice}</Alert>}
+      <Typography variant="caption" color="text.secondary">
+        {status?.keySet
+          ? "An API key is saved. Enter a new one to replace it, or save an empty field to remove it."
+          : "This board is pulled from over its API — save an API key instead of signing in. Generate one under Advanced · API access on Remote Rocketship (an active subscription is required)."}
+      </Typography>
+      <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+        <TextField
+          size="small"
+          type="password"
+          label="API key"
+          autoComplete="off"
+          value={value}
+          disabled={busy || encryptionOff}
+          onChange={(e) => setValue(e.target.value)}
+          sx={{ minWidth: 260 }}
+        />
+        <Button size="small" variant="contained" disabled={busy || encryptionOff} onClick={handleSave}>
+          Save key
+        </Button>
+        <Button size="small" variant="outlined" disabled={busy || !status?.keySet} onClick={handleTest}>
+          Test
+        </Button>
+      </Stack>
+    </Stack>
+  );
+}
+
 function BoardRow({ board, onRemove }: { board: JobBoard; onRemove: () => void }) {
   const navigate = useNavigate();
   const noSigninUrl = !board.effectiveSigninUrl;
 
   return (
-    <Stack direction="row" spacing={2} sx={{ alignItems: "center", justifyContent: "space-between" }}>
-      <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-        <Typography variant="body2">{board.domain || board.source}</Typography>
-        {board.isDefault && (
-          <Tooltip title="Default boards are always searched and cannot be removed.">
-            <Chip label="Default" size="small" />
-          </Tooltip>
-        )}
-      </Stack>
-      <Stack direction="row" spacing={1}>
-        <Tooltip title={noSigninUrl ? "No sign-in URL is set for this board" : ""}>
-          <span>
-            <Button
-              variant="outlined"
-              size="small"
-              disabled={noSigninUrl}
-              onClick={() => navigate(browserSessionPath(board.effectiveSigninUrl))}
-            >
-              Sign in
+    <Stack spacing={1}>
+      <Stack direction="row" spacing={2} sx={{ alignItems: "center", justifyContent: "space-between" }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+          <Typography variant="body2">{boardLabel(board)}</Typography>
+          {board.isDefault && (
+            <Tooltip title="Default boards are always searched and cannot be removed.">
+              <Chip label="Default" size="small" />
+            </Tooltip>
+          )}
+          {board.isApi && (
+            <Tooltip title="Pulled from over its API with a saved key — there is nothing to sign in to.">
+              <Chip label="API" size="small" variant="outlined" />
+            </Tooltip>
+          )}
+        </Stack>
+        <Stack direction="row" spacing={1}>
+          {!board.isApi && (
+            <Tooltip title={noSigninUrl ? "No sign-in URL is set for this board" : ""}>
+              <span>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={noSigninUrl}
+                  onClick={() => navigate(browserSessionPath(board.effectiveSigninUrl))}
+                >
+                  Sign in
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+          {!board.isDefault && (
+            <Button size="small" color="error" onClick={onRemove}>
+              Remove
             </Button>
-          </span>
-        </Tooltip>
-        {!board.isDefault && (
-          <Button size="small" color="error" onClick={onRemove}>
-            Remove
-          </Button>
-        )}
+          )}
+        </Stack>
       </Stack>
+      {board.isApi && <ApiKeyControl source={board.source} />}
     </Stack>
   );
 }
@@ -133,11 +254,22 @@ function AddBoardControl({ onAdd, existing }: { onAdd: (board: JobBoard) => void
         domain: customDomain.trim(),
         effectiveSigninUrl: customSigninUrl.trim(),
         isDefault: false,
+        isApi: false,
       });
       setCustomDomain("");
       setCustomSigninUrl("");
     } else if (choice) {
-      onAdd({ source: choice, signinUrl: "", domain: "", effectiveSigninUrl: "", isDefault: false });
+      // The response-only fields are placeholders here: the PUT strips them
+      // and the GET that follows carries the server's resolved values, which
+      // is where isApi/isDefault actually come from.
+      onAdd({
+        source: choice,
+        signinUrl: "",
+        domain: "",
+        effectiveSigninUrl: "",
+        isDefault: false,
+        isApi: false,
+      });
     }
     setChoice("");
   }
@@ -157,7 +289,7 @@ function AddBoardControl({ onAdd, existing }: { onAdd: (board: JobBoard) => void
           </MenuItem>
           {KNOWN_BOARDS.filter((source) => !existing.has(source)).map((source) => (
             <MenuItem key={source} value={source}>
-              {source}
+              {BOARD_LABELS[source] ?? source}
             </MenuItem>
           ))}
           <MenuItem value="__custom__">Custom domain…</MenuItem>
@@ -263,6 +395,8 @@ export function JobBoardsPage() {
           <Typography variant="h6">Job boards</Typography>
           <Typography variant="body2" color="text.secondary">
             These are the boards the agent searches AND the sites you sign in to — one list, not two.
+            A board marked API is pulled from directly using a key you save here; there is nothing to
+            sign in to for those.
           </Typography>
         </Stack>
         {error && <Alert severity="error">{error}</Alert>}
