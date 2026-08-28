@@ -494,7 +494,7 @@
             "data": {
               "routes": [
                 {
-                  "desc": "Most recently started agent runs, newest first (limit, default 50); read in-process from runs.store.list_recent on the data volume, not proxied to the supervisor.",
+                  "desc": "One page of agent runs, newest first. `limit` (default 50; 0 or negative means no limit) and `offset` (default 0, clamped at 0, applied before the limit). Returns {runs, total, limit, offset}; `total` counts every run currently retained, which a capped page cannot report. An offset past the end is an empty page, not an error. Only the 200 most recent runs are retained (runs.store trims on write), so `total` is a count of what is kept, not of every run ever. Read in-process from runs.store on the data volume, not proxied to the supervisor.",
                   "method": "GET",
                   "path": "/api/runs"
                 },

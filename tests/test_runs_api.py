@@ -33,6 +33,63 @@ def test_list_runs_newest_first_and_honours_limit(client):
     assert len(r.json()["runs"]) == 2
 
 
+def _dated_runs(count: int) -> None:
+    """Record `count` runs with distinct, ascending started_at values."""
+    for i in range(count):
+        store.start(f"run-{i}", trigger="scheduled", apply_cap=0)
+    all_runs = store.load_all()
+    by_id = {r.id: r for r in all_runs}
+    for i in range(count):
+        by_id[f"run-{i}"].started_at = f"2024-01-{i + 1:02d}T00:00:00+00:00"
+    store._write_all(all_runs)
+
+
+def test_the_response_carries_the_total_across_all_pages(client):
+    """A page cannot report how many pages exist, so the client cannot build
+    pagination controls without this."""
+    _dated_runs(12)
+    body = client.get("/api/runs?limit=5").json()
+    assert len(body["runs"]) == 5
+    assert body["total"] == 12
+    assert body["limit"] == 5
+    assert body["offset"] == 0
+
+
+def test_offset_returns_the_next_page_newest_first(client):
+    _dated_runs(12)
+    first = [r["id"] for r in client.get("/api/runs?limit=5&offset=0").json()["runs"]]
+    second = [r["id"] for r in client.get("/api/runs?limit=5&offset=5").json()["runs"]]
+    assert first == ["run-11", "run-10", "run-9", "run-8", "run-7"]
+    assert second == ["run-6", "run-5", "run-4", "run-3", "run-2"]
+
+
+def test_offset_past_the_end_is_an_empty_page_with_the_real_total(client):
+    """The total is what tells the client it overshot; a 404 or an error here
+    would turn a stale page number into a broken section."""
+    _dated_runs(3)
+    body = client.get("/api/runs?limit=5&offset=99").json()
+    assert body["runs"] == []
+    assert body["total"] == 3
+
+
+def test_a_negative_offset_is_clamped_to_the_first_page(client):
+    """A client that paged past the start gets the first page, not an error and
+    not an empty one. Guarded in the route AND in the store's slice, because a
+    negative index into a Python list reads from the END — which would serve
+    the OLDEST runs to a caller that asked for the newest."""
+    _dated_runs(12)
+    body = client.get("/api/runs?limit=5&offset=-5").json()
+    assert [r["id"] for r in body["runs"]] == ["run-11", "run-10", "run-9", "run-8", "run-7"]
+    assert body["offset"] == 0
+
+
+def test_omitting_offset_keeps_the_old_default_behaviour(client):
+    _dated_runs(3)
+    body = client.get("/api/runs").json()
+    assert [r["id"] for r in body["runs"]] == ["run-2", "run-1", "run-0"]
+    assert body["offset"] == 0
+
+
 def test_get_run_404_on_unknown_id(client):
     r = client.get("/api/runs/does-not-exist")
     assert r.status_code == 404
@@ -259,3 +316,16 @@ def test_finish_rejects_an_unknown_status_instead_of_storing_it(client, agent_to
     r = client.post("/api/agent/runs/r3/finish", json={"status": "exploded"}, headers=agent_token)
     assert r.status_code == 422
     assert client.get("/api/runs/r3").json()["status"] == "running"
+
+
+def test_limit_zero_means_every_retained_run(client):
+    """`limit <= 0` means "no limit" — the contract runs.store documents and
+    the old callers relied on. An external client can ask for it, so it is
+    pinned at the HTTP layer and not only in the store."""
+    _dated_runs(12)
+
+    body = client.get("/api/runs?limit=0&offset=2").json()
+
+    assert len(body["runs"]) == 10
+    assert body["total"] == 12
+    assert body["runs"][0]["id"] == "run-9"

@@ -39,6 +39,7 @@ import type {
   BrowserSession,
   CompanyFinding,
   ContradictionGroup,
+  RunPage,
   RunRecord,
 } from "./types";
 import { errorDetailToMessage } from "./errorDetail";
@@ -594,9 +595,12 @@ export function getAgentStatus(): Promise<AgentStatus> {
 }
 
 /** The most recently started agent runs, newest first. */
-export function listRuns(limit?: number): Promise<RunRecord[]> {
-  const qs = limit ? `?limit=${limit}` : "";
-  return request<{ runs: RunRecord[] }>(`/api/runs${qs}`).then((r) => r.runs);
+export function listRuns(limit?: number, offset?: number): Promise<RunPage> {
+  const params = new URLSearchParams();
+  if (limit) params.set("limit", String(limit));
+  if (offset) params.set("offset", String(offset));
+  const qs = params.toString();
+  return request<RunPage>(`/api/runs${qs ? `?${qs}` : ""}`);
 }
 
 /** A single run record, or throws (404) if no run with this id was recorded. */

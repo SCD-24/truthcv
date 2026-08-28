@@ -456,6 +456,16 @@ export interface RunRecord {
   note: string;
 }
 
+/** One page of runs from GET /api/runs, newest first. `total` counts every
+ * recorded run, not this page — it is what tells the caller how many pages
+ * exist, and it cannot be derived from a capped page. */
+export interface RunPage {
+  runs: RunRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 /** A screening's current cover letter. `source` says whether the guardrail
  * vouches for the text: "generated" is what the model wrote and the guardrail
  * validated, "operator" is text you wrote, saved verbatim and unvalidated. */

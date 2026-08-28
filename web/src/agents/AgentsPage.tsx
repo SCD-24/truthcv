@@ -40,6 +40,7 @@ import type {
   JobProfile,
   ProfileAnswers,
   Routing,
+  RunPage,
   RunRecord,
 } from "../api/types";
 
@@ -221,7 +222,14 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
 }
 
 /** Polling interval (ms) for the run-now status poller in idle state. */
-const STATUS_POLL_IDLE_MS = 10_000;
+export const STATUS_POLL_IDLE_MS = 10_000;
+
+/** Recent runs are paged 5 at a time, at most 10 pages — the 50 newest runs.
+ * Older runs are not deleted and /api/runs still serves them; this bounds what
+ * the section offers to scroll through, and the section says so when there are
+ * runs it is not listing. */
+const RUNS_PAGE_SIZE = 5;
+const RUNS_MAX_PAGES = 10;
 /** Faster polling interval used while a run is active or was just triggered. */
 const STATUS_POLL_ACTIVE_MS = 2_000;
 
@@ -422,21 +430,28 @@ export { RecentRunsSection };
  * Polls independently of RunNowSection's status poll so this list refreshes
  * without coupling to that component's pacing. */
 function RecentRunsSection() {
-  const [runs, setRuns] = useState<RunRecord[] | null>(null);
+  const [page, setPage] = useState(0);
+  const [result, setResult] = useState<RunPage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
+    // Polls are not serialised, so a request slower than the interval can
+    // land after its own successor. Without an ordering guard that older
+    // response wins, and it carries an older `total` — which shrinks
+    // pageCount and can step the operator's page back under them.
+    let latest = 0;
 
     function refresh() {
-      listRuns(10)
-        .then((rs) => {
-          if (!alive) return;
-          setRuns(rs);
+      const seq = ++latest;
+      listRuns(RUNS_PAGE_SIZE, page * RUNS_PAGE_SIZE)
+        .then((r) => {
+          if (!alive || seq !== latest) return;
+          setResult(r);
           setError(null);
         })
         .catch((e: unknown) => {
-          if (!alive) return;
+          if (!alive || seq !== latest) return;
           setError(e instanceof Error ? e.message : "Could not load recent runs");
         });
     }
@@ -447,7 +462,34 @@ function RecentRunsSection() {
       alive = false;
       clearInterval(id);
     };
-  }, []);
+  }, [page]);
+
+  // Only the newest RUNS_PAGE_SIZE * RUNS_MAX_PAGES runs are reachable here,
+  // and the store keeps only the newest 200 at all (runs.store trims on
+  // write) — so a run older than this window is not "elsewhere", it is either
+  // unreachable from the product or already gone.
+  const windowed = Math.min(result?.total ?? 0, RUNS_PAGE_SIZE * RUNS_MAX_PAGES);
+  const pageCount = Math.max(1, Math.ceil(windowed / RUNS_PAGE_SIZE));
+  const hidden = Math.max(0, (result?.total ?? 0) - windowed);
+  const runs = result?.runs ?? null;
+  // The page number is read off the response that produced these rows, never
+  // off the click that requested them. Between the two — and permanently, if
+  // that request fails — `page` describes a page the operator is not looking
+  // at, and a run's counters read under the wrong page number are a false
+  // statement about which runs they belong to.
+  const shownPage = Math.floor((result?.offset ?? 0) / RUNS_PAGE_SIZE);
+  // "No runs recorded yet" is a claim about the whole history, which one page
+  // cannot support. Steady state makes an empty non-first page unreachable,
+  // but saying the right thing costs nothing and does not depend on that
+  // proof holding after the next edit to the page arithmetic.
+  const emptyLabel = (result?.total ?? 0) > 0 ? "No runs on this page." : "No runs recorded yet.";
+
+  // A run finishing while you are on the last page can shrink the history out
+  // from under the current page number. Step back rather than showing an
+  // empty page with a Previous button as the only way out.
+  useEffect(() => {
+    if (page > 0 && page > pageCount - 1) setPage(pageCount - 1);
+  }, [page, pageCount]);
 
   return (
     <Section title="Recent runs" description="What each run covered, and where a partial run stopped.">
@@ -459,7 +501,7 @@ function RecentRunsSection() {
       )}
       {runs !== null && runs.length === 0 && (
         <Typography variant="body2" color="text.secondary">
-          No runs recorded yet.
+          {emptyLabel}
         </Typography>
       )}
       {runs !== null && runs.length > 0 && (
@@ -467,6 +509,33 @@ function RecentRunsSection() {
           {runs.map((run) => (
             <RunSummaryRow key={run.id} run={run} />
           ))}
+        </Stack>
+      )}
+      {runs !== null && (runs.length > 0 || pageCount > 1) && (
+        <Stack
+          direction="row"
+          spacing={2}
+          sx={{ alignItems: "center", justifyContent: "flex-end", mt: 1, flexWrap: "wrap" }}
+        >
+          {hidden > 0 && (
+            <Typography variant="caption" color="text.secondary" sx={{ mr: "auto" }}>
+              Showing the {windowed} most recent runs; {hidden} older{" "}
+              {hidden === 1 ? "run is" : "runs are"} not reachable from here.
+            </Typography>
+          )}
+          <Typography variant="caption" color="text.secondary">
+            Page {shownPage + 1} of {pageCount}
+          </Typography>
+          <Button size="small" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+            Previous
+          </Button>
+          <Button
+            size="small"
+            disabled={page >= pageCount - 1}
+            onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+          >
+            Next
+          </Button>
         </Stack>
       )}
     </Section>

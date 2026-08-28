@@ -55,6 +55,65 @@ def test_list_recent_orders_newest_first_and_honours_limit(data_dir):
     assert [r.id for r in recent] == ["run-4", "run-3", "run-2"]
 
 
+def _dated_runs(count: int) -> None:
+    """Record `count` runs with distinct, ascending started_at values."""
+    for i in range(count):
+        store.start(f"run-{i}", trigger="scheduled", apply_cap=0)
+    all_runs = store.load_all()
+    by_id = {r.id: r for r in all_runs}
+    for i in range(count):
+        by_id[f"run-{i}"].started_at = f"2024-01-{i + 1:02d}T00:00:00+00:00"
+    store._write_all(all_runs)
+
+
+def test_offset_pages_backwards_through_history(data_dir):
+    _dated_runs(12)
+    assert [r.id for r in store.list_recent(limit=5, offset=0)] == [
+        "run-11", "run-10", "run-9", "run-8", "run-7",
+    ]
+    assert [r.id for r in store.list_recent(limit=5, offset=5)] == [
+        "run-6", "run-5", "run-4", "run-3", "run-2",
+    ]
+    # Last page is short, not padded.
+    assert [r.id for r in store.list_recent(limit=5, offset=10)] == ["run-1", "run-0"]
+
+
+def test_pages_do_not_overlap_or_skip(data_dir):
+    """The property that matters to a reader paging through: every run appears
+    exactly once across the pages, in order."""
+    _dated_runs(12)
+    seen = []
+    for offset in range(0, 12, 5):
+        seen.extend(r.id for r in store.list_recent(limit=5, offset=offset))
+    assert seen == [f"run-{i}" for i in range(11, -1, -1)]
+
+
+def test_offset_past_the_end_is_an_empty_page_not_an_error(data_dir):
+    _dated_runs(3)
+    assert store.list_recent(limit=5, offset=99) == []
+
+
+def test_offset_is_applied_before_the_limit(data_dir):
+    """Applying the limit first would page through the same five runs forever."""
+    _dated_runs(12)
+    first = store.list_recent(limit=5, offset=0)
+    second = store.list_recent(limit=5, offset=5)
+    assert not ({r.id for r in first} & {r.id for r in second})
+
+
+def test_no_limit_still_means_everything(data_dir):
+    """Callers that want the whole history pass limit=0; offset must not have
+    quietly turned that into a page."""
+    _dated_runs(7)
+    assert len(store.list_recent(limit=0)) == 7
+
+
+def test_count_is_the_total_not_a_page(data_dir):
+    _dated_runs(12)
+    assert store.count() == 12
+    assert len(store.list_recent(limit=5)) == 5
+
+
 def test_retention_caps_at_200_records(data_dir):
     for i in range(210):
         store.start(f"r{i}", trigger="scheduled", apply_cap=0)
@@ -142,3 +201,39 @@ def test_finish_if_running_never_overwrites_the_agents_own_account(data_dir):
 def test_finish_if_running_is_a_no_op_for_an_unknown_run(data_dir):
     assert store.finish_if_running("never-started", status="failed") is None
     assert store.get("never-started") is None
+
+
+def test_a_negative_offset_reads_from_the_newest_not_the_end(data_dir):
+    """A negative index into a Python list reads from the END, so an unguarded
+    slice would answer a paged-past-the-start client with the OLDEST runs while
+    calling them the newest. The route clamps too; this pins the store's own
+    guard, which nothing else was testing."""
+    _dated_runs(3)
+    assert [r.id for r in store.list_recent(limit=2, offset=-5)] == ["run-2", "run-1"]
+
+
+def test_list_page_returns_the_page_and_the_total_it_came_from(data_dir):
+    _dated_runs(12)
+
+    page, total = store.list_page(limit=5, offset=5)
+
+    assert [r.id for r in page] == ["run-6", "run-5", "run-4", "run-3", "run-2"]
+    assert total == 12
+
+
+def test_list_page_totals_everything_even_when_the_page_is_empty(data_dir):
+    _dated_runs(3)
+
+    page, total = store.list_page(limit=5, offset=99)
+
+    assert page == []
+    assert total == 3
+
+
+def test_list_page_with_no_limit_returns_everything(data_dir):
+    _dated_runs(7)
+
+    page, total = store.list_page(limit=0)
+
+    assert len(page) == 7
+    assert total == 7

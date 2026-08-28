@@ -15,7 +15,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **DELETE** | `/api/applications/{id}` | Delete an application and its owned document files. |
 | **PUT** | `/api/applications/{id}/cv` | Save edited CV content for an application and re-render its pdf/docx (guardrail-checked). |
 | **PUT** | `/api/applications/{id}/cover-letter` | Save edited cover-letter content for an application and re-render its pdf/docx. |
-| **GET** | `/api/runs` | Most recently started agent runs, newest first (limit, default 50); read in-process from runs.store.list_recent on the data volume, not proxied to the supervisor. |
+| **GET** | `/api/runs` | One page of agent runs, newest first. `limit` (default 50; 0 or negative means no limit) and `offset` (default 0, clamped at 0, applied before the limit). Returns {runs, total, limit, offset}; `total` counts every run currently retained, which a capped page cannot report. An offset past the end is an empty page, not an error. Only the 200 most recent runs are retained (runs.store trims on write), so `total` is a count of what is kept, not of every run ever. Read in-process from runs.store on the data volume, not proxied to the supervisor. |
 | **GET** | `/api/runs/{run_id}` | One agent run record by id, read in-process from runs.store.get; 404 when unknown. |
 | **POST** | `/api/extract` | LLM extracts structured truth.yaml from the uploaded PDF text. |
 | **GET** | `/api/truth` | Return the current truth.yaml for the Review step. |
