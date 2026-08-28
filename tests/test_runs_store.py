@@ -201,3 +201,39 @@ def test_finish_if_running_never_overwrites_the_agents_own_account(data_dir):
 def test_finish_if_running_is_a_no_op_for_an_unknown_run(data_dir):
     assert store.finish_if_running("never-started", status="failed") is None
     assert store.get("never-started") is None
+
+
+def test_a_negative_offset_reads_from_the_newest_not_the_end(data_dir):
+    """A negative index into a Python list reads from the END, so an unguarded
+    slice would answer a paged-past-the-start client with the OLDEST runs while
+    calling them the newest. The route clamps too; this pins the store's own
+    guard, which nothing else was testing."""
+    _dated_runs(3)
+    assert [r.id for r in store.list_recent(limit=2, offset=-5)] == ["run-2", "run-1"]
+
+
+def test_list_page_returns_the_page_and_the_total_it_came_from(data_dir):
+    _dated_runs(12)
+
+    page, total = store.list_page(limit=5, offset=5)
+
+    assert [r.id for r in page] == ["run-6", "run-5", "run-4", "run-3", "run-2"]
+    assert total == 12
+
+
+def test_list_page_totals_everything_even_when_the_page_is_empty(data_dir):
+    _dated_runs(3)
+
+    page, total = store.list_page(limit=5, offset=99)
+
+    assert page == []
+    assert total == 3
+
+
+def test_list_page_with_no_limit_returns_everything(data_dir):
+    _dated_runs(7)
+
+    page, total = store.list_page(limit=0)
+
+    assert len(page) == 7
+    assert total == 7

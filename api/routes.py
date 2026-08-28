@@ -222,12 +222,16 @@ def list_runs(limit: int = 50, offset: int = 0) -> RunListResponse:
     that paged past the start, and an empty first page is a worse answer than
     the first page. An offset past the end yields an empty page — the total
     tells the client it overshot.
+
+    The page and its total come from one read of the store, so they always
+    describe the same set of runs; a run recorded between two reads would
+    otherwise be reported as an older run that had gone missing.
     """
     offset = max(0, offset)
-    records = runs_store.list_recent(limit=limit, offset=offset)
+    records, total = runs_store.list_page(limit=limit, offset=offset)
     return RunListResponse(
         runs=_run_models(records),
-        total=runs_store.count(),
+        total=total,
         limit=limit,
         offset=offset,
     )

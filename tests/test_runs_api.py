@@ -316,3 +316,16 @@ def test_finish_rejects_an_unknown_status_instead_of_storing_it(client, agent_to
     r = client.post("/api/agent/runs/r3/finish", json={"status": "exploded"}, headers=agent_token)
     assert r.status_code == 422
     assert client.get("/api/runs/r3").json()["status"] == "running"
+
+
+def test_limit_zero_means_every_retained_run(client):
+    """`limit <= 0` means "no limit" — the contract runs.store documents and
+    the old callers relied on. An external client can ask for it, so it is
+    pinned at the HTTP layer and not only in the store."""
+    _dated_runs(12)
+
+    body = client.get("/api/runs?limit=0&offset=2").json()
+
+    assert len(body["runs"]) == 10
+    assert body["total"] == 12
+    assert body["runs"][0]["id"] == "run-9"

@@ -96,13 +96,34 @@ def list_recent(limit: int = 50, offset: int = 0) -> list[RunRecord]:
 
 
 def count() -> int:
-    """How many runs have been recorded in total.
+    """How many runs are currently retained.
+
+    Not "how many have ever run": `_write_all` keeps only the newest
+    `_MAX_RECORDS`, so this counts what is on the volume now.
 
     Separate from list_recent because a paginated caller needs the total to
     know how many pages there are, and deriving it from a page is impossible
-    once the page is capped.
+    once the page is capped. A caller that needs the page and the total to
+    describe the same file should use `list_page`, which reads once.
     """
     return len(load_all())
+
+
+def list_page(limit: int = 50, offset: int = 0) -> tuple[list[RunRecord], int]:
+    """One page of runs and the total they were drawn from, from ONE read.
+
+    `list_recent` followed by `count` reads runs.json twice, and a run can be
+    recorded between the two: the response then pairs a page with a total that
+    describes a different file, and reports an older run as newly hidden. One
+    read cannot disagree with itself.
+    """
+    runs = sorted(load_all(), key=lambda r: r.started_at, reverse=True)
+    total = len(runs)
+    if offset > 0:
+        runs = runs[offset:]
+    if limit and limit > 0:
+        runs = runs[:limit]
+    return runs, total
 
 
 def start(run_id: str, trigger: str = "", apply_cap: int = 0) -> RunRecord:

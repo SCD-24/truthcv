@@ -92,7 +92,13 @@ describe("RecentRunsSection", () => {
     const spy = vi
       .spyOn(client, "listRuns")
       .mockImplementation(async (_limit?: number, offset = 0) =>
-        makePage([makeRun({ id: `run-at-${offset}` })], 12, offset),
+        // A full five-run page, as the endpoint would actually return: a
+        // one-row fixture cannot show the label disagreeing with the rows.
+        makePage(
+          Array.from({ length: 5 }, (_, i) => makeRun({ id: `run-at-${offset + i}` })),
+          12,
+          offset,
+        ),
       );
 
     render(<RecentRunsSection />);
@@ -126,7 +132,7 @@ describe("RecentRunsSection", () => {
     await waitFor(() => expect(screen.getByText("Page 1 of 10")).toBeTruthy());
     // 63 runs would be 13 pages uncapped. Truncating silently would read as
     // "this is all of them".
-    expect(screen.getByText(/13 older runs are not listed here/)).toBeTruthy();
+    expect(screen.getByText(/13 older runs are not reachable from here/)).toBeTruthy();
     expect(screen.getByText(/Showing the 50 most recent runs/)).toBeTruthy();
   });
 
@@ -163,5 +169,35 @@ describe("RecentRunsSection", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("never labels a page it is not showing, even when the fetch fails", async () => {
+    // `page` flips on click; the rows only change when the response lands. If
+    // the label follows the click, a failed page-2 fetch leaves "Page 2" over
+    // page 1's runs — and a run's counters read under the wrong page number
+    // are a false statement about which runs they describe.
+    vi.spyOn(client, "listRuns").mockImplementation(async (_limit?: number, offset = 0) => {
+      if (offset > 0) throw new Error("network down");
+      return makePage([makeRun({ id: "page-one-run" })], 12, 0);
+    });
+
+    render(<RecentRunsSection />);
+    await waitFor(() => expect(screen.getByText("page-one-run")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    await waitFor(() => expect(screen.getByText(/network down/)).toBeTruthy());
+    expect(screen.getByText("page-one-run")).toBeTruthy();
+    expect(screen.getByText("Page 1 of 3")).toBeTruthy();
+  });
+
+  it("says the page is empty, not that no runs exist, when history has runs", async () => {
+    vi.spyOn(client, "listRuns").mockResolvedValue(makePage([], 12, 5));
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("No runs on this page.")).toBeTruthy());
+    // And there is a way back off it.
+    expect(screen.getByRole("button", { name: "Previous" })).toBeTruthy();
   });
 });
