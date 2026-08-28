@@ -41,7 +41,10 @@ describe('shouldCompact threshold', () => {
   const config: CompactionConfig = { contextWindow: 1000, reserveTokens: 0, triggerRatio: 0.75 };
 
   it('returns true once accumulated tokens exceed contextWindow * triggerRatio', () => {
-    const usage = { inputTokens: 700, outputTokens: 100 }; // 800 > 750
+    // Input only: the reply those output tokens paid for is appended to the
+    // conversation before the next check, so it is counted in the tail
+    // estimate instead. Counting both would count every assistant turn twice.
+    const usage = { inputTokens: 800, outputTokens: 100 }; // 800 > 750
     expect(shouldCompact([], usage, config)).toBe(true);
   });
 
@@ -144,5 +147,46 @@ describe('shouldCompact accounting', () => {
 
     expect(shouldCompact([], usage, config)).toBe(false);
     expect(shouldCompact(tail, usage, config)).toBe(true);
+  });
+});
+
+describe('compaction across a tool batch', () => {
+  const config: CompactionConfig = { contextWindow: 1000 };
+
+  // Both wires require a tool-results message to be immediately preceded by
+  // the assistant turn that requested it. A fixed-offset cut lands inside a
+  // batch whenever the batch is wider than the keep window, leaving a result
+  // whose call was dropped — a 400 the provider does not let us retry, from
+  // the compaction that was supposed to rescue the run.
+  function batchedLog(): ConversationMessage[] {
+    const call = (id: string) => ({ id, name: 'browser_navigate', arguments: {} });
+    return [
+      { role: 'user', content: 'RUNBOOK' },
+      { role: 'assistant', content: '', toolCalls: [call('c1')] },
+      { role: 'user', content: '', toolResults: [{ toolCallId: 'c1', content: 'ok' }] },
+      { role: 'assistant', content: '', toolCalls: [call('c2')] },
+      { role: 'user', content: '', toolResults: [{ toolCallId: 'c2', content: 'ok' }] },
+      { role: 'user', content: 'WRAP UP' },
+      { role: 'assistant', content: '', toolCalls: [call('c3')] },
+      { role: 'user', content: '', toolResults: [{ toolCallId: 'c3', content: 'ok' }] },
+      { role: 'assistant', content: '', toolCalls: [call('c4')] },
+      { role: 'user', content: '', toolResults: [{ toolCallId: 'c4', content: 'ok' }] },
+    ];
+  }
+
+  it('never keeps a tool result whose tool call it dropped', () => {
+    const { messages: out } = compact(batchedLog(), config);
+
+    const callIds = new Set(out.flatMap((m) => (m.toolCalls ?? []).map((c) => c.id)));
+    const orphans = out
+      .flatMap((m) => (m.toolResults ?? []).map((r) => r.toolCallId))
+      .filter((id) => !callIds.has(id));
+
+    expect(orphans).toEqual([]);
+  });
+
+  it('still drops something, rather than giving up to keep the batch whole', () => {
+    const { record } = compact(batchedLog(), config);
+    expect(record?.droppedMessageCount).toBeGreaterThan(0);
   });
 });

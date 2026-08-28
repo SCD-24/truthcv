@@ -65,6 +65,31 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+/**
+ * Move a cut point back until it does not split a tool batch.
+ *
+ * Both wires require a message carrying tool results to be immediately
+ * preceded by the assistant turn that requested them. An agentic log's tail is
+ * always `assistant(toolCalls), tool, tool, …`, so a fixed-offset cut lands
+ * inside such a run whenever the batch is wider than the keep window — leaving
+ * a tool result whose tool call has been dropped. The provider answers 400
+ * ("unexpected tool_use_id"), which is not retryable, so the compaction that
+ * was meant to rescue the run ends it instead, having already discarded the
+ * history.
+ *
+ * Walking backward — rather than forward, or giving up — matters for the
+ * reason it is called from: the reactive path compacts BECAUSE the context
+ * overflowed, so a tighter keep window must never be more likely to fail than
+ * a loose one. Bounded at the pinned head, which is never a tool result.
+ */
+function pairedBoundary(messages: ConversationMessage[], from: number): number {
+  let boundary = from;
+  while (boundary > PIN_LEADING && (messages[boundary]?.toolResults?.length ?? 0) > 0) {
+    boundary -= 1;
+  }
+  return boundary;
+}
+
 /** Estimated token cost of a message: its content plus any tool payloads. */
 function messageTokens(message: ConversationMessage): number {
   const toolCalls = (message.toolCalls ?? []).map((c) => JSON.stringify(c.arguments)).join('');
@@ -94,7 +119,10 @@ export function shouldCompact(
   const reserve = config.reserveTokens ?? DEFAULT_RESERVE_TOKENS;
   const ratio = config.triggerRatio ?? DEFAULT_TRIGGER_RATIO;
   let total = reserve;
-  if (reportedUsage) total += reportedUsage.inputTokens + reportedUsage.outputTokens;
+  // Input only. The reply those output tokens paid for is appended to the
+  // conversation before the next check, so it is already inside the estimated
+  // tail — adding outputTokens as well counts every assistant turn twice.
+  if (reportedUsage) total += reportedUsage.inputTokens;
   total += messages.reduce((sum, m) => sum + messageTokens(m), 0);
   return total > config.contextWindow * ratio;
 }
@@ -146,9 +174,17 @@ export function compact(
   if (messages.length <= PIN_LEADING + KEEP_RECENT) {
     return { messages, record: null };
   }
+  const keepFrom = pairedBoundary(messages, messages.length - KEEP_RECENT);
   const pinned = messages.slice(0, PIN_LEADING);
-  const dropped = messages.slice(PIN_LEADING, messages.length - KEEP_RECENT);
-  const kept = messages.slice(messages.length - KEEP_RECENT);
+  const dropped = messages.slice(PIN_LEADING, keepFrom);
+  const kept = messages.slice(keepFrom);
+  // Moving the boundary back to keep a batch whole can leave nothing between
+  // the pinned head and the kept tail. Saying so, rather than emitting a
+  // summary of nothing, is what lets a caller tell "compacted" from "already
+  // at its floor" — the difference between resending and giving up.
+  if (dropped.length === 0) {
+    return { messages, record: null };
+  }
   const summary = summarise(dropped);
   const summaryMessage: ConversationMessage = { role: 'system', content: `[compaction] ${summary}` };
   const record: CompactionRecord = { type: 'compaction', droppedMessageCount: dropped.length, summary };

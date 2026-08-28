@@ -221,10 +221,26 @@ async function resolvePrompt(
  * difference is large enough to matter at the trigger point.
  */
 function resolveContextWindow(flag: string | undefined, envVal: string | undefined): number {
-  const raw = flag || envVal;
+  const raw = (flag || envVal || '').trim();
   if (!raw) return 0;
+  // Digits only, deliberately. parseInt stops at the first non-digit and keeps
+  // what it has, which turns every natural way an operator writes a large
+  // number into a small one: "1e6" -> 1, "128k" -> 128, "1_000_000" -> 1,
+  // "0x20000" -> 0. Each of those validates as a positive integer and then
+  // compacts the conversation to its floor on every single turn, silently.
+  if (!/^\d+$/.test(raw)) return Number.NaN;
   return Number.parseInt(raw, 10);
 }
+
+/**
+ * Smallest window worth acting on.
+ *
+ * Below this the reserve alone exceeds the trigger, so every turn compacts and
+ * the agent runs with no memory beyond the pinned instructions and the last
+ * few messages — while looking healthy. A figure this small is an operator
+ * typo, not an intent, so it is refused rather than honoured.
+ */
+const MIN_CONTEXT_WINDOW = 8192;
 
 /** Parse `--max-turns`/`AGENT_MAX_TURNS`, defaulting when unset; NaN if invalid. */
 function resolveMaxTurns(flag: string | undefined, envVal: string | undefined): number {
@@ -293,7 +309,9 @@ export function validateConfig(config: CliConfig): string[] {
   if (!WIRES.includes(config.wire)) errors.push('a valid --wire (anthropic-messages|openai-chat-completions) is required');
   if (!Number.isInteger(config.maxTurns) || config.maxTurns <= 0) errors.push('--max-turns must be a positive integer');
   if (!Number.isInteger(config.contextWindow) || config.contextWindow < 0)
-    errors.push('--context-window must be a non-negative integer (0 or unset means unknown)');
+    errors.push('--context-window must be a whole number of tokens, digits only (0 or unset means unknown)');
+  else if (config.contextWindow > 0 && config.contextWindow < MIN_CONTEXT_WINDOW)
+    errors.push(`--context-window must be at least ${MIN_CONTEXT_WINDOW} tokens, or 0/unset for unknown`);
   errors.push(...validateAuth(config));
   return errors;
 }

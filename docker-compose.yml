@@ -194,10 +194,12 @@ services:
       # The model's INPUT context capacity in tokens, if you know it. Unset (0)
       # means unknown: the harness then does no proactive compaction and relies
       # on the provider's own "context too long" error to compact and retry.
+      # That fallback needs a provider that REPORTS an overflow — a local
+      # server that quietly truncates and answers 200 gives nothing to react
+      # to, and drops its oldest messages itself, which is where the agent's
+      # instructions live. So set this explicitly when pointing at ollama.
       # Setting it wrong is worse than leaving it unset — too high still
-      # overflows, too low silently drops context that was fitting. For a local
-      # model this is also what the harness states as Ollama's num_ctx, so the
-      # server serves the same window the harness compacts against.
+      # overflows, too low silently drops context that was fitting.
       - AGENT_CONTEXT_WINDOW=${AGENT_CONTEXT_WINDOW:-0}
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
       # Port supervisor.js listens on — matched to the app service entry above.

@@ -45,8 +45,10 @@ const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
 const DEFAULT_MAX_RETRIES = 8;
 
 /**
- * Default cap on compactions forced by a provider context-overflow error in
- * one run. Distinct from the retry cap: a retry resends the same request,
+ * Default cap on CONSECUTIVE compactions forced by a provider context-overflow
+ * error. Reset by any turn that succeeds, because the thing worth stopping is
+ * a conversation that will not shrink — not a long run that legitimately
+ * overflows several times, which a 400-turn run on a small window will. Distinct from the retry cap: a retry resends the same request,
  * while this changes it, so the two must not share a budget.
  */
 const DEFAULT_MAX_OVERFLOW_COMPACTIONS = 3;
@@ -90,7 +92,7 @@ export interface LoopConfig {
   maxConsecutiveReflections?: number;
   /** Ceiling on any single retry backoff delay, in ms. Defaults to 60000. */
   maxRetryDelayMs?: number;
-  /** Cap on compactions forced by a context-overflow error. Defaults to 3. */
+  /** Cap on CONSECUTIVE context-overflow compactions. Defaults to 3. */
   maxOverflowCompactions?: number;
   /** Cap on consecutive retryable-error retries within one turn. Defaults to 8. */
   maxConsecutiveRetries?: number;
@@ -176,8 +178,9 @@ interface LoopState {
    * for what has been appended since rather than re-guessing the whole log. */
   usage?: TokenUsage;
   usageCoveredMessages: number;
-  /** Compactions forced by a provider context-overflow error, bounded so a
-   * conversation that will not shrink cannot loop forever. */
+  /** Consecutive compactions forced by a provider context-overflow error,
+   * bounded so a conversation that will not shrink cannot loop forever. Reset
+   * by any successful turn. */
   overflowCompactions: number;
   /** Whether the wrap-up instruction has already been delivered, so entering
    * the window repeatedly cannot append it on every remaining turn. */
@@ -228,13 +231,20 @@ function classifyRetryable(msg: string): ErrorClass {
  * maximum", which contains neither "context" nor "too many tokens", so the
  * obvious check misses the one provider this deployment uses by default.
  *
- * A miss is not silent, but it is expensive: the run ends on a fatal
- * bad-request instead of compacting and continuing. A false positive costs one
- * wasted compaction and a resend that fails the same way, which the overflow
- * cap then stops.
+ * Every alternative is anchored to a phrase a provider writes about its own
+ * limits, never a bare noun. The matched string carries up to 300 characters
+ * of the provider's body, and a validation error routinely quotes the request
+ * — which for this agent is scraped job-posting text, i.e. arbitrary prose
+ * that can contain "context window" by coincidence.
+ *
+ * The two errors are not symmetric. A miss ends the run on a fatal
+ * bad-request. A false positive discards conversation history — irreversibly,
+ * up to the consecutive cap — and then ends the run anyway, having told the
+ * operator the context was too long when it was not. So the bar for adding an
+ * alternative here is a phrase that cannot appear in a posting.
  */
 const OVERFLOW_MESSAGE =
-  /prompt is too long|context[\s_-]?length|context window|maximum.{0,20}context|too many tokens|exceeds the maximum number of tokens|input token count/i;
+  /prompt is too long|maximum context length|context[\s_-]?length exceeded|context_length_exceeded|maximum.{0,20}context window|too many tokens|exceeds the maximum number of tokens|input token count (?:exceeds|too large)/i;
 
 /** Narrow a non-retryable error message to its bucket. */
 function classifyFatal(msg: string): ErrorClass {
@@ -430,17 +440,20 @@ async function compactAndRetry(state: LoopState, ctx: LoopContext): Promise<Loop
     return finish('error', state, ctx, 'context overflow persisted after compaction');
   }
   const before = state.messages.length;
-  const compacted = applyCompaction(
-    state,
-    ctx.compactionConfig ?? { contextWindow: 0 },
-    ctx.onEvent,
-    'provider reported the context was too long',
-  );
-  if (compacted.length >= before) {
+  const { messages: compacted, record } = compact(state.messages, ctx.compactionConfig ?? { contextWindow: 0 });
+  // Checked before anything is reported or reset: a compaction that removed
+  // nothing must not appear in the run log, and must not clear the usage
+  // anchor on its way out.
+  if (!record || compacted.length >= before) {
     return finish('error', state, ctx, 'context overflow with nothing left to compact');
   }
   state.messages = compacted;
+  state.usage = undefined;
+  state.usageCoveredMessages = 0;
   state.overflowCompactions += 1;
+  ctx.onEvent?.(
+    loopEvent('compaction', state.turns, `provider reported the context was too long: ${record.summary}`),
+  );
   return undefined;
 }
 
@@ -480,6 +493,11 @@ async function backoff(state: LoopState, ctx: LoopContext, error: ErrorEvent): P
 async function applyDone(done: DoneEvent, state: LoopState, ctx: LoopContext): Promise<LoopResult | undefined> {
   state.retries = 0;
   state.reflections = 0;
+  // A turn the provider accepted proves the conversation fits, so the overflow
+  // budget starts again. Left as a lifetime count it would kill a long run
+  // that legitimately overflows every N turns on a small window — which is the
+  // shape of a 400-turn run, not a fault.
+  state.overflowCompactions = 0;
   state.turns += 1;
   state.messages.push(done.message);
   return dispatchStopReason(done, state, ctx);

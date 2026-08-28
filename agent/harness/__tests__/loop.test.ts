@@ -376,6 +376,7 @@ describe('compaction the provider asks for', () => {
     // Compacting removes nothing, so resending would be byte-identical.
     const { adapter, calls } = scriptedAdapter([[overflow]]);
     const { pool } = fakePool();
+    const stops: string[] = [];
 
     const result = await runLoop({
       adapter,
@@ -384,10 +385,17 @@ describe('compaction the provider asks for', () => {
       initialMessages: [{ role: 'user', content: 'instructions' }],
       config: { maxTurns: 5 },
       sleep: async () => {},
+      onEvent: (e) => {
+        if ('kind' in e && e.kind === 'stop') stops.push(e.detail ?? '');
+      },
     });
 
     expect(result.stopReason).toBe('error');
     expect(calls()).toBe(1);
+    // Asserting the reason, not just the failure: pre-change this message
+    // classified as a plain bad-request and also ended the run after one
+    // request, so stopReason alone cannot tell the two apart.
+    expect(stops).toContain('context overflow with nothing left to compact');
   });
 
   it('stops once compacting stops helping, without exhausting the cap', () => {
@@ -413,5 +421,25 @@ describe('compaction the provider asks for', () => {
       // The original attempt, one compaction, one resend — then it stops.
       expect(calls()).toBe(2);
     })();
+  });
+
+  it('starts the overflow budget again after a turn the provider accepted', async () => {
+    // The budget guards a conversation that will not shrink, not a long run
+    // that legitimately overflows more than three times.
+    const overflowThenWork: HarnessEvent[][] = [];
+    for (let i = 0; i < 5; i += 1) overflowThenWork.push([overflow], [doneToolCalls()], [doneEnd]);
+    const { adapter } = scriptedAdapter(overflowThenWork);
+    const { pool } = fakePool();
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: longConversation(),
+      config: { maxTurns: 50, maxOverflowCompactions: 1 },
+      sleep: async () => {},
+    });
+
+    expect(result.stopReason).toBe('end');
   });
 });
