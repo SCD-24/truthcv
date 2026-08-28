@@ -293,3 +293,23 @@ describe('wrap-up window', () => {
     expect(warned?.toolResults).toBeUndefined();
   });
 });
+
+describe('a network failure the adapter reports instead of throwing', () => {
+  // The end-to-end shape of the 2026-08-28 outage: the request never reached
+  // the provider, so the adapter reports it as retryable rather than throwing
+  // past the loop. The run must survive it, not end on it.
+  it('backs off and carries on, rather than ending the run', async () => {
+    const networkError: HarnessEvent = {
+      type: 'error',
+      message: 'Anthropic request could not be sent: fetch failed: getaddrinfo EAI_AGAIN',
+      retryable: true,
+    };
+    const { adapter, calls } = scriptedAdapter([[networkError], [doneEnd]]);
+    const { pool } = fakePool();
+
+    const result = await run(adapter, pool, { maxTurns: 5 });
+
+    expect(result.stopReason).toBe('end');
+    expect(calls()).toBeGreaterThan(1);
+  });
+});

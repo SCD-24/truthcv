@@ -13,7 +13,7 @@ import type {
   ToolDefinition,
 } from './types.js';
 
-import { providerErrorEvent, readBody, retryAfterMsFrom } from './errors.js';
+import { networkErrorEvent, providerErrorEvent, readBody, retryAfterMsFrom } from './errors.js';
 
 /** Options for constructing an Anthropic Messages adapter. */
 export interface AnthropicMessagesOptions {
@@ -159,11 +159,20 @@ export class AnthropicMessagesAdapter implements ProviderAdapter {
   /** Send a request and yield normalised events to completion. */
   async *sendMessage(request: ModelRequest): AsyncGenerator<HarnessEvent, void, unknown> {
     const baseUrl = this.opts.baseUrl ?? 'https://api.anthropic.com';
-    const response = await fetch(`${baseUrl}/v1/messages`, {
-      method: 'POST',
-      headers: buildHeaders(this.opts),
-      body: JSON.stringify(buildBody(request, this.opts)),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${baseUrl}/v1/messages`, {
+        method: 'POST',
+        headers: buildHeaders(this.opts),
+        body: JSON.stringify(buildBody(request, this.opts)),
+      });
+    } catch (err) {
+      // The request never left, or never came back. Reported rather than
+      // thrown: a throw here escapes the retry loop entirely, and this is the
+      // failure class most likely to succeed on the next attempt.
+      yield networkErrorEvent('Anthropic', err);
+      return;
+    }
     if (!response.ok) {
       yield errorEvent(response.status, await readBody(response), retryAfterMsFrom(response.headers));
       return;

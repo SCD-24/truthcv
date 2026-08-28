@@ -275,7 +275,7 @@ describe('a request that never reached the provider', () => {
 
   it('reports an OpenAI network failure as a retryable event, not a throw', async () => {
     stubFetchThrowing();
-    const events = await collect(createOpenAiChatCompletionsAdapter({ apiKey: 'k', model: 'gpt' }));
+    const events = await collect(createOpenAiChatCompletionsAdapter({ apiKey: 'k', model: 'gpt', baseUrl: 'https://api.openai.com/v1' }));
     const error = events.find((e) => e.type === 'error');
     expect(error).toBeDefined();
     expect(error).toMatchObject({ retryable: true });

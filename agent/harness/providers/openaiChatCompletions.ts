@@ -13,7 +13,7 @@ import type {
   ToolDefinition,
 } from './types.js';
 
-import { providerErrorEvent, readBody, retryAfterMsFrom } from './errors.js';
+import { networkErrorEvent, providerErrorEvent, readBody, retryAfterMsFrom } from './errors.js';
 
 /** Options for constructing an OpenAI Chat Completions adapter. */
 export interface OpenAiChatCompletionsOptions {
@@ -119,11 +119,20 @@ export class OpenAiChatCompletionsAdapter implements ProviderAdapter {
 
   /** Send a request and yield normalised events to completion. */
   async *sendMessage(request: ModelRequest): AsyncGenerator<HarnessEvent, void, unknown> {
-    const response = await fetch(`${this.opts.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: buildHeaders(this.opts.apiKey),
-      body: JSON.stringify(buildBody(request, this.opts)),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${this.opts.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: buildHeaders(this.opts.apiKey),
+        body: JSON.stringify(buildBody(request, this.opts)),
+      });
+    } catch (err) {
+      // See the Anthropic adapter: a thrown fetch escapes the retry loop, so
+      // the one failure class most likely to be transient is reported as a
+      // retryable event instead.
+      yield networkErrorEvent('OpenAI', err);
+      return;
+    }
     if (!response.ok) {
       yield errorEvent(response.status, await readBody(response), retryAfterMsFrom(response.headers));
       return;
