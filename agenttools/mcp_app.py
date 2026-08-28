@@ -37,7 +37,8 @@ from agenttools.tools_runs import (
 _TOOL_REGISTRY = {
     "generate_cover_letter": (
         _generate_cover_letter,
-        "Generates a guardrailed, per-role cover letter.",
+        "Generates a guardrailed, per-role cover letter, as TEXT. A letter generated in-run is never a "
+        "file: paste it into the form. Only an operator-approved queue item carries a document to upload.",
     ),
     "record_application": (
         _record_application,
@@ -86,7 +87,16 @@ _TOOL_REGISTRY = {
         "by it — a shorter list than you expected means the per-run cap was reached, not that "
         "work was lost; call it again on a later run for the rest. "
         "An entry with a non-empty blocked_reason must NOT be applied to — report it instead, "
-        "and it never counts against the cap.",
+        "and it never counts against the cap. "
+        "Every entry that is going out carries the operator's letter twice: cover_letter (the text, to be "
+        "submitted verbatim) and cover_letter_path (a PDF of that same text on the data volume, to upload "
+        "where the form has a place for a document). A null cover_letter_path means the letter exists only "
+        "as text — check it before passing it to an upload. cover_letter_asset_id is that file's bare "
+        "name, and cover_letter_download_url fetches it over HTTP for a client that cannot see the data "
+        "volume; the browser can see it, so the path is what you use. NEVER upload it through a control that already holds the CV unless the page visibly "
+        "accumulates files (a list of filenames, an 'Add another' affordance): a control showing one "
+        "filename will REPLACE the CV, and an application that arrives with the cover letter filed as the "
+        "resume and no CV is worse than one with no letter. When in doubt, keep the CV and paste the text.",
     ),
     "report_apply_failure": (
         _report_apply_failure,

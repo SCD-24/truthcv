@@ -56,7 +56,7 @@ There is **no authentication** on this interaction.
 - `coverletter/__init__.py` → re-exports `build_letter` (`__all__ = ["build_letter"]`).
 
 **Renderer (`renderer`)**
-- `render/cover_letter.py` → `render_letter_html(text, name, contact)` — the cover-letter entry point; reuses the Jinja env from `render/html.py` (`_env`).
+- `render/cover_letter.py` → `render_letter_html(text, name, contact)` — the HTML entry point, and `render_letter_pdf(text, filename, name, contact)`, which renders that HTML to a staged file on the data volume and moves it into place (used only by `agenttools.letter_files` for the unattended agent's upload); reuses the Jinja env from `render/html.py` (`_env`).
 - `render/templates/cover_letter.html.j2` — the ATS-plain template rendered.
 - `render/pdf.py` → `render_pdf(html, filename)` and `RenderUnavailable` — HTML→PDF via WeasyPrint.
 - `render/docx.py` → `render_docx(html, filename)` — HTML→DOCX via pandoc subprocess.

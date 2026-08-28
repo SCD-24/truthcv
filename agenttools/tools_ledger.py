@@ -21,6 +21,10 @@ import json
 import agentconfig.store as _agentconfig_store
 from agentconfig.salary import clamp_ask as _clamp_ask
 from agentconfig.salary import format_ask as _format_ask
+from agenttools.letter_files import (
+    NO_FILE as _NO_LETTER_FILE,
+    render_screening_letter as _render_screening_letter,
+)
 from applications.model import Attachment, Confirmation, FieldSubmitted, Screening
 from applications.store import save_attachments as _save_attachments
 from applications.store import save_confirmation as _save_confirmation
@@ -604,9 +608,13 @@ def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:
     - An item with no URL (many imported records predate URL capture) comes
       back with ``blocked_reason`` set to "no_url" rather than hidden, since
       the agent has nothing to open and would otherwise flail trying to apply.
-    - The operator's stored letter travels with the item. The agent applies with
-      that text verbatim and does not regenerate: regenerating would discard the
-      operator's edit, which is the whole point of semi-auto. Approval only
+    - The operator's stored letter travels with the item, as text and — for an
+      item that is actually going out — as ``cover_letter_path``, a rendered
+      PDF of that same text on the data volume for the agent to upload where
+      the form takes a file rather than a textarea. The path is None when no
+      rendering backend is installed; the text is then all there is. The agent
+      applies with that text verbatim and does not regenerate: regenerating
+      would discard the operator's edit, which is the whole point of semi-auto. Approval only
       checks the draft exists at approval time, not afterward, so an item whose
       draft was since blanked or deleted comes back with ``blocked_reason`` set
       to "no_letter" rather than reaching the agent with nothing to send.
@@ -641,6 +649,15 @@ def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:
         elif not blocked_reason:
             claimed_count += 1
 
+        # Only an item that is actually going out gets a file rendered for it:
+        # a blocked item is reported, never applied to, so rendering it would
+        # buy nothing and cost a WeasyPrint pass per blocked item per run.
+        letter_file = (
+            _render_screening_letter(s.id, entry["cover_letter"])
+            if not blocked_reason
+            else dict(_NO_LETTER_FILE)
+        )
+
         items.append(
             {
                 "screening_id": s.id,
@@ -652,6 +669,9 @@ def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:
                 "contradictions": entry["contradictions"],
                 "cover_letter": entry["cover_letter"],
                 "letter_source": entry["letter_source"],
+                "cover_letter_asset_id": letter_file["asset_id"],
+                "cover_letter_path": letter_file["path"],
+                "cover_letter_download_url": letter_file["download_url"],
                 "claimed_by_run": claimed_by_run,
             }
         )

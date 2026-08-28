@@ -38,7 +38,9 @@ tools:
   skipped on cooldown or dedupe leaves no record behind — so report it with
   this tool as you go, passing your `run_id`. Each call ADDS its `count` to
   the run's running total.
-- `generate_cover_letter` — produces a guardrailed, per-role cover letter.
+- `generate_cover_letter` — produces a guardrailed, per-role cover letter, as
+  text. A letter generated in-run is never a file: paste it into the form. Only
+  an operator-approved queue item carries a document to upload.
 - `record_application` — records a submitted application and its evidence.
 - `record_screening` — records a rejected or deferred posting. A deferred
   one enters the operator's approval queue.
@@ -85,7 +87,13 @@ tools:
 - `report_apply_failure` — records why an approved application could not be
   completed. The item stays queued for the next run.
 - `check_cooldown` — checks whether a company/role is in cooldown.
-- `get_canonical_cv` — returns the stored canonical CV asset to attach.
+- `get_canonical_cv` — returns the stored canonical CV asset to attach. The CV
+  is not the whole submission: the letter goes somewhere too — its own control,
+  a control that visibly takes several files, a textarea, or nowhere at all — so
+  read the form and work it out. **Never attach anything through a control that
+  already holds the CV unless the page shows it accumulates files; replacing the
+  CV is worse than sending no letter.** See `agent/RUNBOOK.md` §5 "Both documents
+  go up".
 - `get_profile_answers` — returns the operator's canonical screening answers
   (name, work authorisation, and the rest) from the answers store. Never
   assume, remember, or hard-code any of these — always call the tool. Salary
@@ -179,10 +187,12 @@ approved these postings, so apply to them before spending time on discovery.
   and move on.
 - The cover-letter guardrail still binds. An approval is not permission to
   assert an ungrounded claim.
-- Each entry carries `cover_letter`, the text the operator approved. Submit it
-  verbatim. Do not regenerate it, do not edit it, and do not call
-  `generate_cover_letter` for an approved entry — the operator may have written
-  that text themselves, and rewriting it discards their decision.
+- Each entry carries `cover_letter`, the text the operator approved, and
+  `cover_letter_path` — a PDF of that same text to upload where the form has a
+  place for it that does not cost the CV, or null, in which case the letter is
+  text and nothing is uploaded. Submit it verbatim. Do not regenerate it, do not edit it, and do not
+  call `generate_cover_letter` for an approved entry — the operator may have
+  written that text themselves, and rewriting it discards their decision.
 - An entry whose `cover_letter` is empty must not be applied to. Report it.
 - On success call `record_application` with that entry's `screening_id`.
 - If you cannot complete one, call `report_apply_failure` with the reason. It

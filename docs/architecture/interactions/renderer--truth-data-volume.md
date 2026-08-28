@@ -17,12 +17,14 @@ The Renderer (`render/`) does not speak an HTTP protocol to the Truth Data Volum
 **Writes (Renderer output, into the volume):**
 - `render_pdf(html, filename="cv.pdf") -> Path` writes a PDF to `data_dir() / filename` (WeasyPrint) and returns the absolute path.
 - `render_docx(html, filename="cv.docx") -> Path` writes a scratch `cv.render.html` into `data_dir()`, then runs `pandoc` to produce `data_dir() / filename`, returning the path.
-- Filenames are either shared scratch names (`cv.pdf`/`cv.docx`, `cover_letter.pdf`/`cover_letter.docx`) or per-application names from `applications.store.cv_filenames(app_id)` / `cover_letter_filenames(app_id)`.
+- Filenames are shared scratch names (`cv.pdf`/`cv.docx`, `cover_letter.pdf`/`cover_letter.docx`), per-application names from `applications.store.cv_filenames(app_id)` / `cover_letter_filenames(app_id)`, or per-screening cover-letter renders from `coverletter.store.pdf_filename(screening_id, text)` — `cover_letter_screening_{screening_id}_{sha256(text)[:16]}.pdf`, the file the unattended agent uploads to an employer.
 
 **Invariants:**
 - `data_dir()` calls `mkdir(parents=True, exist_ok=True)`, so the target directory always exists before a write.
 - PDF and DOCX are written **best-effort**: if the backend is missing, `render_pdf`/`render_docx` raise `RenderUnavailable` and callers null the corresponding download URL rather than failing (except a pure wizard preview with no attached application, which hard-errors 500).
 - Rendering only happens *after* the guardrail (`guardrail.validate`) passes in `/render`; the Renderer adds no facts of its own (`render/__init__.py`, `render/html.py`).
+- The per-screening cover-letter render (`render.cover_letter.render_letter_pdf`, called only from `agenttools.letter_files`) renders text the *operator* approved, which may be text they wrote themselves — `letter_source: "operator"` means the guardrail no longer vouches for it. It is never reached from a tool the agent can supply text to; that is what keeps a render from becoming a route around the guardrail.
+- That render is content-addressed and staged: the name carries a digest of the text, and the file is written under a name unique to that write and `os.replace`d into position, so a name that exists is a complete render of known text (`render/cover_letter.py`, `storage/atomic.py` for the same lesson on the JSON stores).
 - Returned paths are later exposed only as `/api/download/{name}` (basename only).
 
 ## Auth  (how the interaction is authenticated)
