@@ -188,8 +188,9 @@ approved these postings, so apply to them before spending time on discovery.
 - The cover-letter guardrail still binds. An approval is not permission to
   assert an ungrounded claim.
 - Each entry carries `cover_letter`, the text the operator approved, and
-  `cover_letter_path`, a PDF of that same text to upload where the form has a
-  place for it that does not cost the CV. Submit it verbatim. Do not regenerate it, do not edit it, and do not
+  `cover_letter_path` — a PDF of that same text to upload where the form has a
+  place for it that does not cost the CV, or null, in which case the letter is
+  text and nothing is uploaded. Submit it verbatim. Do not regenerate it, do not edit it, and do not
   call `generate_cover_letter` for an approved entry — the operator may have
   written that text themselves, and rewriting it discards their decision.
 - An entry whose `cover_letter` is empty must not be applied to. Report it.

@@ -91,7 +91,9 @@ _TOOL_REGISTRY = {
         "Every entry that is going out carries the operator's letter twice: cover_letter (the text, to be "
         "submitted verbatim) and cover_letter_path (a PDF of that same text on the data volume, to upload "
         "where the form has a place for a document). A null cover_letter_path means the letter exists only "
-        "as text. NEVER upload it through a control that already holds the CV unless the page visibly "
+        "as text — check it before passing it to an upload. cover_letter_asset_id is that file's bare "
+        "name, and cover_letter_download_url fetches it over HTTP for a client that cannot see the data "
+        "volume; the browser can see it, so the path is what you use. NEVER upload it through a control that already holds the CV unless the page visibly "
         "accumulates files (a list of filenames, an 'Add another' affordance): a control showing one "
         "filename will REPLACE the CV, and an application that arrives with the cover letter filed as the "
         "resume and no CV is worse than one with no letter. When in doubt, keep the CV and paste the text.",

@@ -57,6 +57,18 @@ def _approved_with_letter(text="Dear team, I am applying.", source="generated"):
     return s
 
 
+def _expected_name(screening_id, text):
+    """The filename production would choose, header included."""
+    from services.render_cv import _contact_line
+    from truth.store import load as load_truth
+
+    truth = load_truth()
+    header = letter_files._header_digest(
+        truth.profile.name or "Your Name", _contact_line(truth.profile)
+    )
+    return letters.pdf_filename(screening_id, text, header)
+
+
 def _pdfs(data_dir):
     """Every file this feature can leave behind — renders and staging alike."""
     return sorted(p.name for p in data_dir.glob("*.pdf*"))
@@ -68,9 +80,9 @@ def test_approved_item_carries_a_letter_file(data_dir, fake_renderer):
     item = get_approved_applications()[0]
 
     assert item["blocked_reason"] == ""
-    assert item["cover_letter_asset_id"] == letters.pdf_filename(s.id, "My own words.")
-    assert item["cover_letter_path"] == str(letters.pdf_path(s.id, "My own words."))
-    assert letters.pdf_path(s.id, "My own words.").exists()
+    assert item["cover_letter_asset_id"] == _expected_name(s.id, "My own words.")
+    assert item["cover_letter_path"] == str(data_dir / _expected_name(s.id, "My own words."))
+    assert (data_dir / _expected_name(s.id, "My own words.")).exists()
     _, html = fake_renderer[0]
     assert "My own words." in html
 
@@ -80,7 +92,12 @@ def test_generated_letters_are_never_rendered(data_dir, fake_renderer):
     guardrail only validates each paragraph's declared `claims`, never its
     prose — so a paragraph with an empty claims list passes. Rendering there
     would turn text the guardrail never checked into a document an employer
-    receives as vouched-for. It must stay text."""
+    receives as vouched-for. It must stay text.
+
+    This is a guard against a future change, not evidence about the current
+    one: it also passes on any revision where nothing renders anywhere. What
+    it pins is that adding a render here has to fail this test first.
+    """
     from agenttools import tools_letter
     from providers.fake import FakeProvider
     from truth.model import Bullet, Experience, Skill, Truth
@@ -194,7 +211,7 @@ def test_a_failed_render_leaves_no_file_to_mistake_for_one(data_dir, monkeypatch
 
     first = get_approved_applications()[0]
     assert first["cover_letter_path"] is None
-    assert not letters.pdf_path(s.id, first["cover_letter"]).exists()
+    assert not (data_dir / _expected_name(s.id, first["cover_letter"])).exists()
     assert _pdfs(data_dir) == []
 
     # And the next run, with a healthy backend, still renders.
@@ -269,7 +286,7 @@ def test_letter_file_is_never_written_outside_the_volume(data_dir, fake_renderer
     """The screening id reaches the filename builder from stored state; a
     traversal in it must not steer a write out of the data directory."""
     with pytest.raises(ValueError):
-        letters.pdf_filename("../escape", "hi")
+        letters.pdf_filename("../escape", "hi", "")
 
     assert letter_files.render_screening_letter("../escape", "hi") == letter_files.NO_FILE
     assert fake_renderer == []
@@ -306,4 +323,24 @@ def test_two_concurrent_renders_both_produce_a_file(data_dir, monkeypatch):
 
     assert len(results) == 2
     assert all(r["path"] for r in results), "a completed render reported no file"
-    assert _pdfs(data_dir) == [letters.pdf_filename("s1", "Shared text.")]
+    assert _pdfs(data_dir) == [_expected_name("s1", "Shared text.")]
+
+
+def test_a_profile_edit_re_renders_the_letter(data_dir, fake_renderer):
+    """The header is part of the document, so it is part of the digest. An
+    operator who corrects their email would otherwise send a CV carrying the
+    new address beside a letter carrying the old one, with nothing in the
+    system able to notice or replace that file."""
+    from truth.model import Profile, Truth
+    from truth.store import save as save_truth
+
+    save_truth(Truth(profile=Profile(name="Alice Old", email="old@example.com")))
+    _approved_with_letter(text="Unchanged text.")
+    first = get_approved_applications()[0]["cover_letter_path"]
+
+    save_truth(Truth(profile=Profile(name="Alice New", email="new@example.com")))
+    second = get_approved_applications()[0]["cover_letter_path"]
+
+    assert first != second
+    assert "new@example.com" in fake_renderer[1][1]
+    assert _pdfs(data_dir) == [Path(second).name]

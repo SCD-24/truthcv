@@ -57,7 +57,10 @@ the operator approved on the Approvals page since the last run, each with a
 
 `cover_letter_path` is a PDF of the approved text on the data volume: the
 approved queue is the ONLY place a letter arrives as a file, so this is the
-only path on which anything is uploaded as a cover letter. Read §5 "Both
+only path on which anything is uploaded as a cover letter. **It is null
+whenever no PDF could be produced** — a deployment without the rendering
+backend produces none at all — and a null path means the letter is text and
+nothing else. Never pass it to an upload without checking it. Read §5 "Both
 documents go up" before attaching it — attaching it wrongly costs the CV.
 
 These are already decided. Apply to them before spending the run's time — and
@@ -347,13 +350,18 @@ which one you are looking at — read the form and work it out.** Take a snapsho
 after the CV is attached and find where the letter goes before deciding it has
 nowhere to go. Four shapes are common; there are others.
 
-- A **second, separately labelled control** ("Cover letter", "Additional
-  documents", "Add another file") — use it. Prefer this whenever it exists.
+- A **second control of its own**, labelled for what it takes ("Cover letter",
+  "Additional documents", "Supporting documents") — use it. Prefer this
+  whenever it exists. A control counts as its own only if it sits outside the
+  CV's block: an "add another file" button *inside* the résumé block belongs to
+  the résumé, and the next bullet governs it, not this one.
 - **One control that visibly takes several files.** Re-using the control that
   already holds the CV is safe ONLY on evidence you can see BEFORE uploading —
   in practice one thing: an explicit affordance to add another file ("Add
   another", "+", "Attach another document") that is still present now that the
-  CV is attached. Anything else is not evidence. A control showing a single
+  CV is attached, AND that is not itself the CV's own control. Anything else is
+  not evidence, and where the two readings are both available, the one that
+  protects the CV wins. A control showing a single
   filename shows that whether or not it accumulates, so it decides nothing;
   and whether an input accepts multiple files is not something the page tells
   you. **Never re-use a control labelled for the CV** ("Resume", "CV",
@@ -459,7 +467,10 @@ likelier to be silently blocked by ATS bot detection.
      (§3, §2), recorded on every screening.
    - `gaps_disclosed`: every gap you disclosed in the cover letter, one entry
      per gap, in full — not a summary of it.
-   - `attachments`: one entry per file actually uploaded, as `{kind, path}`.
+   - `attachments`: one entry per file the form actually shows as attached,
+     read back off the page — never one per upload you attempted. See §5 "Both
+     documents go up" for why: an entry for a file that did not attach is a
+     false record of a complete application.
    - `notes`: any open issue raised with the employer under §7, and any flag
      on the application itself.
 8. Submit.

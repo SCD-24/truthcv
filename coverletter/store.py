@@ -74,15 +74,18 @@ def draft_path(screening_id: str) -> Path:
     return letters_dir() / f"{screening_id}.json"
 
 
-def pdf_filename(screening_id: str, text: str) -> str:
-    """The rendered-letter filename for one screening's current text.
+def pdf_filename(screening_id: str, text: str, header: str = "") -> str:
+    """The rendered-letter filename for one screening's current letter.
 
     Flat in data_dir() rather than under letters/ because /api/download/{name}
     rejects any name with a separator, and this file is both what the agent
     uploads to an employer and what the operator downloads to see what went.
 
-    The name carries a digest of the text it renders, so a file that exists is
-    a file whose contents are known: an edited letter renders to a new name
+    The name carries a digest of everything that ends up in the document — the
+    letter text AND the header the renderer draws from the operator's profile,
+    since a PDF whose contact line is stale is as wrong as one whose prose is.
+    So a file that exists is a file whose contents are known: an edit renders
+    to a new name
     instead of overwriting the old one, and no reader needs to compare
     timestamps to decide whether a render is current. Superseded renders are
     swept by `prune_pdfs`, so one screening keeps one file. The `screening`
@@ -91,23 +94,29 @@ def pdf_filename(screening_id: str, text: str) -> str:
     """
     if not screening_id or "/" in screening_id or "\\" in screening_id or screening_id.startswith("."):
         raise ValueError(f"Unsafe screening id '{screening_id}'.")
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    digest = hashlib.sha256(f"{header}\x00{text}".encode("utf-8")).hexdigest()[:16]
     return f"cover_letter_screening_{screening_id}_{digest}.pdf"
 
 
-def pdf_path(screening_id: str, text: str) -> Path:
-    """Filesystem path of the rendered letter for one screening's text."""
-    return data_dir() / pdf_filename(screening_id, text)
+def pdf_path(screening_id: str, text: str, header: str = "") -> Path:
+    """Filesystem path of the rendered letter for one screening's letter."""
+    return data_dir() / pdf_filename(screening_id, text, header)
 
 
-def pdf_glob(screening_id: str) -> str:
-    """Every rendered letter belonging to one screening, current or superseded."""
+def pdf_glob(screening_id: str, include_staging: bool = False) -> str:
+    """Every rendered letter belonging to one screening, current or superseded.
+
+    ``include_staging`` widens the match to the ``.part`` files a render stages
+    under. Only safe where nothing can be rendering this screening — deleting
+    its draft — because a stage belonging to a render still in flight would
+    otherwise be swept out from under it.
+    """
     if not screening_id or "/" in screening_id or "\\" in screening_id or screening_id.startswith("."):
         raise ValueError(f"Unsafe screening id '{screening_id}'.")
-    return f"cover_letter_screening_{screening_id}_*.pdf"
+    return f"cover_letter_screening_{screening_id}_*" if include_staging else f"cover_letter_screening_{screening_id}_*.pdf"
 
 
-def prune_pdfs(screening_id: str, keep: str = "") -> int:
+def prune_pdfs(screening_id: str, keep: str = "", include_staging: bool = False) -> int:
     """Delete this screening's rendered letters, except ``keep``. Returns the count.
 
     Renders are content-addressed, so an edited letter leaves its predecessor
@@ -117,7 +126,7 @@ def prune_pdfs(screening_id: str, keep: str = "") -> int:
     forever, with no route by which the operator could see or remove them.
     """
     try:
-        pattern = pdf_glob(screening_id)
+        pattern = pdf_glob(screening_id, include_staging)
     except ValueError:
         return 0
     removed = 0
@@ -176,8 +185,8 @@ def delete(screening_id: str) -> bool:
     if not p.exists():
         # The draft may already be gone while its renders are not — sweep them
         # anyway, so a lost JSON file cannot strand a letter on the volume.
-        prune_pdfs(screening_id)
+        prune_pdfs(screening_id, include_staging=True)
         return False
     p.unlink()
-    prune_pdfs(screening_id)
+    prune_pdfs(screening_id, include_staging=True)
     return True
