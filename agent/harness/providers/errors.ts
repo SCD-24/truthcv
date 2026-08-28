@@ -94,3 +94,40 @@ export function retryAfterMsFrom(headers: { get?: (name: string) => string | nul
   if (Number.isNaN(at)) return undefined;
   return Math.max(0, at - Date.now());
 }
+
+/**
+ * Build an error HarnessEvent for a request that never reached the provider.
+ *
+ * `fetch` rejects — rather than resolving with a status — for the whole class
+ * of failures where nothing was sent or nothing came back: DNS, TCP, TLS,
+ * connection reset, the socket dying mid-body. undici reports most of them as
+ * the same opaque `TypeError: fetch failed`, with the real cause on `.cause`,
+ * so both are reported here.
+ *
+ * Always retryable. Nothing was delivered, so nothing can have been rejected:
+ * there is no half-applied request to worry about and no provider verdict to
+ * respect. Left as a throw it escapes the adapter, the retry loop and the
+ * harness alike — which ended a run of 33 turns on one flap of the host's DNS.
+ */
+export function networkErrorEvent(vendor: string, cause: unknown): HarnessEvent {
+  return {
+    type: 'error',
+    message: `${vendor} request could not be sent: ${describeCause(cause)}`,
+    retryable: true,
+  };
+}
+
+/**
+ * The most specific description of a thrown fetch failure available.
+ *
+ * `TypeError: fetch failed` on its own names no cause; undici hangs the real
+ * one (`ENOTFOUND`, `ECONNRESET`, `EAI_AGAIN`, a TLS failure) off `.cause`.
+ * Both are kept, in that order, so the run log says which host or syscall
+ * failed rather than only that something did.
+ */
+function describeCause(cause: unknown): string {
+  const outer = cause instanceof Error ? cause.message : String(cause);
+  const inner = cause instanceof Error && cause.cause instanceof Error ? cause.cause.message : '';
+  const both = inner && inner !== outer ? `${outer}: ${inner}` : outer;
+  return both.replace(/\s+/g, ' ').slice(0, MAX_DETAIL);
+}

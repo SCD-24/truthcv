@@ -210,7 +210,13 @@ function outcomeFor(rc, cancelled, reason) {
   const known = {
     1: "run aborted before the agent started — see the run log",
     2: "stopped at the harness turn cap (AGENT_MAX_TURNS)",
-    3: "the LLM provider rejected every attempt — see the run log for the provider's error",
+    // Deliberately does not say "rejected": exit 3 covers both a verdict the
+    // provider returned and a request that never reached it, and those need
+    // opposite responses from the operator (fix the account vs. check the
+    // network). Saying "rejected" for a DNS failure sends them to their API
+    // key. The log's own line distinguishes them: "request failed with status
+    // N" against "request could not be sent".
+    3: "the run could not get a usable answer from the LLM provider — see the run log: \"request failed with status\" is the provider refusing, \"request could not be sent\" is the network never reaching it",
     4: "could not connect to an MCP server (the app's tools, or the browser)",
     5: "the harness was misconfigured — see the run log",
   };
