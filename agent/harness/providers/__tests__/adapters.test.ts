@@ -52,6 +52,28 @@ function stubFetchThrowing(message = 'fetch failed'): void {
   );
 }
 
+/** Build a fetch stub whose headers arrive and whose body then dies.
+ *
+ * undici's `terminated` — the socket closing mid-response. The request DID
+ * reach the provider, but no answer was read, so it is as retryable as a
+ * failed connect and must not escape the adapter either.
+ */
+function stubFetchBodyDying(): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw Object.assign(new TypeError('terminated'), {
+          cause: new Error('other side closed'),
+        });
+      },
+      text: async () => '',
+    })),
+  );
+}
+
 /** Drive an adapter to completion and collect every yielded event. */
 async function collect(adapter: ProviderAdapter): Promise<HarnessEvent[]> {
   const events: HarnessEvent[] = [];
@@ -258,7 +280,11 @@ describe('provider adapters', () => {
 
 describe('a request that never reached the provider', () => {
   // A run died on 2026-08-28 at turn 33 of 400, ~105k tokens in, to a single
-  // `fetch failed` while the host's DNS was flapping. Every HTTP *response* the
+  // `fetch failed` — no response received, on a morning when the host's network
+  // was demonstrably unstable (an AP roam with a DHCP restart, two resolver
+  // degradations). Which packet was lost at that second is not knowable: the
+  // cause was discarded before it reached the log, which is half of what this
+  // change fixes. Every HTTP *response* the
   // provider sends becomes a retryable error event and is retried up to eight
   // times with backoff; a *thrown* fetch was the one class that escaped the
   // adapter entirely, past every retry, to the harness's outermost catch —
@@ -287,5 +313,28 @@ describe('a request that never reached the provider', () => {
     const message = (events.find((e) => e.type === 'error') as { message: string }).message;
     expect(message).toContain('Anthropic');
     expect(message).toContain('EAI_AGAIN');
+  });
+});
+
+describe('a response whose body dies mid-read', () => {
+  // The other half of the same transient-socket class: headers arrive, the
+  // socket closes before the body does. undici throws `terminated` here rather
+  // than `fetch failed`, so guarding only the connect leaves this one exactly
+  // as fatal as it was — on a long response over a flapping link, which is
+  // where 100k-token answers live.
+  it('is retryable for Anthropic, not a throw', async () => {
+    stubFetchBodyDying();
+    const events = await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toMatchObject({ retryable: true });
+    expect((error as { message: string }).message).toContain('terminated');
+  });
+
+  it('is retryable for OpenAI, not a throw', async () => {
+    stubFetchBodyDying();
+    const events = await collect(
+      createOpenAiChatCompletionsAdapter({ apiKey: 'k', model: 'gpt', baseUrl: 'https://api.openai.com/v1' }),
+    );
+    expect(events.find((e) => e.type === 'error')).toMatchObject({ retryable: true });
   });
 });

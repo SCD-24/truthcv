@@ -295,9 +295,10 @@ describe('wrap-up window', () => {
 });
 
 describe('a network failure the adapter reports instead of throwing', () => {
-  // The end-to-end shape of the 2026-08-28 outage: the request never reached
-  // the provider, so the adapter reports it as retryable rather than throwing
-  // past the loop. The run must survive it, not end on it.
+  // The end-to-end shape of the 2026-08-28 outage: no answer came back, so the
+  // adapter reports it as retryable rather than throwing past the loop. The run
+  // must survive it, not end on it. Eight attempts with capped backoff is ~183s
+  // of tolerance, against a disruption window the host journal puts at ~90s.
   it('backs off and carries on, rather than ending the run', async () => {
     const networkError: HarnessEvent = {
       type: 'error',

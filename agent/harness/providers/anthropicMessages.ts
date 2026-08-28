@@ -177,7 +177,19 @@ export class AnthropicMessagesAdapter implements ProviderAdapter {
       yield errorEvent(response.status, await readBody(response), retryAfterMsFrom(response.headers));
       return;
     }
-    yield* emitAnthropicEvents(await response.json());
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch (err) {
+      // The headers arrived and the body did not. undici reports this as
+      // `terminated` rather than `fetch failed`, and it is the same transient
+      // socket death as a failed connect — a long response over a flapping
+      // link is exactly where it happens. Retryable for the same reason: a
+      // body we never read cannot have been acted on.
+      yield networkErrorEvent('Anthropic', err);
+      return;
+    }
+    yield* emitAnthropicEvents(payload);
   }
 }
 
