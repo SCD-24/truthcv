@@ -4,6 +4,7 @@ import {
   estimateTokens,
   shouldCompact,
   KEEP_RECENT,
+  PIN_LEADING,
   type CompactionConfig,
 } from '../compaction.js';
 import type { ConversationMessage } from '../providers/types.js';
@@ -63,14 +64,16 @@ describe('compact', () => {
     const messages = makeMessages(KEEP_RECENT + 4);
     const recent = messages.slice(messages.length - KEEP_RECENT);
     const { messages: out } = compact(messages, config);
-    // First entry is the synthetic summary; the tail must match exactly.
+    // Pinned head, then the synthetic summary; the tail must match exactly.
     expect(out.slice(out.length - KEEP_RECENT)).toEqual(recent);
-    expect(out.length).toBe(KEEP_RECENT + 1);
+    expect(out.length).toBe(PIN_LEADING + 1 + KEEP_RECENT);
   });
 
   it('returns a record naming the dropped count', () => {
+    // PIN_LEADING messages survive at the front, so a conversation of
+    // KEEP_RECENT + n + PIN_LEADING drops n.
     const dropCount = 5;
-    const messages = makeMessages(KEEP_RECENT + dropCount);
+    const messages = makeMessages(PIN_LEADING + KEEP_RECENT + dropCount);
     const { record } = compact(messages, config);
     expect(record).not.toBeNull();
     expect(record?.droppedMessageCount).toBe(dropCount);
@@ -81,8 +84,10 @@ describe('compact', () => {
   });
 
   it('names the tools touched by dropped turns', () => {
-    const messages = makeMessages(KEEP_RECENT + 2);
-    messages[0] = { role: 'assistant', content: 'call', toolCalls: [{ id: '1', name: 'search', arguments: {} }] };
+    const messages = makeMessages(PIN_LEADING + KEEP_RECENT + 2);
+    // Index 0 is pinned and never dropped, so the tool call under test has to
+    // sit in the elided middle to appear in the summary at all.
+    messages[PIN_LEADING] = { role: 'assistant', content: 'call', toolCalls: [{ id: '1', name: 'search', arguments: {} }] };
     const { record } = compact(messages, config);
     expect(record?.summary).toContain('search');
   });

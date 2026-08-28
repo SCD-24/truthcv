@@ -37,6 +37,18 @@ export interface CompactionConfig {
 /** Number of most-recent messages that are never compacted away. */
 export const KEEP_RECENT = 6;
 
+/**
+ * Number of leading messages never compacted away.
+ *
+ * The harness delivers its operating instructions as the first message — cli.ts
+ * builds `initialMessages: [{ role: 'user', content: config.prompt }]` and
+ * SYSTEM_PROMPT is '' — so the run's whole RUNBOOK lives at index 0. Dropping
+ * it leaves an agent still holding the browser and the ledger tools but told
+ * nothing about how to use them: it keeps going, which is worse than stopping,
+ * because the run looks alive while nothing constrains it.
+ */
+export const PIN_LEADING = 1;
+
 /** Default headroom reserved for the next model response, in tokens. */
 const DEFAULT_RESERVE_TOKENS = 2000;
 
@@ -65,8 +77,13 @@ function messageTokens(message: ConversationMessage): number {
  *
  * Returns false immediately when `contextWindow` is falsy (the escape hatch —
  * we do not guess for unknown-window models). Otherwise it sums any reported
- * usage plus an estimate for the untracked tail of messages and compares the
- * total against `contextWindow * triggerRatio`.
+ * usage for the prefix it has already seen, PLUS an estimate for the messages
+ * appended since, and compares the total against `contextWindow * triggerRatio`.
+ *
+ * Both terms are needed. Usage describes a request already sent, so it misses
+ * everything added since — and what gets added between two requests is a page
+ * snapshot or a posting body, the largest single additions this agent makes.
+ * The estimate alone throws away the one exact number the provider gives us.
  */
 export function shouldCompact(
   messages: ConversationMessage[],
@@ -77,11 +94,8 @@ export function shouldCompact(
   const reserve = config.reserveTokens ?? DEFAULT_RESERVE_TOKENS;
   const ratio = config.triggerRatio ?? DEFAULT_TRIGGER_RATIO;
   let total = reserve;
-  if (reportedUsage) {
-    total += reportedUsage.inputTokens + reportedUsage.outputTokens;
-  } else {
-    total += messages.reduce((sum, m) => sum + messageTokens(m), 0);
-  }
+  if (reportedUsage) total += reportedUsage.inputTokens + reportedUsage.outputTokens;
+  total += messages.reduce((sum, m) => sum + messageTokens(m), 0);
   return total > config.contextWindow * ratio;
 }
 
@@ -117,9 +131,9 @@ function summarise(dropped: ConversationMessage[]): string {
 }
 
 /**
- * Compact the conversation, keeping the most recent {@link KEEP_RECENT}
- * messages byte-identical and folding everything older into one synthetic
- * `system` summary message.
+ * Compact the conversation, keeping the first {@link PIN_LEADING} messages and
+ * the most recent {@link KEEP_RECENT} byte-identical, and folding everything
+ * between them into one synthetic `system` summary message.
  *
  * Safe to call unconditionally: when there are not more than the keep-minimum
  * messages there is nothing to drop, so it returns the messages unchanged and
@@ -129,13 +143,14 @@ export function compact(
   messages: ConversationMessage[],
   _config: CompactionConfig,
 ): { messages: ConversationMessage[]; record: CompactionRecord | null } {
-  if (messages.length <= KEEP_RECENT) {
+  if (messages.length <= PIN_LEADING + KEEP_RECENT) {
     return { messages, record: null };
   }
-  const dropped = messages.slice(0, messages.length - KEEP_RECENT);
+  const pinned = messages.slice(0, PIN_LEADING);
+  const dropped = messages.slice(PIN_LEADING, messages.length - KEEP_RECENT);
   const kept = messages.slice(messages.length - KEEP_RECENT);
   const summary = summarise(dropped);
   const summaryMessage: ConversationMessage = { role: 'system', content: `[compaction] ${summary}` };
   const record: CompactionRecord = { type: 'compaction', droppedMessageCount: dropped.length, summary };
-  return { messages: [summaryMessage, ...kept], record };
+  return { messages: [...pinned, summaryMessage, ...kept], record };
 }

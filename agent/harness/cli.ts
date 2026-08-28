@@ -111,6 +111,15 @@ export interface CliConfig {
   mcpConfigPath: string;
   /** Hard cap on completed loop turns. */
   maxTurns: number;
+  /**
+   * The model's context window in tokens, as stated by the operator, or 0 when
+   * unstated. 0 means "unknown" and disables PROACTIVE compaction — never a
+   * guess, because compacting against a wrong window fails both ways: too high
+   * still overflows, too low silently discards context that was fitting. A run
+   * without it is still covered reactively, when the provider says the context
+   * is too long.
+   */
+  contextWindow: number;
   /** Where to write the final assistant message text; omitted to write nothing. */
   outputFile?: string;
 }
@@ -197,6 +206,26 @@ async function resolvePrompt(
   return (await io.readStdin()).trim();
 }
 
+/**
+ * Parse `--context-window`/`AGENT_CONTEXT_WINDOW`; 0 when unset, NaN if invalid.
+ *
+ * There is deliberately no per-model table behind this. A table of model ids to
+ * window sizes is wrong the day a model ships and wrong again when a provider
+ * changes a served window, and being wrong here is worse than knowing nothing:
+ * the reactive path already covers an unstated window using the provider's own
+ * verdict. So the number is stated by whoever deployed the model, or not at all.
+ *
+ * State it as the model's INPUT capacity, not its headline total: the two
+ * differ by whatever the provider reserves for the response (Anthropic reports
+ * the input figure as `max_input_tokens` on its models endpoint), and the
+ * difference is large enough to matter at the trigger point.
+ */
+function resolveContextWindow(flag: string | undefined, envVal: string | undefined): number {
+  const raw = flag || envVal;
+  if (!raw) return 0;
+  return Number.parseInt(raw, 10);
+}
+
 /** Parse `--max-turns`/`AGENT_MAX_TURNS`, defaulting when unset; NaN if invalid. */
 function resolveMaxTurns(flag: string | undefined, envVal: string | undefined): number {
   const raw = flag || envVal;
@@ -230,6 +259,7 @@ export async function resolveConfig(
     authType: (f['auth-type'] ?? env.AGENT_LLM_AUTH_TYPE ?? undefined) as CliConfig['authType'],
     mcpConfigPath: f['mcp-config'] ?? env.MCP_CONFIG_PATH ?? 'mcp.json',
     maxTurns: resolveMaxTurns(f['max-turns'], env.AGENT_MAX_TURNS),
+    contextWindow: resolveContextWindow(f['context-window'], env.AGENT_CONTEXT_WINDOW),
     outputFile: f['output-file'] || undefined,
   };
 }
@@ -262,6 +292,8 @@ export function validateConfig(config: CliConfig): string[] {
   if (!PROVIDERS.includes(config.provider)) errors.push('a valid --provider (claude|codex|openrouter|ollama) is required');
   if (!WIRES.includes(config.wire)) errors.push('a valid --wire (anthropic-messages|openai-chat-completions) is required');
   if (!Number.isInteger(config.maxTurns) || config.maxTurns <= 0) errors.push('--max-turns must be a positive integer');
+  if (!Number.isInteger(config.contextWindow) || config.contextWindow < 0)
+    errors.push('--context-window must be a non-negative integer (0 or unset means unknown)');
   errors.push(...validateAuth(config));
   return errors;
 }
@@ -372,6 +404,9 @@ async function runAgent(
       systemPrompt: SYSTEM_PROMPT,
       initialMessages: [{ role: 'user', content: config.prompt }],
       config: { maxTurns: config.maxTurns },
+      // Omitted entirely when unstated, so the loop's own "no window, no
+      // proactive compaction" guard is the single place that decision lives.
+      ...(config.contextWindow ? { compactionConfig: { contextWindow: config.contextWindow } } : {}),
       onEvent: createEventStream(emit.json),
     });
   } catch (err) {
@@ -592,6 +627,11 @@ function adapterOptions(config: CliConfig): ProviderAdapterOptions {
     token: config.token,
     baseUrl: config.baseUrl,
     authType: config.authType,
+    // The same number the compaction trigger uses. Ollama needs it stated on
+    // the request (`options.num_ctx`) because a local server otherwise serves
+    // its own default; deriving both from one figure is what stops the harness
+    // compacting against one window while the server enforces another.
+    ...(config.contextWindow ? { contextWindow: config.contextWindow } : {}),
   };
 }
 

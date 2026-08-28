@@ -202,7 +202,12 @@ function errorEvent(status: number, body: string, retryAfterMs?: number): Harnes
 /** Shape of the fields we read from an Anthropic Messages response. */
 interface AnthropicResponse {
   content?: AnthropicBlock[];
-  usage?: { input_tokens?: number; output_tokens?: number };
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+  };
   stop_reason?: unknown;
 }
 
@@ -223,11 +228,25 @@ function* emitAnthropicEvents(payload: unknown): Generator<HarnessEvent, void, u
   yield doneEvent(mapStopReason(body.stop_reason), text, toolCalls);
 }
 
-/** Build a usage HarnessEvent from Anthropic token counts. */
+/**
+ * Build a usage HarnessEvent from Anthropic token counts.
+ *
+ * The three input counters are summed because `input_tokens` alone excludes
+ * the cached prefix — it counts only what was NOT served from cache. On a long
+ * agentic run the cached prefix is most of the prompt, so reading
+ * `input_tokens` by itself under-reports the context by exactly its largest
+ * part, and would tell a compaction check the conversation is small while it
+ * is nearly full. Both cache counters are absent today (nothing sets
+ * `cache_control`); summing them is what makes this number stay true if
+ * caching is ever turned on.
+ */
 function usageEvent(usage: AnthropicResponse['usage']): HarnessEvent {
   return {
     type: 'usage',
-    inputTokens: usage?.input_tokens ?? 0,
+    inputTokens:
+      (usage?.input_tokens ?? 0) +
+      (usage?.cache_read_input_tokens ?? 0) +
+      (usage?.cache_creation_input_tokens ?? 0),
     outputTokens: usage?.output_tokens ?? 0,
   };
 }

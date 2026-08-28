@@ -191,6 +191,14 @@ services:
       # itself never passes through that hand-out, so its cap is prompt-level
       # only — see agent/RUNBOOK.md.
       - AGENT_MAX_TURNS=${AGENT_MAX_TURNS:-400}
+      # The model's INPUT context capacity in tokens, if you know it. Unset (0)
+      # means unknown: the harness then does no proactive compaction and relies
+      # on the provider's own "context too long" error to compact and retry.
+      # Setting it wrong is worse than leaving it unset — too high still
+      # overflows, too low silently drops context that was fitting. For a local
+      # model this is also what the harness states as Ollama's num_ctx, so the
+      # server serves the same window the harness compacts against.
+      - AGENT_CONTEXT_WINDOW=${AGENT_CONTEXT_WINDOW:-0}
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
       # Port supervisor.js listens on — matched to the app service entry above.
       - AGENT_CONTROL_PORT=${AGENT_CONTROL_PORT:-9099}
