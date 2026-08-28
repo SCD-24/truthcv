@@ -94,3 +94,50 @@ describe('compact', () => {
     expect(out).toBe(messages);
   });
 });
+
+describe('what compaction must never drop', () => {
+  const config: CompactionConfig = { contextWindow: 1000 };
+
+  // The harness sends its operating instructions as the FIRST message
+  // (cli.ts builds `initialMessages: [{ role: 'user', content: config.prompt }]`
+  // and SYSTEM_PROMPT is ''), so the whole RUNBOOK — how to screen, the
+  // truthfulness rules, which control to attach a document to — lives at
+  // index 0. Dropping it leaves an agent still holding the browser and the
+  // ledger tools but no longer told how to use them.
+  it('keeps the first message, which carries the run instructions', () => {
+    const messages = makeMessages(KEEP_RECENT + 5);
+    messages[0] = { role: 'user', content: 'RUNBOOK: never apply without a cover letter.' };
+
+    const { messages: out } = compact(messages, config);
+
+    expect(out[0]).toEqual(messages[0]);
+    expect(out.some((m) => m.content.includes('RUNBOOK'))).toBe(true);
+  });
+
+  it('counts only what it actually dropped', () => {
+    // 11 messages in: 1 pinned + 6 kept recent = 7 survive, 4 are dropped.
+    const messages = makeMessages(KEEP_RECENT + 5);
+
+    const { record, messages: out } = compact(messages, config);
+
+    expect(record?.droppedMessageCount).toBe(4);
+    // pinned + summary + KEEP_RECENT
+    expect(out.length).toBe(1 + 1 + KEEP_RECENT);
+  });
+});
+
+describe('shouldCompact accounting', () => {
+  // The docstring promises "any reported usage plus an estimate for the
+  // untracked tail". Reported usage covers the prefix the provider has already
+  // seen; the messages appended since are invisible to it. Taking usage alone
+  // undercounts by exactly the turns most likely to be enormous — a fresh page
+  // snapshot or a posting body just appended.
+  it('adds an estimate of untracked messages to the reported usage', () => {
+    const config: CompactionConfig = { contextWindow: 1000, reserveTokens: 0, triggerRatio: 0.75 };
+    const usage = { inputTokens: 700, outputTokens: 0 }; // 700 < 750 on its own
+    const tail = makeMessages(30); // ~300 estimated tokens appended since
+
+    expect(shouldCompact([], usage, config)).toBe(false);
+    expect(shouldCompact(tail, usage, config)).toBe(true);
+  });
+});
