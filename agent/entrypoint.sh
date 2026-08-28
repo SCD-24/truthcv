@@ -7,7 +7,8 @@
 #   RUN_ONCE=1   run immediately, exit with the run's status (use this to test)
 #   default      loop: sleep until the next scheduled slot, run, repeat
 #
-# Schedule is controlled by RUN_AT (comma-separated HH:MM, 24h, container TZ)
+# Schedule is controlled by RUN_AT (comma-separated HH:MM, 24h, resolved in
+# the schedule zone: the app's run_timezone, else RUN_TIMEZONE, else TZ)
 # and RUN_DAYS (comma-separated 1=Mon .. 7=Sun). The schedule's source of
 # truth is the app's agent config (Agents page); env is the fallback used only
 # when that config API is unreachable.
@@ -16,6 +17,11 @@ set -uo pipefail
 
 RUN_AT_DEFAULT="${RUN_AT:-09:00,15:00}"
 RUN_DAYS_DEFAULT="${RUN_DAYS:-1,2,3,4,5}"
+# The wall-clock zone the RUN_AT slots are interpreted in. Source of truth is
+# the app's agent config (run_timezone); this env value is only the fallback,
+# and it falls back in turn to the container's own TZ, which is how the slots
+# were resolved before run_timezone existed.
+RUN_TIMEZONE_DEFAULT="${RUN_TIMEZONE:-${TZ:-UTC}}"
 DAILY_APPLY="${DAILY_APPLY:-/app/agent/daily-apply.sh}"
 AGENT_CONFIG_JS="${AGENT_CONFIG_JS:-/app/agent/agent-config.js}"
 
@@ -25,6 +31,7 @@ AGENT_CONFIG_JS="${AGENT_CONFIG_JS:-/app/agent/agent-config.js}"
 # preflight and startup log line have sane values.
 RUN_AT="$RUN_AT_DEFAULT"
 RUN_DAYS="$RUN_DAYS_DEFAULT"
+RUN_TIMEZONE="$RUN_TIMEZONE_DEFAULT"
 
 log() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 
@@ -113,8 +120,11 @@ seconds_until_next_slot() {
   IFS=',' read -ra slots <<< "$RUN_AT"
   for offset in $(seq 0 8); do
     for t in "${slots[@]}"; do
-      target=$(date -d "$(date -d "@$now" +%F) +${offset} days ${t}" +%s 2>/dev/null) || return 1
-      dow=$(date -d "@$target" +%u)
+      # Slots are wall-clock times in $RUN_TIMEZONE, so the reference date, the
+      # slot resolution and the weekday test all read the clock in that zone;
+      # the epoch comparison below stays absolute.
+      target=$(TZ="$RUN_TIMEZONE" date -d "$(TZ="$RUN_TIMEZONE" date -d "@$now" +%F) +${offset} days ${t}" +%s 2>/dev/null) || return 1
+      dow=$(TZ="$RUN_TIMEZONE" date -d "@$target" +%u)
       if [[ ",$RUN_DAYS," == *",$dow,"* ]] && (( target > now )); then
         if (( best == -1 )) || (( target - now < best )); then
           best=$(( target - now ))
@@ -130,18 +140,28 @@ seconds_until_next_slot() {
 # Schedule source of truth is the app's agent config (Agents page); the RUN_AT/
 # RUN_DAYS env values are only the fallback when the config API is unreachable.
 refresh_schedule() {
-  local at days
+  local at days zone
   at="$(node "$AGENT_CONFIG_JS" run_at 2>/dev/null)" || at=""
   days="$(node "$AGENT_CONFIG_JS" run_days 2>/dev/null)" || days=""
+  zone="$(node "$AGENT_CONFIG_JS" run_timezone 2>/dev/null)" || zone=""
   RUN_AT="${at:-$RUN_AT_DEFAULT}"
   RUN_DAYS="${days:-$RUN_DAYS_DEFAULT}"
+  RUN_TIMEZONE="${zone:-$RUN_TIMEZONE_DEFAULT}"
   SCHEDULE_SOURCE=config
   [[ -n "$at" ]] || SCHEDULE_SOURCE=env
-  validate_run_at || { RUN_AT="$RUN_AT_DEFAULT"; RUN_DAYS="$RUN_DAYS_DEFAULT"; SCHEDULE_SOURCE=env; }
+  validate_run_at || {
+    RUN_AT="$RUN_AT_DEFAULT"
+    RUN_DAYS="$RUN_DAYS_DEFAULT"
+    RUN_TIMEZONE="$RUN_TIMEZONE_DEFAULT"
+    SCHEDULE_SOURCE=env
+  }
 }
 
 # Print the next few slots and exit, so the schedule can be checked without
-# waiting a day for it. Deliberately runs BEFORE preflight: it submits
+# waiting a day for it. Advisory only: the running loop is supervisor.js, whose
+# schedule.mjs resolves the DST edge cases (non-existent and ambiguous local
+# times) explicitly, where `date -d` here just takes the system's answer, so on
+# a DST transition day the printed instant can differ by an hour. Deliberately runs BEFORE preflight: it submits
 # nothing (it only reads the schedule via refresh_schedule), so it must not
 # require ANTHROPIC_API_KEY.
 check_schedule() {
@@ -149,11 +169,11 @@ check_schedule() {
   cursor=$(date +%s)
   refresh_schedule
   validate_run_at || return 1
-  echo "RUN_AT=$RUN_AT RUN_DAYS=$RUN_DAYS TZ=${TZ:-unset} source=$SCHEDULE_SOURCE - next ${CHECK_SLOTS:-6} slots:"
+  echo "RUN_AT=$RUN_AT RUN_DAYS=$RUN_DAYS schedule-zone=$RUN_TIMEZONE TZ=${TZ:-unset} source=$SCHEDULE_SOURCE - next ${CHECK_SLOTS:-6} slots:"
   for (( i = 0; i < ${CHECK_SLOTS:-6}; i++ )); do
     secs=$(seconds_until_next_slot "$cursor") || return 1
     cursor=$(( cursor + secs ))
-    date -d "@$cursor" '+  %a %Y-%m-%d %H:%M %Z'
+    TZ="$RUN_TIMEZONE" date -d "@$cursor" '+  %a %Y-%m-%d %H:%M %Z'
   done
   return 0
 }
@@ -164,7 +184,7 @@ if [[ "${1:-}" == "--check-schedule" ]]; then
   exit $?
 fi
 
-log "agent starting (TZ=${TZ:-unset}, RUN_AT=$RUN_AT, RUN_DAYS=$RUN_DAYS)"
+log "agent starting (TZ=${TZ:-unset}, schedule-zone=$RUN_TIMEZONE, RUN_AT=$RUN_AT, RUN_DAYS=$RUN_DAYS)"
 
 preflight || exit 1
 

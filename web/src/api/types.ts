@@ -572,6 +572,8 @@ export interface AgentConfig {
   blockedCompanies: string[];
   runAt: string[];
   runDays: string[];
+  /** IANA zone the `runAt` slots are wall-clock times in (default 'UTC'). */
+  runTimezone: string;
   profiles: JobProfile[];
   jobBoards: JobBoard[];
   targetCompanies: string[];
@@ -598,6 +600,7 @@ export type AgentConfigUpdate = Partial<
     | "blockedCompanies"
     | "runAt"
     | "runDays"
+    | "runTimezone"
     | "profiles"
     | "jobBoards"
     | "targetCompanies"

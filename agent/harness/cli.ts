@@ -122,6 +122,8 @@ export interface CliConfig {
   contextWindow: number;
   /** Where to write the final assistant message text; omitted to write nothing. */
   outputFile?: string;
+  /** Where to write the failure detail on a non-zero exit; omitted to write nothing. */
+  reasonFile?: string;
 }
 
 /**
@@ -277,6 +279,7 @@ export async function resolveConfig(
     maxTurns: resolveMaxTurns(f['max-turns'], env.AGENT_MAX_TURNS),
     contextWindow: resolveContextWindow(f['context-window'], env.AGENT_CONTEXT_WINDOW),
     outputFile: f['output-file'] || undefined,
+    reasonFile: f['reason-file'] || undefined,
   };
 }
 
@@ -331,6 +334,32 @@ export function redact(text: string, token: string): string {
 }
 
 /**
+ * Maximum characters of failure detail written to a reason file.
+ *
+ * A run record's stopped-reason is displayed in a UI card, so an unbounded
+ * provider body — a 401 that echoes a whole HTML error page, a stack trace —
+ * cannot be allowed onto it or it breaks the card's layout and buries the one
+ * useful sentence. The bound is on UTF-16 code units (what `String.length`
+ * counts), matching {@link MAX_ERROR_CONTENT_CHARS}'s convention.
+ */
+const MAX_REASON_CHARS = 240;
+
+/**
+ * Cap a reason-file line at {@link MAX_REASON_CHARS}, marking that it was cut.
+ *
+ * When over the bound the text is sliced to 239 code units and a single-char
+ * ellipsis is appended, giving a result of exactly {@link MAX_REASON_CHARS}
+ * code units — under the "under 240 chars" contract the reason card enforces.
+ *
+ * @param text The reason text about to be written.
+ * @returns The text unchanged, or truncated to {@link MAX_REASON_CHARS} with a trailing ellipsis.
+ */
+function truncateReason(text: string): string {
+  if (text.length <= MAX_REASON_CHARS) return text;
+  return `${text.slice(0, MAX_REASON_CHARS - 1)}…`;
+}
+
+/**
  * Return the final assistant message's text: the content of the last
  * `assistant`-role message, or '' if there is none.
  *
@@ -374,17 +403,32 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv, deps: CliDe
     emit.err(`configuration error: ${errors.join('; ')}`);
     return ExitCode.BadConfig;
   }
-  return runOnce(config, env, d, emit);
+  return runOnce(config, env, d, emit, token);
 }
 
-/** Build pool and adapter, run the loop, and report; returns the exit code. */
-async function runOnce(config: CliConfig, env: NodeJS.ProcessEnv, d: ResolvedDeps, emit: Emitter): Promise<number> {
+/**
+ * Build pool and adapter, run the loop, and report; returns the exit code.
+ *
+ * @param config The resolved configuration.
+ * @param env The environment providing fallbacks.
+ * @param d The resolved dependencies.
+ * @param emit The redacting stdout/stderr writers.
+ * @param token The credential token, threaded through for reason-file redaction.
+ * @returns The process exit code.
+ */
+async function runOnce(
+  config: CliConfig,
+  env: NodeJS.ProcessEnv,
+  d: ResolvedDeps,
+  emit: Emitter,
+  token: string,
+): Promise<number> {
   const pool = await tryBuildPool(config, env, d, emit);
   if (typeof pool === 'number') return pool;
   const adapter = d.createAdapter(adapterOptions(config));
-  const outcome = await runAgent(adapter, pool, config, emit);
+  const outcome = await runAgent(adapter, pool, config, d, emit, token);
   if (typeof outcome === 'number') return outcome;
-  return report(outcome, config, d, emit);
+  return report(outcome.result, config, d, emit, token, outcome.getFailureDetail);
 }
 
 /** Build and connect the MCP pool, or return an exit code on total failure. */
@@ -408,15 +452,29 @@ async function tryBuildPool(
   }
 }
 
-/** Run the loop, streaming events; returns the result or an error exit code. */
+/**
+ * Run the loop, streaming events; returns the result plus a failure-detail
+ * getter on success, or an error exit code.
+ *
+ * @param adapter The provider adapter.
+ * @param pool The connected MCP pool.
+ * @param config The resolved configuration.
+ * @param d The resolved dependencies (supplies `writeOutput` for the reason file).
+ * @param emit The redacting stdout/stderr writers.
+ * @param token The credential token, threaded through for reason-file redaction.
+ * @returns The loop result and its failure-detail getter, or an error exit code.
+ */
 async function runAgent(
   adapter: ProviderAdapter,
   pool: McpClientPool,
   config: CliConfig,
+  d: ResolvedDeps,
   emit: Emitter,
-): Promise<LoopResult | number> {
+  token: string,
+): Promise<{ result: LoopResult; getFailureDetail: () => string | undefined } | number> {
+  const stream = createEventStream(emit.json);
   try {
-    return await runLoop({
+    const result = await runLoop({
       adapter,
       pool,
       systemPrompt: SYSTEM_PROMPT,
@@ -425,41 +483,116 @@ async function runAgent(
       // Omitted entirely when unstated, so the loop's own "no window, no
       // proactive compaction" guard is the single place that decision lives.
       ...(config.contextWindow ? { compactionConfig: { contextWindow: config.contextWindow } } : {}),
-      onEvent: createEventStream(emit.json),
+      onEvent: stream.onEvent,
     });
+    return { result, getFailureDetail: stream.getFailureDetail };
   } catch (err) {
     emit.err(`provider error: ${errorMessage(err)}`);
+    await writeReason(config, d, token, `provider error: ${errorMessage(err)}`);
     return ExitCode.ProviderError;
   }
 }
 
-/** Emit derived tool results and the final `done`, write output, return the code. */
-async function report(result: LoopResult, config: CliConfig, d: ResolvedDeps, emit: Emitter): Promise<number> {
+/**
+ * Emit derived tool results and the final `done`, write output, return the code.
+ *
+ * @param result The finished loop result.
+ * @param config The resolved configuration.
+ * @param d The resolved dependencies (supplies `writeOutput`).
+ * @param emit The redacting stdout/stderr writers.
+ * @param token The credential token, used to redact the reason-file write.
+ * @param getFailureDetail Returns the run's captured failure detail, if any.
+ * @returns The process exit code.
+ */
+async function report(
+  result: LoopResult,
+  config: CliConfig,
+  d: ResolvedDeps,
+  emit: Emitter,
+  token: string,
+  getFailureDetail: () => string | undefined,
+): Promise<number> {
   const exitCode = exitCodeFor(result.stopReason);
   emitToolResults(emit.json, result.messages);
   emit.json({ type: 'done', stopReason: result.stopReason, turns: result.turns, exitCode });
   if (config.outputFile) await d.writeOutput(config.outputFile, finalAssistantText(result.messages));
+  if (exitCode !== ExitCode.Success) {
+    await writeReason(config, d, token, getFailureDetail() ?? `stopped: ${result.stopReason}`);
+  }
   return exitCode;
 }
 
 /**
- * Build the loop `onEvent` handler that streams JSON-line events.
+ * Write a failure detail to the configured reason file, redacted and bounded.
+ * Best-effort by design: a write failure must never change a run's exit code,
+ * so every error out of the write is swallowed.
  *
- * It synthesises a `turnStart` at the start of each turn (loop.ts emits no such
- * event, so it is derived here from the event stream), passes the harness's own
- * events through verbatim, and SUPPRESSES the per-turn `done` events — a single
- * final `done` carrying the outcome is emitted by {@link report} instead.
+ * @param config The resolved configuration (supplies `reasonFile`).
+ * @param d The resolved dependencies (supplies `writeOutput`).
+ * @param token The credential token, redacted out of the detail before writing.
+ * @param detail The human-readable failure detail to record.
  */
-function createEventStream(write: (obj: unknown) => void): (event: HarnessEvent | LoopEvent) => void {
+async function writeReason(config: CliConfig, d: ResolvedDeps, token: string, detail: string): Promise<void> {
+  if (!config.reasonFile) return;
+  try {
+    // Redact BEFORE truncating: a 401 body can echo the submitted key, and
+    // truncating first could leave a partial key that redaction no longer matches.
+    await d.writeOutput(config.reasonFile, truncateReason(redact(detail, token)));
+  } catch {
+    // best-effort
+  }
+}
+
+/**
+ * Build the loop `onEvent` handler that streams JSON-line events, plus a getter
+ * for the run's most recent human-readable failure detail.
+ *
+ * The handler synthesises a `turnStart` at the start of each turn (loop.ts emits
+ * no such event, so it is derived here from the event stream), passes the
+ * harness's own events through verbatim, and SUPPRESSES the per-turn `done`
+ * events — a single final `done` carrying the outcome is emitted by
+ * {@link report} instead.
+ *
+ * Alongside streaming, it captures failure detail the {@link LoopResult} does
+ * not carry: the last provider `error` message, and the last detail from a
+ * TERMINAL loop event (`stop` / `turnCapReached`). Details from `retry`,
+ * `compaction` and `reflection` are deliberately ignored — those describe
+ * recovered-from incidents mid-run, not why the run ended, and the last one
+ * seen would otherwise masquerade as the failure.
+ *
+ * `getFailureDetail` prefers the provider `error` message, because that is the
+ * provider's real text (an HTTP body, a quota message) and is what the run
+ * record exists to surface; the terminal loop detail is a categorisation of the
+ * stop ("non-retryable error: bad-request") that `stopReason` already conveys,
+ * so it serves as the fallback.
+ *
+ * @param write The redacting JSON-line writer for stdout.
+ * @returns The loop `onEvent` handler and the failure-detail getter.
+ */
+function createEventStream(write: (obj: unknown) => void): {
+  onEvent: (event: HarnessEvent | LoopEvent) => void;
+  getFailureDetail: () => string | undefined;
+} {
   let turn = 0;
   let open = false;
+  let lastErrorMessage: string | undefined;
+  let lastStopDetail: string | undefined;
   const ensureTurn = (): void => {
     if (open) return;
     turn += 1;
     open = true;
     write({ type: 'turnStart', turn });
   };
-  return (event) => {
+  const onEvent = (event: HarnessEvent | LoopEvent): void => {
+    if (event.type === 'error') lastErrorMessage = event.message;
+    if (
+      event.type === 'loopEvent' &&
+      (event.kind === 'stop' || event.kind === 'turnCapReached') &&
+      typeof event.detail === 'string' &&
+      event.detail.length > 0
+    ) {
+      lastStopDetail = event.detail;
+    }
     if (event.type === 'done') {
       ensureTurn();
       open = false;
@@ -471,6 +604,10 @@ function createEventStream(write: (obj: unknown) => void): (event: HarnessEvent 
     }
     ensureTurn();
     write(event);
+  };
+  return {
+    onEvent,
+    getFailureDetail: () => lastErrorMessage ?? lastStopDetail ?? undefined,
   };
 }
 

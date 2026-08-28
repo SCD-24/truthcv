@@ -6,6 +6,7 @@ export default defineConfig({
     include: [
       'harness/**/*.test.ts',
       'harness/**/__tests__/**/*.ts',
+      '__tests__/**/*.test.ts',
     ],
     coverage: {
       provider: 'v8',

@@ -7,6 +7,7 @@ frontend client (web/src/api/types.ts) expects.
 from __future__ import annotations
 
 import re
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
@@ -413,6 +414,7 @@ class AgentConfigModel(_Camel):
     run_days: list[str] = Field(
         default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"]
     )
+    run_timezone: str = "UTC"
     profiles: list[JobProfileModel] = Field(default_factory=list)
     job_boards: list[JobBoardModel] = Field(default_factory=list)
     target_companies: list[str] = Field(default_factory=list)
@@ -446,6 +448,7 @@ class AgentConfigUpdate(_Camel):
     blocked_companies: list[str] | None = None
     run_at: list[str] | None = None
     run_days: list[str] | None = None
+    run_timezone: str | None = None
     profiles: list[JobProfileModel] | None = None
     job_boards: list[JobBoardModel] | None = None
     target_companies: list[str] | None = None
@@ -497,6 +500,17 @@ class AgentConfigUpdate(_Camel):
             if d not in deduped:
                 deduped.append(d)
         return deduped
+
+    @field_validator("run_timezone")
+    @classmethod
+    def _validate_run_timezone(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        try:
+            ZoneInfo(v)
+        except Exception as exc:
+            raise ValueError(f"invalid timezone {v!r}: {exc}") from exc
+        return v
 
     @field_validator("target_companies", mode="before")
     @classmethod

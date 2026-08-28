@@ -15,6 +15,7 @@ import MenuItem from "@mui/material/MenuItem";
 import Typography from "@mui/material/Typography";
 import CircularProgress from "@mui/material/CircularProgress";
 import Chip from "@mui/material/Chip";
+import Autocomplete from "@mui/material/Autocomplete";
 import Link from "@mui/material/Link";
 import {
   getAgentConfig,
@@ -32,7 +33,14 @@ import {
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { ModelRoutePicker } from "../settings/ModelRoutePicker";
 import { SettingsModal } from "../settings/SettingsModal";
-import { isValidRunTime, WEEKDAYS } from "./schedule";
+import {
+  DEFAULT_TIMEZONE,
+  formatInZone,
+  isValidRunTime,
+  isValidTimezone,
+  TIMEZONES,
+  WEEKDAYS,
+} from "./schedule";
 import type {
   AgentConfig,
   AgentStatus,
@@ -190,7 +198,7 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
             onChange={(updater) => setConfig((cur) => (cur ? updater(cur) : cur))}
           />
           <RunNowSection agentEnabled={config.enabled} />
-          <RecentRunsSection />
+          <RecentRunsSection timeZone={config.runTimezone || DEFAULT_TIMEZONE} />
           {routing ? (
             <ModelSection connections={connections} routing={routing} onSaved={setRouting} />
           ) : (
@@ -429,7 +437,10 @@ export { RecentRunsSection };
  * the work each run actually got through, and where a partial run stopped.
  * Polls independently of RunNowSection's status poll so this list refreshes
  * without coupling to that component's pacing. */
-function RecentRunsSection() {
+/** Recent-run history. `timeZone` is the schedule's wall-clock zone so a run's
+ * start time can be read against the slot that was meant to fire it; it falls
+ * back to DEFAULT_TIMEZONE when the config has not loaded. */
+function RecentRunsSection({ timeZone }: { timeZone?: string } = {}) {
   const [page, setPage] = useState(0);
   const [result, setResult] = useState<RunPage | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -507,7 +518,7 @@ function RecentRunsSection() {
       {runs !== null && runs.length > 0 && (
         <Stack spacing={1}>
           {runs.map((run) => (
-            <RunSummaryRow key={run.id} run={run} />
+            <RunSummaryRow key={run.id} run={run} timeZone={timeZone || DEFAULT_TIMEZONE} />
           ))}
         </Stack>
       )}
@@ -542,7 +553,7 @@ function RecentRunsSection() {
   );
 }
 
-function RunSummaryRow({ run }: { run: RunRecord }) {
+function RunSummaryRow({ run, timeZone }: { run: RunRecord; timeZone?: string }) {
   const isRunning = run.status === "running";
   const capLabel = run.applyCap > 0 ? `${run.applicationsSubmitted}/${run.applyCap}` : `${run.applicationsSubmitted}`;
   return (
@@ -562,9 +573,12 @@ function RunSummaryRow({ run }: { run: RunRecord }) {
           {run.id}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          {run.startedAt ? new Date(run.startedAt).toLocaleString() : ""}
-          {run.finishedAt ? ` – ${new Date(run.finishedAt).toLocaleString()}` : ""}
+          {run.startedAt ? formatInZone(run.startedAt, timeZone) : ""}
+          {run.finishedAt ? ` – ${formatInZone(run.finishedAt, timeZone)}` : ""}
         </Typography>
+        {run.trigger && (
+          <Chip size="small" variant="outlined" label={run.trigger === "manual" ? "manual" : "scheduled"} />
+        )}
       </Stack>
       <Stack direction="row" spacing={2} sx={{ mt: 0.5, flexWrap: "wrap" }}>
         <Typography variant="caption" color="text.secondary">
@@ -589,7 +603,11 @@ function RunSummaryRow({ run }: { run: RunRecord }) {
         )}
       </Stack>
       {run.stoppedReason && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: "block", mt: 0.5, overflowWrap: "anywhere" }}
+        >
           Stopped: {run.stoppedReason}
         </Typography>
       )}
@@ -756,6 +774,9 @@ function ScheduleSection({
 }) {
   const [runAt, setRunAt] = useState<string[]>(config.runAt);
   const [runDays, setRunDays] = useState<string[]>(config.runDays);
+  const [runTimezone, setRunTimezone] = useState<string>(
+    config.runTimezone || DEFAULT_TIMEZONE,
+  );
   const [newTime, setNewTime] = useState("");
   const [timeError, setTimeError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -791,10 +812,11 @@ function ScheduleSection({
     setError(null);
     setSaved(false);
     try {
-      const fresh = await updateAgentConfig({ runAt, runDays });
+      const fresh = await updateAgentConfig({ runAt, runDays, runTimezone });
       onChange(fresh);
       setRunAt(fresh.runAt);
       setRunDays(fresh.runDays);
+      setRunTimezone(fresh.runTimezone || DEFAULT_TIMEZONE);
       setSaved(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't save the schedule.");
@@ -806,7 +828,7 @@ function ScheduleSection({
   return (
     <Section
       title="Schedule"
-      description="Changes take effect within about five minutes; the agent re-reads its schedule between runs."
+      description={`Run times are wall-clock times in the selected timezone (${runTimezone}). Changes take effect within about five minutes; the agent re-reads its schedule between runs.`}
     >
       <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
         {runAt.map((time) => (
@@ -835,6 +857,26 @@ function ScheduleSection({
           Add
         </Button>
       </Stack>
+      <Autocomplete
+        options={TIMEZONES}
+        value={runTimezone}
+        onChange={(_e, value) => setRunTimezone(value || DEFAULT_TIMEZONE)}
+        disableClearable
+        sx={{ maxWidth: 360 }}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            size="small"
+            label="Timezone"
+            error={!isValidTimezone(runTimezone)}
+            helperText={
+              isValidTimezone(runTimezone)
+                ? "Run times are interpreted in this zone."
+                : "Pick a valid timezone."
+            }
+          />
+        )}
+      />
       <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
         {WEEKDAYS.map((day) => (
           <FormControlLabel
@@ -850,7 +892,16 @@ function ScheduleSection({
         ))}
       </Stack>
       <Box>
-        <Button variant="contained" onClick={handleSave} disabled={saving}>
+        <Button
+          variant="contained"
+          onClick={handleSave}
+          disabled={
+            saving ||
+            runAt.length < 1 ||
+            runDays.length < 1 ||
+            !isValidTimezone(runTimezone)
+          }
+        >
           {saving && <ButtonSpinner />}
           {saving ? "Saving…" : "Save schedule"}
         </Button>

@@ -21,6 +21,7 @@ def test_get_returns_defaults(client, data_dir):
         "blockedCompanies": [],
         "runAt": ["09:00", "15:00"],
         "runDays": ["mon", "tue", "wed", "thu", "fri"],
+        "runTimezone": "UTC",
         "profiles": [],
         "targetCompanies": [],
         "cooldownDays": None,
@@ -245,6 +246,24 @@ def test_put_explicit_nulls_do_not_reset_fields(client, data_dir):
     assert r.status_code == 200
     assert r.json()["mode"] == "off"
     assert r.json()["blockedCompanies"] == ["Acme"]
+
+
+def test_put_run_timezone_accepts_valid_zone(client, data_dir):
+    r = client.put("/api/agent/config", json={"runTimezone": "Europe/Berlin"})
+    assert r.status_code == 200
+    assert r.json()["runTimezone"] == "Europe/Berlin"
+
+
+def test_put_run_timezone_rejects_unknown_zone(client, data_dir):
+    assert client.put("/api/agent/config", json={"runTimezone": "Mars/Olympus"}).status_code == 422
+
+
+def test_put_omitting_run_timezone_leaves_stored_zone_untouched(client, data_dir):
+    """PUT merges: an unrelated edit must not reset a stored timezone."""
+    r = client.put("/api/agent/config", json={"runTimezone": "Europe/Berlin"})
+    assert r.status_code == 200
+    client.put("/api/agent/config", json={"runAt": ["10:00"]})
+    assert client.get("/api/agent/config").json()["runTimezone"] == "Europe/Berlin"
 
 
 def test_put_target_companies_accepts_comma_delimited_string(client, data_dir):

@@ -1,6 +1,6 @@
 // Fetch one field of the agent config from the app service. The agent image
 // has no curl (see daily-apply.sh's note); node is the only HTTP client.
-// Usage: node agent-config.js mode|enabled|run_at|run_days|llm_credentials
+// Usage: node agent-config.js mode|enabled|run_at|run_days|run_timezone|llm_credentials
 // Errors print nothing and exit 1 — callers fall back to env defaults.
 import nodeHttp from "node:http";
 import nodeHttps from "node:https";
@@ -36,7 +36,7 @@ if (process.env.FAKE_AGENT_CONFIG && field !== "llm_credentials") {
   }
 }
 const base = process.env.TRUTHCV_MCP_URL;
-if (!base || !["enabled", "mode", "run_at", "run_days", "llm_credentials", "job_config"].includes(field)) process.exit(1);
+if (!base || !["enabled", "mode", "run_at", "run_days", "run_timezone", "llm_credentials", "job_config"].includes(field)) process.exit(1);
 
 if (field === "llm_credentials") {
   // Distinct exit code (2) when the shared secret itself is missing, so
@@ -102,6 +102,10 @@ const req = http.get(u, { timeout }, (res) => {
       }
       else if (field === "run_at") process.stdout.write(cfg.runAt.join(","));
       else if (field === "run_days") process.stdout.write(cfg.runDays.map((d) => DAY_NUM[d]).filter(Boolean).join(","));
+      // The IANA zone the run_at slots are wall-clock times in. Written empty
+      // when an older app service omits the field, so callers fall back to
+      // their own default (UTC) rather than scheduling against "undefined".
+      else if (field === "run_timezone") process.stdout.write(typeof cfg.runTimezone === "string" ? cfg.runTimezone : "");
       else if (field === "job_config") {
         const payload = {
           profiles: cfg.profiles || [],

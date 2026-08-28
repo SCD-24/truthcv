@@ -284,7 +284,7 @@ precedence once configured.
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Fallback credential for the selected provider, used only when nothing is connected in the app. |
 | `OLLAMA_HOST` | Ollama endpoint (compose sets this automatically). |
 | `RUN_AT` / `RUN_DAYS` | Fallback agent schedule, used only when the Agents page's schedule is unreachable. |
-| `TZ` | Timezone the agent's schedule and logs are interpreted in (default `UTC`). |
+| `TZ` | Fallback timezone the agent's schedule and logs are interpreted in (default `UTC`). The Agents page's schedule timezone takes precedence. |
 
 Generate `ENCRYPTION_KEY` or `AGENT_API_TOKEN` with either of the following:
 

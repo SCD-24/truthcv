@@ -40,6 +40,7 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     blockedCompanies: [],
     runAt: ["09:00"],
     runDays: ["mon"],
+    runTimezone: "UTC",
     profiles: [],
     jobBoards: [],
     targetCompanies: [],

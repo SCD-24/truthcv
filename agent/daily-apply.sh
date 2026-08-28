@@ -559,6 +559,7 @@ node "$HARNESS_CLI" \
   --max-turns "${AGENT_MAX_TURNS:-400}" \
   --context-window "${AGENT_CONTEXT_WINDOW:-0}" \
   --output-file "$RUN_OUTPUT" \
+  --reason-file "$REASON_FILE" \
   </dev/null >>"$RUN_LOG" 2>&1
 
 RC=$?

@@ -76,6 +76,7 @@ tinyhtml5==2.1.0
 truststore==0.10.4
 typing_extensions==4.16.0
 typing-inspection==0.4.4
+tzdata==2025.2
 uvloop==0.22.1
 watchfiles==1.2.0
 webencodings==0.6.1

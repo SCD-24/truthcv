@@ -211,9 +211,10 @@ services:
       # Where agent/daily-apply.sh writes per-run logs. Must stay inside the
       # agent-runs volume mounted below, or the logs vanish on restart.
       - RUN_LOG_DIR=${RUN_LOG_DIR:-/app/runs}
-      # RUN_AT and RUN_DAYS above are container-local times, so the container
-      # needs the operator's timezone or an unattended run fires at the wrong
-      # hour. Same default as the `browser` service.
+      # Fallback zone for the RUN_AT/RUN_DAYS slots above: the Agents page's
+      # schedule timezone (run_timezone) wins when the config API is
+      # reachable, and this TZ is what the slots fall back to otherwise, so it
+      # should still be the operator's timezone. Same default as `browser`.
       - TZ=${TZ:-UTC}
       # Which browser driver the agent uses (agent/mcp.json's `browser` entry,
       # the containerised @playwright/mcp service above). `browser` is

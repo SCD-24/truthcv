@@ -83,6 +83,44 @@ def test_from_dict_rejects_non_string_list_elements_run_days(data_dir):
     assert cfg.run_days == ["mon", "tue", "wed", "thu", "fri"]
 
 
+def test_run_timezone_defaults_to_utc(data_dir):
+    """A fresh config carries UTC until the operator picks a zone."""
+    assert store.AgentConfig().run_timezone == "UTC"
+
+
+def test_run_timezone_round_trip(data_dir):
+    cfg = store.AgentConfig()
+    cfg.run_timezone = "Europe/Berlin"
+    store.save(cfg)
+    again = store.load()
+    assert again.run_timezone == "Europe/Berlin"
+
+
+def test_from_dict_unknown_zone_falls_back_to_utc(data_dir):
+    """A garbage zone string that zoneinfo cannot resolve degrades to UTC."""
+    cfg = store.AgentConfig.from_dict({"run_timezone": "Mars/Olympus"})
+    assert cfg.run_timezone == "UTC"
+
+
+def test_from_dict_non_string_zone_falls_back_to_utc(data_dir):
+    """A non-string or empty run_timezone degrades to UTC, never raises."""
+    assert store.AgentConfig.from_dict({"run_timezone": 123}).run_timezone == "UTC"
+    assert store.AgentConfig.from_dict({"run_timezone": ""}).run_timezone == "UTC"
+
+
+def test_config_predating_run_timezone_loads_as_utc(data_dir):
+    """A config file written before the field existed migrates to UTC."""
+    (data_dir / "agent_config.json").write_text(
+        '{"run_at": ["09:00"], "run_days": ["mon"]}', encoding="utf-8"
+    )
+    cfg = store.load()
+    assert cfg.run_timezone == "UTC"
+
+
+def test_to_dict_emits_run_timezone(data_dir):
+    assert "run_timezone" in store.AgentConfig().to_dict()
+
+
 def test_is_blocked_never_raises_on_malformed_config(data_dir):
     (data_dir / "agent_config.json").write_text(
         '{"blocked_companies": [1, 2, 3]}', encoding="utf-8"

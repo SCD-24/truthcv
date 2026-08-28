@@ -105,7 +105,8 @@ under the operator's name. Watch it.
 | `RUN_AT` | `09:00,15:00` | Comma-separated `HH:MM` (24h, container TZ). Fallback only — used when the agent config API is unreachable; see below. |
 | `RUN_DAYS` | `1,2,3,4,5` | Days to run, `1`=Mon … `7`=Sun. Fallback only — used when the agent config API is unreachable; see below. |
 | `RUN_ONCE` | unset | `1` = run immediately and exit. |
-| `TZ` | container default | Timezone the schedule is expressed in. |
+| `TZ` | container default | Fallback timezone the schedule is expressed in, used only when the Agents page's `run_timezone` is unset or unreachable. |
+| `RUN_TIMEZONE` | `TZ`, else `UTC` | Fallback IANA zone the `RUN_AT` slots are wall-clock times in. The app's stored `run_timezone` (Agents page) wins whenever the config API is reachable. |
 | `TRUTHCV_MCP_URL` | `http://app:8080/mcp` | The `app` service's MCP streamable-HTTP JSON-RPC tool surface (`POST /mcp`, `agenttools/mcp_app.py`). In-network only — not reachable from the host or the internet. |
 | `AGENT_BROWSER_DRIVER` | `browser` | Which browser driver the agent uses. `browser` (the containerised Chromium) is currently the only supported value — kept as a validating seam so a second driver can be added later without every call site needing to change. |
 | `BROWSER_MCP_URL` | `http://browser:8931/mcp` | In-network address of the `browser` compose service's MCP endpoint (see [`browser/README.md`](../browser/README.md)). Also in-network only. Used by the `browser` driver. |
@@ -176,17 +177,22 @@ not in that config, the agent cannot reach it.
 The **Agents page** is the source of truth for whether the agent runs and
 when. It reads and writes the app service's agent config
 (`GET`/`PUT /api/agent/config`, camelCase `enabled`/`blockedCompanies`/
-`runAt`/`runDays`), which `agent/entrypoint.sh` and `agent/daily-apply.sh`
+`runAt`/`runDays`/`runTimezone`), which `agent/entrypoint.sh` and `agent/daily-apply.sh`
 poll through the small node helper `agent/agent-config.js` — the agent image
 has no `curl`, so `node` is the only HTTP client available to it.
 
 - **Schedule** — `entrypoint.sh`'s `refresh_schedule()` re-fetches `runAt`/
-  `runDays` from the config API on every pass through the run loop (at least
+  `runDays`/`runTimezone` from the config API on every pass through the run
+  loop (at least
   every 5 minutes, so a change made on the Agents page is picked up without
   restarting the container). If the config API is unreachable or returns a
   malformed schedule, it falls back to the `RUN_AT`/`RUN_DAYS` env values
   above. `--check-schedule`'s output line reports which source it used
-  (`source=config` or `source=env`).
+  (`source=config` or `source=env`) and the schedule zone it resolved. The
+  `runAt` slots are **wall-clock times in `runTimezone`** (default `UTC`), so
+  a `09:00` slot with `Europe/Berlin` fires at 07:00Z in winter and 08:00Z
+  under DST. The long-running loop is `supervisor.js`; `--check-schedule` is
+  an advisory preview and can differ by an hour on a DST transition day.
 - **Enabled flag** — `daily-apply.sh` checks `enabled` at the start of every
   run, after its other preconditions pass. `false` skips the run cleanly
   (exit 0, logged, not an error). An **unreachable** config API is not treated

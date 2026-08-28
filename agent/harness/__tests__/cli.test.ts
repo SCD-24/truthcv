@@ -365,3 +365,114 @@ describe('the context window reaches the loop and the adapter', () => {
     expect(stderr.join('\n')).toContain('--context-window');
   });
 });
+
+/** Path handed to `--reason-file`; a bare label since writeOutput is faked. */
+const REASON_PATH = '/run/reason.txt';
+
+/** The text written to {@link REASON_PATH}, or undefined if never written there. */
+function reasonText(writeOutput: ReturnType<typeof vi.fn>, path = REASON_PATH): string | undefined {
+  const call = writeOutput.mock.calls.find((c) => c[0] === path);
+  return call?.[1] as string | undefined;
+}
+
+describe('runCli reason file', () => {
+  // The reason file is the daily-apply script's only human-readable window into
+  // WHY a run failed; a non-zero exit must leave the captured detail behind.
+  it('writes the captured failure detail on a non-zero exit', async () => {
+    const writeOutput = vi.fn(async () => {});
+    const adapter = scriptedAdapter([[{ type: 'error', message: 'Bad request: 400 invalid', retryable: false }]]);
+    const { deps } = harness(adapter, fakePool(), { writeOutput });
+
+    const code = await runCli([...BASE_ARGS, '--reason-file', REASON_PATH, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.ProviderError);
+    expect(reasonText(writeOutput)).toBe('Bad request: 400 invalid');
+  });
+
+  // A 401 body routinely echoes the submitted key; the reason file is written to
+  // disk, so the raw token must be redacted out of it, not just off stdout/err.
+  it('never writes the raw token to the reason file even when the detail embeds it', async () => {
+    const token = 'SUPERSECRET-TOKEN-123';
+    const writeOutput = vi.fn(async () => {});
+    // A simulated 401 body echoing the submitted credential verbatim.
+    const adapter = scriptedAdapter([
+      [{ type: 'error', message: `401 unauthorized: {"key":"${token}"}`, retryable: false }],
+    ]);
+    const { deps } = harness(adapter, fakePool(), { writeOutput });
+
+    const code = await runCli(
+      ['--model', 'm', '--provider', 'claude', '--wire', 'anthropic-messages', '--token', token, '--reason-file', REASON_PATH, 'go'],
+      {},
+      deps,
+    );
+
+    expect(code).toBe(ExitCode.ProviderError);
+    const written = reasonText(writeOutput);
+    expect(written).toContain('<redacted>');
+    expect(written).not.toContain(token);
+  });
+
+  // The reason card enforces an under-240-char contract; an over-long detail is
+  // capped to exactly 240 with a trailing ellipsis marking the cut.
+  it('truncates an over-long failure detail to 240 chars ending in an ellipsis', async () => {
+    const writeOutput = vi.fn(async () => {});
+    // 300 chars, none of them the token 'tok', so redaction leaves length untouched.
+    const detail = 'x'.repeat(300);
+    const adapter = scriptedAdapter([[{ type: 'error', message: detail, retryable: false }]]);
+    const { deps } = harness(adapter, fakePool(), { writeOutput });
+
+    const code = await runCli([...BASE_ARGS, '--reason-file', REASON_PATH, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.ProviderError);
+    const written = reasonText(writeOutput) as string;
+    expect(written).toHaveLength(240);
+    expect(written.endsWith('…')).toBe(true);
+  });
+
+  // A clean run has no failure to record; writing a reason file on success would
+  // leave a stale "why did it fail" note behind a run that did not fail.
+  it('writes NO reason file on a successful (exit 0) run', async () => {
+    const writeOutput = vi.fn(async (_path: string, _text: string) => {});
+    const adapter = scriptedAdapter([[{ type: 'text', delta: 'all done' }, doneEnd]]);
+    const { deps } = harness(adapter, fakePool(), { writeOutput });
+
+    const code = await runCli([...BASE_ARGS, '--reason-file', REASON_PATH, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.Success);
+    expect(reasonText(writeOutput)).toBeUndefined();
+    expect(writeOutput.mock.calls.some((c) => c[0] === REASON_PATH)).toBe(false);
+  });
+
+  // Recording the reason is best-effort: a failed write of the diagnostic must
+  // never change the exit code the run actually earned, nor throw out of runCli.
+  it('swallows a reason-file write failure, preserving the exit code', async () => {
+    const writeOutput = vi.fn(async (path: string) => {
+      if (path === REASON_PATH) throw new Error('disk full');
+    });
+    const adapter = scriptedAdapter([[{ type: 'error', message: 'Bad request: 400 invalid', retryable: false }]]);
+    const { deps } = harness(adapter, fakePool(), { writeOutput });
+
+    const code = await runCli([...BASE_ARGS, '--reason-file', REASON_PATH, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.ProviderError);
+    expect(writeOutput.mock.calls.some((c) => c[0] === REASON_PATH)).toBe(true);
+  });
+
+  // The runAgent catch path: when the loop itself throws, the reason file still
+  // gets a detail, prefixed to mark it as a provider/transport failure.
+  it('records a provider-error detail when the loop throws', async () => {
+    const writeOutput = vi.fn(async () => {});
+    const throwingAdapter: ProviderAdapter = {
+      // eslint-disable-next-line require-yield
+      async *sendMessage() {
+        throw new Error('connection reset by peer');
+      },
+    };
+    const { deps } = harness(throwingAdapter, fakePool(), { writeOutput });
+
+    const code = await runCli([...BASE_ARGS, '--reason-file', REASON_PATH, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.ProviderError);
+    expect(reasonText(writeOutput)?.startsWith('provider error: ')).toBe(true);
+  });
+});
