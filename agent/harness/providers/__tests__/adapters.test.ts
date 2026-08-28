@@ -38,6 +38,20 @@ function stubFetchText(status: number, body: string, headers: Record<string, str
   );
 }
 
+/** Build a fetch stub that throws the way a network failure does.
+ *
+ * undici rejects with `TypeError: fetch failed` for DNS, TCP, TLS and reset
+ * failures — the whole class where the request never reached the provider.
+ */
+function stubFetchThrowing(message = 'fetch failed'): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => {
+      throw new TypeError(message);
+    }),
+  );
+}
+
 /** Drive an adapter to completion and collect every yielded event. */
 async function collect(adapter: ProviderAdapter): Promise<HarnessEvent[]> {
   const events: HarnessEvent[] = [];
@@ -239,5 +253,39 @@ describe('provider adapters', () => {
     events = await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
     error = events.find((e) => e.type === 'error');
     expect(error?.type === 'error' && 'retryAfterMs' in error).toBe(false);
+  });
+});
+
+describe('a request that never reached the provider', () => {
+  // A run died on 2026-08-28 at turn 33 of 400, ~105k tokens in, to a single
+  // `fetch failed` while the host's DNS was flapping. Every HTTP *response* the
+  // provider sends becomes a retryable error event and is retried up to eight
+  // times with backoff; a *thrown* fetch was the one class that escaped the
+  // adapter entirely, past every retry, to the harness's outermost catch —
+  // ending the run on the first blip. The failure most likely to be transient
+  // had the least tolerance for being transient.
+  it('reports an Anthropic network failure as a retryable event, not a throw', async () => {
+    stubFetchThrowing();
+    const events = await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toBeDefined();
+    expect(error).toMatchObject({ retryable: true });
+    expect((error as { message: string }).message).toContain('fetch failed');
+  });
+
+  it('reports an OpenAI network failure as a retryable event, not a throw', async () => {
+    stubFetchThrowing();
+    const events = await collect(createOpenAiChatCompletionsAdapter({ apiKey: 'k', model: 'gpt' }));
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toBeDefined();
+    expect(error).toMatchObject({ retryable: true });
+  });
+
+  it('names the vendor and the cause, so the run log says which failed and why', async () => {
+    stubFetchThrowing('getaddrinfo EAI_AGAIN api.anthropic.com');
+    const events = await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    const message = (events.find((e) => e.type === 'error') as { message: string }).message;
+    expect(message).toContain('Anthropic');
+    expect(message).toContain('EAI_AGAIN');
   });
 });
