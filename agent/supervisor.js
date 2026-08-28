@@ -19,6 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
+import { secondsUntilNextSlot } from "./schedule.mjs";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -29,6 +30,16 @@ const DAILY_APPLY = process.env.DAILY_APPLY || "/app/agent/daily-apply.sh";
 const AGENT_CONFIG_JS = process.env.AGENT_CONFIG_JS || "/app/agent/agent-config.js";
 const RUN_AT_DEFAULT = (process.env.RUN_AT || "09:00,15:00").trim();
 const RUN_DAYS_DEFAULT = (process.env.RUN_DAYS || "1,2,3,4,5").trim();
+// The IANA zone the RUN_AT slots are wall-clock times in. Falls back to the
+// container's own TZ (docker-compose sets TZ=${TZ:-UTC}) so an existing
+// deployment's slots keep firing at exactly the instants they do now — before
+// this field existed the slots were resolved in container-local time. The
+// app's stored run_timezone overrides it once configured.
+const RUN_TIMEZONE_DEFAULT = (
+  process.env.RUN_TIMEZONE ||
+  process.env.TZ ||
+  "UTC"
+).trim();
 const RUN_LOG_DIR = process.env.RUN_LOG_DIR || "/app/runs";
 // The app's MCP base URL; the run-accounting routes hang off the same origin
 // with the /mcp suffix stripped, exactly as agent-config.js derives
@@ -83,6 +94,7 @@ const CANCEL_GRACE_MS = parseInt(process.env.AGENT_CANCEL_GRACE_MS || "10000", 1
 // ---------------------------------------------------------------------------
 let scheduleRunAt = RUN_AT_DEFAULT;
 let scheduleRunDays = RUN_DAYS_DEFAULT;
+let scheduleTimezone = RUN_TIMEZONE_DEFAULT;
 let scheduleRefreshedAt = 0; // epoch ms of last successful refresh
 
 // The agent-level enabled toggle from the Agents page. Three-valued on
@@ -407,10 +419,12 @@ function refreshSchedule() {
 
   const at = fetchField("run_at");
   const days = fetchField("run_days");
+  const zone = fetchField("run_timezone");
   const enabled = fetchField("enabled");
 
   scheduleRunAt = at || RUN_AT_DEFAULT;
   scheduleRunDays = days || RUN_DAYS_DEFAULT;
+  scheduleTimezone = zone || RUN_TIMEZONE_DEFAULT;
   // Keep the last known value when the fetch fails rather than flipping to
   // false: one flaky request should not read as "the operator disabled it".
   // A run needs the app anyway (daily-apply.sh aborts without its job config),
@@ -421,56 +435,37 @@ function refreshSchedule() {
   const src = at ? "config" : "env";
   log(
     `schedule refreshed (source=${src}): RUN_AT=${scheduleRunAt} RUN_DAYS=${scheduleRunDays} ` +
-      `enabled=${scheduleEnabled === null ? "unknown" : scheduleEnabled}`,
+      `TZ=${scheduleTimezone} enabled=${scheduleEnabled === null ? "unknown" : scheduleEnabled}`,
   );
 }
 
 /**
- * Mirrors entrypoint.sh seconds_until_next_slot.
- * Returns seconds until the next scheduled run (>0), or -1 if none found in 8 days.
- * @param {number} nowMs - epoch milliseconds representing "now"
+ * Render an instant as "YYYY-MM-DD HH:MM" in the given IANA zone, for logs.
+ * Falls back to UTC when the zone is unresolvable, so a bad stored zone can
+ * never crash the scheduler loop.
+ * @param {Date} date
+ * @param {string} timeZone
+ * @returns {string}
  */
-function secondsUntilNextSlot(nowMs) {
-  const nowSec = Math.floor(nowMs / 1000);
-  const slots = scheduleRunAt
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const allowedDays = scheduleRunDays
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  let best = -1;
-
-  for (let offset = 0; offset <= 8; offset++) {
-    for (const t of slots) {
-      const parts = t.split(":");
-      if (parts.length < 2) continue;
-      const hh = parseInt(parts[0], 10);
-      const mm = parseInt(parts[1], 10);
-      if (isNaN(hh) || isNaN(mm)) continue;
-
-      // Compute epoch-seconds for nowDate + offset days at HH:MM local time
-      const base = new Date(nowMs);
-      base.setHours(0, 0, 0, 0);
-      base.setDate(base.getDate() + offset);
-      base.setHours(hh, mm, 0, 0);
-      const targetSec = Math.floor(base.getTime() / 1000);
-
-      if (targetSec <= nowSec) continue;
-
-      // JS getDay(): 0=Sun, 1=Mon … 6=Sat → ISO: Mon=1 … Sun=7
-      const jsDay = base.getDay();
-      const isoDow = jsDay === 0 ? 7 : jsDay;
-      if (!allowedDays.includes(String(isoDow))) continue;
-
-      const delta = targetSec - nowSec;
-      if (best === -1 || delta < best) best = delta;
-    }
+function formatInZone(date, timeZone) {
+  try {
+    const p = Object.fromEntries(
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone,
+        hour12: false,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+        .formatToParts(date)
+        .map((x) => [x.type, x.value]),
+    );
+    return `${p.year}-${p.month}-${p.day} ${p.hour === "24" ? "00" : p.hour}:${p.minute}`;
+  } catch {
+    return date.toISOString().replace("T", " ").slice(0, 16);
   }
-
-  return best;
 }
 
 // ---------------------------------------------------------------------------
@@ -479,7 +474,7 @@ function secondsUntilNextSlot(nowMs) {
 function schedulerLoop() {
   refreshSchedule();
 
-  const secs = secondsUntilNextSlot(Date.now());
+  const secs = secondsUntilNextSlot(Date.now(), scheduleRunAt, scheduleRunDays, scheduleTimezone);
   if (secs < 0) {
     log(
       `ERROR: could not compute next slot from RUN_AT=${scheduleRunAt} RUN_DAYS=${scheduleRunDays} — retrying in 300 s`,
@@ -495,7 +490,13 @@ function schedulerLoop() {
   }
 
   const nextDate = new Date(Date.now() + secs * 1000);
-  log(`next scheduled run in ${secs}s (${nextDate.toISOString().replace("T", " ").slice(0, 16)} UTC)`);
+  // Print the next slot in the SCHEDULE's own zone as well as UTC. Logging it
+  // in UTC alone implied UTC was the schedule's clock, which is exactly the
+  // misreading a configurable run_timezone has to stop.
+  log(
+    `next scheduled run in ${secs}s (${formatInZone(nextDate, scheduleTimezone)} ${scheduleTimezone}` +
+      ` / ${nextDate.toISOString().replace("T", " ").slice(0, 16)} UTC)`,
+  );
 
   setTimeout(() => {
     if (runState.running) {

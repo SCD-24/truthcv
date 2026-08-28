@@ -297,8 +297,11 @@ _GATE_STUB="/tmp/agent-gate-stub-$$.mjs"
 
 # Slot = the minute containing now+70s, so the wait below is 18-78s.
 _GATE_TS=$(( $(date +%s) + 70 ))
-_GATE_HHMM=$(date -d "@$_GATE_TS" +%H:%M)
-_GATE_SLOT=$(date -d "$(date -d "@$_GATE_TS" +%Y-%m-%dT%H:%M:00)" +%s)
+# Resolved in UTC, and the stub below serves runTimezone:"UTC", so the slot the
+# supervisor computes is the slot this test waits for whatever the host's TZ or
+# RUN_TIMEZONE happens to be.
+_GATE_HHMM=$(TZ=UTC date -d "@$_GATE_TS" +%H:%M)
+_GATE_SLOT=$(TZ=UTC date -d "$(TZ=UTC date -d "@$_GATE_TS" +%Y-%m-%dT%H:%M:00)" +%s)
 
 cat >"$_GATE_STUB" <<'GATESTUB'
 import http from "node:http";
@@ -309,6 +312,8 @@ const CONFIG = {
   enabled: process.env.STUB_ENABLED === "true",
   runAt: [process.env.STUB_RUN_AT],
   runDays: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+  // Pinned so the slot is resolved in the same zone the test computed it in.
+  runTimezone: "UTC",
 };
 http.createServer((req, res) => {
   if (req.url === "/api/agent/config") {

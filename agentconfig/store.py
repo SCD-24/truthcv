@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import zoneinfo
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -165,6 +166,10 @@ class AgentConfig:
     blocked_companies: list[str] = field(default_factory=list)
     run_at: list[str] = field(default_factory=lambda: ["09:00", "15:00"])
     run_days: list[str] = field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
+    # Wall-clock IANA timezone that the run_at slots are interpreted in
+    # (e.g. "Europe/Berlin"). Defaults to UTC so existing schedules keep
+    # firing at exactly the same instant they do today.
+    run_timezone: str = "UTC"
     profiles: list[JobProfile] = field(default_factory=list)
     target_companies: list[str] = field(default_factory=list)
     cooldown_days: int | None = None
@@ -242,6 +247,19 @@ class AgentConfig:
         if "run_days" in raw:
             if _is_string_list(raw["run_days"]):
                 kwargs["run_days"] = raw["run_days"]
+
+        # run_timezone: str. Accepted only when it names a real IANA zone;
+        # a missing key or a garbage value leaves the dataclass default
+        # "UTC" in place rather than raising.
+        if "run_timezone" in raw:
+            value = raw["run_timezone"]
+            if isinstance(value, str) and value:
+                try:
+                    zoneinfo.ZoneInfo(value)
+                except Exception:  # ZoneInfoNotFoundError, ValueError, or anything else
+                    pass
+                else:
+                    kwargs["run_timezone"] = value
 
         # profiles: list[JobProfile]
         if "profiles" in raw:
@@ -337,6 +355,7 @@ class AgentConfig:
             "blocked_companies": self.blocked_companies,
             "run_at": self.run_at,
             "run_days": self.run_days,
+            "run_timezone": self.run_timezone,
             "profiles": [p.to_dict() for p in self.profiles],
             "job_boards": [b.to_dict() for b in self.job_boards],
             "target_companies": self.target_companies,
