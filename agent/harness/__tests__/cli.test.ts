@@ -306,3 +306,62 @@ describe('runCli token redaction', () => {
     expect(all).toContain('<redacted>');
   });
 });
+
+describe('the context window reaches the loop and the adapter', () => {
+  // The defect this whole change exists to fix was not a broken algorithm: it
+  // was a correct one that nothing ever called. These assert the wiring.
+  it('states no window by default, leaving proactive compaction off', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, createAdapter } = harness(adapter, fakePool());
+
+    await runCli([...BASE_ARGS, 'go'], {}, deps);
+
+    expect(createAdapter.mock.calls[0][0].contextWindow).toBeUndefined();
+  });
+
+  it('passes a stated window to the adapter, so ollama serves the same one', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, createAdapter } = harness(adapter, fakePool());
+
+    await runCli(['--context-window', '128000', ...BASE_ARGS, 'go'], {}, deps);
+
+    expect(createAdapter.mock.calls[0][0].contextWindow).toBe(128000);
+  });
+
+  // parseInt stops at the first non-digit and keeps what it has, so every
+  // natural way of writing a large number becomes a tiny one that validates —
+  // and a tiny window compacts the conversation to its floor every turn,
+  // silently, while the run looks healthy.
+  it.each(['1e6', '128k', '1_000_000', '0x20000', '200000abc', '1.5'])(
+    'refuses %s rather than silently reading a small number out of it',
+    async (raw) => {
+      const adapter = scriptedAdapter([[doneEnd]]);
+      const { deps, stderr } = harness(adapter, fakePool());
+
+      const code = await runCli(['--context-window', raw, ...BASE_ARGS, 'go'], {}, deps);
+
+      expect(code).toBe(ExitCode.BadConfig);
+      expect(stderr.join('\n')).toContain('--context-window');
+    },
+  );
+
+  it('refuses a window too small to be anything but a typo', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, stderr } = harness(adapter, fakePool());
+
+    const code = await runCli(['--context-window', '512', ...BASE_ARGS, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.BadConfig);
+    expect(stderr.join('\n')).toContain('at least');
+  });
+
+  it('rejects a negative window rather than treating it as unknown', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, stderr } = harness(adapter, fakePool());
+
+    const code = await runCli(['--context-window', '-1', ...BASE_ARGS, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.BadConfig);
+    expect(stderr.join('\n')).toContain('--context-window');
+  });
+});

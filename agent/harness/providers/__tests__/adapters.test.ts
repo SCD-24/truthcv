@@ -338,3 +338,28 @@ describe('a response whose body dies mid-read', () => {
     expect(events.find((e) => e.type === 'error')).toMatchObject({ retryable: true });
   });
 });
+
+describe('token usage that a compaction check can trust', () => {
+  it('counts the cached prefix as input, not just the uncached remainder', async () => {
+    // `input_tokens` excludes anything served from cache. On a long run the
+    // cached prefix IS most of the prompt, so reading it alone reports a
+    // nearly-full context as a small one.
+    stubFetch(200, {
+      content: [{ type: 'text', text: 'ok' }],
+      usage: {
+        input_tokens: 1_000,
+        cache_read_input_tokens: 90_000,
+        cache_creation_input_tokens: 4_000,
+        output_tokens: 500,
+      },
+      stop_reason: 'end_turn',
+    });
+
+    const events = await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+
+    expect(events.find((e) => e.type === 'usage')).toMatchObject({
+      inputTokens: 95_000,
+      outputTokens: 500,
+    });
+  });
+});

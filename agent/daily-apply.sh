@@ -557,6 +557,7 @@ node "$HARNESS_CLI" \
   --base-url "$AGENT_LLM_BASE_URL" \
   --mcp-config "$MCP_CONFIG" \
   --max-turns "${AGENT_MAX_TURNS:-400}" \
+  --context-window "${AGENT_CONTEXT_WINDOW:-0}" \
   --output-file "$RUN_OUTPUT" \
   </dev/null >>"$RUN_LOG" 2>&1
 

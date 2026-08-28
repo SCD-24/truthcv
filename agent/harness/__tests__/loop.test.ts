@@ -314,3 +314,132 @@ describe('a network failure the adapter reports instead of throwing', () => {
     expect(calls()).toBeGreaterThan(1);
   });
 });
+
+describe('compaction the provider asks for', () => {
+  // The path that needs no configuration: the provider says the context is too
+  // long, so no window number and no estimate can be wrong. It is the only
+  // cover for a run whose window nobody stated, and the backstop for one whose
+  // estimate ran under — which it will, on dense JSON tool results.
+  const overflow: HarnessEvent = {
+    type: 'error',
+    message: 'Anthropic request failed with status 400: prompt is too long: 214000 tokens > 200000 maximum',
+    retryable: false,
+  };
+
+  function longConversation() {
+    return Array.from({ length: 40 }, (_, i) => ({
+      role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+      content: `turn ${i} `.repeat(50),
+    }));
+  }
+
+  it('compacts and resends instead of ending the run', async () => {
+    const { adapter, calls } = scriptedAdapter([[overflow], [doneEnd]]);
+    const { pool } = fakePool();
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: longConversation(),
+      config: { maxTurns: 5 },
+      sleep: async () => {},
+    });
+
+    expect(result.stopReason).toBe('end');
+    expect(calls()).toBeGreaterThan(1);
+  });
+
+  it('reports the compaction it was forced into', async () => {
+    const { adapter } = scriptedAdapter([[overflow], [doneEnd]]);
+    const { pool } = fakePool();
+    const events: string[] = [];
+
+    await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: longConversation(),
+      config: { maxTurns: 5 },
+      sleep: async () => {},
+      onEvent: (e) => {
+        if ('kind' in e && e.kind === 'compaction') events.push(e.detail ?? '');
+      },
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toContain('provider reported the context was too long');
+  });
+
+  it('gives up when there is nothing left to compact, rather than spinning', async () => {
+    // Already at the floor: the pinned instructions plus the recent turns.
+    // Compacting removes nothing, so resending would be byte-identical.
+    const { adapter, calls } = scriptedAdapter([[overflow]]);
+    const { pool } = fakePool();
+    const stops: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: [{ role: 'user', content: 'instructions' }],
+      config: { maxTurns: 5 },
+      sleep: async () => {},
+      onEvent: (e) => {
+        if ('kind' in e && e.kind === 'stop') stops.push(e.detail ?? '');
+      },
+    });
+
+    expect(result.stopReason).toBe('error');
+    expect(calls()).toBe(1);
+    // Asserting the reason, not just the failure: pre-change this message
+    // classified as a plain bad-request and also ended the run after one
+    // request, so stopReason alone cannot tell the two apart.
+    expect(stops).toContain('context overflow with nothing left to compact');
+  });
+
+  it('stops once compacting stops helping, without exhausting the cap', () => {
+    // Compaction is single-pass: after one pass the history is already at its
+    // floor (pinned instructions + summary + KEEP_RECENT), so a second pass
+    // removes nothing. The "did it actually shrink" check is therefore the
+    // bound that fires in practice, and maxOverflowCompactions is the
+    // secondary guard for a compactor that does keep shrinking.
+    return (async () => {
+      const { adapter, calls } = scriptedAdapter([[overflow]]);
+      const { pool } = fakePool();
+
+      const result = await runLoop({
+        adapter,
+        pool,
+        systemPrompt: 'you are an agent',
+        initialMessages: longConversation(),
+        config: { maxTurns: 50, maxOverflowCompactions: 5 },
+        sleep: async () => {},
+      });
+
+      expect(result.stopReason).toBe('error');
+      // The original attempt, one compaction, one resend — then it stops.
+      expect(calls()).toBe(2);
+    })();
+  });
+
+  it('starts the overflow budget again after a turn the provider accepted', async () => {
+    // The budget guards a conversation that will not shrink, not a long run
+    // that legitimately overflows more than three times.
+    const overflowThenWork: HarnessEvent[][] = [];
+    for (let i = 0; i < 5; i += 1) overflowThenWork.push([overflow], [doneToolCalls()], [doneEnd]);
+    const { adapter } = scriptedAdapter(overflowThenWork);
+    const { pool } = fakePool();
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: longConversation(),
+      config: { maxTurns: 50, maxOverflowCompactions: 1 },
+      sleep: async () => {},
+    });
+
+    expect(result.stopReason).toBe('end');
+  });
+});

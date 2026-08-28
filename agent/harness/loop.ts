@@ -22,7 +22,7 @@ import type {
 } from './providers/types.js';
 import type { McpClientPool } from './mcp/client.js';
 import { buildToolRegistry, executeToolCall, type RegisteredTool } from './tools.js';
-import { compact, shouldCompact, type CompactionConfig } from './compaction.js';
+import { compact, shouldCompact, type CompactionConfig, type TokenUsage } from './compaction.js';
 
 /** An error event narrowed out of the {@link HarnessEvent} union. */
 type ErrorEvent = Extract<HarnessEvent, { type: 'error' }>;
@@ -43,6 +43,15 @@ const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
  * ever advancing a turn or a reflection, defeating the loop's own turn cap.
  */
 const DEFAULT_MAX_RETRIES = 8;
+
+/**
+ * Default cap on CONSECUTIVE compactions forced by a provider context-overflow
+ * error. Reset by any turn that succeeds, because the thing worth stopping is
+ * a conversation that will not shrink — not a long run that legitimately
+ * overflows several times, which a 400-turn run on a small window will. Distinct from the retry cap: a retry resends the same request,
+ * while this changes it, so the two must not share a budget.
+ */
+const DEFAULT_MAX_OVERFLOW_COMPACTIONS = 3;
 
 /** Base unit for exponential backoff and its jitter, in milliseconds. */
 const BASE_RETRY_DELAY_MS = 1_000;
@@ -83,6 +92,8 @@ export interface LoopConfig {
   maxConsecutiveReflections?: number;
   /** Ceiling on any single retry backoff delay, in ms. Defaults to 60000. */
   maxRetryDelayMs?: number;
+  /** Cap on CONSECUTIVE context-overflow compactions. Defaults to 3. */
+  maxOverflowCompactions?: number;
   /** Cap on consecutive retryable-error retries within one turn. Defaults to 8. */
   maxConsecutiveRetries?: number;
   /**
@@ -162,6 +173,15 @@ interface LoopState {
   turns: number;
   reflections: number;
   retries: number;
+  /** The provider's own token count for the last request it answered, and how
+   * many messages that count covered — so the next check can add an estimate
+   * for what has been appended since rather than re-guessing the whole log. */
+  usage?: TokenUsage;
+  usageCoveredMessages: number;
+  /** Consecutive compactions forced by a provider context-overflow error,
+   * bounded so a conversation that will not shrink cannot loop forever. Reset
+   * by any successful turn. */
+  overflowCompactions: number;
   /** Whether the wrap-up instruction has already been delivered, so entering
    * the window repeatedly cannot append it on every remaining turn. */
   wrapUpSent: boolean;
@@ -172,6 +192,9 @@ interface LoopContext {
   pool: McpClientPool;
   registry: RegisteredTool[];
   config: LoopConfig;
+  /** Present only when the operator stated a context window; the reactive
+   * overflow path works without it, since compact() needs no window. */
+  compactionConfig?: CompactionConfig;
   onEvent?: (event: HarnessEvent | LoopEvent) => void;
   sleep: (ms: number) => Promise<void>;
 }
@@ -199,10 +222,34 @@ function classifyRetryable(msg: string): ErrorClass {
   return 'service-unavailable';
 }
 
+/**
+ * Wordings providers actually use to say the request was too long.
+ *
+ * Matched on the message because that is all a 400 gives us — the status is
+ * shared with every other malformed request. Deliberately broader than the
+ * single word "context": Anthropic says "prompt is too long: N tokens > M
+ * maximum", which contains neither "context" nor "too many tokens", so the
+ * obvious check misses the one provider this deployment uses by default.
+ *
+ * Every alternative is anchored to a phrase a provider writes about its own
+ * limits, never a bare noun. The matched string carries up to 300 characters
+ * of the provider's body, and a validation error routinely quotes the request
+ * — which for this agent is scraped job-posting text, i.e. arbitrary prose
+ * that can contain "context window" by coincidence.
+ *
+ * The two errors are not symmetric. A miss ends the run on a fatal
+ * bad-request. A false positive discards conversation history — irreversibly,
+ * up to the consecutive cap — and then ends the run anyway, having told the
+ * operator the context was too long when it was not. So the bar for adding an
+ * alternative here is a phrase that cannot appear in a posting.
+ */
+const OVERFLOW_MESSAGE =
+  /prompt is too long|maximum context length|context[\s_-]?length exceeded|context_length_exceeded|maximum.{0,20}context window|too many tokens|exceeds the maximum number of tokens|input token count (?:exceeds|too large)/i;
+
 /** Narrow a non-retryable error message to its bucket. */
 function classifyFatal(msg: string): ErrorClass {
   if (msg.includes('auth') || msg.includes('401') || msg.includes('403')) return 'authentication';
-  if (msg.includes('context') || msg.includes('too many tokens')) return 'context-window-exceeded';
+  if (OVERFLOW_MESSAGE.test(msg)) return 'context-window-exceeded';
   if (msg.includes('usage limit') || msg.includes('quota')) return 'usage-limit';
   return 'bad-request';
 }
@@ -235,14 +282,36 @@ export function backoffDelay(attempt: number, maxRetryDelayMs: number): number {
 export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
   const { adapter, pool, systemPrompt, initialMessages, config, compactionConfig, onEvent } = opts;
   const sleep = opts.sleep ?? defaultSleep;
-  const state: LoopState = { messages: [...initialMessages], turns: 0, reflections: 0, retries: 0, wrapUpSent: false };
+  const state: LoopState = {
+    messages: [...initialMessages],
+    turns: 0,
+    reflections: 0,
+    retries: 0,
+    usageCoveredMessages: 0,
+    overflowCompactions: 0,
+    wrapUpSent: false,
+  };
   while (true) {
     const registry = await refreshRegistry(pool);
-    state.messages = maybeCompact(state.messages, compactionConfig, onEvent);
+    state.messages = maybeCompact(state, compactionConfig, onEvent);
     const tools = registry.map((r) => r.definition);
     const request: ModelRequest = { systemPrompt, messages: state.messages, tools };
-    const outcome = await runOneTurn(adapter, request, onEvent);
-    const result = await applyOutcome(outcome, state, { pool, registry, config, onEvent, sleep });
+    const sentMessageCount = state.messages.length;
+    const { outcome, usage } = await runOneTurn(adapter, request, onEvent);
+    if (usage) {
+      // Anchor the next estimate: this count describes exactly the messages
+      // that were sent, so only what is appended after it needs estimating.
+      state.usage = usage;
+      state.usageCoveredMessages = sentMessageCount;
+    }
+    const result = await applyOutcome(outcome, state, {
+      pool,
+      registry,
+      config,
+      compactionConfig,
+      onEvent,
+      sleep,
+    });
     if (result) return result;
   }
 }
@@ -253,16 +322,51 @@ async function refreshRegistry(pool: McpClientPool): Promise<RegisteredTool[]> {
   return buildToolRegistry(pool.listTools());
 }
 
-/** Apply compaction before sending, but only when a real context window is set. */
+/**
+ * Apply compaction before sending, but only when a real context window is set.
+ *
+ * The window is the operator's to state (see cli.ts): unknown means no
+ * proactive compaction, because compacting against a guessed window is worse
+ * than not compacting — too high still overflows, too low silently throws away
+ * context that was fitting. Runs without a stated window are covered by the
+ * reactive path in {@link applyError} instead, which needs no number because
+ * the provider supplies the verdict.
+ *
+ * Only the messages appended since the provider's last count are estimated;
+ * the counted prefix uses the provider's own number.
+ */
 function maybeCompact(
-  messages: ConversationMessage[],
+  state: LoopState,
   config: CompactionConfig | undefined,
   onEvent?: (event: HarnessEvent | LoopEvent) => void,
 ): ConversationMessage[] {
-  if (!config || !config.contextWindow) return messages;
-  if (!shouldCompact(messages, undefined, config)) return messages;
-  const { messages: compacted, record } = compact(messages, config);
-  if (record) onEvent?.(loopEvent('compaction', undefined, record.summary));
+  if (!config || !config.contextWindow) return state.messages;
+  const untracked = state.messages.slice(state.usageCoveredMessages);
+  if (!shouldCompact(untracked, state.usage, config)) return state.messages;
+  return applyCompaction(state, config, onEvent, 'approaching the context window');
+}
+
+/**
+ * Compact, reset the usage anchor, and report it. Shared by the proactive and
+ * reactive paths so a compaction is recorded and re-anchored identically
+ * however it was triggered.
+ *
+ * The anchor must be dropped here: the provider's last count described a
+ * conversation that no longer exists, and carrying it forward would keep
+ * re-triggering against a prefix that has been thrown away.
+ */
+function applyCompaction(
+  state: LoopState,
+  config: CompactionConfig,
+  onEvent: ((event: HarnessEvent | LoopEvent) => void) | undefined,
+  why: string,
+): ConversationMessage[] {
+  const { messages: compacted, record } = compact(state.messages, config);
+  if (record) {
+    state.usage = undefined;
+    state.usageCoveredMessages = 0;
+    onEvent?.(loopEvent('compaction', state.turns, `${why}: ${record.summary}`));
+  }
   return compacted;
 }
 
@@ -271,15 +375,20 @@ async function runOneTurn(
   adapter: ProviderAdapter,
   request: ModelRequest,
   onEvent?: (event: HarnessEvent | LoopEvent) => void,
-): Promise<TurnOutcome> {
+): Promise<{ outcome: TurnOutcome; usage?: TokenUsage }> {
   let terminal: TurnOutcome | undefined;
+  let usage: TokenUsage | undefined;
   for await (const event of adapter.sendMessage(request)) {
     onEvent?.(event);
     if (event.type === 'done') terminal = { kind: 'done', done: event };
     else if (event.type === 'error') terminal = { kind: 'error', error: event };
+    else if (event.type === 'usage') usage = { inputTokens: event.inputTokens, outputTokens: event.outputTokens };
   }
-  if (terminal) return terminal;
-  return { kind: 'error', error: { type: 'error', message: 'Adapter ended without a terminal event', retryable: false } };
+  if (terminal) return { outcome: terminal, usage };
+  return {
+    outcome: { kind: 'error', error: { type: 'error', message: 'Adapter ended without a terminal event', retryable: false } },
+    usage,
+  };
 }
 
 /** Dispatch a terminal outcome; a returned result ends the loop. */
@@ -299,10 +408,52 @@ async function applyOutcome(
 async function applyError(error: ErrorEvent, state: LoopState, ctx: LoopContext): Promise<LoopResult | undefined> {
   if (isMalformedToolCall(error)) return reflect(error, state, ctx);
   const cls = classifyError(error);
+  if (cls === 'context-window-exceeded') return compactAndRetry(state, ctx);
   if (!isRetryable(cls)) return finish('error', state, ctx, `non-retryable error: ${cls}`);
   const maxRetries = ctx.config.maxConsecutiveRetries ?? DEFAULT_MAX_RETRIES;
   if (state.retries >= maxRetries) return finish('error', state, ctx, 'retry limit exceeded');
   await backoff(state, ctx, error);
+  return undefined;
+}
+
+/**
+ * Compact in response to the provider saying the context is too long, and let
+ * the loop resend the same turn.
+ *
+ * This is the path that works on every provider without any configuration:
+ * the verdict comes from the provider, so no context-window number is needed
+ * and no estimate can be wrong. It is also the only cover for a run whose
+ * window the operator did not state, and the backstop for one whose estimate
+ * ran under — which it will, because the estimate is roughly four characters
+ * per token and this agent's history is dense JSON tool results and page
+ * snapshots, where that under-reports.
+ *
+ * Two bounds, because a conversation that cannot shrink must not spin: a cap
+ * on how many times one run may do this, and a check that the compaction
+ * actually removed something. Without the second, a history already at its
+ * floor — the pinned instructions plus the recent turns — would resend a
+ * byte-identical oversized request forever.
+ */
+async function compactAndRetry(state: LoopState, ctx: LoopContext): Promise<LoopResult | undefined> {
+  const max = ctx.config.maxOverflowCompactions ?? DEFAULT_MAX_OVERFLOW_COMPACTIONS;
+  if (state.overflowCompactions >= max) {
+    return finish('error', state, ctx, 'context overflow persisted after compaction');
+  }
+  const before = state.messages.length;
+  const { messages: compacted, record } = compact(state.messages, ctx.compactionConfig ?? { contextWindow: 0 });
+  // Checked before anything is reported or reset: a compaction that removed
+  // nothing must not appear in the run log, and must not clear the usage
+  // anchor on its way out.
+  if (!record || compacted.length >= before) {
+    return finish('error', state, ctx, 'context overflow with nothing left to compact');
+  }
+  state.messages = compacted;
+  state.usage = undefined;
+  state.usageCoveredMessages = 0;
+  state.overflowCompactions += 1;
+  ctx.onEvent?.(
+    loopEvent('compaction', state.turns, `provider reported the context was too long: ${record.summary}`),
+  );
   return undefined;
 }
 
@@ -342,6 +493,11 @@ async function backoff(state: LoopState, ctx: LoopContext, error: ErrorEvent): P
 async function applyDone(done: DoneEvent, state: LoopState, ctx: LoopContext): Promise<LoopResult | undefined> {
   state.retries = 0;
   state.reflections = 0;
+  // A turn the provider accepted proves the conversation fits, so the overflow
+  // budget starts again. Left as a lifetime count it would kill a long run
+  // that legitimately overflows every N turns on a small window — which is the
+  // shape of a 400-turn run, not a fault.
+  state.overflowCompactions = 0;
   state.turns += 1;
   state.messages.push(done.message);
   return dispatchStopReason(done, state, ctx);
