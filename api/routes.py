@@ -211,15 +211,26 @@ def _run_models(records: list) -> list[RunModel]:
 
 
 @router.get("/runs", response_model=RunListResponse)
-def list_runs(limit: int = 50) -> RunListResponse:
-    """The most recently started agent runs, newest first.
+def list_runs(limit: int = 50, offset: int = 0) -> RunListResponse:
+    """One page of the most recently started agent runs, newest first.
 
     Reads the shared data volume in-process via runs.store — this does NOT
     proxy to the supervisor, unlike the /agent/* routes, because the run
     records live on the volume the API already has access to.
+
+    A negative offset is clamped to 0 rather than rejected: it is a client
+    that paged past the start, and an empty first page is a worse answer than
+    the first page. An offset past the end yields an empty page — the total
+    tells the client it overshot.
     """
-    records = runs_store.list_recent(limit=limit)
-    return RunListResponse(runs=_run_models(records))
+    offset = max(0, offset)
+    records = runs_store.list_recent(limit=limit, offset=offset)
+    return RunListResponse(
+        runs=_run_models(records),
+        total=runs_store.count(),
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/runs/{run_id}", response_model=RunModel)

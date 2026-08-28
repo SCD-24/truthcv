@@ -75,12 +75,34 @@ def get(run_id: str) -> RunRecord | None:
     return next((r for r in load_all() if r.id == run_id), None)
 
 
-def list_recent(limit: int = 50) -> list[RunRecord]:
-    """The most recently started runs, newest first."""
+def list_recent(limit: int = 50, offset: int = 0) -> list[RunRecord]:
+    """One page of the most recently started runs, newest first.
+
+    ``offset`` skips that many of the newest runs before the page starts, so
+    the caller can page backwards through history. It is applied BEFORE the
+    limit, and an offset past the end yields an empty list rather than an
+    error — a page that no longer exists (runs were pruned, or the caller held
+    a stale page number) is an empty page, not a failure.
+
+    ``limit`` of 0 or less still means "no limit", which is what the callers
+    that want the whole history rely on.
+    """
     runs = sorted(load_all(), key=lambda r: r.started_at, reverse=True)
+    if offset > 0:
+        runs = runs[offset:]
     if limit and limit > 0:
         return runs[:limit]
     return runs
+
+
+def count() -> int:
+    """How many runs have been recorded in total.
+
+    Separate from list_recent because a paginated caller needs the total to
+    know how many pages there are, and deriving it from a page is impossible
+    once the page is capped.
+    """
+    return len(load_all())
 
 
 def start(run_id: str, trigger: str = "", apply_cap: int = 0) -> RunRecord:

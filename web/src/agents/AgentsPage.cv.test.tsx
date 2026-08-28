@@ -26,7 +26,7 @@ vi.mock("../api/client", () => ({
   getRouting: vi.fn(),
   listConnections: vi.fn(),
   listConnectionModels: vi.fn(),
-  listRuns: vi.fn().mockResolvedValue([]),
+  listRuns: vi.fn().mockResolvedValue({ runs: [], total: 0, limit: 5, offset: 0 }),
   getSigninQueue: vi.fn().mockResolvedValue({ sites: [] }),
 }));
 

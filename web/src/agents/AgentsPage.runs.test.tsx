@@ -1,9 +1,16 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { RecentRunsSection } from "./AgentsPage";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { RecentRunsSection, STATUS_POLL_IDLE_MS } from "./AgentsPage";
 import * as client from "../api/client";
-import type { RunRecord } from "../api/types";
+import type { RunPage, RunRecord } from "../api/types";
+
+/** Wrap runs in the paged response shape the endpoint returns. `total`
+ * defaults to the page's own length, which is what a single-page history
+ * looks like; the pagination tests pass a larger one explicitly. */
+function makePage(runs: RunRecord[], total = runs.length, offset = 0): RunPage {
+  return { runs, total, limit: 5, offset };
+}
 
 function makeRun(overrides: Partial<RunRecord> = {}): RunRecord {
   return {
@@ -32,13 +39,15 @@ afterEach(() => {
 
 describe("RecentRunsSection", () => {
   it("renders coverage counters and stopped_reason for a finished run", async () => {
-    vi.spyOn(client, "listRuns").mockResolvedValue([
-      makeRun({
-        id: "run-finished",
-        status: "completed",
-        stoppedReason: "apply cap reached",
-      }),
-    ]);
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([
+        makeRun({
+          id: "run-finished",
+          status: "completed",
+          stoppedReason: "apply cap reached",
+        }),
+      ]),
+    );
 
     render(<RecentRunsSection />);
 
@@ -52,9 +61,9 @@ describe("RecentRunsSection", () => {
   });
 
   it("renders a running run distinctly from a finished one", async () => {
-    vi.spyOn(client, "listRuns").mockResolvedValue([
-      makeRun({ id: "run-active", status: "running", finishedAt: "" }),
-    ]);
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([makeRun({ id: "run-active", status: "running", finishedAt: "" })]),
+    );
 
     render(<RecentRunsSection />);
 
@@ -63,10 +72,96 @@ describe("RecentRunsSection", () => {
   });
 
   it("shows a message when no runs are recorded", async () => {
-    vi.spyOn(client, "listRuns").mockResolvedValue([]);
+    vi.spyOn(client, "listRuns").mockResolvedValue(makePage([]));
 
     render(<RecentRunsSection />);
 
     await waitFor(() => expect(screen.getByText("No runs recorded yet.")).toBeTruthy());
+  });
+
+  it("asks for five runs at a time, newest first", async () => {
+    const spy = vi.spyOn(client, "listRuns").mockResolvedValue(makePage([makeRun()]));
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(spy).toHaveBeenCalledWith(5, 0);
+  });
+
+  it("pages forward and back by five, and disables the ends", async () => {
+    const spy = vi
+      .spyOn(client, "listRuns")
+      .mockImplementation(async (_limit?: number, offset = 0) =>
+        makePage([makeRun({ id: `run-at-${offset}` })], 12, offset),
+      );
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("run-at-0")).toBeTruthy());
+    // 12 runs, 5 per page -> 3 pages.
+    expect(screen.getByText("Page 1 of 3")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Previous" }).hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(screen.getByText("run-at-5")).toBeTruthy());
+    expect(spy).toHaveBeenCalledWith(5, 5);
+    expect(screen.getByText("Page 2 of 3")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(screen.getByText("run-at-10")).toBeTruthy());
+    expect(screen.getByText("Page 3 of 3")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Next" }).hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+    await waitFor(() => expect(screen.getByText("Page 2 of 3")).toBeTruthy());
+  });
+
+  it("stops at ten pages and says how many runs it is not listing", async () => {
+    vi.spyOn(client, "listRuns").mockImplementation(async (_limit?: number, offset = 0) =>
+      makePage([makeRun({ id: `run-at-${offset}` })], 63, offset),
+    );
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("Page 1 of 10")).toBeTruthy());
+    // 63 runs would be 13 pages uncapped. Truncating silently would read as
+    // "this is all of them".
+    expect(screen.getByText(/13 older runs are not listed here/)).toBeTruthy();
+    expect(screen.getByText(/Showing the 50 most recent runs/)).toBeTruthy();
+  });
+
+  it("does not claim runs are hidden when they all fit", async () => {
+    vi.spyOn(client, "listRuns").mockResolvedValue(makePage([makeRun()], 4));
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("Page 1 of 1")).toBeTruthy());
+    expect(screen.queryByText(/not listed here/)).toBeNull();
+  });
+
+  it("steps back when the page it is on stops existing", async () => {
+    // A run history that shrinks under the current page — the last page is
+    // otherwise left empty with Previous as the only way out. The shrink is
+    // noticed by the section's own poll, so drive that clock rather than
+    // waiting ten real seconds for it.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let total = 12;
+    vi.spyOn(client, "listRuns").mockImplementation(async (_limit?: number, offset = 0) =>
+      makePage(offset < total ? [makeRun({ id: `run-at-${offset}` })] : [], total, offset),
+    );
+
+    try {
+      render(<RecentRunsSection />);
+      await waitFor(() => expect(screen.getByText("Page 1 of 3")).toBeTruthy());
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      await waitFor(() => expect(screen.getByText("Page 3 of 3")).toBeTruthy());
+
+      total = 6;
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_IDLE_MS + 1);
+      await waitFor(() => expect(screen.getByText("Page 2 of 2")).toBeTruthy());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
