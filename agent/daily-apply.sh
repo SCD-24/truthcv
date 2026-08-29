@@ -226,11 +226,55 @@ log "agent mode: $AGENT_MODE"
 PROMPT="$(cat "$PROMPT_FILE")"$'\n\n'"Today is $(date +%Y-%m-%d)."
 
 # agent/prompt.md tells the agent to "read agent/RUNBOOK.md in full before
-# doing anything else", but the harness has no Read tool — no file access at
-# all — so the runbook cannot be fetched at runtime. Inline its full text here
-# so the operating spec the prompt refers to actually travels with the prompt.
+# doing anything else". The harness's only file-reading tool is
+# read_runbook_section (agent/harness/builtins/readRunbook.ts) — it returns
+# one named section of RUNBOOK.md on request and takes no path argument, so
+# it cannot read anything else. The full 39.8KB RUNBOOK no longer travels in
+# this permanently-pinned first message (every token here is paid on every
+# turn of the run, cached or not, for the life of the conversation): only its
+# non-negotiable rules/invariants are inlined below, verbatim from the file,
+# plus a table of contents of every section heading. Every other section —
+# the per-phase how-to — is fetched on demand with read_runbook_section, and
+# the agent is told to do so before starting the phase it covers.
 # $RUNBOOK is checked readable in the preconditions above.
-PROMPT="$PROMPT"$'\n\n'"## Operating spec (agent/RUNBOOK.md)"$'\n\n'"$(cat "$RUNBOOK")"
+#
+# The ranges below are section numbers, not headings, so a RUNBOOK edit that
+# only changes prose (not renumbers a section) needs no change here; a
+# renumbering does, and test-prompt-render.sh's Case 12 plus this script
+# failing to find a "## N." marker (awk silently prints nothing for a range
+# whose start never matches) are the signals that it drifted.
+RUNBOOK_TOC="$(grep -E '^##[^#]' "$RUNBOOK" | sed -E 's/^##[[:space:]]*/- /')"
+RUNBOOK_RULES="$(awk '
+  /^## 1\. There is no daily quota/,/^## 2\./   { if ($0 !~ /^## 2\./) print }
+  /^## 4\. Truthfulness rules/,/^## 5\./         { if ($0 !~ /^## 5\./) print }
+  /^## 7\. When something is ambiguous/,/^## 8\./ { if ($0 !~ /^## 8\./) print }
+  /^## 8\. Never do/,/^## 9\./                    { if ($0 !~ /^## 9\./) print }
+' "$RUNBOOK")"
+
+PROMPT="$PROMPT"$'\n\n'"## Operating spec (agent/RUNBOOK.md) — non-negotiable rules
+
+Also non-negotiable, detailed in the full section — call read_runbook_section
+with EXACTLY this heading text (section numbers included, case-insensitive)
+before you need it:
+- \"0. The approved queue — work it first\": approved-queue postings are
+  applied to before anything new is discovered, every run.
+- \"2. Hard filters — every criterion of the matched profile must pass\":
+  every criterion of the matched profile must pass, no exceptions, no
+  judgment calls.
+- \"3. Canonical answers — call \`get_profile_answers\`\": screening-question
+  answers come only from get_profile_answers, never invented or guessed.
+- \"5. Applying\" (its \"Both documents go up\" subsection): a passing
+  posting gets a CV **and** a cover letter — never one without the other to
+  save cost.
+- record_screening REJECTS the call and stores nothing unless company,
+  verdict, role and url all carry usable values, on every screening you
+  record, rejections included (see \"6. The approve/deny boundary\")."$'\n\n'"$RUNBOOK_RULES"$'\n\n'"## Operating spec — table of contents
+
+Call read_runbook_section(section: <heading text below, exactly as written,
+including its number>) for a section's full procedure before you start the
+phase it covers — its detail is not inlined here. A \"##\" section's fetch
+also returns its \"###\" subsections (e.g. fetching \"5. Applying\" includes
+\"Both documents go up\")."$'\n\n'"$RUNBOOK_TOC"
 
 PROMPT="$PROMPT"$'\n\n'"## Run identity
 
@@ -522,20 +566,22 @@ esac
 # check_cooldown, get_canonical_cv, get_profile_answers, record_company_board,
 # get_job_profiles, recommend_salary, get_approved_applications,
 # report_apply_failure, record_company_finding, get_company_findings, start_run,
-# finish_run, record_run_note, record_postings_seen), plus the browser server
-# granted WHOLE. Naming
-# each truthcv tool keeps the blast radius of a new server-side tool at zero
-# until it is granted on purpose; the browser server is upstream @playwright/mcp
-# (browser/Dockerfile) and renames/extends its own tools on version bumps, so it
-# is trusted whole and containment comes from the container instead (no host
-# filesystem, no host network, its profile on its own volume, the app data
-# volume read-only). Read/Write/WebSearch/WebFetch are gone entirely: the
-# harness has no built-in tools of its own, only MCP tools exist to be granted.
+# finish_run, record_run_note, record_postings_seen), plus an enumerated
+# allow-list of browser server tools (BROWSER_ALLOWED_TOOL_NAMES in
+# agent/harness/tools.ts, mirrored in mcp.json's browser.allowedTools) — only
+# the tool names this RUNBOOK actually calls, not the whole upstream
+# @playwright/mcp server; the harness fails loudly at startup if one of those
+# names is missing from what the browser server advertises. Naming each tool
+# keeps the blast radius of a new server-side tool at zero until it is granted
+# on purpose. Read/Write/WebSearch/WebFetch are gone entirely: the harness's
+# only non-MCP tool is read_runbook_section, which returns one named section
+# of RUNBOOK.md and takes no path argument (no general filesystem read).
 
 # This is an unattended run with stdin at /dev/null, so it cannot block on any
 # approval prompt — the harness's hardcoded allow-list, not an interactive
-# prompt, is the authorization boundary. The composed prompt (with the RUNBOOK
-# inlined, since the harness has no Read tool) is handed over via a temp file.
+# prompt, is the authorization boundary. The composed prompt (with the
+# RUNBOOK's non-negotiable rules and a table of contents, not the whole file
+# — see above) is handed over via a temp file.
 log "invoking agent harness... (provider: $AGENT_LLM_PROVIDER, browser driver: $AGENT_BROWSER_DRIVER)"
 
 HARNESS_PROMPT_FILE="$(mktemp)"
@@ -558,6 +604,8 @@ node "$HARNESS_CLI" \
   --mcp-config "$MCP_CONFIG" \
   --max-turns "${AGENT_MAX_TURNS:-400}" \
   --context-window "${AGENT_CONTEXT_WINDOW:-0}" \
+  --max-tool-result-chars "${AGENT_MAX_TOOL_RESULT_CHARS:-24000}" \
+  --prompt-cache "${AGENT_PROMPT_CACHE:-true}" \
   --output-file "$RUN_OUTPUT" \
   --reason-file "$REASON_FILE" \
   </dev/null >>"$RUN_LOG" 2>&1

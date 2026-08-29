@@ -363,3 +363,67 @@ describe('token usage that a compaction check can trust', () => {
     });
   });
 });
+
+describe('anthropic prompt caching', () => {
+  /** A request with several tools and two message turns, so the tools array and
+   * both the first and last message carry real content blocks to mark. */
+  const cachingRequest: ModelRequest = {
+    systemPrompt: 'you are a test',
+    messages: [
+      { role: 'user', content: 'first turn' },
+      { role: 'assistant', content: 'second turn' },
+    ],
+    tools: [
+      { name: 'foo', description: 'the foo tool', inputSchema: { type: 'object' } },
+      { name: 'bar', description: 'the bar tool', inputSchema: { type: 'object' } },
+    ],
+  };
+
+  it('sends a byte-identical cached prefix on repeated requests', async () => {
+    // Anthropic's server-side cache only hits when the prefix (tools + the
+    // opening message) is identical byte-for-byte across requests.
+    stubFetch(200, { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' });
+    const adapter = createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' });
+    for await (const _ of adapter.sendMessage(cachingRequest)) void _;
+    for await (const _ of adapter.sendMessage(cachingRequest)) void _;
+    const calls = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls;
+    const body1 = JSON.parse((calls[0][1] as { body: string }).body);
+    const body2 = JSON.parse((calls[1][1] as { body: string }).body);
+    expect(JSON.stringify(body1.tools)).toBe(JSON.stringify(body2.tools));
+    expect(JSON.stringify(body1.messages[0])).toBe(JSON.stringify(body2.messages[0]));
+  });
+
+  it('marks cache_control breakpoints within the 4-block budget', async () => {
+    stubFetch(200, { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' });
+    const adapter = createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' });
+    for await (const _ of adapter.sendMessage(cachingRequest)) void _;
+    const call = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const raw = (call[1] as { body: string }).body;
+    const body = JSON.parse(raw) as {
+      tools: Array<{ cache_control?: unknown }>;
+      messages: Array<{ content: Array<{ cache_control?: unknown }> }>;
+    };
+
+    const lastTool = body.tools[body.tools.length - 1];
+    expect(lastTool.cache_control).toEqual({ type: 'ephemeral' });
+
+    const firstMsg = body.messages[0];
+    expect(firstMsg.content[firstMsg.content.length - 1].cache_control).toEqual({ type: 'ephemeral' });
+
+    const lastMsg = body.messages[body.messages.length - 1];
+    expect(lastMsg.content[lastMsg.content.length - 1].cache_control).toEqual({ type: 'ephemeral' });
+
+    const count = (raw.match(/cache_control/g) ?? []).length;
+    expect(count).toBeLessThanOrEqual(4);
+  });
+
+  it('writes zero cache_control blocks when promptCache is false', async () => {
+    stubFetch(200, { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' });
+    const adapter = createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude', promptCache: false });
+    for await (const _ of adapter.sendMessage(cachingRequest)) void _;
+    const call = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const raw = (call[1] as { body: string }).body;
+    expect(raw).not.toContain('cache_control');
+    expect((raw.match(/cache_control/g) ?? []).length).toBe(0);
+  });
+});

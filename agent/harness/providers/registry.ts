@@ -32,6 +32,13 @@ export interface ProviderAdapterOptions {
   contextWindow?: number;
   /** How to present the token; defaults to api-key routing when absent. */
   authType?: AuthType;
+  /**
+   * Whether Anthropic prompt-cache `cache_control` breakpoints are placed on
+   * the wire. Defaults to true when undefined; false disables caching entirely.
+   * Anthropic-only — ignored by the OpenAI-wire adapter, which relies on
+   * automatic prefix caching.
+   */
+  promptCache?: boolean;
 }
 
 /** Default base URLs for OpenAI-wire providers when none is supplied. */
@@ -47,6 +54,7 @@ function buildAnthropic(opts: ProviderAdapterOptions): ProviderAdapter {
     model: opts.model,
     baseUrl: opts.baseUrl || undefined,
     ...(useOauth ? { oauthToken: opts.token } : { apiKey: opts.token }),
+    ...(opts.promptCache !== undefined ? { promptCache: opts.promptCache } : {}),
   });
 }
 

@@ -25,6 +25,19 @@ describe('loadMcpConfig', () => {
     const servers = loadMcpConfig(mcpJsonPath, {} as NodeJS.ProcessEnv);
     expect(servers.map((s) => s.name).sort()).toEqual(['browser', 'truthcv']);
   });
+
+  it('parses the browser server allowedTools allow-list', () => {
+    const servers = loadMcpConfig(mcpJsonPath, {} as NodeJS.ProcessEnv);
+    const browser = servers.find((s) => s.name === 'browser');
+    expect(browser?.allowedTools).toEqual(expect.arrayContaining(['browser_snapshot', 'browser_navigate']));
+  });
+
+  it('leaves allowedTools absent for a server that declares none (truthcv)', () => {
+    const servers = loadMcpConfig(mcpJsonPath, {} as NodeJS.ProcessEnv);
+    const truthcv = servers.find((s) => s.name === 'truthcv');
+    expect(truthcv?.allowedTools).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(truthcv, 'allowedTools')).toBe(false);
+  });
 });
 
 describe('expandPlaceholders', () => {

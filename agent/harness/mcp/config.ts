@@ -8,6 +8,13 @@ export interface McpServerConfig {
   name: string;
   /** The connect URL, with every `${VAR:-default}` placeholder expanded. */
   url: string;
+  /**
+   * Optional allow-list of bare tool names this server exposes. When present,
+   * isToolAllowed narrows a whole-server grant to just these names (see
+   * agent/harness/tools.ts). Absent for a server that has no such restriction
+   * (e.g. `truthcv`, whose grant list lives entirely in tools.ts).
+   */
+  allowedTools?: string[];
 }
 
 /**
@@ -58,12 +65,16 @@ export function loadMcpConfig(path: string, env: NodeJS.ProcessEnv): McpServerCo
  * Validate and normalise one raw server config entry into an McpServerConfig.
  */
 function parseServer(name: string, cfg: unknown, env: NodeJS.ProcessEnv): McpServerConfig {
-  const server = (cfg ?? {}) as { type?: string; url?: string };
+  const server = (cfg ?? {}) as { type?: string; url?: string; allowedTools?: string[] };
   if (server.type !== 'http') {
     throw new Error(`MCP server '${name}' has unsupported type '${String(server.type)}'; only 'http' is supported`);
   }
   if (typeof server.url !== 'string') {
     throw new Error(`MCP server '${name}' is missing a string 'url'`);
   }
-  return { name, url: expandPlaceholders(server.url, env) };
+  return {
+    name,
+    url: expandPlaceholders(server.url, env),
+    ...(Array.isArray(server.allowedTools) ? { allowedTools: server.allowedTools } : {}),
+  };
 }

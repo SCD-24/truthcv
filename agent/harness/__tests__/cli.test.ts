@@ -25,10 +25,37 @@ function scriptedAdapter(scripts: HarnessEvent[][]): ProviderAdapter {
   };
 }
 
-/** A fake MCP pool exposing one allowed truthcv tool; no network anywhere. */
+/** The 10 browser tools the startup fail-loud check requires to be advertised. */
+const BROWSER_TOOL_NAMES = [
+  'browser_navigate',
+  'browser_click',
+  'browser_type',
+  'browser_file_upload',
+  'browser_snapshot',
+  'browser_take_screenshot',
+  'browser_wait_for',
+  'browser_press_key',
+  'browser_select_option',
+  'browser_handle_dialog',
+];
+
+/** Namespaced browser tools so the CLI's checkAdvertisedBrowserTools check passes. */
+const BROWSER_TOOLS: NamespacedTool[] = BROWSER_TOOL_NAMES.map((toolName) => ({
+  namespacedName: `browser__${toolName}`,
+  serverName: 'browser',
+  toolName,
+  description: 'd',
+  inputSchema: { type: 'object' },
+}));
+
+/**
+ * A fake MCP pool exposing one allowed truthcv tool plus the full browser
+ * allow-list (so the startup fail-loud check passes); no network anywhere.
+ */
 function fakePool(tools?: NamespacedTool[]): McpClientPool {
   const list: NamespacedTool[] = tools ?? [
     { namespacedName: 'truthcv__start_run', serverName: 'truthcv', toolName: 'start_run', description: 'd', inputSchema: { type: 'object' } },
+    ...BROWSER_TOOLS,
   ];
   return {
     callTool: vi.fn(async () => ({ content: 'ok', isError: false })),
@@ -133,6 +160,22 @@ describe('runCli exit codes', () => {
 
     expect(code).toBe(ExitCode.McpFailure);
     expect(createAdapter).not.toHaveBeenCalled();
+  });
+
+  it('exits with the MCP-failure code when the browser server drops an allowlisted tool', async () => {
+    // A pool with truthcv plus every browser tool EXCEPT browser_snapshot.
+    const list: NamespacedTool[] = [
+      { namespacedName: 'truthcv__start_run', serverName: 'truthcv', toolName: 'start_run', description: 'd', inputSchema: { type: 'object' } },
+      ...BROWSER_TOOLS.filter((t) => t.toolName !== 'browser_snapshot'),
+    ];
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, createAdapter, stderr } = harness(adapter, fakePool(list));
+
+    const code = await runCli([...BASE_ARGS, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.McpFailure);
+    expect(createAdapter).not.toHaveBeenCalled();
+    expect(stderr.join('\n')).toContain('browser_snapshot');
   });
 });
 
@@ -363,6 +406,87 @@ describe('the context window reaches the loop and the adapter', () => {
 
     expect(code).toBe(ExitCode.BadConfig);
     expect(stderr.join('\n')).toContain('--context-window');
+  });
+});
+
+describe('the tool-result cap reaches the loop config', () => {
+  it('accepts a valid --max-tool-result-chars value', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps } = harness(adapter, fakePool());
+
+    const code = await runCli([...BASE_ARGS, '--max-tool-result-chars', '8000', 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.Success);
+  });
+
+  it('accepts AGENT_MAX_TOOL_RESULT_CHARS from the environment', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps } = harness(adapter, fakePool());
+
+    const code = await runCli([...BASE_ARGS, 'go'], { AGENT_MAX_TOOL_RESULT_CHARS: '8000' }, deps);
+
+    expect(code).toBe(ExitCode.Success);
+  });
+
+  it.each(['0', '-1', 'abc', '1.5'])(
+    'refuses %s as a tool-result cap with a BadConfig exit',
+    async (raw) => {
+      const adapter = scriptedAdapter([[doneEnd]]);
+      const { deps, stderr } = harness(adapter, fakePool());
+
+      const code = await runCli([...BASE_ARGS, '--max-tool-result-chars', raw, 'go'], {}, deps);
+
+      expect(code).toBe(ExitCode.BadConfig);
+      expect(stderr.join('\n')).toContain('--max-tool-result-chars');
+    },
+  );
+
+  it('refuses a bad AGENT_MAX_TOOL_RESULT_CHARS with a BadConfig exit', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, stderr } = harness(adapter, fakePool());
+
+    const code = await runCli([...BASE_ARGS, 'go'], { AGENT_MAX_TOOL_RESULT_CHARS: '0' }, deps);
+
+    expect(code).toBe(ExitCode.BadConfig);
+    expect(stderr.join('\n')).toContain('--max-tool-result-chars');
+  });
+});
+
+describe('the prompt-cache switch reaches the adapter', () => {
+  it('leaves prompt caching on by default', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, createAdapter } = harness(adapter, fakePool());
+
+    await runCli([...BASE_ARGS, 'go'], {}, deps);
+
+    expect(createAdapter.mock.calls[0][0].promptCache).toBe(true);
+  });
+
+  it('disables prompt caching when --prompt-cache false is passed', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, createAdapter } = harness(adapter, fakePool());
+
+    await runCli([...BASE_ARGS, '--prompt-cache', 'false', 'go'], {}, deps);
+
+    expect(createAdapter.mock.calls[0][0].promptCache).toBe(false);
+  });
+
+  it('disables prompt caching when AGENT_PROMPT_CACHE=false', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, createAdapter } = harness(adapter, fakePool());
+
+    await runCli([...BASE_ARGS, 'go'], { AGENT_PROMPT_CACHE: 'false' }, deps);
+
+    expect(createAdapter.mock.calls[0][0].promptCache).toBe(false);
+  });
+
+  it('lets the CLI flag override AGENT_PROMPT_CACHE=false', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, createAdapter } = harness(adapter, fakePool());
+
+    await runCli([...BASE_ARGS, '--prompt-cache', 'true', 'go'], { AGENT_PROMPT_CACHE: 'false' }, deps);
+
+    expect(createAdapter.mock.calls[0][0].promptCache).toBe(true);
   });
 });
 

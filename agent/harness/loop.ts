@@ -21,7 +21,7 @@ import type {
   ToolResult,
 } from './providers/types.js';
 import type { McpClientPool } from './mcp/client.js';
-import { buildToolRegistry, executeToolCall, type RegisteredTool } from './tools.js';
+import { buildToolRegistry, executeToolCall, DEFAULT_MAX_TOOL_RESULT_CHARS, type RegisteredTool } from './tools.js';
 import { compact, shouldCompact, type CompactionConfig, type TokenUsage } from './compaction.js';
 
 /** An error event narrowed out of the {@link HarnessEvent} union. */
@@ -102,6 +102,11 @@ export interface LoopConfig {
    * mid-action as it did before.
    */
   wrapUpTurns?: number;
+  /**
+   * Cap on a single tool result's content, in characters. Defaults to
+   * `DEFAULT_MAX_TOOL_RESULT_CHARS` (see tools.ts).
+   */
+  maxToolResultChars?: number;
 }
 
 /**
@@ -520,7 +525,12 @@ async function dispatchStopReason(done: DoneEvent, state: LoopState, ctx: LoopCo
 /** Execute every tool call this turn requested, then continue or hit the cap. */
 async function continueWithTools(done: DoneEvent, state: LoopState, ctx: LoopContext): Promise<LoopResult | undefined> {
   const calls = done.message.toolCalls ?? [];
-  const results = await executeTurnToolCalls(ctx.pool, calls, ctx.registry);
+  const results = await executeTurnToolCalls(
+    ctx.pool,
+    calls,
+    ctx.registry,
+    ctx.config.maxToolResultChars ?? DEFAULT_MAX_TOOL_RESULT_CHARS,
+  );
   state.messages.push(toolResultsMessage(results));
   return capOrContinue(state, ctx);
 }
@@ -582,9 +592,10 @@ async function executeTurnToolCalls(
   pool: McpClientPool,
   calls: ToolCall[],
   registry: RegisteredTool[],
+  maxContentChars: number,
 ): Promise<ToolResult[]> {
   const results: ToolResult[] = [];
-  for (const call of calls) results.push(await executeToolCall(pool, call, registry));
+  for (const call of calls) results.push(await executeToolCall(pool, call, registry, maxContentChars));
   return results;
 }
 
