@@ -1061,26 +1061,29 @@ def _resolved_job_boards(cfg: agent_config_store.AgentConfig) -> list[dict]:
     """Build the RESOLVED wire list of job boards from an agent config.
 
     Both GET and PUT responses go through this helper so they cannot drift.
-    Iterates ``cfg.resolved_board_sources()`` (the four defaults, then the
-    operator's own boards) and for each source emits its stored sign-in
-    override (if any), plus the server-resolved domain, effective sign-in URL
-    and default marker. The response deliberately carries this resolved list
-    rather than the stored one, so the client never re-implements the union —
-    and ``is_default`` is what tells the UI to withhold a remove button.
+    Iterates ``cfg.resolved_boards()`` (the four defaults, then the operator's
+    own boards, each already carrying its EFFECTIVE mode) and for each board
+    emits its stored sign-in override (if any), plus the server-resolved
+    domain, effective sign-in URL, default marker and mode. ``mode_locked``
+    is True for any catalog source — its mode is fixed and not operator-
+    editable — and False only for a custom board. The response deliberately
+    carries this resolved list rather than the stored one, so the client
+    never re-implements the union — and ``is_default`` is what tells the UI
+    to withhold a remove button.
     """
     from agentconfig import boards
 
-    overrides = {b.source.strip().casefold(): b.signin_url for b in cfg.job_boards}
     result = []
-    for source in cfg.resolved_board_sources():
-        override = overrides.get(source.strip().casefold(), "")
+    for board in cfg.resolved_boards():
         result.append({
-            "source": source,
-            "signin_url": override,
-            "domain": boards.resolve_domain(source) or "",
-            "effective_signin_url": boards.resolve_signin_url(source, override),
-            "is_default": boards.is_default_source(source),
-            "is_api": boards.is_api_source(source),
+            "source": board.source,
+            "signin_url": board.signin_url,
+            "mode": board.mode,
+            "mode_locked": not boards.is_custom_source(board.source),
+            "domain": boards.resolve_domain(board.source) or "",
+            "effective_signin_url": boards.resolve_signin_url(board.source, board.signin_url),
+            "is_default": boards.is_default_source(board.source),
+            "is_api": boards.is_api_source(board.source),
         })
     return result
 
@@ -1163,7 +1166,7 @@ def get_agent_config(include_feed: bool = False) -> AgentConfigModel:
     cost paid for nothing, since the browser never renders the postings.
     """
     from companyboards import store as board_store
-    from agentconfig.dorks import compose_queries
+    from agentconfig.dorks import compose_direct_boards, compose_queries
     
     cfg = agent_config_store.load()
     data = cfg.to_dict()
@@ -1188,7 +1191,14 @@ def get_agent_config(include_feed: bool = False) -> AgentConfigModel:
     # Populate search_queries in response. The freshness window is applied to
     # the composed URLs here rather than stored on them, so changing the
     # setting takes effect on the next fetch with no stored state to migrate.
-    data["search_queries"] = compose_queries(cfg.profiles, cfg.max_posting_age_days, cfg.resolved_board_sources())
+    # resolved_boards() (not resolved_board_sources()) is passed so a
+    # direct-mode board is excluded from the dorks rather than defaulting to
+    # "dork" the way a bare source string would.
+    resolved_boards = cfg.resolved_boards()
+    data["search_queries"] = compose_queries(cfg.profiles, cfg.max_posting_age_days, resolved_boards)
+
+    # One entry per direct-mode board, for the agent to search on-site.
+    data["direct_boards"] = compose_direct_boards(cfg.profiles, resolved_boards)
 
     # Postings from API-backed boards, on request only. fetch_postings never
     # raises, so a Remote Rocketship outage degrades this response to the

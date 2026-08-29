@@ -33,6 +33,21 @@ SOURCE_DOMAINS: dict[str, str] = {
 # row with; nothing composes a search from it.
 API_BOARD_SOURCES: list[str] = ["remoterocketship"]
 
+# Fixed discovery mode per catalog source: how postings from that board are
+# found is a property of the board, not something the operator toggles. Every
+# SOURCE_DOMAINS key must appear here so catalog_mode() never falls through to
+# a guess. "dork" boards are found via a Google site: search; "feed" is pulled
+# directly from the board's own API (see jobfeeds/) and never gets a dork.
+CATALOG_MODES: dict[str, str] = {
+    "ashby": "dork",
+    "greenhouse": "dork",
+    "lever": "dork",
+    "personio": "dork",
+    "linkedin": "dork",
+    "workday": "dork",
+    "remoterocketship": "feed",
+}
+
 DEFAULT_BOARD_DOMAINS: list[str] = [
     "jobs.ashbyhq.com",
     "job-boards.greenhouse.io",
@@ -70,15 +85,64 @@ def is_api_source(source: str) -> bool:
     return key in {s.casefold() for s in API_BOARD_SOURCES} or key in domains
 
 
-def resolve_domain(source: str) -> str | None:
-    """Resolve a board source to a site: domain, or None if unrecognised.
+def is_custom_source(source: str) -> bool:
+    """Check whether source is a custom board — not one of the SOURCE_DOMAINS catalog keys.
 
-    A source containing "." is treated as a domain already and used verbatim;
-    otherwise it is looked up case-insensitively in SOURCE_DOMAINS.
+    Key match only, case-insensitive; a raw domain that happens to equal a
+    catalog board's domain is still treated as custom here (mode selection
+    cares only about how the board was added, not what it resolves to).
     """
-    if "." in source:
-        return source
-    return SOURCE_DOMAINS.get(source.strip().casefold())
+    return source.strip().casefold() not in SOURCE_DOMAINS
+
+
+def catalog_mode(source: str) -> str | None:
+    """Fixed discovery mode for a catalog source, or None if source is custom.
+
+    Looks source up as a SOURCE_DOMAINS key (case-insensitive) and returns its
+    CATALOG_MODES entry. Returns None for any source that is not a catalog
+    key, signalling the caller should fall back to the board's own stored
+    mode.
+    """
+    key = source.strip().casefold()
+    if key not in SOURCE_DOMAINS:
+        return None
+    return CATALOG_MODES.get(key, "dork")
+
+
+def resolve_domain(source: str) -> str | None:
+    """Resolve a board source to a bare site: host, or None if unrecognised.
+
+    A catalog key (case-insensitive) resolves to its SOURCE_DOMAINS value
+    verbatim. Anything else containing "." is treated as a URL or bare
+    domain: scheme, path, query and fragment are stripped, a leading "www."
+    is dropped (SOURCE_DOMAINS entries never carry one), and the remaining
+    host is returned casefolded. Returns None when no usable host can be
+    extracted, rather than a malformed value that would produce a broken
+    `site:` dork.
+    """
+    key = source.strip().casefold()
+    if key in SOURCE_DOMAINS:
+        return SOURCE_DOMAINS[key]
+
+    if "." not in source:
+        return None
+
+    candidate = source.strip()
+    for prefix in ("https://", "http://"):
+        if candidate.casefold().startswith(prefix):
+            candidate = candidate[len(prefix):]
+            break
+    for sep in ("/", "?", "#"):
+        idx = candidate.find(sep)
+        if idx != -1:
+            candidate = candidate[:idx]
+    if candidate.casefold().startswith("www."):
+        candidate = candidate[4:]
+    candidate = candidate.strip().rstrip(".").casefold()
+
+    if not candidate or "." not in candidate or any(ch.isspace() for ch in candidate):
+        return None
+    return candidate
 
 
 def resolve_signin_url(source: str, override: str = "") -> str:

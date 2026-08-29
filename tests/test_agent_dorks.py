@@ -2,8 +2,9 @@
 
 from urllib.parse import unquote_plus
 
+from agentconfig import boards as boards_module
 from agentconfig import dorks
-from agentconfig.store import JobProfile
+from agentconfig.store import JobBoard, JobProfile
 
 
 def test_multi_word_keyword_is_quoted_single_word_is_not():
@@ -165,3 +166,86 @@ def test_window_does_not_alter_the_query_string_itself():
         dorks.compose_queries([p], 5, ["ashby"])[0]["query"]
         == dorks.compose_queries([p], None, ["ashby"])[0]["query"]
     )
+
+
+# ---------------------------------------------------------------------------
+# Board mode: direct boards are excluded from dorks, resolve_domain normalises
+# hosts, compose_direct_boards composes their on-site search payload.
+# ---------------------------------------------------------------------------
+
+
+def test_direct_mode_board_emits_no_dork():
+    p = JobProfile(name="p", enabled=True, keywords=["backend"])
+    direct_board = JobBoard(source="custom.example.com", mode="direct")
+    entries = dorks.compose_queries([p], None, [direct_board])
+    # Only the four always-searched defaults; no entry for the direct board.
+    assert len(entries) == 4
+    assert "custom.example.com" not in {e["source"] for e in entries}
+
+
+def test_dork_mode_board_still_emits_a_dork():
+    p = JobProfile(name="p", enabled=True, keywords=["backend"])
+    dork_board = JobBoard(source="custom.example.com", mode="dork")
+    entries = dorks.compose_queries([p], None, [dork_board])
+    assert "custom.example.com" in {e["source"] for e in entries}
+
+
+def test_resolve_domain_normalises_scheme_path_query_and_www():
+    assert boards_module.resolve_domain("https://www.wearedevelopers.com/jobs?country=DE") == (
+        "wearedevelopers.com"
+    )
+    assert boards_module.resolve_domain("http://boards.example.io/careers/") == "boards.example.io"
+    assert boards_module.resolve_domain("careers.acme.com") == "careers.acme.com"
+
+
+def test_resolve_domain_of_unparseable_source_is_none():
+    assert boards_module.resolve_domain("not-a-domain") is None
+
+
+def test_two_sources_normalising_to_the_same_host_dedupe_to_one_query():
+    p = JobProfile(name="p", enabled=True, keywords=["backend"])
+    a = JobBoard(source="https://www.custom-board.io/jobs", mode="dork")
+    b = JobBoard(source="custom-board.io", mode="dork")
+    entries = dorks.compose_queries([p], None, [a, b])
+    matching = [e for e in entries if e["source"] == "custom-board.io"]
+    assert len(matching) == 1
+
+
+def test_compose_direct_boards_shape():
+    p1 = JobProfile(
+        name="active",
+        enabled=True,
+        keywords=["backend"],
+        locations=["Berlin"],
+        rejected_role_types=["contract"],
+    )
+    p2 = JobProfile(name="disabled", enabled=False, keywords=["frontend"])
+    p3 = JobProfile(name="no-keywords", enabled=True, keywords=[])
+    direct_board = JobBoard(
+        source="https://boards.acme.io/careers",
+        signin_url="https://boards.acme.io/login",
+        mode="direct",
+    )
+    dork_board = JobBoard(source="ashby", mode="dork")
+
+    entries = dorks.compose_direct_boards([p1, p2, p3], [direct_board, dork_board])
+
+    assert len(entries) == 1
+    entry = entries[0]
+    # The URL is verbatim, never normalised to a bare host.
+    assert entry["url"] == "https://boards.acme.io/careers"
+    assert entry["signin_url"] == "https://boards.acme.io/login"
+    assert entry["profiles"] == [
+        {
+            "profile": "active",
+            "keywords": ["backend"],
+            "locations": ["Berlin"],
+            "rejected_role_types": ["contract"],
+        }
+    ]
+
+
+def test_compose_direct_boards_empty_when_no_direct_boards():
+    p = JobProfile(name="p", enabled=True, keywords=["backend"])
+    assert dorks.compose_direct_boards([p], [JobBoard(source="ashby", mode="dork")]) == []
+    assert dorks.compose_direct_boards([p], None) == []

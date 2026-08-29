@@ -28,12 +28,14 @@ def update_agent_config(sent: dict) -> agent_config_store.AgentConfig:
     Profiles are WHOLESALE-REPLACED (not merged) because a null or omitted
     profiles field never reaches the merge dict. job_boards is replaced the
     same way, but first NORMALISED: the response-only keys (domain,
-    effective_signin_url, is_default) are stripped — they are derived, and a
-    stored copy is a second writer that can go stale — and any default-source
-    entry with a blank signin_url is DROPPED, so a client echoing back the
-    resolved GET list does not bloat storage with the four defaults. A
-    default-source entry WITH a signin_url is kept, since that is a
-    legitimate override.
+    effective_signin_url, is_default, mode_locked) are stripped — they are
+    derived, and a stored copy is a second writer that can go stale — and any
+    default-source entry with a blank signin_url is DROPPED, so a client
+    echoing back the resolved GET list does not bloat storage with the four
+    defaults. A default-source entry WITH a signin_url is kept, since that is
+    a legitimate override. ``mode`` IS carried through (it is the one
+    board-level field the operator can actually set) — dropping it here would
+    silently revert a custom board's mode back to "dork" on every save.
     """
     sent = dict(sent)
     if "job_boards" in sent and sent["job_boards"] is not None:
@@ -41,9 +43,10 @@ def update_agent_config(sent: dict) -> agent_config_store.AgentConfig:
         for item in sent["job_boards"]:
             source = item.get("source", "")
             signin_url = item.get("signin_url", "")
+            mode = item.get("mode", "")
             if boards.is_default_source(source) and not signin_url.strip():
                 continue
-            normalised.append({"source": source, "signin_url": signin_url})
+            normalised.append({"source": source, "signin_url": signin_url, "mode": mode})
         sent["job_boards"] = normalised
 
     merged = agent_config_store.load().to_dict()

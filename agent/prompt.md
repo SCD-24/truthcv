@@ -198,6 +198,17 @@ approved these postings, so apply to them before spending time on discovery.
 - If you cannot complete one, call `report_apply_failure` with the reason. It
   stays queued for the next run.
 
+## Phase 1: discovery
+
+After the approved queue, discover new postings. Composed search queries
+(Google-style `site:` dorks) are one route in, but not the only one: some
+configured boards are searched on-site instead, via a Direct-search boards
+block in your run prompt (their own search box, not a dork). Work both. If a
+direct board's search wall requires a sign-in you don't have, call
+`report_apply_failure` with `blocker="login_required"` and its sign-in URL
+and move on to the next board — never wait for a sign-in mid-run. The full
+procedure for both is in `agent/RUNBOOK.md`, embedded above.
+
 ## End of run
 
 Call `finish_run` with your run id and an honest `stopped_reason` before you

@@ -304,6 +304,29 @@ boundary — you may point the browser at further searches of your own alongside
 them. A composed query never changes *where* you apply, which is still the
 employer's own site, per item 1 below.
 
+Google dorking is not the only discovery path. Some configured boards are
+"direct" boards — searched on the board's own site instead of via a `site:`
+dork, because the board has no useful dork surface. Your run prompt carries a
+Direct-search boards block for these, with the board's URL, its sign-in URL
+(if any), and each enabled profile's keywords/locations to search with. For
+each one:
+
+1. `browser_navigate` to the board's URL.
+2. `browser_snapshot` to read the page and locate its search box.
+3. `browser_type` the profile's keywords into it (and set a location filter
+   if the board offers one) and submit the search.
+4. `browser_snapshot` the results and harvest posting URLs from them, then
+   continue into the normal Applying flow below for each one, exactly as for
+   a dorked result.
+
+If the board puts up a login wall before you can search or apply, do **not**
+wait for a sign-in — a run and a manual sign-in cannot overlap because the
+browser's Chromium profile has a single holder. Call `report_apply_failure`
+with `blocker="login_required"` and the board's sign-in URL, exactly as for a
+login wall hit mid-application (see item 4 under Applying, below) — queuing
+it for the operator to sign in to before the next run — and move on to the
+next board or query.
+
 1. Find the role on the **employer's own site** (Ashby / Greenhouse / Personio /
    Lever). Apply there, not through an aggregator.
 2. Call `get_canonical_cv` and attach the CV it returns. If it comes back with

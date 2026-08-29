@@ -1609,6 +1609,12 @@
                   "name": "job_boards[].signin_url",
                   "notes": "Operator-supplied sign-in URL; blank for a known board, which resolves from the catalog.",
                   "type": "string"
+                },
+                {
+                  "flags": "optional",
+                  "name": "job_boards[].mode",
+                  "notes": "dork | direct. User-settable only for custom boards (source not in the boards.py catalog). Catalog boards derive a fixed mode and ignore any stored value. Defaults to dork on load for backward compatibility, and to direct for a newly added custom board.",
+                  "type": "string"
                 }
               ]
             },

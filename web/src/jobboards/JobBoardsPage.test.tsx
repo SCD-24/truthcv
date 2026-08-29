@@ -26,6 +26,8 @@ vi.mock("../api/client", () => ({
 const REMOTE_ROCKETSHIP: JobBoard = {
   source: "remoterocketship",
   signinUrl: "",
+  mode: "feed",
+  modeLocked: true,
   domain: "remoterocketship.com",
   effectiveSigninUrl: "",
   isDefault: false,
@@ -38,10 +40,10 @@ afterEach(() => {
 });
 
 const DEFAULT_BOARDS: JobBoard[] = [
-  { source: "ashby", signinUrl: "", domain: "jobs.ashbyhq.com", effectiveSigninUrl: "https://jobs.ashbyhq.com", isDefault: true, isApi: false },
-  { source: "greenhouse", signinUrl: "", domain: "job-boards.greenhouse.io", effectiveSigninUrl: "https://job-boards.greenhouse.io", isDefault: true, isApi: false },
-  { source: "lever", signinUrl: "", domain: "jobs.lever.co", effectiveSigninUrl: "https://jobs.lever.co", isDefault: true, isApi: false },
-  { source: "workday", signinUrl: "", domain: "myworkdayjobs.com", effectiveSigninUrl: "https://www.myworkdayjobs.com", isDefault: true, isApi: false },
+  { source: "ashby", signinUrl: "", mode: "dork", modeLocked: true, domain: "jobs.ashbyhq.com", effectiveSigninUrl: "https://jobs.ashbyhq.com", isDefault: true, isApi: false },
+  { source: "greenhouse", signinUrl: "", mode: "dork", modeLocked: true, domain: "job-boards.greenhouse.io", effectiveSigninUrl: "https://job-boards.greenhouse.io", isDefault: true, isApi: false },
+  { source: "lever", signinUrl: "", mode: "dork", modeLocked: true, domain: "jobs.lever.co", effectiveSigninUrl: "https://jobs.lever.co", isDefault: true, isApi: false },
+  { source: "workday", signinUrl: "", mode: "dork", modeLocked: true, domain: "myworkdayjobs.com", effectiveSigninUrl: "https://www.myworkdayjobs.com", isDefault: true, isApi: false },
 ];
 
 function makeConfig(jobBoards: JobBoard[]): AgentConfig {
@@ -98,6 +100,8 @@ describe("JobBoardsPage", () => {
     const linkedin: JobBoard = {
       source: "linkedin",
       signinUrl: "",
+      mode: "dork",
+      modeLocked: true,
       domain: "linkedin.com/jobs",
       effectiveSigninUrl: "https://www.linkedin.com/login",
       isDefault: false,
@@ -119,6 +123,8 @@ describe("JobBoardsPage", () => {
     const board: JobBoard = {
       source: "custom.example.com",
       signinUrl: "",
+      mode: "direct",
+      modeLocked: false,
       domain: "custom.example.com",
       effectiveSigninUrl: "",
       isDefault: false,
@@ -144,7 +150,16 @@ describe("JobBoardsPage", () => {
       expect(updateAgentConfig).toHaveBeenCalledWith({
         jobBoards: [
           ...DEFAULT_BOARDS,
-          { source: "linkedin", signinUrl: "", domain: "", effectiveSigninUrl: "", isDefault: false, isApi: false },
+          {
+            source: "linkedin",
+            signinUrl: "",
+            mode: "dork",
+            modeLocked: true,
+            domain: "",
+            effectiveSigninUrl: "",
+            isDefault: false,
+            isApi: false,
+          },
         ],
       }),
     );
@@ -159,9 +174,6 @@ describe("JobBoardsPage", () => {
     fireEvent.mouseDown(screen.getByRole("combobox"));
     fireEvent.click(within(screen.getByRole("listbox")).getByText("Custom domain…"));
     fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "custom.example.com" } });
-    fireEvent.change(screen.getByLabelText("Sign-in URL (optional)"), {
-      target: { value: "https://custom.example.com/login" },
-    });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() =>
@@ -170,52 +182,17 @@ describe("JobBoardsPage", () => {
           ...DEFAULT_BOARDS,
           {
             source: "custom.example.com",
-            signinUrl: "https://custom.example.com/login",
+            signinUrl: "",
+            mode: "direct",
+            modeLocked: false,
             domain: "custom.example.com",
-            effectiveSigninUrl: "https://custom.example.com/login",
+            effectiveSigninUrl: "",
             isDefault: false,
             isApi: false,
           },
         ],
       }),
     );
-  });
-
-  it("renders a queue entry with its waiting count and navigates to the browser session path", async () => {
-    vi.mocked(getSigninQueue).mockResolvedValue({
-      sites: [
-        {
-          host: "jobs.ashbyhq.com",
-          waiting: 3,
-          companies: ["Acme"],
-          lastBlockedAt: "",
-          signinUrl: "https://jobs.ashbyhq.com",
-        },
-      ],
-    });
-    await renderPage(makeConfig(DEFAULT_BOARDS));
-
-    await screen.findByText(/3 postings waiting/);
-    expect(screen.getByText(/Acme/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Sign in to jobs.ashbyhq.com" })).toBeTruthy();
-  });
-
-  it("offers an API key field instead of a Sign in button for an API-backed board", async () => {
-    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
-    vi.mocked(getJobBoardKey).mockResolvedValue({
-      source: "remoterocketship",
-      keySet: false,
-      encryptionAvailable: true,
-    });
-    await renderPage(makeConfig([REMOTE_ROCKETSHIP]));
-
-    // The regression this guards: an API board rendering the sign-in flow.
-    // There is no session to open, so a Sign in button would send the operator
-    // to a browser page that can never authenticate the feed.
-    await screen.findByLabelText("API key");
-    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
-    expect(screen.getByText("Remote Rocketship")).toBeTruthy();
-    expect(screen.getByText("API")).toBeTruthy();
   });
 
   it("saves an API key and clears the field", async () => {
@@ -266,5 +243,57 @@ describe("JobBoardsPage", () => {
       </MemoryRouter>,
     );
     await screen.findByText("boom");
+  });
+
+  // --- Board mode: dork | direct --------------------------------------------
+
+  it("renders a working mode selector for a custom board and saves a change", async () => {
+    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
+    const custom: JobBoard = {
+      source: "custom.example.com",
+      signinUrl: "",
+      mode: "dork",
+      modeLocked: false,
+      domain: "custom.example.com",
+      effectiveSigninUrl: "",
+      isDefault: false,
+      isApi: false,
+    };
+    vi.mocked(updateAgentConfig).mockResolvedValue(makeConfig([custom]));
+    await renderPage(makeConfig([custom]));
+
+    const select = await screen.findByRole("combobox", { name: "Mode" });
+    fireEvent.mouseDown(select);
+    fireEvent.click(within(screen.getByRole("listbox")).getByText("Search the site directly"));
+
+    await waitFor(() =>
+      expect(updateAgentConfig).toHaveBeenCalledWith({
+        jobBoards: [{ ...custom, mode: "direct" }],
+      }),
+    );
+  });
+
+  it("renders no mode selector for a catalog (mode-locked) board", async () => {
+    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
+    await renderPage(makeConfig([DEFAULT_BOARDS[0]]));
+
+    await screen.findByText("Searched via Google.");
+    expect(screen.queryByText("Google dork")).toBeNull();
+    expect(screen.queryByText("Search the site directly")).toBeNull();
+  });
+
+  it("renders the API-key affordance and no mode selector for a feed board", async () => {
+    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
+    vi.mocked(getJobBoardKey).mockResolvedValue({
+      source: "remoterocketship",
+      keySet: false,
+      encryptionAvailable: true,
+    });
+    await renderPage(makeConfig([REMOTE_ROCKETSHIP]));
+
+    await screen.findByLabelText("API key");
+    await screen.findByText("Postings come from this board's own API — only the API key below is configurable.");
+    expect(screen.queryByText("Google dork")).toBeNull();
+    expect(screen.queryByText("Search the site directly")).toBeNull();
   });
 });

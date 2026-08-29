@@ -512,6 +512,11 @@ export interface JobProfile {
 export interface JobBoard {
   source: string;
   signinUrl: string;
+  /** "dork" (Google site: search) or "direct" (search the board's own site).
+   * Only meaningful — and only operator-settable — for a custom board;
+   * `modeLocked` says whether this board's mode can be changed at all. */
+  mode: "dork" | "direct" | "feed";
+  readonly modeLocked: boolean;
   readonly domain: string;
   readonly effectiveSigninUrl: string;
   readonly isDefault: boolean;

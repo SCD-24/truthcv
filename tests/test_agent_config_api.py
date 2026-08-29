@@ -36,6 +36,7 @@ def test_get_returns_defaults(client, data_dir):
         # empty shape and never calls out to an API-backed board.
         "feedPostings": [],
         "feedError": "",
+        "directBoards": [],
     }
     got = r.json()
     job_boards = got.pop("jobBoards")
@@ -115,6 +116,50 @@ def test_search_queries_source_follows_resolved_boards_not_profile(client, data_
         "myworkdayjobs.com",
         "linkedin.com/jobs",
     }
+
+
+def test_catalog_boards_return_mode_locked_true_and_their_fixed_mode(client, data_dir):
+    got = client.get("/api/agent/config").json()
+    by_source = {b["source"]: b for b in got["jobBoards"]}
+    for source in ("ashby", "greenhouse", "lever", "workday"):
+        assert by_source[source]["modeLocked"] is True
+        assert by_source[source]["mode"] == "dork"
+
+
+def test_custom_board_returns_mode_locked_false(client, data_dir):
+    r = client.put("/api/agent/config", json={"jobBoards": [{"source": "custom.example.com", "mode": "direct"}]})
+    assert r.status_code == 200
+    custom = next(b for b in r.json()["jobBoards"] if b["source"] == "custom.example.com")
+    assert custom["modeLocked"] is False
+    assert custom["mode"] == "direct"
+
+
+def test_mode_set_via_put_survives_a_subsequent_get(client, data_dir):
+    """Regression: the services/agent_config.py merge used to drop mode on save."""
+    client.put("/api/agent/config", json={"jobBoards": [{"source": "custom.example.com", "mode": "direct"}]})
+    got = client.get("/api/agent/config").json()
+    custom = next(b for b in got["jobBoards"] if b["source"] == "custom.example.com")
+    assert custom["mode"] == "direct"
+
+
+def test_direct_boards_contains_only_direct_mode_boards(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [
+                {"source": "custom-direct.example.com", "mode": "direct"},
+                {"source": "custom-dork.example.com", "mode": "dork"},
+            ],
+            "profiles": [{"name": "p", "enabled": True, "keywords": ["backend"]}],
+        },
+    )
+    assert r.status_code == 200
+    got = client.get("/api/agent/config").json()
+    urls = [b["url"] for b in got["directBoards"]]
+    assert urls == ["custom-direct.example.com"]
+    dork_sources = {q["source"] for q in got["searchQueries"]}
+    assert "custom-dork.example.com" in dork_sources
+    assert "custom-direct.example.com" not in dork_sources
 
 
 def test_old_shape_config_migrates_job_boards_on_first_get(client, data_dir):

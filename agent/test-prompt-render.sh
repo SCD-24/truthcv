@@ -290,6 +290,48 @@ if ! diff -q "$BASELINE4" "$PROMPT_FILE4" >/dev/null 2>&1; then
 fi
 echo "PASS: omitted search queries leaves prompt unchanged"
 
+# --- Direct-search boards block ---------------------------------------------
+# Mirrors daily-apply.sh's DIRECT_BOARDS rendering verbatim (see "Direct-
+# search boards" there), so a divergence between this simulation and the
+# real script is a bug in one of the two, not just here.
+
+# Case 12: directBoards present renders the board URL and profile keywords.
+echo "Testing: direct-search boards render into prompt..."
+DIRECT_BOARDS_CONFIG='{"profiles":[{"name":"Senior Python"}],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":null,"companyBoards":[],"directBoards":[{"url":"https://boards.acme.io/careers","signinUrl":"https://boards.acme.io/login","profiles":[{"profile":"Senior Python","keywords":["platform engineer","backend"],"locations":["Berlin"],"rejectedRoleTypes":["contract"]}]}]}'
+DIRECT_BOARDS="$(jq -r '.directBoards[]? | ("  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end)), (.profiles[]? | "    [\(.profile)] keywords: \(.keywords // [] | join(", "))" + (if ((.locations // []) | length) > 0 then "; locations: \(.locations | join(", "))" else "" end) + (if ((.rejectedRoleTypes // []) | length) > 0 then "; avoid: \(.rejectedRoleTypes | join(", "))" else "" end))' <<<"$DIRECT_BOARDS_CONFIG")"
+if [[ -z "$DIRECT_BOARDS" ]]; then
+  echo "FAIL: expected a rendered direct-boards block, got none"
+  exit 1
+fi
+if [[ "$DIRECT_BOARDS" != *"https://boards.acme.io/careers"* ]]; then
+  echo "FAIL: expected the board URL in rendered block"
+  exit 1
+fi
+if [[ "$DIRECT_BOARDS" != *"platform engineer"* ]] || [[ "$DIRECT_BOARDS" != *"backend"* ]]; then
+  echo "FAIL: expected the profile's keywords in rendered block"
+  exit 1
+fi
+echo "PASS: direct-search boards render into prompt"
+
+# Case 13: directBoards omitted leaves the prompt byte-identical to baseline.
+echo "Testing: omitted direct-search boards leaves prompt unchanged..."
+PROMPT_FILE5="$TEST_DIR/prompt5.txt"
+BASELINE5="$TEST_DIR/baseline5.txt"
+echo "## Original RUNBOOK filters" > "$PROMPT_FILE5"
+echo "Apply to at most 5 role(s) this run." >> "$PROMPT_FILE5"
+cp "$PROMPT_FILE5" "$BASELINE5"
+
+NO_DIRECT_BOARDS_CONFIG='{"profiles":[],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":null,"companyBoards":[]}'
+DIRECT_BOARDS_NONE="$(jq -r '.directBoards[]? | ("  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end)), (.profiles[]? | "    [\(.profile)] keywords: \(.keywords // [] | join(", "))" + (if ((.locations // []) | length) > 0 then "; locations: \(.locations | join(", "))" else "" end) + (if ((.rejectedRoleTypes // []) | length) > 0 then "; avoid: \(.rejectedRoleTypes | join(", "))" else "" end))' <<<"$NO_DIRECT_BOARDS_CONFIG")"
+if [[ -n "$DIRECT_BOARDS_NONE" ]]; then
+  echo "$DIRECT_BOARDS_NONE" >> "$PROMPT_FILE5"
+fi
+if ! diff -q "$BASELINE5" "$PROMPT_FILE5" >/dev/null 2>&1; then
+  echo "FAIL: omitted directBoards changed the prompt"
+  exit 1
+fi
+echo "PASS: omitted direct-search boards leaves prompt unchanged"
+
 # --- Inlined RUNBOOK operating spec -----------------------------------------
 # Mirrors daily-apply.sh's RUNBOOK inlining verbatim (see the "Inline its full
 # text here" block there), so a divergence between this simulation and the real
