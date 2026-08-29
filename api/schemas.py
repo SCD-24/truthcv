@@ -339,20 +339,44 @@ class JobProfileModel(_Camel):
 class JobBoardModel(_Camel):
     """One job board the agent searches AND a site the operator signs in to.
 
-    ``source``/``signin_url`` are the operator's stored input. ``domain``,
-    ``effective_signin_url``, ``is_default`` and ``is_api`` are response-only,
-    resolved server-side by the routes from agentconfig/boards.py and stripped
-    on a PUT — ``is_default`` marks a board that is always searched and cannot
-    be removed, ``is_api`` a board reached with a saved API key rather than a
-    browser sign-in (``effective_signin_url`` is always "" for those).
+    ``source``/``signin_url``/``mode`` are the operator's stored input —
+    ``mode`` ("dork" or "direct") is only ever actually settable when the
+    board is custom; a board dict that omits it (an older client, or a
+    catalog board) still validates. ``domain``, ``effective_signin_url``,
+    ``is_default``, ``is_api`` and ``mode_locked`` are response-only, resolved
+    server-side by the routes from agentconfig/boards.py and stripped on a
+    PUT — ``is_default`` marks a board that is always searched and cannot be
+    removed, ``is_api`` a board reached with a saved API key rather than a
+    browser sign-in (``effective_signin_url`` is always "" for those), and
+    ``mode_locked`` marks a catalog board whose ``mode`` is fixed and not
+    operator-editable.
     """
 
     source: str = ""
     signin_url: str = ""
+    mode: str = ""
+    mode_locked: bool = False
     domain: str = ""
     effective_signin_url: str = ""
     is_default: bool = False
     is_api: bool = False
+
+
+class DirectBoardProfileModel(_Camel):
+    """One enabled, keyword-bearing profile's search criteria for a direct board (response-only)."""
+
+    profile: str = ""
+    keywords: list[str] = Field(default_factory=list)
+    locations: list[str] = Field(default_factory=list)
+    rejected_role_types: list[str] = Field(default_factory=list)
+
+
+class DirectBoardModel(_Camel):
+    """One direct-mode job board: searched on-site by the agent, not via a Google dork (response-only)."""
+
+    url: str = ""
+    signin_url: str = ""
+    profiles: list[DirectBoardProfileModel] = Field(default_factory=list)
 
 
 class FeedPostingModel(_Camel):
@@ -425,6 +449,10 @@ class AgentConfigModel(_Camel):
     max_posting_age_days: int | None = None
     company_boards: list[CompanyBoardModel] = Field(default_factory=list)
     search_queries: list[SearchQueryModel] = Field(default_factory=list)
+    # One entry per direct-mode board (searched on-site rather than via a
+    # Google dork), with its URL, sign-in URL, and the enabled profiles'
+    # search criteria for the agent to use there.
+    direct_boards: list[DirectBoardModel] = Field(default_factory=list)
     # Postings pulled from API-backed boards. Populated only when the caller
     # asks for them (GET /agent/config?include_feed=true) — the web UI does
     # not, so loading a page never waits on a third-party API. feed_error

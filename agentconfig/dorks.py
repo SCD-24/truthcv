@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from urllib.parse import quote_plus
 
-from agentconfig.boards import DEFAULT_BOARD_DOMAINS, SOURCE_DOMAINS, is_api_source, resolve_domain
-from agentconfig.store import JobProfile
+from agentconfig.boards import DEFAULT_BOARD_DOMAINS, is_api_source, resolve_domain, resolve_signin_url
+from agentconfig.store import JobBoard, JobProfile
 
 MAX_QUERIES = 24
 
@@ -47,25 +47,35 @@ def _or_group(terms: list[str]) -> str:
     return "(" + " OR ".join(_quote_term(t) for t in terms) + ")"
 
 
-def _resolve_sources(sources: list[str] | None) -> list[str]:
-    """Resolve board sources to site domains, always including the default boards.
+def _resolve_sources(boards: list[JobBoard] | None) -> list[str]:
+    """Resolve dork-mode boards to site domains, always including the default boards.
 
-    Behaviour change: source selection used to be a per-profile field with an
-    empty-list-only fallback to the defaults. It is now global — the caller
-    passes the operator's configured board sources (or None), and the four
-    default boards are searched on EVERY run regardless of what is
-    configured, with the caller's recognised extras following, de-duplicated.
+    Takes the resolved board records (AgentConfig.resolved_boards()), not bare
+    source strings, so each board's EFFECTIVE mode can be honoured: a board
+    whose effective mode is "direct" is skipped here entirely — the agent
+    searches it on-site instead (see compose_direct_boards) and it must not
+    also consume a `site:` dork slot against MAX_QUERIES.
 
-    API-backed boards (agentconfig.boards.API_BOARD_SOURCES) are SKIPPED here.
-    Their postings are pulled from the board's own API in jobfeeds/ and handed
-    to the agent as concrete URLs; composing a `site:` dork for one would send
-    it to the aggregator's listing pages instead, which is strictly worse than
-    the feed it already has.
+    API-backed boards (agentconfig.boards.API_BOARD_SOURCES) are SKIPPED here
+    too. Their postings are pulled from the board's own API in jobfeeds/ and
+    handed to the agent as concrete URLs; composing a `site:` dork for one
+    would send it to the aggregator's listing pages instead, which is
+    strictly worse than the feed it already has.
+
+    ``boards`` being None or empty still yields the four default domains —
+    they are baked into DEFAULT_BOARD_DOMAINS directly, independent of any
+    board record, so this always returns at least those four.
     """
     domains = list(DEFAULT_BOARD_DOMAINS)
     seen = set(domains)
-    for source in sources or []:
-        if is_api_source(source):
+    for item in boards or []:
+        # Accept a bare source string too (dork mode implied), so older
+        # callers that have not moved to resolved board records keep working.
+        if isinstance(item, str):
+            source, mode = item, "dork"
+        else:
+            source, mode = item.source, item.mode
+        if mode == "direct" or is_api_source(source):
             continue
         domain = resolve_domain(source)
         if domain is not None and domain not in seen:
@@ -74,16 +84,54 @@ def _resolve_sources(sources: list[str] | None) -> list[str]:
     return domains
 
 
+def compose_direct_boards(
+    profiles: list[JobProfile],
+    boards: list[JobBoard] | None,
+) -> list[dict]:
+    """Compose one entry per direct-mode board, for on-site (non-dork) discovery.
+
+    Each entry carries the board's URL EXACTLY as configured (never passed
+    through resolve_domain — the agent navigates to it, so it needs the real
+    address, not a bare host), its resolved sign-in URL, and the search
+    criteria of every enabled, keyword-bearing profile — mirroring the
+    profile filter compose_queries applies — for the agent to use on the
+    board's own search page.
+    """
+    profile_entries = [
+        {
+            "profile": profile.name,
+            "keywords": profile.keywords,
+            "locations": profile.locations,
+            "rejected_role_types": profile.rejected_role_types,
+        }
+        for profile in profiles
+        if profile.enabled and profile.keywords
+    ]
+    results: list[dict] = []
+    for board in boards or []:
+        if getattr(board, "mode", "") != "direct":
+            continue
+        results.append({
+            "url": board.source,
+            "signin_url": resolve_signin_url(board.source, board.signin_url),
+            "profiles": profile_entries,
+        })
+    return results
+
+
 def compose_profile_queries(
     profile: JobProfile,
     max_posting_age_days: int | None = None,
-    sources: list[str] | None = None,
+    sources: list[JobBoard | str] | None = None,
 ) -> list[dict]:
     """Compose one dork query + URL per resolved source for a single profile.
 
     ``max_posting_age_days`` sets the search URL's recency filter; see
     ``recency_param``. ``sources`` is the operator's globally configured job
-    board sources; ``None`` means defaults only — see ``_resolve_sources``.
+    boards — resolved JobBoard records (e.g. AgentConfig.resolved_boards())
+    or bare source strings, which are treated as dork-mode; ``None`` means
+    defaults only. A board whose effective mode is "direct" is skipped — see
+    ``_resolve_sources``.
     """
     keyword_group = _or_group(profile.keywords)
     location_group = _or_group(profile.locations)
@@ -111,12 +159,14 @@ def compose_profile_queries(
 def compose_queries(
     profiles: list[JobProfile],
     max_posting_age_days: int | None = None,
-    sources: list[str] | None = None,
+    sources: list[JobBoard | str] | None = None,
 ) -> list[dict]:
     """Compose dork queries for every enabled, keyword-bearing profile, capped at MAX_QUERIES.
 
-    ``sources`` is the operator's globally configured job board sources,
-    shared across all profiles; ``None`` means defaults only.
+    ``sources`` is the operator's globally configured job boards, shared
+    across all profiles; ``None`` means defaults only. See
+    ``compose_profile_queries`` for what it accepts and how direct-mode
+    boards are excluded.
     """
     results: list[dict] = []
     for profile in profiles:

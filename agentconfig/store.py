@@ -7,7 +7,7 @@ import zoneinfo
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from agentconfig.boards import DEFAULT_BOARD_SOURCES
+from agentconfig.boards import DEFAULT_BOARD_SOURCES, catalog_mode
 from screening.company import company_identity_key
 from storage import data_dir
 
@@ -36,10 +36,18 @@ def _dedupe_boards(boards: list["JobBoard"]) -> list["JobBoard"]:
 
 @dataclass
 class JobBoard:
-    """One job board the operator has configured beyond the always-searched defaults."""
+    """One job board the operator has configured beyond the always-searched defaults.
+
+    ``mode`` is only meaningful for a custom (non-catalog) board: "dork"
+    searches it via Google, "direct" has the agent search the board's own
+    site. A catalog board's effective mode is fixed and computed at resolve
+    time (see AgentConfig.resolved_boards()) regardless of what is stored
+    here — this field only ever drives behaviour for a custom source.
+    """
 
     source: str = ""
     signin_url: str = ""
+    mode: str = ""
 
     @classmethod
     def from_dict(cls, raw: dict) -> "JobBoard":
@@ -49,11 +57,13 @@ class JobBoard:
             kwargs["source"] = raw["source"]
         if "signin_url" in raw and isinstance(raw["signin_url"], str):
             kwargs["signin_url"] = raw["signin_url"]
+        if "mode" in raw and isinstance(raw["mode"], str):
+            kwargs["mode"] = raw["mode"]
         return cls(**kwargs)
 
     def to_dict(self) -> dict:
         """Serialize to a dict with snake_case keys."""
-        return {"source": self.source, "signin_url": self.signin_url}
+        return {"source": self.source, "signin_url": self.signin_url, "mode": self.mode}
 
 
 @dataclass
@@ -216,6 +226,36 @@ class AgentConfig:
                 result.append(board.source)
         return result
 
+    def resolved_boards(self) -> list[JobBoard]:
+        """Job boards actually searched, defaults-first, each carrying its effective mode.
+
+        Mirrors resolved_board_sources()'s defaults-first union but returns
+        full JobBoard records (source, signin_url, effective mode) instead of
+        bare source strings. Effective mode is the catalog's fixed mode for a
+        catalog source (agentconfig.boards.catalog_mode), else the board's
+        own stored mode, else "dork" — the behaviour every board had before
+        modes existed.
+        """
+        overrides = {b.source.strip().casefold(): b for b in self.job_boards if b.source.strip()}
+        result: list[JobBoard] = []
+        seen: set[str] = set()
+        for source in DEFAULT_BOARD_SOURCES:
+            key = source.strip().casefold()
+            seen.add(key)
+            override = overrides.get(key)
+            signin_url = override.signin_url if override else ""
+            result.append(
+                JobBoard(source=source, signin_url=signin_url, mode=catalog_mode(source) or "dork")
+            )
+        for board in self.job_boards:
+            key = board.source.strip().casefold()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            mode = catalog_mode(board.source) or (board.mode or "dork")
+            result.append(JobBoard(source=board.source, signin_url=board.signin_url, mode=mode))
+        return result
+
     @classmethod
     def from_dict(cls, raw: dict) -> AgentConfig:
         """Construct from a dict, ignoring unknown keys and falling back to defaults on wrong types."""
@@ -301,7 +341,9 @@ class AgentConfig:
                 for item in raw_profiles:
                     if isinstance(item, dict) and _is_string_list(item.get("preferred_sources")):
                         for source in item["preferred_sources"]:
-                            migrated.append(JobBoard(source=source))
+                            # Migrated boards keep today's dork-based discovery
+                            # so an existing config's behaviour is unchanged.
+                            migrated.append(JobBoard(source=source, mode="dork"))
             kwargs["job_boards"] = _dedupe_boards(migrated)
 
         # target_companies: list[str]

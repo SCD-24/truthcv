@@ -193,7 +193,43 @@ function ApiKeyControl({ source }: { source: string }) {
   );
 }
 
-function BoardRow({ board, onRemove }: { board: JobBoard; onRemove: () => void }) {
+/** How postings are found on this board — a fixed label for a catalog board
+ * (its mode can't be changed), or a live selector for a custom one. A locked
+ * board is ALWAYS rendered as plain text, never a disabled control, so it
+ * cannot be mistaken for something the operator could enable. */
+function BoardModeControl({ board, onModeChange }: { board: JobBoard; onModeChange: (mode: string) => void }) {
+  if (board.modeLocked) {
+    return (
+      <Typography variant="caption" color="text.secondary">
+        {board.isApi
+          ? "Postings come from this board's own API — only the API key below is configurable."
+          : "Searched via Google."}
+      </Typography>
+    );
+  }
+  return (
+    <Select
+      size="small"
+      value={board.mode || "dork"}
+      onChange={(e) => onModeChange(e.target.value)}
+      sx={{ minWidth: 220 }}
+      inputProps={{ "aria-label": "Mode" }}
+    >
+      <MenuItem value="dork">Google dork</MenuItem>
+      <MenuItem value="direct">Search the site directly</MenuItem>
+    </Select>
+  );
+}
+
+function BoardRow({
+  board,
+  onRemove,
+  onModeChange,
+}: {
+  board: JobBoard;
+  onRemove: () => void;
+  onModeChange: (mode: string) => void;
+}) {
   const navigate = useNavigate();
   const noSigninUrl = !board.effectiveSigninUrl;
 
@@ -213,7 +249,8 @@ function BoardRow({ board, onRemove }: { board: JobBoard; onRemove: () => void }
             </Tooltip>
           )}
         </Stack>
-        <Stack direction="row" spacing={1}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+          <BoardModeControl board={board} onModeChange={onModeChange} />
           {!board.isApi && (
             <Tooltip title={noSigninUrl ? "No sign-in URL is set for this board" : ""}>
               <span>
@@ -251,6 +288,8 @@ function AddBoardControl({ onAdd, existing }: { onAdd: (board: JobBoard) => void
       onAdd({
         source: customDomain.trim(),
         signinUrl: customSigninUrl.trim(),
+        mode: "direct",
+        modeLocked: false,
         domain: customDomain.trim(),
         effectiveSigninUrl: customSigninUrl.trim(),
         isDefault: false,
@@ -265,6 +304,8 @@ function AddBoardControl({ onAdd, existing }: { onAdd: (board: JobBoard) => void
       onAdd({
         source: choice,
         signinUrl: "",
+        mode: "dork",
+        modeLocked: true,
         domain: "",
         effectiveSigninUrl: "",
         isDefault: false,
@@ -370,6 +411,15 @@ export function JobBoardsPage() {
     persist([...config.jobBoards, board]);
   }
 
+  function handleModeChange(source: string, mode: string) {
+    if (!config) return;
+    persist(
+      config.jobBoards.map((b) =>
+        b.source === source ? { ...b, mode: mode as JobBoard["mode"] } : b,
+      ),
+    );
+  }
+
   if (loadError) {
     return (
       <Paper variant="outlined" sx={{ p: 3 }}>
@@ -404,7 +454,12 @@ export function JobBoardsPage() {
         <Divider />
         <Typography variant="subtitle2">Your job boards</Typography>
         {config.jobBoards.map((board) => (
-          <BoardRow key={board.source} board={board} onRemove={() => handleRemove(board.source)} />
+          <BoardRow
+            key={board.source}
+            board={board}
+            onRemove={() => handleRemove(board.source)}
+            onModeChange={(mode) => handleModeChange(board.source, mode)}
+          />
         ))}
         <AddBoardControl
           onAdd={handleAdd}

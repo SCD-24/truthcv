@@ -84,6 +84,7 @@ Projected from `schema` widgets on the architecture canvas.
 | `job_boards` | list[JobBoard] |  | The operator's OWN boards. The four default boards are unioned in at resolve time and are not stored here unless carrying a signin_url override. |
 | `job_boards[].source` | string |  | A catalog key (linkedin, ashby, greenhouse, lever, personio, workday) or a raw domain. |
 | `job_boards[].signin_url` | string | optional | Operator-supplied sign-in URL; blank for a known board, which resolves from the catalog. |
+| `job_boards[].mode` | string | optional | dork \| direct. User-settable only for custom boards (source not in the boards.py catalog). Catalog boards derive a fixed mode and ignore any stored value. Defaults to dork on load for backward compatibility, and to direct for a newly added custom board. |
 <!-- generated:end comp:agent-config -->
 
 <!-- generated:start comp:api -->

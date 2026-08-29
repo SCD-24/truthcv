@@ -304,3 +304,65 @@ def test_profile_with_legacy_preferred_sources_loads_without_error():
     assert len(cfg.profiles) == 1
     assert cfg.profiles[0].name == "p"
     assert not hasattr(cfg.profiles[0], "preferred_sources")
+
+
+# --- Board mode: dork | direct ---------------------------------------------
+
+
+def test_job_board_mode_round_trips():
+    board = store.JobBoard(source="jobs.acme.com", mode="direct")
+    restored = store.JobBoard.from_dict(board.to_dict())
+    assert restored.mode == "direct"
+
+
+def test_job_board_with_no_mode_key_loads_as_dork():
+    """A board dict predating modes, or a hand-edited one missing the key,
+    keeps today's dork-based discovery."""
+    board = store.JobBoard.from_dict({"source": "custom.example.com"})
+    assert board.mode == ""
+    cfg = store.AgentConfig.from_dict(
+        {"job_boards": [{"source": "custom.example.com"}]}
+    )
+    resolved = {b.source: b.mode for b in cfg.resolved_boards()}
+    assert resolved["custom.example.com"] == "dork"
+
+
+def test_migrated_preferred_source_boards_default_to_dork_mode():
+    cfg = store.AgentConfig.from_dict(
+        {"profiles": [{"preferred_sources": ["custom.com"]}]}
+    )
+    assert cfg.job_boards[0].mode == "dork"
+
+
+def test_catalog_board_ignores_a_stored_mode_and_uses_its_catalog_mode():
+    """A catalog board's mode is fixed; a stray stored mode (e.g. from a
+    hand-edited config) is never honoured."""
+    cfg = store.AgentConfig.from_dict(
+        {"job_boards": [{"source": "ashby", "mode": "direct"}]}
+    )
+    resolved = {b.source: b.mode for b in cfg.resolved_boards()}
+    assert resolved["ashby"] == "dork"
+
+
+def test_resolved_boards_defaults_first_with_effective_modes():
+    cfg = store.AgentConfig(
+        job_boards=[
+            store.JobBoard(source="custom.example.com", mode="direct"),
+            store.JobBoard(source="linkedin"),
+        ]
+    )
+    resolved = cfg.resolved_boards()
+    sources = [b.source for b in resolved]
+    assert sources == ["ashby", "greenhouse", "lever", "workday", "custom.example.com", "linkedin"]
+    by_source = {b.source: b.mode for b in resolved}
+    assert by_source["ashby"] == "dork"
+    assert by_source["custom.example.com"] == "direct"
+    assert by_source["linkedin"] == "dork"
+
+
+def test_resolved_boards_skips_a_default_reconfigured_by_the_operator():
+    cfg = store.AgentConfig(job_boards=[store.JobBoard(source="ashby", mode="direct")])
+    resolved = cfg.resolved_boards()
+    ashby_entries = [b for b in resolved if b.source.strip().casefold() == "ashby"]
+    assert len(ashby_entries) == 1
+    assert ashby_entries[0].mode == "dork"

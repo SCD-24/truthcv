@@ -361,6 +361,18 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
       PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$QUERIES"$'\n'
     fi
 
+    # Direct-search boards: searched on the board's own site rather than via
+    # a Google dork (e.g. it has no useful `site:` search surface). One block
+    # per board with the sign-in URL (if any) and each enabled profile's
+    # search criteria to use there. On hitting a login wall, report the
+    # board with report_apply_failure(blocker="login_required", signin_url)
+    # and move on to the next board — see RUNBOOK.md.
+    DIRECT_BOARDS="$(jq -r '.directBoards[]? | ("  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end)), (.profiles[]? | "    [\(.profile)] keywords: \(.keywords // [] | join(", "))" + (if ((.locations // []) | length) > 0 then "; locations: \(.locations | join(", "))" else "" end) + (if ((.rejectedRoleTypes // []) | length) > 0 then "; avoid: \(.rejectedRoleTypes | join(", "))" else "" end))' <<<"$JOB_CONFIG")"
+    if [[ -n "$DIRECT_BOARDS" ]]; then
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Direct-search boards (search these on the board's own site using each profile's keywords/locations below; on a login wall, report_apply_failure with blocker \"login_required\" and the sign-in URL, then continue to the next board):"$'\n'
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$DIRECT_BOARDS"$'\n'
+    fi
+
     # Postings pulled from API-backed job boards (Remote Rocketship) by the
     # app, using the saved API key. Unlike the composed queries above these are
     # already-matched postings, not entry points to search from — each line is
