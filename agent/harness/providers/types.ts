@@ -62,7 +62,17 @@ export type HarnessEvent =
   /** A tool the model wants to invoke. */
   | { type: 'toolCall'; toolCall: ToolCall }
   /** Token accounting for the request. */
-  | { type: 'usage'; inputTokens: number; outputTokens: number }
+  | {
+      type: 'usage';
+      inputTokens: number;
+      outputTokens: number;
+      /** Anthropic-only: tokens served from the prompt cache. Present only when
+       * the provider reports it; absent on OpenAI-wire responses. */
+      cacheReadTokens?: number;
+      /** Anthropic-only: tokens written into the prompt cache. Present only when
+       * the provider reports it; absent on OpenAI-wire responses. */
+      cacheWriteTokens?: number;
+    }
   /** Terminal event carrying the stop reason and assembled message. */
   | { type: 'done'; stopReason: StopReason; message: ConversationMessage }
   /** A recoverable or fatal error surfaced instead of throwing. */

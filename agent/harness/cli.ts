@@ -12,10 +12,13 @@
  *                       or otherwise non-success loop outcome, or an unexpected
  *                       throw out of the loop.
  *   4  MCP failure    — the MCP layer could not be brought up at all: loading
- *                       the MCP config threw, pool construction threw, OR the
+ *                       the MCP config threw, pool construction threw, the
  *                       constructed pool exposes ZERO tools (every configured
  *                       server was unreachable, so the agent has no tool surface
- *                       to act through). Per-server failures that still leave
+ *                       to act through), OR the `browser` server does not
+ *                       advertise every allowlisted browser tool the RUNBOOK
+ *                       depends on (an upstream @playwright/mcp rename silently
+ *                       dropped one). Per-server failures that still leave
  *                       SOME tools available are intentionally NOT a 4 — the
  *                       pool isolates them and the run proceeds, matching the
  *                       pool's own isolation design.
@@ -51,6 +54,7 @@ import {
 } from './providers/registry.js';
 import type { ConversationMessage, HarnessEvent, ProviderAdapter } from './providers/types.js';
 import { runLoop, type LoopEvent, type LoopOutcome, type LoopResult } from './loop.js';
+import { checkAdvertisedBrowserTools } from './tools.js';
 
 /** The CLI's process exit codes; see the module comment for the full contract. */
 export const ExitCode = {
@@ -68,6 +72,9 @@ export const ExitCode = {
 
 /** Default hard turn cap when neither flag nor env supplies one. */
 const DEFAULT_MAX_TURNS = 40;
+
+/** Default cap on a single MCP tool result's characters when unset. */
+const DEFAULT_MAX_TOOL_RESULT_CHARS = 24000;
 
 /**
  * The system prompt sent on every request. The user's prompt is delivered as
@@ -120,6 +127,18 @@ export interface CliConfig {
    * is too long.
    */
   contextWindow: number;
+  /**
+   * Maximum characters of a single MCP tool result inserted into the
+   * conversation. A larger result is truncated with an explicit marker before
+   * the model sees it, so it never receives silently partial data.
+   */
+  maxToolResultChars: number;
+  /**
+   * Whether Anthropic prompt-cache `cache_control` breakpoints are placed on
+   * the wire. An escape hatch: false fully disables caching (Anthropic wire
+   * only; no effect on the OpenAI-compatible wire).
+   */
+  promptCache: boolean;
   /** Where to write the final assistant message text; omitted to write nothing. */
   outputFile?: string;
   /** Where to write the failure detail on a non-zero exit; omitted to write nothing. */
@@ -252,6 +271,33 @@ function resolveMaxTurns(flag: string | undefined, envVal: string | undefined): 
 }
 
 /**
+ * Parse `--max-tool-result-chars`/`AGENT_MAX_TOOL_RESULT_CHARS`, defaulting when
+ * unset; NaN if invalid. CLI flag wins over env var wins over the default,
+ * matching resolveMaxTurns.
+ */
+function resolveMaxToolResultChars(flag: string | undefined, envVal: string | undefined): number {
+  const raw = (flag || envVal || '').trim();
+  if (!raw) return DEFAULT_MAX_TOOL_RESULT_CHARS;
+  // Digits only, deliberately — see resolveContextWindow's comment. This
+  // rejects "1.5", "24000k", "0x10" etc. as NaN instead of parseInt silently
+  // truncating them into a plausible-looking positive integer that would
+  // then sail through validateConfig's Number.isInteger check.
+  if (!/^\d+$/.test(raw)) return Number.NaN;
+  return Number.parseInt(raw, 10);
+}
+
+/**
+ * Parse `--prompt-cache`/`AGENT_PROMPT_CACHE` as a default-true escape hatch:
+ * any value other than the literal string `'false'` leaves caching on. CLI flag
+ * wins over env var wins over the default (on), matching resolveMaxTurns.
+ */
+function resolvePromptCache(flag: string | undefined, envVal: string | undefined): boolean {
+  const raw = flag ?? envVal;
+  if (raw === undefined || raw === '') return true;
+  return raw !== 'false';
+}
+
+/**
  * Merge flags, environment and defaults (and read the prompt) into a
  * {@link CliConfig}. Performs no validation and constructs nothing.
  *
@@ -278,6 +324,8 @@ export async function resolveConfig(
     mcpConfigPath: f['mcp-config'] ?? env.MCP_CONFIG_PATH ?? 'mcp.json',
     maxTurns: resolveMaxTurns(f['max-turns'], env.AGENT_MAX_TURNS),
     contextWindow: resolveContextWindow(f['context-window'], env.AGENT_CONTEXT_WINDOW),
+    maxToolResultChars: resolveMaxToolResultChars(f['max-tool-result-chars'], env.AGENT_MAX_TOOL_RESULT_CHARS),
+    promptCache: resolvePromptCache(f['prompt-cache'], env.AGENT_PROMPT_CACHE),
     outputFile: f['output-file'] || undefined,
     reasonFile: f['reason-file'] || undefined,
   };
@@ -311,6 +359,8 @@ export function validateConfig(config: CliConfig): string[] {
   if (!PROVIDERS.includes(config.provider)) errors.push('a valid --provider (claude|codex|openrouter|ollama) is required');
   if (!WIRES.includes(config.wire)) errors.push('a valid --wire (anthropic-messages|openai-chat-completions) is required');
   if (!Number.isInteger(config.maxTurns) || config.maxTurns <= 0) errors.push('--max-turns must be a positive integer');
+  if (!Number.isInteger(config.maxToolResultChars) || config.maxToolResultChars <= 0)
+    errors.push('--max-tool-result-chars must be a positive integer');
   if (!Number.isInteger(config.contextWindow) || config.contextWindow < 0)
     errors.push('--context-window must be a whole number of tokens, digits only (0 or unset means unknown)');
   else if (config.contextWindow > 0 && config.contextWindow < MIN_CONTEXT_WINDOW)
@@ -445,6 +495,11 @@ async function tryBuildPool(
       emit.err('mcp connection failure: no tools available from any configured MCP server');
       return ExitCode.McpFailure;
     }
+    const missingBrowserTools = checkAdvertisedBrowserTools(pool.listTools());
+    if (missingBrowserTools.length > 0) {
+      emit.err(`mcp connection failure: browser server is missing allowlisted tool(s): ${missingBrowserTools.join(', ')}`);
+      return ExitCode.McpFailure;
+    }
     return pool;
   } catch (err) {
     emit.err(`mcp connection failure: ${errorMessage(err)}`);
@@ -479,7 +534,7 @@ async function runAgent(
       pool,
       systemPrompt: SYSTEM_PROMPT,
       initialMessages: [{ role: 'user', content: config.prompt }],
-      config: { maxTurns: config.maxTurns },
+      config: { maxTurns: config.maxTurns, maxToolResultChars: config.maxToolResultChars },
       // Omitted entirely when unstated, so the loop's own "no window, no
       // proactive compaction" guard is the single place that decision lives.
       ...(config.contextWindow ? { compactionConfig: { contextWindow: config.contextWindow } } : {}),
@@ -787,6 +842,8 @@ function adapterOptions(config: CliConfig): ProviderAdapterOptions {
     // its own default; deriving both from one figure is what stops the harness
     // compacting against one window while the server enforces another.
     ...(config.contextWindow ? { contextWindow: config.contextWindow } : {}),
+    // Anthropic-only escape hatch; the registry ignores it on the OpenAI wire.
+    promptCache: config.promptCache,
   };
 }
 

@@ -1,7 +1,28 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { McpClientPool, NamespacedTool } from '../mcp/client.js';
 import type { ToolCall } from '../providers/types.js';
-import { buildToolRegistry, executeToolCall, isToolAllowed, type RegisteredTool } from '../tools.js';
+import {
+  buildToolRegistry,
+  checkAdvertisedBrowserTools,
+  DEFAULT_MAX_TOOL_RESULT_CHARS,
+  executeToolCall,
+  isToolAllowed,
+  type RegisteredTool,
+} from '../tools.js';
+
+/** The 10 browser tools enumerated in the browser allow-list. */
+const BROWSER_TOOLS = [
+  'browser_navigate',
+  'browser_click',
+  'browser_type',
+  'browser_file_upload',
+  'browser_snapshot',
+  'browser_take_screenshot',
+  'browser_wait_for',
+  'browser_press_key',
+  'browser_select_option',
+  'browser_handle_dialog',
+];
 
 /** The 17 truthcv tools granted individually by daily-apply.sh. */
 const TRUTHCV_TOOLS = [
@@ -49,10 +70,12 @@ describe('isToolAllowed', () => {
     expect(isToolAllowed('truthcv', 'some_unlisted_18th_tool')).toBe(false);
   });
 
-  it('grants any tool at all from the browser server as a whole-server grant', () => {
-    expect(isToolAllowed('browser', 'browser_navigate')).toBe(true);
-    expect(isToolAllowed('browser', 'browser_click')).toBe(true);
-    expect(isToolAllowed('browser', 'browser_totally_new_tool')).toBe(true);
+  it('grants only the enumerated browser allow-list tools, not the whole server', () => {
+    for (const name of BROWSER_TOOLS) {
+      expect(isToolAllowed('browser', name)).toBe(true);
+    }
+    // Previously granted as part of the whole-server grant; now denied.
+    expect(isToolAllowed('browser', 'browser_totally_new_tool')).toBe(false);
   });
 
   it('denies a tool from an unknown server even if the name is a truthcv tool', () => {
@@ -101,14 +124,125 @@ describe('executeToolCall', () => {
     expect(result.toolCallId).toBe('call-1');
   });
 
-  it('allows any browser tool through the whole-server grant', async () => {
+  it('dispatches an allowlisted browser tool and maps its result', async () => {
     const callTool = vi.fn(async () => ({ content: 'navigated', isError: false }));
     const pool = { callTool } as unknown as McpClientPool;
-    const registry = registryFor('browser', 'browser_totally_new_tool');
+    const registry = registryFor('browser', 'browser_click');
+
+    const result = await executeToolCall(pool, callFor('browser__browser_click'), registry);
+
+    expect(callTool).toHaveBeenCalledWith('browser__browser_click', {});
+    expect(result.content).toBe('navigated');
+  });
+
+  it('denies a non-allowlisted browser tool without calling pool.callTool', async () => {
+    const callTool = vi.fn(() => {
+      throw new Error('pool.callTool must not be invoked for a denied browser tool');
+    });
+    const pool = { callTool } as unknown as McpClientPool;
+    // A registry can only be built from an allowed tool now, so register it
+    // directly to prove the call-time isToolAllowed check still denies it.
+    const registry: RegisteredTool[] = [
+      {
+        namespacedName: 'browser__browser_totally_new_tool',
+        serverName: 'browser',
+        toolName: 'browser_totally_new_tool',
+        definition: { name: 'browser__browser_totally_new_tool', description: 'd', inputSchema: { type: 'object' } },
+      },
+    ];
 
     const result = await executeToolCall(pool, callFor('browser__browser_totally_new_tool'), registry);
 
-    expect(callTool).toHaveBeenCalledWith('browser__browser_totally_new_tool', {});
-    expect(result.content).toBe('navigated');
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('browser_totally_new_tool');
+    expect(callTool).not.toHaveBeenCalled();
+  });
+});
+
+describe('executeToolCall content cap', () => {
+  it('leaves content under the cap byte-identical (no marker appended)', async () => {
+    const content = 'x'.repeat(100);
+    const callTool = vi.fn(async () => ({ content, isError: false }));
+    const pool = { callTool } as unknown as McpClientPool;
+    const registry = registryFor('truthcv', 'start_run');
+
+    const result = await executeToolCall(pool, callFor('truthcv__start_run'), registry);
+
+    expect(result.content).toBe(content);
+    expect(result.content.length).toBe(100);
+  });
+
+  it('caps content over the default cap and names the omitted count', async () => {
+    const content = 'a'.repeat(30000);
+    const callTool = vi.fn(async () => ({ content, isError: false }));
+    const pool = { callTool } as unknown as McpClientPool;
+    const registry = registryFor('truthcv', 'start_run');
+
+    const result = await executeToolCall(pool, callFor('truthcv__start_run'), registry);
+
+    // Starts with exactly the first DEFAULT_MAX_TOOL_RESULT_CHARS characters.
+    expect(result.content.startsWith(content.slice(0, DEFAULT_MAX_TOOL_RESULT_CHARS))).toBe(true);
+    expect(result.content.length).toBeGreaterThan(DEFAULT_MAX_TOOL_RESULT_CHARS);
+    // The marker names the omitted count (30000 - 24000 = 6000) and tells the
+    // model to re-request a narrower view.
+    const omitted = 30000 - DEFAULT_MAX_TOOL_RESULT_CHARS;
+    expect(result.content).toContain(String(omitted));
+    expect(result.content).toContain('re-request');
+  });
+
+  it('also caps a long error body', async () => {
+    const content = 'e'.repeat(30000);
+    const callTool = vi.fn(async () => ({ content, isError: true }));
+    const pool = { callTool } as unknown as McpClientPool;
+    const registry = registryFor('truthcv', 'start_run');
+
+    const result = await executeToolCall(pool, callFor('truthcv__start_run'), registry);
+
+    expect(result.isError).toBe(true);
+    expect(result.content.startsWith(content.slice(0, DEFAULT_MAX_TOOL_RESULT_CHARS))).toBe(true);
+    expect(result.content).toContain(String(30000 - DEFAULT_MAX_TOOL_RESULT_CHARS));
+  });
+
+  it('honours an explicit maxContentChars override instead of the default', async () => {
+    const content = 'z'.repeat(100);
+    const callTool = vi.fn(async () => ({ content, isError: false }));
+    const pool = { callTool } as unknown as McpClientPool;
+    const registry = registryFor('truthcv', 'start_run');
+
+    const result = await executeToolCall(pool, callFor('truthcv__start_run'), registry, 50);
+
+    expect(result.content.startsWith('z'.repeat(50))).toBe(true);
+    // 100 - 50 = 50 characters omitted, and it is NOT capped at the default.
+    expect(result.content).toContain('50');
+    expect(result.content).toContain('re-request');
+  });
+});
+
+describe('checkAdvertisedBrowserTools', () => {
+  /** Build a raw namespaced-tool list for the given (server, tool) pairs. */
+  function toolsList(pairs: [string, string][]): ReturnType<McpClientPool['listTools']> {
+    const tools: NamespacedTool[] = pairs.map(([serverName, toolName]) => ({
+      namespacedName: `${serverName}__${toolName}`,
+      serverName,
+      toolName,
+      description: 'd',
+      inputSchema: { type: 'object' },
+    }));
+    return tools as ReturnType<McpClientPool['listTools']>;
+  }
+
+  it('returns [] when every allowlisted browser tool is advertised', () => {
+    const advertised = toolsList(BROWSER_TOOLS.map((name) => ['browser', name] as [string, string]));
+    expect(checkAdvertisedBrowserTools(advertised)).toEqual([]);
+  });
+
+  it('returns the missing tool name when the browser server drops one', () => {
+    const advertised = toolsList(
+      BROWSER_TOOLS.filter((name) => name !== 'browser_snapshot').map(
+        (name) => ['browser', name] as [string, string],
+      ),
+    );
+    const missing = checkAdvertisedBrowserTools(advertised);
+    expect(missing).toContain('browser_snapshot');
   });
 });

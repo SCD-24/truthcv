@@ -201,6 +201,13 @@ services:
       # Setting it wrong is worse than leaving it unset — too high still
       # overflows, too low silently drops context that was fitting.
       - AGENT_CONTEXT_WINDOW=${AGENT_CONTEXT_WINDOW:-0}
+      # Cap on a single MCP tool result's characters before it is inserted into
+      # the conversation; a longer result is truncated with an explicit marker.
+      - AGENT_MAX_TOOL_RESULT_CHARS=${AGENT_MAX_TOOL_RESULT_CHARS:-24000}
+      # On/off switch for Anthropic prompt-cache cache_control breakpoints
+      # (Anthropic wire only). Set false if turns are spaced further apart than
+      # the cache's 5-minute TTL, where cache writes (1.25x) can exceed savings.
+      - AGENT_PROMPT_CACHE=${AGENT_PROMPT_CACHE:-true}
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
       # Port supervisor.js listens on — matched to the app service entry above.
       - AGENT_CONTROL_PORT=${AGENT_CONTROL_PORT:-9099}

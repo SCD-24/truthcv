@@ -293,43 +293,115 @@ echo "PASS: omitted search queries leaves prompt unchanged"
 # --- Inlined RUNBOOK operating spec -----------------------------------------
 # Mirrors daily-apply.sh's RUNBOOK inlining verbatim (see the "Inline its full
 # text here" block there), so a divergence between this simulation and the real
-# script is a bug in one of the two, not just here. The harness has no Read
-# tool, so daily-apply.sh appends the RUNBOOK's full text under a fixed marker
-# rather than pointing at a file the agent cannot open.
+# script is a bug in one of the two, not just here. The harness's only
+# file-reading tool is read_runbook_section, which returns one named RUNBOOK
+# section and takes no path argument, so daily-apply.sh no longer inlines the
+# whole file: it inlines the non-negotiable rule sections (1, 4, 7, 8)
+# verbatim plus a table of contents of every heading, and expects the agent
+# to fetch anything else with the tool before it needs it.
 #
 # daily-apply.sh enforces no byte/char/line cap on the composed prompt before
 # invoking the harness, so there is no render-size limit for this test to
 # mirror; RUNBOOK inlining is covered by the case below.
 
-# Case 12: the composed prompt inlines RUNBOOK.md's full text under its marker.
-echo "Testing: composed prompt inlines the RUNBOOK operating spec..."
+# Case 12: the composed prompt inlines the RUNBOOK's non-negotiable rule
+# sections (1, 4, 7, 8) plus a table of contents of every heading, and does
+# NOT inline the full text of a section that isn't one of those four.
+echo "Testing: composed prompt inlines RUNBOOK rules + TOC, not the full text..."
 RUNBOOK_FIXTURE="$TEST_DIR/RUNBOOK.md"
 cat > "$RUNBOOK_FIXTURE" <<'EOF'
 # Operating spec fixture
-## §1 quota
+
+## 0. The approved queue — work it first
+Work the approved queue before anything else.
+
+## 1. There is no daily quota
 There is no daily quota.
-## §2 filters
-Match each posting against the configured profiles.
+
+## 2. Hard filters — every criterion of the matched profile must pass
+This is a long procedural section about gathering filter criteria that must NOT appear in the composed prompt.
+
+## 3. Canonical answers — call get_profile_answers
+This is a long procedural section about canonical answers that must NOT appear in the composed prompt.
+
+## 4. Truthfulness rules — non-negotiable
+Never claim a skill the profile does not have.
+
+## 5. Applying
+This is a long procedural section about applying that must NOT appear in the composed prompt.
+
+## 6. The approve/deny boundary
+This is a long procedural section about the approve/deny boundary that must NOT appear in the composed prompt.
+
+## 7. When something is ambiguous
+Escalate rather than guess.
+
+## 8. Never do — cooldowns
+Never re-apply within the cooldown window.
+
+## 9. Report at the end of every run
+This is a long procedural section about reporting that must NOT appear in the composed prompt.
 EOF
 
 PROMPT_FILE5="$TEST_DIR/prompt5.txt"
 echo "## Original RUNBOOK filters" > "$PROMPT_FILE5"
 echo "Apply to at most 5 role(s) this run." >> "$PROMPT_FILE5"
 
-# Same composition as daily-apply.sh: PROMPT starts from the prompt file, then
-# the RUNBOOK's full text is appended under the "## Operating spec" marker.
+# Same composition as daily-apply.sh: PROMPT starts from the prompt file,
+# then the RUNBOOK's non-negotiable rule sections (1, 4, 7, 8) are extracted
+# verbatim by section-number range, plus a table of contents of every "## "
+# heading — never the full RUNBOOK text.
 PROMPT="$(cat "$PROMPT_FILE5")"$'\n\n'"Today is $(date +%Y-%m-%d)."
-PROMPT="$PROMPT"$'\n\n'"## Operating spec (agent/RUNBOOK.md)"$'\n\n'"$(cat "$RUNBOOK_FIXTURE")"
+RUNBOOK_TOC="$(grep -E '^##[^#]' "$RUNBOOK_FIXTURE" | sed -E 's/^##[[:space:]]*/- /')"
+RUNBOOK_RULES="$(awk '
+  /^## 1\. There is no daily quota/,/^## 2\./   { if ($0 !~ /^## 2\./) print }
+  /^## 4\. Truthfulness rules/,/^## 5\./         { if ($0 !~ /^## 5\./) print }
+  /^## 7\. When something is ambiguous/,/^## 8\./ { if ($0 !~ /^## 8\./) print }
+  /^## 8\. Never do/,/^## 9\./                    { if ($0 !~ /^## 9\./) print }
+' "$RUNBOOK_FIXTURE")"
+PROMPT="$PROMPT"$'\n\n'"## Operating spec (agent/RUNBOOK.md) — non-negotiable rules
 
-if [[ "$PROMPT" != *"## Operating spec (agent/RUNBOOK.md)"* ]]; then
-  echo "FAIL: composed prompt is missing the RUNBOOK operating-spec marker"
+Also non-negotiable, detailed in the full section — call read_runbook_section
+with EXACTLY this heading text (section numbers included, case-insensitive)
+before you need it:
+- \"0. The approved queue — work it first\": approved-queue postings are
+  applied to before anything new is discovered, every run.
+- \"2. Hard filters — every criterion of the matched profile must pass\":
+  every criterion of the matched profile must pass, no exceptions, no
+  judgment calls.
+- \"3. Canonical answers — call \`get_profile_answers\`\": screening-question
+  answers come only from get_profile_answers, never invented or guessed.
+- \"5. Applying\" (its \"Both documents go up\" subsection): a passing
+  posting gets a CV **and** a cover letter — never one without the other to
+  save cost.
+- record_screening REJECTS the call and stores nothing unless company,
+  verdict, role and url all carry usable values, on every screening you
+  record, rejections included (see \"6. The approve/deny boundary\")."$'\n\n'"$RUNBOOK_RULES"$'\n\n'"## Operating spec — table of contents
+
+Call read_runbook_section(section: <heading text below, exactly as written,
+including its number>) for a section's full procedure before you start the
+phase it covers — its detail is not inlined here. A \"##\" section's fetch
+also returns its \"###\" subsections (e.g. fetching \"5. Applying\" includes
+\"Both documents go up\")."$'\n\n'"$RUNBOOK_TOC"
+
+if [[ "$PROMPT" != *"## Operating spec (agent/RUNBOOK.md) — non-negotiable rules"* ]]; then
+  echo "FAIL: composed prompt is missing the RUNBOOK rules marker"
   exit 1
 fi
-if [[ "$PROMPT" != *"There is no daily quota."* ]] || [[ "$PROMPT" != *"Match each posting against the configured profiles."* ]]; then
-  echo "FAIL: composed prompt is missing the inlined RUNBOOK fixture content"
+if [[ "$PROMPT" != *"There is no daily quota."* ]] || [[ "$PROMPT" != *"Never claim a skill the profile does not have."* ]] \
+   || [[ "$PROMPT" != *"Escalate rather than guess."* ]] || [[ "$PROMPT" != *"Never re-apply within the cooldown window."* ]]; then
+  echo "FAIL: composed prompt is missing an inlined RUNBOOK rule section"
   exit 1
 fi
-echo "PASS: composed prompt inlines the RUNBOOK operating spec"
+if [[ "$PROMPT" == *"must NOT appear in the composed prompt"* ]]; then
+  echo "FAIL: composed prompt inlines a procedural section's full text (it should carry only the TOC for it)"
+  exit 1
+fi
+if [[ "$PROMPT" != *"- 5. Applying"* ]] || [[ "$PROMPT" != *"- 2. Hard filters"* ]]; then
+  echo "FAIL: composed prompt is missing the table of contents for a moved section"
+  exit 1
+fi
+echo "PASS: composed prompt inlines RUNBOOK rules + TOC, not full procedural text"
 
 echo ""
 echo "All tests passed!"

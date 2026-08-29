@@ -159,6 +159,8 @@ flag that takes precedence; `daily-apply.sh` passes the flags explicitly):
 | `AGENT_LLM_AUTH_TYPE` | How to present the token: `oauth`, `api_key`, or `url`. |
 | `AGENT_CONTEXT_WINDOW` | The model's **input** context capacity in tokens, digits only; values that are not whole numbers, and windows under 8192, are refused rather than silently reinterpreted. Unset/`0` means unknown. Unknown is supported **on providers that report an overflow as an error** (Anthropic, OpenAI-wire hosted APIs): the harness does no proactive compaction and instead compacts when the provider says the context is too long, then resends. Set it and the harness also compacts *before* sending, at 75% of this figure. State the input capacity, not the headline total — Anthropic reports it as `max_input_tokens` on `GET /v1/models/{id}`; the difference is what the provider reserves for the reply. There is deliberately no built-in per-model table: one is wrong the day a model ships, and a wrong window fails both ways (too high still overflows, too low silently discards context that was fitting). **Set it explicitly for `ollama`** — a local server that truncates an over-long prompt and answers 200 produces no error to react to, so the reactive path never fires and the oldest messages are dropped server-side, instructions first. The number is also passed to the adapter as `options.num_ctx`; whether the OpenAI-compatible endpoint honours that has not been verified here, so do not rely on it to raise a server-side window. |
 | `AGENT_MAX_TURNS` | Runaway backstop on the agent loop's turns. Defaults to `400`. Not the operational bound on how much a run does — that is `maxApplicationsPerRun` on the Agents page. Driving one application form through the browser costs 15-25 turns. The last turns are reserved for the model to wind up in. |
+| `AGENT_MAX_TOOL_RESULT_CHARS` | Caps a single MCP tool result's character length at the moment it is inserted into the conversation. Defaults to `24000`. An over-long result — a full-page browser snapshot, a long file read — is truncated with an explicit marker naming how many characters were cut and instructing the model to re-request a narrower view, so it never receives silently partial data. Must be a positive integer. |
+| `AGENT_PROMPT_CACHE` | Toggles Anthropic prompt-cache `cache_control` breakpoints (the tools block plus the first and last message) on the **Anthropic wire only**. Defaults to `true`. Set to `false` to disable caching entirely if runs are spaced further apart than the cache's 5-minute TTL, where the cache-write cost (1.25x) could exceed the savings. Has no effect on the OpenAI-compatible wire, which relies on automatic prefix caching instead. |
 
 **Harness binary.** `HARNESS_CLI` overrides the path to the compiled entry
 point; it defaults to `/app/agent/dist/harness/cli.js`.
@@ -167,10 +169,12 @@ point; it defaults to `/app/agent/dist/harness/cli.js`.
 and propagated verbatim: `0` success, `2` turn cap, `3` provider error, `4` MCP
 connection failure, `5` bad configuration.
 
-**No built-in tools.** The harness ships with **no** built-in tools — there is
-no `Read`, `Write`, `WebSearch`, or `WebFetch`. Every capability the agent has
-comes from the MCP servers declared in [`mcp.json`](mcp.json); if a server is
-not in that config, the agent cannot reach it.
+**Almost no built-in tools.** The harness ships with one narrow built-in tool,
+`read_runbook_section` — it returns one named section of `RUNBOOK.md` from the
+image and takes no path argument, so it opens no general filesystem read. There
+is no `Read`, `Write`, `WebSearch`, or `WebFetch`. Every other capability the
+agent has comes from the MCP servers declared in [`mcp.json`](mcp.json); if a
+server is not in that config, the agent cannot reach it.
 
 ## Agents page: the schedule and enable switch
 
@@ -232,11 +236,16 @@ filesystem route to your data and should not acquire one.
 Its allow-list is hardcoded in the harness (`agent/harness/tools.ts`) and is the
 TruthCV MCP tools, each granted individually — naming each one keeps the blast
 radius of a new server-side tool at zero until it is granted on purpose — plus
-the whole `browser` MCP server (granted as `mcp__browser`, not as individually
-named tools — the upstream `@playwright/mcp` tool set is theirs to rename or
-extend on a version bump). The harness has no built-in tools of its own: the
-former `Read`/`Write`/`WebSearch`/`WebFetch` are gone, and only MCP tools exist
-to be granted. It has no tool for approving an inference: the approve/deny gate
+an enumerated allow-list of `browser` MCP server tools (`BROWSER_ALLOWED_TOOL_NAMES`
+in `agent/harness/tools.ts`, mirrored in `agent/mcp.json`'s `browser.allowedTools`):
+only the tool names this RUNBOOK actually calls are granted, not the whole
+upstream `@playwright/mcp` server. The harness fails loudly at startup, before
+any run turn, if one of those allowlisted names is missing from what the
+`browser` server actually advertises — an upstream rename must never silently
+disable a tool mid-run. The harness has no MCP-backed built-in tools of its
+own beyond one narrow exception: `read_runbook_section`, which returns a named
+section of `RUNBOOK.md` from the image and takes no path argument, so it opens
+no general filesystem read. It has no tool for approving an inference: the approve/deny gate
 is the product, and the agent never stands on both sides of it. The RUNBOOK's core rules still hold —
 the truthfulness rules, the cooldowns, and the rule that an application counts
 as submitted only when the confirmation page says so — but its search filters

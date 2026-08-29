@@ -25,6 +25,15 @@ export interface AnthropicMessagesOptions {
   baseUrl?: string;
   /** Model identifier to request. */
   model: string;
+  /**
+   * Whether to place Anthropic prompt-cache `cache_control` breakpoints on the
+   * request (tools array + first/last message). Defaults to true when
+   * undefined; set to false as an escape hatch to send zero `cache_control`
+   * blocks and attempt no caching at all — useful when turns are spaced further
+   * apart than the cache's 5-minute TTL, where cache writes (1.25x cost) can
+   * exceed the savings.
+   */
+  promptCache?: boolean;
 }
 
 /** HTTP statuses worth retrying. */
@@ -99,23 +108,69 @@ function toToolResultBlock(id: string, content: string, isError?: boolean): unkn
   return { type: 'tool_result', tool_use_id: id, content, is_error: isError ?? false };
 }
 
-/** Map normalised tool definitions to Anthropic's tool shape. */
-function toAnthropicTools(tools: ToolDefinition[]): unknown[] {
-  return tools.map((tool) => ({
+/** Map normalised tool definitions to Anthropic's tool shape.
+ *
+ * A `cache_control` breakpoint is placed on the LAST tool only: it caches the
+ * whole tool array as one contiguous prefix (Anthropic caches everything up to
+ * and including a breakpoint), so a single marker on the final entry covers all
+ * of them. See addCacheControlToLastBlock for the 4-breakpoint budget. */
+function toAnthropicTools(tools: ToolDefinition[], cacheEnabled: boolean): unknown[] {
+  const mapped = tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
     input_schema: tool.inputSchema,
   }));
+  if (cacheEnabled && mapped.length > 0) {
+    const last = mapped[mapped.length - 1];
+    mapped[mapped.length - 1] = { ...last, cache_control: { type: 'ephemeral' } } as typeof last;
+  }
+  return mapped;
+}
+
+/**
+ * Add an Anthropic prompt-caching breakpoint to the final content block of a
+ * message produced by toAnthropicMessage.
+ *
+ * `cache_control` is only valid on a content BLOCK, never on a bare string, so
+ * a message whose `content` is a plain string (a pure-text turn that fell back
+ * to the string form) is left untouched — the API would reject the marker
+ * otherwise. In practice text turns already become an array of blocks, so this
+ * only skips truly empty messages.
+ */
+function addCacheControlToLastBlock(anthropicMessage: unknown): void {
+  const msg = anthropicMessage as { content?: unknown };
+  const content = msg.content;
+  if (Array.isArray(content) && content.length > 0) {
+    const last = content[content.length - 1] as Record<string, unknown>;
+    content[content.length - 1] = { ...last, cache_control: { type: 'ephemeral' } };
+  }
 }
 
 /** Assemble the full Anthropic request body from a ModelRequest. */
 function buildBody(request: ModelRequest, opts: AnthropicMessagesOptions): unknown {
+  const anthropicMessages = request.messages.map(toAnthropicMessage);
+  // Anthropic prompt-caching breakpoints. A request may declare at most 4
+  // `cache_control` blocks total; here that budget is spent on the tools array
+  // (1) + at most 2 message breakpoints below = 3, well under 4 (the `system`
+  // field is deliberately left uncached to keep its shape byte-identical). The
+  // first message anchors a stable cached prefix; the last message is a rolling
+  // breakpoint that extends the cache as the conversation grows.
+  //
+  // The whole scheme is skipped when `promptCache` is false: no breakpoint is
+  // written anywhere (tools included, via the argument to toAnthropicTools
+  // below), so the request carries zero `cache_control` blocks and attempts no
+  // caching at all.
+  const cacheEnabled = opts.promptCache !== false;
+  if (cacheEnabled && anthropicMessages.length > 0) {
+    addCacheControlToLastBlock(anthropicMessages[0]);
+    addCacheControlToLastBlock(anthropicMessages[anthropicMessages.length - 1]);
+  }
   return {
     model: opts.model,
     max_tokens: request.maxTokens ?? 4096,
     system: buildSystem(request.systemPrompt, opts),
-    messages: request.messages.map(toAnthropicMessage),
-    tools: toAnthropicTools(request.tools),
+    messages: anthropicMessages,
+    tools: toAnthropicTools(request.tools, cacheEnabled),
   };
 }
 
@@ -236,9 +291,10 @@ function* emitAnthropicEvents(payload: unknown): Generator<HarnessEvent, void, u
  * agentic run the cached prefix is most of the prompt, so reading
  * `input_tokens` by itself under-reports the context by exactly its largest
  * part, and would tell a compaction check the conversation is small while it
- * is nearly full. Both cache counters are absent today (nothing sets
- * `cache_control`); summing them is what makes this number stay true if
- * caching is ever turned on.
+ * is nearly full. `cache_control` breakpoints are set on the tools array and on the
+ * first/last message (see buildBody); summing all three counters keeps this
+ * number true regardless of whether a given turn was a cache read, a cache
+ * write, or ordinary uncached input.
  */
 function usageEvent(usage: AnthropicResponse['usage']): HarnessEvent {
   return {
@@ -248,6 +304,11 @@ function usageEvent(usage: AnthropicResponse['usage']): HarnessEvent {
       (usage?.cache_read_input_tokens ?? 0) +
       (usage?.cache_creation_input_tokens ?? 0),
     outputTokens: usage?.output_tokens ?? 0,
+    // Anthropic-only prompt-cache counters, surfaced separately from the summed
+    // inputTokens above (which stays the sum so compaction's shouldCompact is
+    // unchanged). Absent on OpenAI-wire responses.
+    cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
+    cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
   };
 }
 
