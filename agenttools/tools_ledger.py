@@ -617,7 +617,7 @@ def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:
       would discard the operator's edit, which is the whole point of semi-auto. Approval only
       checks the draft exists at approval time, not afterward, so an item whose
       draft was since blanked or deleted comes back with ``blocked_reason`` set
-      to "no_letter" rather than reaching the agent with nothing to send.
+      to "" rather than reaching the agent with nothing to send.
     """
     cap = 0
     if limit and limit > 0:

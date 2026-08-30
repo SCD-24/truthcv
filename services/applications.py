@@ -201,8 +201,6 @@ def gather_approvable_screenings() -> list[dict]:
             blocked_reason = "cooldown"
         elif not s.url.strip():
             blocked_reason = "no_url"
-        elif draft is None or not draft.text.strip():
-            blocked_reason = "no_letter"
         else:
             blocked_reason = ""
 

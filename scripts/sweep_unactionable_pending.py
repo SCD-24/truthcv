@@ -11,8 +11,8 @@ to read, and no cover-letter draft already written against it.
 For each stored screening:
 
 * If ``approval == "pending"`` AND ``posting_text`` is blank after stripping
-  AND it has no saved cover-letter draft (checked the same way
-  ``api/routes.py``'s ``_has_draft`` does, through ``coverletter.store``), the
+  AND it has no saved cover-letter draft (the same definition used elsewhere:
+  a draft with only whitespace text does not count), the
   record is SWEPT — under ``--apply`` its approval is rewritten to
   ``"rejected"`` through ``screening.store.set_approval``. There is nothing to
   draft from and nothing left for the operator to decide.

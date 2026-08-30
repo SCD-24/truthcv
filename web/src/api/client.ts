@@ -468,8 +468,7 @@ export function setScreeningRole(id: string, role: string): Promise<ScreeningRec
   });
 }
 
-/** Supply the posting text a record was created without; the operator cannot
- * draft a cover letter without it. */
+/** Supply the posting text a record was created without. */
 export function setScreeningPostingText(
   id: string,
   postingText: string,

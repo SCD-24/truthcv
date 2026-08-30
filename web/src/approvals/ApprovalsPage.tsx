@@ -62,13 +62,7 @@ import { safeHref } from "../utils/safeUrl";
  * the caption is the audit trail, since "generated" means the guardrail
  * checked this exact text and "operator" means the operator's words went in
  * unchecked. */
-function CoverLetterSection({
-  record,
-  onDraftChange,
-}: {
-  record: ScreeningRecord;
-  onDraftChange: (id: string, draft: CoverLetterDraft | null) => void;
-}) {
+function CoverLetterSection({ record }: { record: ScreeningRecord }) {
   const [draft, setDraft] = useState<CoverLetterDraft | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [text, setText] = useState("");
@@ -88,7 +82,6 @@ function CoverLetterSection({
       setDraft(d);
       setText(d?.text ?? "");
       setLoaded(true);
-      onDraftChange(record.id, d);
     });
     return () => {
       live = false;
@@ -108,7 +101,6 @@ function CoverLetterSection({
       setBlockedClaims([]);
       setBlockedParagraphs([]);
       setDecisions({});
-      onDraftChange(record.id, d);
     } catch (e) {
       if (e instanceof GuardrailBlockedError && e.claims.length > 0) {
         setBlockedClaims(e.claims);
@@ -137,7 +129,6 @@ function CoverLetterSection({
       const d = await saveScreeningLetter(record.id, text);
       setDraft(d);
       setText(d.text);
-      onDraftChange(record.id, d);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -386,9 +377,7 @@ function PendingCard({
   onSaveUrl: (id: string, url: string) => void;
   onMarkApplied: (id: string) => void;
 }) {
-  // The server enforces this at approval time too (PATCH 409s with no draft
-  // stored) — this only makes the reason visible before the click.
-  const [hasDraft, setHasDraft] = useState(false);
+  
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
       <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start" }}>
@@ -423,17 +412,13 @@ function PendingCard({
               .
             </Alert>
           ) : null}
-          <CoverLetterSection
-            record={record}
-            onDraftChange={(_id, draft) => setHasDraft(draft !== null)}
-          />
+          <CoverLetterSection record={record} />
         </Box>
         <Stack spacing={1}>
           <Button
             variant="contained"
             size="small"
-            disabled={busy || !hasDraft}
-            title={hasDraft ? undefined : "Draft a cover letter first"}
+            disabled={busy}
             onClick={() => onDecide(record.id, "approved")}
           >
             Approve
@@ -448,7 +433,7 @@ function PendingCard({
           </Button>
           {/* The manual escape hatch: the operator applied themselves, so the
               posting becomes an Applications row without the agent ever
-              submitting it. No cover-letter gate — they already applied. */}
+              submitting it. */}
           <Button
             variant="text"
             size="small"

@@ -235,27 +235,33 @@ def test_approved_item_without_a_letter_reports_empty(data_dir):
     assert item["letter_source"] == ""
 
 
-def test_approved_item_with_letter_deleted_after_approval_is_blocked(data_dir):
-    """The approval gate only checks at approval time; a draft deleted after
-    approval must still stop the agent from applying with nothing to send."""
+def test_approved_item_with_letter_deleted_after_approval_goes_out_letterless(data_dir):
+    """The approval gate no longer checks the draft at approval time; a draft
+    deleted after approval must still let the agent go out with an empty
+    cover letter rather than blocking the item."""
     import coverletter.store as letters
 
     s = _approved()
     letters.save(s.id, letters.CoverLetterDraft(text="Dear team,"))
     letters.delete(s.id)
     items = get_approved_applications()
-    assert [i["blocked_reason"] for i in items] == ["no_letter"]
+    assert [i["blocked_reason"] for i in items] == [""]
+    assert [i["cover_letter"] for i in items] == [""]
 
 
-def test_approved_item_with_blank_letter_is_blocked(data_dir):
-    """A store-level blank draft (the route rejects this, but the guard here
-    must hold regardless of how the draft went blank) reports no_letter too."""
+def test_approved_item_with_blank_letter_goes_out_letterless(data_dir):
+    """A store-level blank draft (the route rejects this on save, but the guard
+    here must hold regardless of how the draft went blank) goes out with an
+    empty cover letter rather than being blocked."""
     import coverletter.store as letters
 
     s = _approved()
     letters.save(s.id, letters.CoverLetterDraft(text="   "))
     items = get_approved_applications()
-    assert [i["blocked_reason"] for i in items] == ["no_letter"]
+    assert [i["blocked_reason"] for i in items] == [""]
+    # cover_letter is the raw stored text; whitespace-only is still whitespace,
+    # and the renderer short-circuits on it.
+    assert [i["cover_letter"].strip() for i in items] == [""]
 
 
 def test_approved_item_with_a_real_letter_is_unblocked(data_dir):

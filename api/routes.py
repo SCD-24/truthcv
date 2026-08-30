@@ -274,17 +274,6 @@ def create_screening(body: ScreeningCreate) -> ScreeningModel:
     return _screening_model(screening)
 
 
-def _has_draft(screening_id: str) -> bool:
-    """Whether a letter exists to apply with.
-
-    Approval licenses the agent to submit on the operator's behalf using the
-    stored text verbatim. Approving with no text queues an application with
-    nothing to send, so the check lives here rather than only in the UI.
-    """
-    draft = letter_store.load(screening_id)
-    return draft is not None and bool(draft.text.strip())
-
-
 # Declared BEFORE /screenings/{screening_id}: otherwise the router binds
 # "approvals" as an id and this route is unreachable.
 @router.patch("/screenings/approvals", response_model=BulkApprovalResult)
@@ -292,15 +281,13 @@ def bulk_set_approval(body: BulkApprovalUpdate) -> BulkApprovalResult:
     """Apply one approval decision to many screenings.
 
     Reports per-id outcomes rather than failing wholesale, so a partial failure
-    is visible instead of silently dropping some ids. A draftless id is
-    reported the same way rather than approved out from under the gate below.
+    is visible instead of silently dropping some ids. A draftless id is approved
+    the same way as any other — the agent applies with whatever cover letter is
+    stored, or none.
     """
     try:
         results = []
         for sid in body.ids:
-            if body.approval == "approved" and not _has_draft(sid):
-                results.append({"id": sid, "ok": False})
-                continue
             results.append(
                 {"id": sid, "ok": screening_store.set_approval(sid, body.approval) is not None}
             )
@@ -411,17 +398,8 @@ def set_screening_approval(screening_id: str, body: ApprovalUpdate) -> Screening
             raise HTTPException(status_code=404, detail="Screening not found.")
 
     if body.approval is not None:
-        # Existence wins over the draft gate: an unknown id is 404 regardless
-        # of approval value, matching the url-only branch above.
-        if (
-            body.approval == "approved"
-            and screening_store.get(screening_id) is not None
-            and not _has_draft(screening_id)
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="Draft a cover letter before approving — the agent applies with it verbatim.",
-            )
+        # Existence wins over the unknown-id check: an unknown id is 404
+        # regardless of approval value, matching the url-only branch above.
         try:
             screening = screening_store.set_approval(screening_id, body.approval)
         except ValueError as e:
