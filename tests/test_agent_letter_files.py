@@ -228,14 +228,37 @@ def test_a_failed_render_leaves_no_file_to_mistake_for_one(data_dir, monkeypatch
     assert len(rendered) == 1
 
 
-def test_blocked_item_gets_no_file(data_dir, fake_renderer):
-    """A blocked item is reported, never applied to."""
+def test_letterless_item_still_produces_no_file(data_dir, fake_renderer):
+    """A letterless item is now applied to with an empty cover letter; the
+    renderer's short-circuit on empty text still keeps it from ever being
+    called, and no PDF is produced for an item with nothing to upload."""
     s = _approved_with_letter()
     letters.save(s.id, letters.CoverLetterDraft(text="   "))
 
     item = get_approved_applications()[0]
 
-    assert item["blocked_reason"] == "no_letter"
+    assert item["blocked_reason"] == ""
+    assert item["cover_letter_path"] is None
+    assert fake_renderer == []
+
+
+def test_genuinely_blocked_item_still_produces_no_file(data_dir, fake_renderer):
+    """A real block (e.g. no_url) must still suppress any letter rendering —
+    the render short-circuit is not the only thing being relied on."""
+    from screening import store as screening_store
+
+    s = screening_store.create(
+        {
+            "company": "No URL Co",
+            "role": "Staff",
+            "url": "",
+            "verdict": "deferred",
+        }
+    )
+    screening_store.set_approval(s.id, "approved")
+    item = get_approved_applications()[0]
+
+    assert item["blocked_reason"] == "no_url"
     assert item["cover_letter_path"] is None
     assert fake_renderer == []
 

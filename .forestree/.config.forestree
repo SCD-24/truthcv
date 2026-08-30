@@ -168,6 +168,11 @@
                   "desc": "Agent-token-authenticated credential handoff for the unattended agent. Returns provider, wire format, auth type, token, model and base URL for the configured agent route; serves all four connection cards.",
                   "method": "GET",
                   "path": "/api/agent/llm-credentials"
+                },
+                {
+                  "desc": "Set one screening's approval decision and/or posting URL. A cover letter is optional — approval no longer requires a drafted letter.",
+                  "method": "PATCH",
+                  "path": "/api/screenings/{screening_id}"
                 }
               ]
             },

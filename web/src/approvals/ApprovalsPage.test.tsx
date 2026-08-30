@@ -303,11 +303,12 @@ describe("ApprovalsPage", () => {
 });
 
 describe("ApprovalsPage cover letter", () => {
-  it("offers Generate when there is no draft, and blocks Approve until there is one", async () => {
+  it("offers Generate when there is no draft, and Approve is enabled without one", async () => {
     vi.mocked(getScreeningLetter).mockResolvedValue(null);
     await renderPage([makeRecord()]);
     expect(await screen.findByRole("button", { name: /Generate cover letter/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled")).toBe(true);
+    // Approval no longer requires a stored cover letter.
+    expect(screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled")).toBe(false);
     expect(screen.getByRole("button", { name: "Reject" }).hasAttribute("disabled")).toBe(false);
   });
 
@@ -394,7 +395,8 @@ describe("ApprovalsPage cover letter", () => {
         screen.getByRole("button", { name: /Generate cover letter/ }).hasAttribute("disabled"),
       ).toBe(false),
     );
-    expect(screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled")).toBe(true);
+    // Approval no longer requires a stored cover letter.
+    expect(screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled")).toBe(false);
   });
 
   it("shows the posted and found dates", async () => {
@@ -866,14 +868,28 @@ describe("applying by hand from the Found tab", () => {
     expect(await screen.findByText("Added to the Applications page.")).toBeTruthy();
   });
 
-  it("is available without a cover-letter draft, unlike Approve", async () => {
+  it("is available without a cover-letter draft", async () => {
     // The operator already applied; the draft gate does not apply to them.
     await renderPage([makeRecord({ id: "p1", company: "Duff" })]);
 
     const applied = screen.getByRole("button", { name: "I applied" }) as HTMLButtonElement;
-    const approve = screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement;
     expect(applied.disabled).toBe(false);
-    expect(approve.disabled).toBe(true);
+  });
+
+  it("enables the Approve button without a cover-letter draft", async () => {
+    // Approval no longer requires a stored cover letter. The button must be
+    // clickable, and clicking it must call setScreeningApproval with
+    // approval="approved".
+    vi.mocked(getScreeningLetter).mockResolvedValue(null);
+    vi.mocked(setScreeningApproval).mockResolvedValue(makeRecord({ approval: "approved" }));
+    await renderPage([makeRecord({ id: "p1", company: "Duff" })]);
+
+    const approve = screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(false);
+    fireEvent.click(approve);
+    await waitFor(() =>
+      expect(setScreeningApproval).toHaveBeenCalledWith("p1", "approved"),
+    );
   });
 
   it("keeps the row and surfaces the error when the call fails", async () => {

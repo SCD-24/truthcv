@@ -72,9 +72,11 @@ its browser — on discovery.
   NOT be applied to — treat this as true of the field itself, not of a list
   of known values, so a value you don't recognise still blocks rather than
   being read as unset. The values that exist today: `cooldown` (in cooldown,
-  §8 still governs), `no_url` (no posting URL was ever captured, so there is
-  nothing to open), and `no_letter` (no cover letter is stored for this
-  entry). Name the reason in the run report and move on.
+  §8 still governs) and `no_url` (no posting URL was ever captured, so there
+  is nothing to open). Name the reason in the run report and move on. An
+  empty `cover_letter` with a null `cover_letter_path` means apply with no
+  cover letter attached, not skip — the agent now submits letterless rather
+  than leaving an approved item stranded without the draft-gate gate.
 - **§4 still governs.** An application approval is not permission to assert a
   claim the cover-letter guardrail rejects. If the letter blocks, §6 applies
   exactly as it does for any other application.

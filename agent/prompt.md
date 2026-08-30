@@ -193,7 +193,9 @@ approved these postings, so apply to them before spending time on discovery.
   text and nothing is uploaded. Submit it verbatim. Do not regenerate it, do not edit it, and do not
   call `generate_cover_letter` for an approved entry — the operator may have
   written that text themselves, and rewriting it discards their decision.
-- An entry whose `cover_letter` is empty must not be applied to. Report it.
+- An entry whose `cover_letter` is empty must be applied to anyway, with the form's
+  cover-letter field left blank or skipped where the form allows. It is not a
+  reason to call `generate_cover_letter` or to write a letter of your own.
 - On success call `record_application` with that entry's `screening_id`.
 - If you cannot complete one, call `report_apply_failure` with the reason. It
   stays queued for the next run.

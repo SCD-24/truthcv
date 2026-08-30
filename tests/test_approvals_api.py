@@ -210,13 +210,13 @@ def test_no_agent_route_writes_approval(client):
     assert not (writers & {fn for fn, _ in _TOOL_REGISTRY.values()})
 
 
-def test_approving_without_a_letter_is_refused(client):
-    """The agent applies with the stored letter verbatim, so approving with no
-    letter would queue an application with nothing to send."""
+def test_approving_without_a_letter_succeeds(client):
+    """A letterless screening is approved normally — the agent applies with
+    whatever cover letter is stored, or none."""
     s = _deferred()
     r = client.patch(f"/api/screenings/{s.id}", json={"approval": "approved"})
-    assert r.status_code == 409
-    assert store.get(s.id).approval == "pending"
+    assert r.status_code == 200
+    assert store.get(s.id).approval == "approved"
 
 
 def test_approving_with_a_letter_succeeds(client):
@@ -234,7 +234,7 @@ def test_rejecting_never_needs_a_letter(client):
     assert client.patch(f"/api/screenings/{s.id}", json={"approval": "rejected"}).status_code == 200
 
 
-def test_bulk_approve_reports_a_draftless_item_instead_of_approving_it(client):
+def test_bulk_approve_approves_a_draftless_item(client):
     import coverletter.store as letters
 
     a, b = _deferred("Contoso Labs"), _deferred("Aperture")
@@ -242,8 +242,8 @@ def test_bulk_approve_reports_a_draftless_item_instead_of_approving_it(client):
     body = client.patch(
         "/api/screenings/approvals", json={"ids": [a.id, b.id], "approval": "approved"}
     ).json()
-    assert {r["id"]: r["ok"] for r in body["results"]} == {a.id: True, b.id: False}
-    assert store.get(b.id).approval == "pending"
+    assert {r["id"]: r["ok"] for r in body["results"]} == {a.id: True, b.id: True}
+    assert store.get(b.id).approval == "approved"
 
 
 # ---------------------------------------------------------------------------

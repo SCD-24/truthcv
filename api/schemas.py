@@ -912,7 +912,7 @@ class ApprovalUpdate(_Camel):
 
     ``posting_text`` is patchable because records created before the agent
     captured it carry none, and the operator cannot draft a cover letter
-    without it.
+    from it.
 
     ``role`` is patchable because a screening recorded with a garbled or
     blank title is otherwise only deletable, not correctable. The operator's
