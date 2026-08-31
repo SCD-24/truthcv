@@ -11,8 +11,9 @@ const request: ModelRequest = {
   tools: [{ name: 'foo', description: 'the foo tool', inputSchema: { type: 'object' } }],
 };
 
-/** Build a fetch stub returning one canned JSON response. */
-function stubFetch(status: number, payload: unknown): void {
+/** Build a fetch stub returning one canned JSON response, optionally with
+ * response headers. */
+function stubFetch(status: number, payload: unknown, headers: Record<string, string> = {}): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async () => ({
@@ -20,6 +21,7 @@ function stubFetch(status: number, payload: unknown): void {
       status,
       json: async () => payload,
       text: async () => JSON.stringify(payload),
+      headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
     })),
   );
 }
@@ -463,5 +465,117 @@ describe('anthropic prompt caching', () => {
     const raw = (call[1] as { body: string }).body;
     expect(raw).not.toContain('cache_control');
     expect((raw.match(/cache_control/g) ?? []).length).toBe(0);
+  });
+});
+
+describe('a 200 response that carries no completion', () => {
+  // A run died on turn 5 with `stop reason: error` and nothing else in the log.
+  // OpenRouter had answered HTTP 200 with an `{"error": ...}` body, so the
+  // `!response.ok` branch never fired, the missing choice made every read
+  // empty, and `mapFinishReason(undefined)` laundered the provider's
+  // explanation into a bare terminal error. These cover the shapes that reach
+  // that path.
+  /** Drive the OpenAI adapter over one canned 200 body and its headers. */
+  async function openaiEvents(payload: unknown, headers: Record<string, string> = {}): Promise<HarnessEvent[]> {
+    stubFetch(200, payload, headers);
+    return collect(createOpenAiChatCompletionsAdapter({ apiKey: 'k', baseUrl: 'http://x', model: 'gpt' }));
+  }
+
+  it("reports OpenRouter's upstream failure with its own message instead of a bare error", async () => {
+    const events = await openaiEvents({ error: { message: 'Provider returned error', code: 502 } });
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toMatchObject({ type: 'error', retryable: true });
+    expect(error?.type === 'error' && error.message).toContain('Provider returned error');
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+  });
+
+  it('reports an empty choices array as a retryable error rather than a completion', async () => {
+    const events = await openaiEvents({ choices: [] });
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toMatchObject({ type: 'error', retryable: true });
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+  });
+
+  it('respects a non-retryable status carried as the error code', async () => {
+    const events = await openaiEvents({ error: { message: 'Invalid model', code: 400 } });
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toMatchObject({ type: 'error', retryable: false });
+    expect(error?.type === 'error' && error.message).toContain('Invalid model');
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+  });
+
+  it('leaves a genuine completion untouched', async () => {
+    const events = await openaiEvents({
+      choices: [
+        {
+          message: {
+            content: 'hello',
+            tool_calls: [{ id: 'openai-1', function: { name: 'foo', arguments: '{"x":1}' } }],
+          },
+          finish_reason: 'tool_calls',
+        },
+      ],
+      usage: { prompt_tokens: 3, completion_tokens: 5 },
+    });
+
+    expect(events).toEqual([
+      { type: 'text', delta: 'hello' },
+      { type: 'toolCall', toolCall: { id: 'openai-1', name: 'foo', arguments: { x: 1 } } },
+      { type: 'usage', inputTokens: 3, outputTokens: 5 },
+      {
+        type: 'done',
+        stopReason: 'toolCalls',
+        message: {
+          role: 'assistant',
+          content: 'hello',
+          toolCalls: [{ id: 'openai-1', name: 'foo', arguments: { x: 1 } }],
+        },
+      },
+    ]);
+  });
+
+  it('emits the completion when a null error field arrives alongside real choices', async () => {
+    const events = await openaiEvents({
+      error: null,
+      choices: [{ message: { content: 'hi' }, finish_reason: 'stop' }],
+    });
+
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+    expect(events).toEqual([
+      { type: 'text', delta: 'hi' },
+      { type: 'usage', inputTokens: 0, outputTokens: 0 },
+      { type: 'done', stopReason: 'end', message: { role: 'assistant', content: 'hi' } },
+    ]);
+  });
+
+  it('emits the completion when an empty error object arrives alongside real choices', async () => {
+    const events = await openaiEvents({
+      error: {},
+      choices: [{ message: { content: 'hi' }, finish_reason: 'stop' }],
+    });
+
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+    expect(events).toEqual([
+      { type: 'text', delta: 'hi' },
+      { type: 'usage', inputTokens: 0, outputTokens: 0 },
+      { type: 'done', stopReason: 'end', message: { role: 'assistant', content: 'hi' } },
+    ]);
+  });
+
+  it("honours the response's Retry-After header rather than falling back to the loop's backoff", async () => {
+    const events = await openaiEvents({ error: { message: 'slow', code: 429 } }, { 'retry-after': '30' });
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toMatchObject({ type: 'error', retryable: true, retryAfterMs: 30_000 });
+  });
+
+  it('retries by default when the error code is numeric but not an HTTP status', async () => {
+    const events = await openaiEvents({ error: { message: 'up', code: 502.5 } });
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toMatchObject({ type: 'error', retryable: true });
   });
 });
