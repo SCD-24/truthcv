@@ -1,6 +1,16 @@
 services:
   app:
     build: .
+    # Come back after a host reboot or a crash rather than stay down silently.
+    # `browser` and `agent` have carried this since they were added — the
+    # comment on `agent` even describes its own policy as "same as `app`" —
+    # but `app` itself never did. A reboot therefore left the worst
+    # combination running: the other two came back and this one did not, so
+    # the wizard was unreachable AND the agent's scheduled runs aborted on
+    # their TRUTHCV_MCP_URL precondition (http://app:8080/mcp) instead of
+    # simply not running. `depends_on` does not help; it orders
+    # `docker compose up`, not recovery after a reboot.
+    restart: unless-stopped
     ports:
       # Host side only. The container keeps listening on 8080 (Dockerfile
       # `ENV PORT=8080`), which is what the agent reaches over the compose
