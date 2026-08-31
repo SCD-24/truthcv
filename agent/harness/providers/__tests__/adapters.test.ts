@@ -364,6 +364,44 @@ describe('token usage that a compaction check can trust', () => {
   });
 });
 
+describe('the model that actually served an OpenAI-wire request', () => {
+  // A router such as OpenRouter's `openrouter/free` picks a different backing
+  // model per request, so the configured id cannot tell a run log which model
+  // produced a bad turn. The response body's `model` can.
+  it('carries the resolved model on the usage event when the response names one', async () => {
+    stubFetch(200, {
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 3, completion_tokens: 5 },
+      model: 'deepseek/deepseek-r1:free',
+    });
+
+    const events = await collect(
+      createOpenAiChatCompletionsAdapter({ apiKey: 'k', baseUrl: 'http://x', model: 'openrouter/free' }),
+    );
+
+    expect(events.find((e) => e.type === 'usage')).toMatchObject({
+      inputTokens: 3,
+      outputTokens: 5,
+      model: 'deepseek/deepseek-r1:free',
+    });
+  });
+
+  it('leaves the model absent when the provider does not report one', async () => {
+    stubFetch(200, {
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 3, completion_tokens: 5 },
+    });
+
+    const events = await collect(
+      createOpenAiChatCompletionsAdapter({ apiKey: 'k', baseUrl: 'http://x', model: 'gpt' }),
+    );
+
+    const usage = events.find((e) => e.type === 'usage');
+    expect(usage).toBeDefined();
+    expect(usage && 'model' in usage).toBe(false);
+  });
+});
+
 describe('anthropic prompt caching', () => {
   /** A request with several tools and two message turns, so the tools array and
    * both the first and last message carry real content blocks to mark. */

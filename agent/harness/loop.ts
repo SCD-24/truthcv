@@ -53,6 +53,16 @@ const DEFAULT_MAX_RETRIES = 8;
  */
 const DEFAULT_MAX_OVERFLOW_COMPACTIONS = 3;
 
+/**
+ * Default cap on CONSECUTIVE turns that produced nothing at all — no text and
+ * no tool calls. Such a turn is a non-event, not a decision to stop, so the
+ * loop nudges the model instead of ending; the cap is what stops a model that
+ * answers every nudge with another nothing from spinning. Matches
+ * {@link DEFAULT_MAX_REFLECTIONS}: both bound a model that has stopped
+ * producing usable output.
+ */
+const DEFAULT_MAX_EMPTY_TURNS = 3;
+
 /** Base unit for exponential backoff and its jitter, in milliseconds. */
 const BASE_RETRY_DELAY_MS = 1_000;
 
@@ -81,6 +91,30 @@ const WRAP_UP_MESSAGE =
   'stopped and what you left unfinished, honestly, so the next run can pick it up.';
 
 /**
+ * The stop detail recorded when the empty-turn cap is what ended the run.
+ *
+ * Exported because cli.ts reports it to the operator: without it, a run killed
+ * by a model that went silent and a run whose model merely forgot to call
+ * `finish_run` write byte-identical reason files.
+ */
+export const EMPTY_TURN_STOP_DETAIL = 'model repeatedly returned no content and no tool calls';
+
+/**
+ * What the model is told after a turn that returned nothing at all.
+ *
+ * Written as an instruction rather than an error report: the model that
+ * produced it is the one that has to act on it, and the only two acceptable
+ * next moves are to close the run properly or to get on with the work. Names
+ * `finish_run` because that call is what tells this deployment an outcome was
+ * reported at all (see {@link LoopResult.finishRunExecuted}).
+ */
+const EMPTY_TURN_MESSAGE =
+  'Your last turn returned no content and no tool calls, so nothing happened. That is never a ' +
+  'valid way to end. If you are finished, call finish_run now with an honest stopped_reason ' +
+  'describing what you did and what you left undone. Otherwise, carry on: state the next step ' +
+  'of your task and make the tool call it needs.';
+
+/**
  * Loop tuning. `maxTurns` is REQUIRED and is the hard cap: there is deliberately
  * no unbounded default, because this loop runs unattended overnight and must
  * stop on its own.
@@ -96,6 +130,9 @@ export interface LoopConfig {
   maxOverflowCompactions?: number;
   /** Cap on consecutive retryable-error retries within one turn. Defaults to 8. */
   maxConsecutiveRetries?: number;
+  /** Cap on CONSECUTIVE turns that returned no content and no tool calls,
+   * each of which is nudged rather than ended on. Defaults to 3. */
+  maxConsecutiveEmptyTurns?: number;
   /**
    * Turns reserved at the end of `maxTurns` for the model to wind up in.
    * Defaults to 2. Zero disables the warning entirely — the loop then stops
@@ -135,7 +172,7 @@ export interface LoopEvent {
   /** Discriminant marking this as a loop event to an `onEvent` consumer. */
   type: 'loopEvent';
   /** What happened. */
-  kind: 'compaction' | 'retry' | 'reflection' | 'turnCapReached' | 'wrapUp' | 'stop';
+  kind: 'compaction' | 'retry' | 'reflection' | 'emptyTurn' | 'turnCapReached' | 'wrapUp' | 'stop';
   /** The turn number this event relates to, when applicable. */
   turn?: number;
   /** Human-readable detail for a log line. */
@@ -206,6 +243,12 @@ interface LoopState {
    * bounded so a conversation that will not shrink cannot loop forever. Reset
    * by any successful turn. */
   overflowCompactions: number;
+  /** CONSECUTIVE turns that produced no content and no tool calls. Counted
+   * here rather than reset with `retries`/`reflections` in applyDone(),
+   * because every empty turn arrives as its own `done` event — resetting it
+   * there would clear the count on the very events it exists to count and put
+   * the cap out of reach. */
+  emptyTurns: number;
   /** Whether the wrap-up instruction has already been delivered, so entering
    * the window repeatedly cannot append it on every remaining turn. */
   wrapUpSent: boolean;
@@ -317,6 +360,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
     retries: 0,
     usageCoveredMessages: 0,
     overflowCompactions: 0,
+    emptyTurns: 0,
     wrapUpSent: false,
     finishRunExecuted: false,
   };
@@ -527,6 +571,10 @@ async function applyDone(done: DoneEvent, state: LoopState, ctx: LoopContext): P
   // that legitimately overflows every N turns on a small window — which is the
   // shape of a 400-turn run, not a fault.
   state.overflowCompactions = 0;
+  // Unlike the resets above, the empty-turn count is conditional: it counts
+  // CONSECUTIVE empty turns, and every one of those is itself a `done` event.
+  // Only a turn that actually produced something breaks the run.
+  if (!isEmptyTurn(done.message)) state.emptyTurns = 0;
   state.turns += 1;
   state.messages.push(done.message);
   return dispatchStopReason(done, state, ctx);
@@ -536,7 +584,7 @@ async function applyDone(done: DoneEvent, state: LoopState, ctx: LoopContext): P
 async function dispatchStopReason(done: DoneEvent, state: LoopState, ctx: LoopContext): Promise<LoopResult | undefined> {
   switch (done.stopReason) {
     case 'end':
-      return finish('end', state, ctx, 'model ended the turn');
+      return handleEnd(done, state, ctx);
     case 'toolCalls':
       return continueWithTools(done, state, ctx);
     case 'length':
@@ -544,6 +592,47 @@ async function dispatchStopReason(done: DoneEvent, state: LoopState, ctx: LoopCo
     default:
       return finish(done.stopReason, state, ctx, `stop reason: ${done.stopReason}`);
   }
+}
+
+/**
+ * Handle a turn the model ended.
+ *
+ * A turn carrying neither text nor tool calls did not decide anything: it is a
+ * non-event, and treating it as a deliberate finish is what abandoned a run
+ * after six turns with three approved applications untouched. So the model is
+ * told what happened and the loop continues, bounded by
+ * `maxConsecutiveEmptyTurns`.
+ *
+ * The nudge is withheld once `finish_run` has executed, and that condition is
+ * load-bearing: the run has already reported its outcome, so an empty turn
+ * there means the model simply had nothing left to say. Prompting it onward
+ * could restart work that is finished and submit duplicate job applications
+ * under a real person's name.
+ */
+function handleEnd(done: DoneEvent, state: LoopState, ctx: LoopContext): LoopResult | undefined {
+  if (!isEmptyTurn(done.message) || state.finishRunExecuted) {
+    return finish('end', state, ctx, 'model ended the turn');
+  }
+  state.emptyTurns += 1;
+  const max = ctx.config.maxConsecutiveEmptyTurns ?? DEFAULT_MAX_EMPTY_TURNS;
+  // 'end', not 'error': nothing failed at the provider, the model just stopped
+  // producing. cli.ts's report() maps a clean 'end' with finishRunExecuted
+  // false to the non-zero "unfinished run" exit code, which is exactly what
+  // this is; calling it an error would misreport it as a provider failure.
+  if (state.emptyTurns > max) {
+    return finish('end', state, ctx, EMPTY_TURN_STOP_DETAIL);
+  }
+  state.messages.push({ role: 'user', content: EMPTY_TURN_MESSAGE });
+  ctx.onEvent?.(loopEvent('emptyTurn', state.turns, `empty turn ${state.emptyTurns} of ${max} — nudged the model`));
+  // Through capOrContinue like every other continuation: a nudged turn still
+  // costs a provider request, so it must be held to `maxTurns` and must report
+  // `turnCapReached` when it is the turn that meets the cap.
+  return capOrContinue(state, ctx);
+}
+
+/** Whether a turn produced nothing usable at all: no text, no tool calls. */
+function isEmptyTurn(message: ConversationMessage): boolean {
+  return message.content.trim() === '' && (message.toolCalls?.length ?? 0) === 0;
 }
 
 /** Execute every tool call this turn requested, then continue or hit the cap. */

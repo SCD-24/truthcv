@@ -30,3 +30,7 @@ node_modules
 # Docker image builds its own. Committing it means old hashed assets accumulate
 # and keep serving a stale frontend to any browser with a cached index.html.
 /api/static/
+
+# Build output from `tsc -p agent/tsconfig.json`; the image builds it at
+# build time and it must never be committed.
+agent/dist/
