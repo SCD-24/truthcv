@@ -44,9 +44,16 @@ fi
 log "Xvfb running on PID $XVFB_PID"
 
 # Start x11vnc (VNC server against the Xvfb display)
+# -forever: without it x11vnc exits the moment the first viewer disconnects,
+# and every later viewport connection fails with websockify refusing on
+# localhost:5900 — the operator sees "could not connect to the browser" for
+# the rest of the container's life. The viewport is opened and closed once
+# per attended sign-in, so serving exactly one viewer is never what we want.
+# -shared: a reconnect (the page's Reload, or a second tab) attaches
+# alongside the old socket instead of disconnecting it.
 log "starting x11vnc on $DISPLAY..."
 export DISPLAY
-x11vnc -display "$DISPLAY" -nopw -xkb -o /tmp/x11vnc.log 2>&1 &
+x11vnc -display "$DISPLAY" -nopw -xkb -forever -shared -o /tmp/x11vnc.log 2>&1 &
 X11VNC_PID=$!
 sleep 1
 
