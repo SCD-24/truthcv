@@ -144,6 +144,59 @@ describe("BrowserSessionPage", () => {
     expect(screen.queryByText(/if it worked, the next run will get through/i)).toBeNull();
   });
 
+  it("does not report a viewport that never connected as a finished session", async () => {
+    // What the relay in api/browser_stream.py does when it refuses (1008
+    // before accept), and what a browser container that is down looks like:
+    // RFB is still in `connecting`, so it reports the close as unclean. That
+    // used to land on the "Closed. If it worked, the next run will get
+    // through" screen — telling the operator their sign-in had been shown
+    // and finished when nothing was ever displayed. Both ways out of the
+    // "a session is already open" refusal end here, which is where it was
+    // seen: they attach a viewport, and the viewport is what failed.
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("example.com")).toBeTruthy();
+    });
+
+    rfbHolder.current?.dispatch("disconnect", { clean: false });
+
+    await waitFor(() => {
+      expect(screen.getByText(/could not connect to the browser/i)).toBeTruthy();
+    });
+    expect(screen.queryByText(/if it worked, the next run will get through/i)).toBeNull();
+    // And the operator is not stranded on a screen whose only way out is the
+    // Sign in button that brought them here.
+    expect(screen.getByRole("button", { name: /try again/i })).toBeTruthy();
+  });
+
+  it("says the connection dropped when an established viewport fails", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("example.com")).toBeTruthy();
+    });
+
+    rfbHolder.current?.dispatch("connect", {});
+    rfbHolder.current?.dispatch("disconnect", { clean: false });
+
+    await waitFor(() => {
+      expect(screen.getByText(/connection to the browser dropped/i)).toBeTruthy();
+    });
+  });
+
+  it("still reports a clean disconnect as the session having closed", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("example.com")).toBeTruthy();
+    });
+
+    rfbHolder.current?.dispatch("connect", {});
+    rfbHolder.current?.dispatch("disconnect", { clean: true });
+
+    await waitFor(() => {
+      expect(screen.getByText(/if it worked, the next run will get through/i)).toBeTruthy();
+    });
+  });
+
   it("does not claim the sign-in succeeded when closed", async () => {
     renderPage();
     const done = await screen.findByRole("button", { name: /done/i });
