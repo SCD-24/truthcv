@@ -11,6 +11,13 @@ import { ExitCode, runCli, type CliDeps } from '../cli.js';
 const A_TOOL_CALL: ToolCall = { id: 'c1', name: 'truthcv__start_run', arguments: {} };
 
 /**
+ * A call to the tool that reports a run's outcome. The CLI treats a clean end
+ * with no such call as an abandoned run, so a scenario that is meant to be a
+ * genuine success has to make this call.
+ */
+const FINISH_RUN_CALL: ToolCall = { id: 'c9', name: 'truthcv__finish_run', arguments: {} };
+
+/**
  * A scripted {@link ProviderAdapter}: successive `sendMessage` calls yield
  * successive scripts; the last script repeats forever once they run out.
  */
@@ -49,12 +56,13 @@ const BROWSER_TOOLS: NamespacedTool[] = BROWSER_TOOL_NAMES.map((toolName) => ({
 }));
 
 /**
- * A fake MCP pool exposing one allowed truthcv tool plus the full browser
+ * A fake MCP pool exposing the allowed truthcv tools plus the full browser
  * allow-list (so the startup fail-loud check passes); no network anywhere.
  */
 function fakePool(tools?: NamespacedTool[]): McpClientPool {
   const list: NamespacedTool[] = tools ?? [
     { namespacedName: 'truthcv__start_run', serverName: 'truthcv', toolName: 'start_run', description: 'd', inputSchema: { type: 'object' } },
+    { namespacedName: 'truthcv__finish_run', serverName: 'truthcv', toolName: 'finish_run', description: 'd', inputSchema: { type: 'object' } },
     ...BROWSER_TOOLS,
   ];
   return {
@@ -95,10 +103,20 @@ function doneToolCalls(content: string): HarnessEvent {
   return { type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content, toolCalls: [A_TOOL_CALL] } };
 }
 
+/**
+ * The turn a run that means to succeed has to take: call finish_run, so the
+ * clean end that follows is a reported outcome rather than an abandoned run.
+ */
+const finishRunTurn: HarnessEvent[] = [
+  { type: 'toolCall', toolCall: FINISH_RUN_CALL },
+  { type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [FINISH_RUN_CALL] } },
+];
+
 describe('runCli success path', () => {
   it('streams well-formed JSONL and exits 0 on a clean end', async () => {
     const adapter = scriptedAdapter([
       [{ type: 'text', delta: 'thinking' }, { type: 'toolCall', toolCall: A_TOOL_CALL }, doneToolCalls('thinking')],
+      finishRunTurn,
       [{ type: 'text', delta: 'all done' }, doneEnd],
     ]);
     const { deps, stdout } = harness(adapter, fakePool());
@@ -119,7 +137,7 @@ describe('runCli success path', () => {
     const dir = await mkdtemp(join(tmpdir(), 'cli-test-'));
     const outPath = join(dir, 'final.txt');
     try {
-      const adapter = scriptedAdapter([[{ type: 'text', delta: 'all done' }, doneEnd]]);
+      const adapter = scriptedAdapter([finishRunTurn, [{ type: 'text', delta: 'all done' }, doneEnd]]);
       const { deps } = harness(adapter, fakePool(), { writeOutput: undefined });
 
       const code = await runCli([...BASE_ARGS, '--output-file', outPath, 'go'], {}, deps);
@@ -411,7 +429,7 @@ describe('the context window reaches the loop and the adapter', () => {
 
 describe('the tool-result cap reaches the loop config', () => {
   it('accepts a valid --max-tool-result-chars value', async () => {
-    const adapter = scriptedAdapter([[doneEnd]]);
+    const adapter = scriptedAdapter([finishRunTurn, [doneEnd]]);
     const { deps } = harness(adapter, fakePool());
 
     const code = await runCli([...BASE_ARGS, '--max-tool-result-chars', '8000', 'go'], {}, deps);
@@ -420,7 +438,7 @@ describe('the tool-result cap reaches the loop config', () => {
   });
 
   it('accepts AGENT_MAX_TOOL_RESULT_CHARS from the environment', async () => {
-    const adapter = scriptedAdapter([[doneEnd]]);
+    const adapter = scriptedAdapter([finishRunTurn, [doneEnd]]);
     const { deps } = harness(adapter, fakePool());
 
     const code = await runCli([...BASE_ARGS, 'go'], { AGENT_MAX_TOOL_RESULT_CHARS: '8000' }, deps);
@@ -557,7 +575,7 @@ describe('runCli reason file', () => {
   // leave a stale "why did it fail" note behind a run that did not fail.
   it('writes NO reason file on a successful (exit 0) run', async () => {
     const writeOutput = vi.fn(async (_path: string, _text: string) => {});
-    const adapter = scriptedAdapter([[{ type: 'text', delta: 'all done' }, doneEnd]]);
+    const adapter = scriptedAdapter([finishRunTurn, [{ type: 'text', delta: 'all done' }, doneEnd]]);
     const { deps } = harness(adapter, fakePool(), { writeOutput });
 
     const code = await runCli([...BASE_ARGS, '--reason-file', REASON_PATH, 'go'], {}, deps);
@@ -598,5 +616,90 @@ describe('runCli reason file', () => {
 
     expect(code).toBe(ExitCode.ProviderError);
     expect(reasonText(writeOutput)?.startsWith('provider error: ')).toBe(true);
+  });
+});
+
+/**
+ * A pool like {@link fakePool} whose `finish_run` call comes back as an error,
+ * as it would with a bad run id or an erroring MCP server. Every other tool
+ * still succeeds.
+ */
+function poolFailingFinishRun(): McpClientPool {
+  const pool = fakePool();
+  pool.callTool = vi.fn(async (namespacedName: string) =>
+    namespacedName === 'truthcv__finish_run'
+      ? { content: 'no such run', isError: true }
+      : { content: 'ok', isError: false },
+  ) as unknown as McpClientPool['callTool'];
+  return pool;
+}
+
+describe('runCli unfinished runs', () => {
+  // The bug this guards: a model that started a run, made a couple of calls and
+  // then emitted an empty turn ended the loop on 'end', exited 0, and the
+  // supervisor filed it as "completed" with every counter at zero — while three
+  // approved applications had in fact been abandoned. Only the finish_run call
+  // distinguishes that from a day with genuinely nothing to do.
+  it('exits with the unfinished-run code when a clean end never called finish_run', async () => {
+    const writeOutput = vi.fn(async () => {});
+    const adapter = scriptedAdapter([
+      [{ type: 'toolCall', toolCall: A_TOOL_CALL }, doneToolCalls('')],
+      [doneEnd],
+    ]);
+    const { deps, stdout } = harness(adapter, fakePool(), { writeOutput });
+
+    const code = await runCli([...BASE_ARGS, '--reason-file', REASON_PATH, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.UnfinishedRun);
+    const lines = stdout.map((line) => JSON.parse(line) as { type: string; exitCode?: number });
+    const last = lines[lines.length - 1];
+    expect(last.type).toBe('done');
+    expect(last.exitCode).toBe(ExitCode.UnfinishedRun);
+    expect(reasonText(writeOutput)).toContain('finish_run');
+  });
+
+  // Emission is not execution. A tool call recovered from a truncated ('length')
+  // response is pushed into the history and then deliberately failed WITHOUT
+  // being run, because its arguments may be incomplete — so the run is just as
+  // abandoned as one that never called finish_run at all.
+  it('exits with the unfinished-run code when the finish_run call was truncated and never executed', async () => {
+    const adapter = scriptedAdapter([
+      [
+        { type: 'toolCall', toolCall: FINISH_RUN_CALL },
+        { type: 'done', stopReason: 'length', message: { role: 'assistant', content: '', toolCalls: [FINISH_RUN_CALL] } },
+      ],
+      [doneEnd],
+    ]);
+    const { deps } = harness(adapter, fakePool());
+
+    const code = await runCli([...BASE_ARGS, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.UnfinishedRun);
+  });
+
+  // A call that came back as an error — a bad run id, or an erroring MCP server
+  // — closed no run either, however confidently the model made it.
+  it('exits with the unfinished-run code when the finish_run call returned an error', async () => {
+    const adapter = scriptedAdapter([finishRunTurn, [doneEnd]]);
+    const { deps } = harness(adapter, poolFailingFinishRun());
+
+    const code = await runCli([...BASE_ARGS, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.UnfinishedRun);
+  });
+
+  // The other direction: the guard must not fail a run that did report its
+  // outcome, or every healthy night turns red.
+  it('still exits 0 when the run called finish_run before ending', async () => {
+    const adapter = scriptedAdapter([
+      [{ type: 'toolCall', toolCall: A_TOOL_CALL }, doneToolCalls('')],
+      finishRunTurn,
+      [doneEnd],
+    ]);
+    const { deps } = harness(adapter, fakePool());
+
+    const code = await runCli([...BASE_ARGS, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.Success);
   });
 });

@@ -211,8 +211,10 @@ function takeReasonFile(runId) {
  * The harness's codes are its machine contract, documented at its invocation
  * in daily-apply.sh and produced by exitCodeFor() in agent/harness/cli.ts:
  * 0 success, 2 turn cap, 3 provider error, 4 MCP connection failure, 5 bad
- * configuration. 1 is daily-apply.sh's own abort(); 143/137 are the signalled
- * exits a cancel produces.
+ * configuration. 6 is added by that file's report(), which downgrades a clean
+ * end to a failure when the agent never called finish_run. 1 is
+ * daily-apply.sh's own abort(); 143/137 are the signalled exits a cancel
+ * produces.
  */
 function outcomeFor(rc, cancelled, reason) {
   if (cancelled || rc === 143 || rc === 137) {
@@ -231,6 +233,7 @@ function outcomeFor(rc, cancelled, reason) {
     3: "the run could not get a usable answer from the LLM provider — see the run log: \"request failed with status\" is the provider refusing, \"request could not be sent\" is the network never reaching it",
     4: "could not connect to an MCP server (the app's tools, or the browser)",
     5: "the harness was misconfigured — see the run log",
+    6: "the agent stopped without reporting an outcome, so the run was abandoned part-way and its counters are incomplete — see the run log",
   };
   return {
     status: "failed",

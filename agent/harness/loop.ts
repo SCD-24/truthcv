@@ -170,6 +170,25 @@ export interface LoopResult {
   messages: ConversationMessage[];
   /** How many turns completed. */
   turns: number;
+  /**
+   * Whether the run EXECUTED `finish_run` successfully at least once.
+   *
+   * The prompt requires that call before the agent exits, including when it
+   * stops early, and nothing else can tell an abandoned run from a finished
+   * one: a model that started a run, made two calls and then emitted an empty
+   * turn ends the loop with `stopReason === 'end'` exactly as a genuinely idle
+   * day does. Such a run was recorded as "completed" with every counter at zero
+   * while it had in fact abandoned three approved applications, so the CLI
+   * treats a clean end without this flag as a failure.
+   *
+   * Execution is what counts, not the appearance of a call in the transcript.
+   * A call recovered from a truncated (`length`) response is pushed into the
+   * history but deliberately never run (see {@link handleLength}), and a call
+   * that errored closed nothing either — both leave the run just as abandoned.
+   * Latching it here also survives compaction dropping the message that carried
+   * the call.
+   */
+  finishRunExecuted: boolean;
 }
 
 /** Mutable state threaded through the loop's helpers. */
@@ -190,6 +209,10 @@ interface LoopState {
   /** Whether the wrap-up instruction has already been delivered, so entering
    * the window repeatedly cannot append it on every remaining turn. */
   wrapUpSent: boolean;
+  /** Whether `finish_run` has been executed successfully at least once — see
+   * {@link LoopResult.finishRunExecuted}. Latched at the execution choke point
+   * rather than derived from the transcript afterwards. */
+  finishRunExecuted: boolean;
 }
 
 /** Per-iteration context handed to the outcome handlers. */
@@ -295,6 +318,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
     usageCoveredMessages: 0,
     overflowCompactions: 0,
     wrapUpSent: false,
+    finishRunExecuted: false,
   };
   while (true) {
     const registry = await refreshRegistry(pool);
@@ -532,6 +556,11 @@ async function continueWithTools(done: DoneEvent, state: LoopState, ctx: LoopCon
     ctx.config.maxToolResultChars ?? DEFAULT_MAX_TOOL_RESULT_CHARS,
   );
   state.messages.push(toolResultsMessage(results));
+  // Latch the run's outcome-reporting call here, at the only place a tool is
+  // actually run: an emitted call proves nothing, since a call recovered from a
+  // truncated response is pushed into the history and then failed unexecuted by
+  // handleLength(), and an errored call closed no run either.
+  if (!state.finishRunExecuted) state.finishRunExecuted = executedFinishRun(calls, results);
   return capOrContinue(state, ctx);
 }
 
@@ -555,7 +584,12 @@ async function handleLength(done: DoneEvent, state: LoopState, ctx: LoopContext)
 function capOrContinue(state: LoopState, ctx: LoopContext): LoopResult | undefined {
   if (state.turns >= ctx.config.maxTurns) {
     ctx.onEvent?.(loopEvent('turnCapReached', state.turns, `hard turn cap of ${ctx.config.maxTurns} reached`));
-    return { stopReason: 'turnCapReached', messages: state.messages, turns: state.turns };
+    return {
+      stopReason: 'turnCapReached',
+      messages: state.messages,
+      turns: state.turns,
+      finishRunExecuted: state.finishRunExecuted,
+    };
   }
   maybeWarnWrapUp(state, ctx);
   return undefined;
@@ -599,6 +633,30 @@ async function executeTurnToolCalls(
   return results;
 }
 
+/**
+ * Did this turn successfully execute `finish_run`?
+ *
+ * A call counts only when its own result came back without `isError`: a bad run
+ * id, or an erroring MCP server, leaves the run unclosed however confidently
+ * the model called the tool. Results are matched to calls by id rather than by
+ * position, so the answer does not depend on execution order.
+ *
+ * The name is matched both bare and namespaced: MCP tools reach the model as
+ * `truthcv__finish_run` (namespaceTool() in mcp/nameTransform.ts), while the
+ * bare `finish_run` is what tools.ts's allow-list names.
+ *
+ * @param calls The tool calls this turn requested.
+ * @param results Their results, in any order.
+ * @returns True if a `finish_run` call returned a non-error result.
+ */
+function executedFinishRun(calls: ToolCall[], results: ToolResult[]): boolean {
+  return calls.some(
+    (call) =>
+      (call.name === 'finish_run' || call.name.endsWith('__finish_run')) &&
+      results.some((result) => result.toolCallId === call.id && !result.isError),
+  );
+}
+
 /** An error result for a tool call recovered from a truncated response. */
 function failTruncated(call: ToolCall): ToolResult {
   return {
@@ -621,7 +679,7 @@ function reflectionMessage(error: ErrorEvent): string {
 /** Emit a stop event and return the loop's final result. */
 function finish(stopReason: LoopOutcome, state: LoopState, ctx: LoopContext, detail: string): LoopResult {
   ctx.onEvent?.(loopEvent('stop', state.turns, detail));
-  return { stopReason, messages: state.messages, turns: state.turns };
+  return { stopReason, messages: state.messages, turns: state.turns, finishRunExecuted: state.finishRunExecuted };
 }
 
 /** Whether an error event signals a malformed tool call (a reflection case). */

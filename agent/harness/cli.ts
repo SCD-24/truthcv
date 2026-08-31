@@ -6,7 +6,8 @@
  * CODE to decide what happened. That exit-code contract is the machine
  * interface and is deliberately narrow and stable:
  *
- *   0  success        — the loop ended cleanly (`stopReason === 'end'`).
+ *   0  success        — the loop ended cleanly (`stopReason === 'end'`) AND
+ *                       the agent called `finish_run` before stopping.
  *   2  turn cap       — the hard turn cap stopped the loop (`turnCapReached`).
  *   3  provider error — a non-retryable provider error, a truncated ('length')
  *                       or otherwise non-success loop outcome, or an unexpected
@@ -26,6 +27,12 @@
  *                       provider, wire, max-turns, or the auth rule below),
  *                       detected BEFORE any provider adapter or MCP pool is
  *                       constructed.
+ *   6  unfinished run — the loop ended cleanly but the agent never called
+ *                       `finish_run`, so it abandoned the run without reporting
+ *                       an outcome and its counters are incomplete. A clean end
+ *                       is otherwise indistinguishable from a run that genuinely
+ *                       had nothing to do, and the supervisor would record it as
+ *                       "completed".
  *   1  fatal          — reserved for a truly unexpected crash in the runtime
  *                       guard (should not happen; runCli catches its own paths).
  *
@@ -58,7 +65,7 @@ import { checkAdvertisedBrowserTools } from './tools.js';
 
 /** The CLI's process exit codes; see the module comment for the full contract. */
 export const ExitCode = {
-  /** The loop ended cleanly. */
+  /** The loop ended cleanly AND the agent called `finish_run` before stopping. */
   Success: 0,
   /** The hard turn cap stopped the loop. */
   TurnCapReached: 2,
@@ -68,6 +75,8 @@ export const ExitCode = {
   McpFailure: 4,
   /** A required input was missing or invalid, detected before startup. */
   BadConfig: 5,
+  /** The loop ended cleanly but the agent never called `finish_run`. */
+  UnfinishedRun: 6,
 } as const;
 
 /** Default hard turn cap when neither flag nor env supplies one. */
@@ -567,11 +576,25 @@ async function report(
   token: string,
   getFailureDetail: () => string | undefined,
 ): Promise<number> {
-  const exitCode = exitCodeFor(result.stopReason);
+  // A clean end is only a success if the agent actually reported an outcome:
+  // see {@link LoopResult.finishRunExecuted}, which the loop latches when the
+  // call is EXECUTED rather than merely emitted. The detail is spelled out here
+  // rather than left to the `stopped: ${stopReason}` fallback below, which on
+  // this path would write the useless "stopped: end" — getFailureDetail() is
+  // undefined because nothing failed, the agent simply walked away.
+  const abandoned = result.stopReason === 'end' && !result.finishRunExecuted;
+  const exitCode = abandoned ? ExitCode.UnfinishedRun : exitCodeFor(result.stopReason);
   emitToolResults(emit.json, result.messages);
   emit.json({ type: 'done', stopReason: result.stopReason, turns: result.turns, exitCode });
   if (config.outputFile) await d.writeOutput(config.outputFile, finalAssistantText(result.messages));
-  if (exitCode !== ExitCode.Success) {
+  if (abandoned) {
+    await writeReason(
+      config,
+      d,
+      token,
+      'the agent stopped without calling finish_run — the run was abandoned before it reported an outcome, so its counters are incomplete',
+    );
+  } else if (exitCode !== ExitCode.Success) {
     await writeReason(config, d, token, getFailureDetail() ?? `stopped: ${result.stopReason}`);
   }
   return exitCode;

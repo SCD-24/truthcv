@@ -166,8 +166,11 @@ flag that takes precedence; `daily-apply.sh` passes the flags explicitly):
 point; it defaults to `/app/agent/dist/harness/cli.js`.
 
 **Exit-code contract.** The harness's exit code is its machine interface, logged
-and propagated verbatim: `0` success, `2` turn cap, `3` provider error, `4` MCP
-connection failure, `5` bad configuration.
+and propagated verbatim: `0` success — the loop ended cleanly *and* the agent
+called `finish_run` before stopping — `2` turn cap, `3` provider error, `4` MCP
+connection failure, `5` bad configuration, `6` the loop ended cleanly but
+`finish_run` was never executed, so the run was abandoned without reporting an
+outcome.
 
 **Almost no built-in tools.** The harness ships with one narrow built-in tool,
 `read_runbook_section` — it returns one named section of `RUNBOOK.md` from the
