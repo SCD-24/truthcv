@@ -603,8 +603,9 @@ printf '%s' "$PROMPT" >"$HARNESS_PROMPT_FILE"
 RUN_OUTPUT="$RUN_LOG_DIR/run_${STAMP}_${TRUTHCV_RUN_ID}.output"
 
 # Exit codes are the harness's machine contract: 0 success, 2 turn cap, 3
-# provider error, 4 MCP connection failure, 5 bad configuration. They are logged
-# and propagated verbatim below, not remapped.
+# provider error, 4 MCP connection failure, 5 bad configuration, 6 the agent
+# ended cleanly without calling finish_run. They are logged and propagated
+# verbatim below, not remapped.
 node "$HARNESS_CLI" \
   --prompt-file "$HARNESS_PROMPT_FILE" \
   --model "$AGENT_MODEL" \
