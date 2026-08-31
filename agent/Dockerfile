@@ -69,7 +69,17 @@ COPY --chown=node:node agent/package.json agent/package-lock.json ./
 RUN npm ci --include=dev
 COPY --chown=node:node agent/tsconfig.json ./
 COPY --chown=node:node agent/harness ./harness
-RUN npm run build && npm prune --omit=dev
+# The chown is load-bearing, not tidiness. Both steps above run as root (USER
+# node is set at the end of this file), so node_modules/ and dist/ are
+# root-owned, and the chown at the top of this file cannot help — it runs
+# before npm creates either. Whether USER node can then read its own harness
+# is left to whatever "other" permission bits the BUILDER happened to give
+# root's files: buildkit's docker-container driver creates them 0770/0660,
+# with nothing for "other", and the run aborts at daily-apply.sh's
+# `agent harness not found: .../dist/harness/cli.js` — a permissions failure
+# reported as a missing file. Owning them makes the image independent of that.
+RUN npm run build && npm prune --omit=dev \
+ && chown -R node:node /app/agent
 
 # The agent's own files — its operating spec, its prompt, its MCP config, the
 # per-run script and the scheduling loop that invokes it (task t-3 of plan
