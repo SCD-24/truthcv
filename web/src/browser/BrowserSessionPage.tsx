@@ -87,13 +87,17 @@ export function BrowserSessionPage() {
   // listener below can tell "operator hit Reload" apart from "the server
   // actually closed the session" — only the latter should end the page.
   const reloadingRef = useRef(false);
-  // Set once a securityfailure has put the page in "unavailable" state, so
-  // the disconnect that noVNC fires right after doesn't clobber it back to
+  // Set once a failure has put the page in "unavailable" state, so the
+  // disconnect that noVNC fires right after doesn't clobber it back to
   // "closed". Deliberately separate from `reloadingRef`: the disconnect
   // handler CONSUMES that flag (resets it to false), while this one is only
   // checked, so a Reload after a failed handshake still needs to clear it
   // itself (done at the top of `connect()`).
   const failedRef = useRef(false);
+  // Set when noVNC reports the RFB handshake actually completed, so an
+  // unclean disconnect can say whether the viewport never connected at all
+  // or connected and then dropped. Cleared per connection in `connect()`.
+  const connectedRef = useRef(false);
 
   // Open the session on mount, and again on every retry (`attempt`).
   useEffect(() => {
@@ -146,6 +150,7 @@ export function BrowserSessionPage() {
   // this viewer connection, never the session server's session.
   function connect() {
     failedRef.current = false;
+    connectedRef.current = false;
     if (!canvasRef.current) return;
     const wsUrl = `${location.origin.replace(/^http/, "ws")}/api/browser/session/stream`;
     const rfb = new RFB(canvasRef.current, wsUrl);
@@ -154,7 +159,10 @@ export function BrowserSessionPage() {
     // to the right/bottom of the desktop. Scale-and-clip it to the box instead.
     rfb.clipViewport = true;
     rfb.scaleViewport = true;
-    rfb.addEventListener("disconnect", () => {
+    rfb.addEventListener("connect", () => {
+      connectedRef.current = true;
+    });
+    rfb.addEventListener("disconnect", (e: CustomEvent<{ clean?: boolean }>) => {
       if (reloadingRef.current) {
         // This disconnect was Reload tearing down the old socket on its way
         // to a new one, not the session actually ending — swallow it.
@@ -162,6 +170,28 @@ export function BrowserSessionPage() {
         return;
       }
       if (failedRef.current) return;
+      // noVNC sets `clean: false` for every failure, including the one the
+      // relay produces: `api/browser_stream.py` closes a socket it refuses
+      // (peer, Origin or "no session open") with 1008 BEFORE accepting it,
+      // and the browser container being down looks the same. RFB is still
+      // in `connecting` then, so it reports the close as a failure rather
+      // than an end-of-session. Reporting that as "Closed" told the operator
+      // their sign-in had been shown and finished when nothing was ever
+      // displayed — and "the next run will get through" was flatly wrong.
+      // `failedRef` is set for the same reason securityfailure sets it: the
+      // attach effect's cleanup disconnects the RFB when this state change
+      // unmounts the viewport, which would otherwise re-enter here and
+      // clobber the message back to "closed".
+      if (e?.detail?.clean === false) {
+        failedRef.current = true;
+        setState("unavailable");
+        setMessage(
+          connectedRef.current
+            ? "The connection to the browser dropped. Nothing was saved on the way out — try again."
+            : "The viewport could not connect to the browser. Try again; if it keeps failing, check that the browser service is running.",
+        );
+        return;
+      }
       setState("closed");
     });
     // A failed handshake (bad Origin, relay rejection, etc.) previously
@@ -263,6 +293,19 @@ export function BrowserSessionPage() {
     <Button onClick={() => navigate(ROUTES.jobBoards)}>Back to job boards</Button>
   );
 
+  /** Re-run the open effect from the failure screen. Reload only exists on
+   * the live view, so without this a viewport that never connected leaves
+   * "Back to job boards" as the only way out — and the only thing that
+   * button leads back to is the same Sign in. Opening again while the
+   * session is still open is not a second session: the open effect's
+   * `conflictUrl === url` branch attaches to the existing one. */
+  function onRetry() {
+    setState("starting");
+    setMessage("");
+    setConflictUrl(null);
+    setAttempt((n) => n + 1);
+  }
+
   if (state === "starting") {
     return (
       <Stack spacing={2} sx={{ p: 3 }}>
@@ -286,6 +329,11 @@ export function BrowserSessionPage() {
         {conflictUrl && (
           <Button variant="outlined" onClick={onCloseAndStart}>
             Close it and start here
+          </Button>
+        )}
+        {state === "unavailable" && (
+          <Button variant="contained" onClick={onRetry}>
+            Try again
           </Button>
         )}
         {back}
