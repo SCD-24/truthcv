@@ -152,6 +152,21 @@ export class OpenAiChatCompletionsAdapter implements ProviderAdapter {
       yield networkErrorEvent('OpenAI', err);
       return;
     }
+    const parsed = payload as OpenAiErrorBody;
+    if (lacksCompletion(parsed)) {
+      // The status stays as it arrived — saying "failed with status 200" is
+      // the point, since the 200 is what hid the failure. The body is already
+      // parsed, so it is re-serialised to feed `detailFromBody`, which takes
+      // response text and knows where both vendors nest `error.message`.
+      yield providerErrorEvent(
+        'OpenAI',
+        response.status,
+        JSON.stringify(payload) ?? '',
+        completionErrorRetryable(parsed?.error?.code),
+        retryAfterMsFrom(response.headers),
+      );
+      return;
+    }
     yield* emitOpenAiEvents(payload);
   }
 }
@@ -160,6 +175,52 @@ export class OpenAiChatCompletionsAdapter implements ProviderAdapter {
  * own explanation when it sent one. */
 function errorEvent(status: number, body: string, retryAfterMs?: number): HarnessEvent {
   return providerErrorEvent('OpenAI', status, body, RETRYABLE_STATUS.has(status), retryAfterMs);
+}
+
+/** Shape of the fields we read from a 2xx body that carries no completion. */
+interface OpenAiErrorBody {
+  error?: { message?: unknown; code?: unknown };
+  choices?: unknown;
+}
+
+/**
+ * True when a 2xx body carries nothing that can be emitted as a completion.
+ *
+ * OpenRouter answers an upstream provider failure with HTTP 200 and an
+ * `{"error": {"message": ..., "code": ...}}` body, so `response.ok` guards
+ * nothing. Left to fall through, the absent choice makes every downstream read
+ * empty and `mapFinishReason(undefined)` reports a bare `stopReason: 'error'`
+ * — which is what a production run died of at turn 5, with the provider's
+ * explanation sitting unread in the body it was handed.
+ *
+ * The test is the completion itself, never the presence of an `error` key: a
+ * body carries a completion iff `choices` is a non-empty array. That covers
+ * the OpenRouter shape (which sends no `choices` at all) and a bare
+ * `{"error": "..."}` string body alike, and it cannot discard a real answer
+ * that happens to arrive alongside an empty or null `error` field.
+ */
+function lacksCompletion(body: OpenAiErrorBody): boolean {
+  return !Array.isArray(body?.choices) || body.choices.length === 0;
+}
+
+/**
+ * Whether to retry a 2xx response that carried no completion.
+ *
+ * When the body's error names a numeric HTTP-like code — an integer in the
+ * status range; anything else is not a status and so decides nothing — the
+ * provider has said which class of failure it was and the same
+ * RETRYABLE_STATUS judgement as a real non-2xx applies. With no such code
+ * there is nothing to go on, and the two mistakes are not symmetric: calling a
+ * transient upstream hiccup fatal ends a whole unattended overnight run on one
+ * blip, while calling a permanent condition transient costs a bounded handful
+ * of attempts
+ * (`maxConsecutiveRetries`, 8) before the run ends anyway. So the default is
+ * to retry.
+ */
+function completionErrorRetryable(code: unknown): boolean {
+  if (typeof code === 'number' && Number.isInteger(code) && code >= 100 && code < 600)
+    return RETRYABLE_STATUS.has(code);
+  return true;
 }
 
 /** Yield text, tool-call, usage and done events from a parsed response. */
