@@ -60,7 +60,7 @@ import {
   type Wire,
 } from './providers/registry.js';
 import type { ConversationMessage, HarnessEvent, ProviderAdapter } from './providers/types.js';
-import { runLoop, type LoopEvent, type LoopOutcome, type LoopResult } from './loop.js';
+import { EMPTY_TURN_STOP_DETAIL, runLoop, type LoopEvent, type LoopOutcome, type LoopResult } from './loop.js';
 import { checkAdvertisedBrowserTools } from './tools.js';
 
 /** The CLI's process exit codes; see the module comment for the full contract. */
@@ -578,26 +578,37 @@ async function report(
 ): Promise<number> {
   // A clean end is only a success if the agent actually reported an outcome:
   // see {@link LoopResult.finishRunExecuted}, which the loop latches when the
-  // call is EXECUTED rather than merely emitted. The detail is spelled out here
-  // rather than left to the `stopped: ${stopReason}` fallback below, which on
-  // this path would write the useless "stopped: end" — getFailureDetail() is
-  // undefined because nothing failed, the agent simply walked away.
+  // call is EXECUTED rather than merely emitted. The detail is spelled out by
+  // abandonedReason() rather than left to the `stopped: ${stopReason}` fallback
+  // below, which on this path would write the useless "stopped: end".
   const abandoned = result.stopReason === 'end' && !result.finishRunExecuted;
   const exitCode = abandoned ? ExitCode.UnfinishedRun : exitCodeFor(result.stopReason);
   emitToolResults(emit.json, result.messages);
   emit.json({ type: 'done', stopReason: result.stopReason, turns: result.turns, exitCode });
   if (config.outputFile) await d.writeOutput(config.outputFile, finalAssistantText(result.messages));
   if (abandoned) {
-    await writeReason(
-      config,
-      d,
-      token,
-      'the agent stopped without calling finish_run — the run was abandoned before it reported an outcome, so its counters are incomplete',
-    );
+    await writeReason(config, d, token, abandonedReason(getFailureDetail()));
   } else if (exitCode !== ExitCode.Success) {
     await writeReason(config, d, token, getFailureDetail() ?? `stopped: ${result.stopReason}`);
   }
   return exitCode;
+}
+
+/**
+ * The reason text for a run that ended without reporting an outcome, naming the
+ * cause when the loop identified one.
+ *
+ * Only the empty-turn cap is named, and only by exact match: every other detail
+ * reaching this path is either a mid-run incident the loop recovered from or
+ * the bare "model ended the turn", none of which is why the run was abandoned,
+ * and presenting one as the cause would mislead the operator reading the card.
+ *
+ * @param detail The run's captured failure detail, if any.
+ * @returns One operator-readable sentence, well under the reason-file bound.
+ */
+function abandonedReason(detail: string | undefined): string {
+  const cause = detail === EMPTY_TURN_STOP_DETAIL ? ` (${detail})` : '';
+  return `the agent stopped without calling finish_run${cause} — the run was abandoned before it reported an outcome, so its counters are incomplete`;
 }
 
 /**

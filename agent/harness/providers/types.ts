@@ -72,6 +72,11 @@ export type HarnessEvent =
       /** Anthropic-only: tokens written into the prompt cache. Present only when
        * the provider reports it; absent on OpenAI-wire responses. */
       cacheWriteTokens?: number;
+      /** The model that actually served this request, as the provider reported
+       * it. Present only when it says: a router such as OpenRouter's
+       * `openrouter/free` picks a different backing model per request, so the
+       * configured id does not identify what produced a given turn. */
+      model?: string;
     }
   /** Terminal event carrying the stop reason and assembled message. */
   | { type: 'done'; stopReason: StopReason; message: ConversationMessage }

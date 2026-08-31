@@ -110,6 +110,9 @@ interface OpenAiResponse {
     finish_reason?: unknown;
   }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
+  /** The model that actually answered. A router returns the backing model it
+   * chose here, which need not be the id that was requested. */
+  model?: string;
 }
 
 /** Adapter for the OpenAI Chat Completions API. */
@@ -176,16 +179,18 @@ function* emitOpenAiEvents(payload: unknown): Generator<HarnessEvent, void, unkn
     toolCalls.push(toolCall);
     yield { type: 'toolCall', toolCall };
   }
-  yield usageEvent(body.usage);
+  yield usageEvent(body.usage, body.model);
   yield doneEvent(mapFinishReason(choice?.finish_reason), text, toolCalls);
 }
 
-/** Build a usage HarnessEvent from OpenAI token counts. */
-function usageEvent(usage: OpenAiResponse['usage']): HarnessEvent {
+/** Build a usage HarnessEvent from OpenAI token counts, naming the model that
+ * served the request when the provider reported one. */
+function usageEvent(usage: OpenAiResponse['usage'], model?: string): HarnessEvent {
   return {
     type: 'usage',
     inputTokens: usage?.prompt_tokens ?? 0,
     outputTokens: usage?.completion_tokens ?? 0,
+    ...(model === undefined ? {} : { model }),
   };
 }
 

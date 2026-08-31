@@ -99,6 +99,9 @@ const BASE_ARGS = ['--model', 'm', '--provider', 'claude', '--wire', 'anthropic-
 
 const doneEnd: HarnessEvent = { type: 'done', stopReason: 'end', message: { role: 'assistant', content: 'all done' } };
 
+/** A turn that produced nothing at all — the shape the loop's empty-turn cap counts. */
+const doneEmptyTurn: HarnessEvent = { type: 'done', stopReason: 'end', message: { role: 'assistant', content: '' } };
+
 function doneToolCalls(content: string): HarnessEvent {
   return { type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content, toolCalls: [A_TOOL_CALL] } };
 }
@@ -686,6 +689,33 @@ describe('runCli unfinished runs', () => {
     const code = await runCli([...BASE_ARGS, 'go'], {}, deps);
 
     expect(code).toBe(ExitCode.UnfinishedRun);
+  });
+
+  // Both of these exit the same way for the same reason — no outcome was ever
+  // reported — but the operator reading the reason card has to be able to tell
+  // a model that went silent from one that simply forgot the closing call,
+  // without grepping the JSONL for emptyTurn events.
+  it('says so in the reason file when the empty-turn cap is what ended the run', async () => {
+    const wentSilent = vi.fn(async () => {});
+    const { deps: silentDeps } = harness(scriptedAdapter([[doneEmptyTurn]]), fakePool(), { writeOutput: wentSilent });
+    const forgotFinishRun = vi.fn(async () => {});
+    const { deps: forgotDeps } = harness(
+      scriptedAdapter([[{ type: 'toolCall', toolCall: A_TOOL_CALL }, doneToolCalls('')], [doneEnd]]),
+      fakePool(),
+      { writeOutput: forgotFinishRun },
+    );
+
+    const silentCode = await runCli([...BASE_ARGS, '--reason-file', REASON_PATH, 'go'], {}, silentDeps);
+    const forgotCode = await runCli([...BASE_ARGS, '--reason-file', REASON_PATH, 'go'], {}, forgotDeps);
+
+    expect(silentCode).toBe(ExitCode.UnfinishedRun);
+    expect(forgotCode).toBe(ExitCode.UnfinishedRun);
+    expect(reasonText(wentSilent)).toContain('repeatedly returned no content and no tool calls');
+    expect(reasonText(wentSilent)).not.toBe(reasonText(forgotFinishRun));
+    // The run that merely forgot the call still reads exactly as it always has.
+    expect(reasonText(forgotFinishRun)).toBe(
+      'the agent stopped without calling finish_run — the run was abandoned before it reported an outcome, so its counters are incomplete',
+    );
   });
 
   // The other direction: the guard must not fail a run that did report its

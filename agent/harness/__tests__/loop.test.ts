@@ -294,6 +294,176 @@ describe('wrap-up window', () => {
   });
 });
 
+describe('a turn that produced nothing at all', () => {
+  // The 2026-08-30 incident: a router swapped in a reasoning model, which
+  // answered with an empty `content`, no tool calls and finish_reason 'stop'.
+  // The loop read that non-event as a deliberate finish and abandoned three
+  // approved applications after six turns.
+
+  /** A `done` event for a turn with neither text nor tool calls. */
+  const doneEmpty: HarnessEvent = {
+    type: 'done',
+    stopReason: 'end',
+    message: { role: 'assistant', content: '' },
+  };
+
+  /** A tool call that closes the run, matching the loop's finish_run latch. */
+  const FINISH_RUN_CALL: ToolCall = { id: 'f1', name: 'truthcv__finish_run', arguments: {} };
+
+  /** A `done` event whose single tool call is the run-closing one. */
+  function doneFinishRun(): HarnessEvent {
+    return {
+      type: 'done',
+      stopReason: 'toolCalls',
+      message: { role: 'assistant', content: '', toolCalls: [FINISH_RUN_CALL] },
+    };
+  }
+
+  /** A pool that also allows `finish_run`, so the loop can latch its execution. */
+  function poolWithFinishRun() {
+    const { pool, callTool } = fakePool();
+    const tools: NamespacedTool[] = [
+      ...pool.listTools(),
+      { namespacedName: 'truthcv__finish_run', serverName: 'truthcv', toolName: 'finish_run', description: 'd', inputSchema: { type: 'object' } },
+    ];
+    return { pool: { ...pool, listTools: () => tools } as unknown as McpClientPool, callTool };
+  }
+
+  /** The user-role message contents a finished run accumulated. */
+  const userTexts = (messages: ConversationMessage[]) =>
+    messages.filter((m) => m.role === 'user').map((m) => m.content);
+
+  it('nudges the model and keeps going instead of ending the run', async () => {
+    const { adapter, calls } = scriptedAdapter([[doneEmpty], [doneToolCalls()], [doneEnd]]);
+    const { pool } = fakePool();
+
+    const result = await run(adapter, pool, { maxTurns: 10 });
+
+    expect(result.stopReason).toBe('end');
+    expect(calls()).toBe(3);
+    expect(userTexts(result.messages).filter((t) => t.includes('no content and no tool calls'))).toHaveLength(1);
+  });
+
+  it('reports the nudge as a loop event so a run log shows what happened', async () => {
+    const { adapter } = scriptedAdapter([[doneEmpty], [doneEnd]]);
+    const { pool } = fakePool();
+    const kinds: string[] = [];
+
+    await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: [{ role: 'user', content: 'apply to jobs' }],
+      config: { maxTurns: 10 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e) kinds.push(e.kind);
+      },
+    });
+
+    expect(kinds).toContain('emptyTurn');
+  });
+
+  it('starts the empty-turn budget again after a turn that produced something', async () => {
+    // The cap counts CONSECUTIVE empty turns: a recovered model that later
+    // returns one more empty turn must be nudged again, not counted toward a
+    // cap it never got near.
+    const { adapter } = scriptedAdapter([
+      [doneEmpty],
+      [doneToolCalls()],
+      [doneEmpty],
+      [doneToolCalls()],
+      [doneEnd],
+    ]);
+    const { pool, callTool } = fakePool();
+
+    const result = await run(adapter, pool, { maxTurns: 20, maxConsecutiveEmptyTurns: 1 });
+
+    expect(result.stopReason).toBe('end');
+    expect(callTool).toHaveBeenCalledTimes(2);
+    expect(userTexts(result.messages).filter((t) => t.includes('no content and no tool calls'))).toHaveLength(2);
+  });
+
+  it('counts only the empty turns since the last productive one toward the cap', async () => {
+    // The companion to the test above, and the one that pins the reset down to
+    // being CONDITIONAL: a reset on every turn would keep the streak at one
+    // forever, so the cap could never be reached and only `maxTurns` would
+    // ever stop the run. `maxTurns` is set well above the scripted turns so
+    // that failure shows up as a wrong stop reason rather than a hang.
+    const { adapter, calls } = scriptedAdapter([
+      [doneEmpty],
+      [doneToolCalls()],
+      [doneEmpty],
+      [doneEmpty],
+      [doneEmpty],
+    ]);
+    const { pool } = fakePool();
+
+    const result = await run(adapter, pool, { maxTurns: 8, maxConsecutiveEmptyTurns: 2 });
+
+    // The first empty turn is nudged and then forgotten; the three that follow
+    // the tool call are the streak, and the third of them exceeds the cap.
+    expect(result.stopReason).toBe('end');
+    expect(result.turns).toBe(5);
+    expect(calls()).toBe(5);
+  });
+
+  it('spends nudged turns against the hard cap instead of running past it', async () => {
+    // A nudge is a provider request like any other, so an empty-turn streak
+    // must not buy turns beyond `maxTurns` — the one bound an unattended
+    // overnight run has. It must also still enter the wrap-up window, and stop
+    // as `turnCapReached` (exit 2) rather than as an unfinished run (exit 6),
+    // so the supervisor names the right cause.
+    const { adapter, calls } = scriptedAdapter([[doneToolCalls()], [doneEmpty]]);
+    const { pool } = fakePool();
+    const kinds: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: [{ role: 'user', content: 'apply to jobs' }],
+      config: { maxTurns: 3, wrapUpTurns: 1 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e) kinds.push(e.kind);
+      },
+    });
+
+    expect(result.turns).toBe(3);
+    expect(calls()).toBe(3);
+    expect(result.stopReason).toBe('turnCapReached');
+    expect(kinds).toContain('wrapUp');
+  });
+
+  it('gives up as an unfinished run once the empty turns exceed the cap, rather than nudging forever', async () => {
+    const { adapter, calls } = scriptedAdapter([[doneEmpty]]);
+    const { pool } = fakePool();
+
+    const result = await run(adapter, pool, { maxTurns: 100, maxConsecutiveEmptyTurns: 2 });
+
+    // 'end' with no finish_run is what cli.ts reports as an unfinished run;
+    // 'error' would misname a model that stopped producing as a provider fault.
+    expect(result.stopReason).toBe('end');
+    expect(result.finishRunExecuted).toBe(false);
+    expect(calls()).toBe(3); // the first empty turn, two nudged retries, then it stops
+  });
+
+  it('ends immediately on an empty turn once finish_run has executed, without nudging', async () => {
+    // Nudging here could restart a run that already reported its outcome and
+    // submit duplicate applications under a real person's name.
+    const { adapter, calls } = scriptedAdapter([[doneFinishRun()], [doneEmpty]]);
+    const { pool } = poolWithFinishRun();
+
+    const result = await run(adapter, pool, { maxTurns: 10 });
+
+    expect(result.stopReason).toBe('end');
+    expect(result.finishRunExecuted).toBe(true);
+    expect(calls()).toBe(2);
+    expect(userTexts(result.messages).filter((t) => t.includes('no content and no tool calls'))).toHaveLength(0);
+  });
+});
+
 describe('a network failure the adapter reports instead of throwing', () => {
   // The end-to-end shape of the 2026-08-28 outage: no answer came back, so the
   // adapter reports it as retryable rather than throwing past the loop. The run
