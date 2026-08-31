@@ -31,6 +31,50 @@ abort() {
 
 log "=== browser container starting (DISPLAY=$DISPLAY) ==="
 
+# Clear a stale X lock before starting Xvfb.
+#
+# Xvfb refuses a display whose /tmp/.X<n>-lock names a pid that is alive
+# ("Fatal server error: Server is already active for display 99"), and that
+# file lives in the container's own writable layer — it survives the
+# `restart: unless-stopped` restart that the X server which wrote it does not.
+# Pids start again from 1 in the restarted container, so the recorded pid is
+# routinely occupied by an unrelated process and Xvfb's liveness test reports
+# a display nothing is serving as held. The entrypoint then aborts, Docker
+# restarts it, and it reads the same stale lock: an unattended crash loop that
+# takes the noVNC viewport and @playwright/mcp down with it, ending only if the
+# pid happens not to be reused on some later attempt.
+#
+# Adjudicated rather than deleted unconditionally, in the same spirit as the
+# SingletonLock handling further down: the lock is cleared only when nothing
+# that could actually be an X server holds that pid. A real server still wins,
+# and Xvfb still gets to refuse.
+display_num="${DISPLAY#:}"
+display_num="${display_num%%.*}"
+x_lock="/tmp/.X${display_num}-lock"
+if [[ -e "$x_lock" ]]; then
+  # The lock's sole contents are the X server's pid, space-padded.
+  lock_pid="$(tr -dc '0-9' < "$x_lock" 2>/dev/null || true)"
+  lock_holder=""
+  if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then
+    lock_holder="$(cat "/proc/$lock_pid/comm" 2>/dev/null || true)"
+  fi
+  case "$lock_holder" in
+    Xvfb|Xorg|X)
+      log "display $DISPLAY is already served by $lock_holder (pid $lock_pid) — leaving $x_lock alone"
+      ;;
+    *)
+      if [[ -n "$lock_holder" ]]; then
+        log "clearing stale $x_lock: pid $lock_pid is $lock_holder, not an X server"
+      else
+        log "clearing stale $x_lock (pid '${lock_pid:-unreadable}' is not running)"
+      fi
+      # The socket is the lock's other half: Xvfb recreates it, but leaving a
+      # dead one behind lets a client connect to nothing.
+      rm -f "$x_lock" "/tmp/.X11-unix/X${display_num}"
+      ;;
+  esac
+fi
+
 # Start Xvfb (virtual X11 server)
 log "starting Xvfb on $DISPLAY with size $XVFB_SIZE..."
 Xvfb "$DISPLAY" -screen 0 "$XVFB_SIZE" &
