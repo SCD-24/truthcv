@@ -173,6 +173,21 @@
                   "desc": "Set one screening's approval decision and/or posting URL. A cover letter is optional — approval no longer requires a drafted letter.",
                   "method": "PATCH",
                   "path": "/api/screenings/{screening_id}"
+                },
+                {
+                  "desc": "Begin subscription sign-in for a connection card; returns a paste-code or device-code flow descriptor.",
+                  "method": "POST",
+                  "path": "/api/auth/{provider}/start"
+                },
+                {
+                  "desc": "Card-generic completion of a paste-code subscription sign-in (supersedes /api/auth/claude/complete, kept as an alias).",
+                  "method": "POST",
+                  "path": "/api/auth/{provider}/complete"
+                },
+                {
+                  "desc": "Perform one non-blocking poll of an in-progress device-code sign-in; returns pending or complete.",
+                  "method": "POST",
+                  "path": "/api/auth/{provider}/poll"
                 }
               ]
             },
@@ -801,7 +816,8 @@
                 "Python",
                 "anthropic SDK",
                 "openai SDK",
-                "Ollama"
+                "Ollama",
+                "httpx (Codex Responses SSE transport)"
               ]
             },
             "h": 200,
@@ -1469,7 +1485,7 @@
         "widgets": [
           {
             "data": {
-              "text": "Provider connection layer (connections/): a static catalog of provider connection cards (catalog.py — claude, codex, openrouter, ollama) plus per-vendor auth flows under connections/auth/. connections/auth/gmail.py owns the Gmail OAuth flow end to end: start_login builds the Google authorize URL (PKCE S256, offline access, gmail.readonly scope), complete_login exchanges the code, reads the account's email from the Gmail profile API and stores the token record; get_valid_access_token refreshes lazily behind a lock with a 300s expiry skew; mark_reconnect_required blanks the tokens and flags reauthRequired when access is revoked. Credentials are never held here — every record is persisted through secretstore.get_connection/set_connection."
+              "text": "Provider connection layer (connections/): a static catalog of connection cards plus per-vendor auth flows. Claude Pro/Max signs in with a PKCE paste-code flow; ChatGPT (OpenAI) signs in with an OAuth device-code flow; Gmail uses Google OAuth 2.0 PKCE. Tokens are persisted encrypted in the Secret Store and refreshed lazily on use."
             },
             "h": 180,
             "id": "widget-1787568456174-0",

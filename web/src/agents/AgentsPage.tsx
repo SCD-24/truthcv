@@ -724,17 +724,15 @@ function ModeSection({
   );
 }
 
-/** The model the unattended agent runs on — an Anthropic-compatible-only
- * ModelRoutePicker
- * (the agent runs TruthCV's own provider-neutral harness (agent/harness),
- * which drives the containerised Chromium in the sibling `browser` service
- * over MCP. The harness can target four providers — claude, codex,
- * openrouter, ollama — across two wires — anthropic-messages and
- * openai-chat-completions (see agent/harness/providers/registry.ts) — but
- * this route is limited to the anthropic-messages wire, so the only usable
- * connections are the ones serving the Anthropic Messages API: Anthropic
- * itself and OpenRouter, which the harness reaches via ANTHROPIC_BASE_URL.
- * codex and ollama speak openai-chat-completions only)
+/** The model the unattended agent runs on — a ModelRoutePicker that now
+ * supports THREE wires (see agent/harness/providers/registry.ts):
+ * - anthropic-messages (claude)
+ * - openai-chat-completions (openrouter, codex api-key)
+ * - openai-responses (codex subscription)
+ * 
+ * Previously this was limited to anthropic-messages only (claude + openrouter).
+ * With the codex subscription wire (openai-responses) the ChatGPT (OpenAI)
+ * card is now also a valid agent target when connected via subscription.
  * saving/clearing the `agent` route.
  * Cleared falls back to the container's ANTHROPIC_API_KEY. */
 function ModelSection({
@@ -756,7 +754,7 @@ function ModelSection({
       }}
       title="Model"
       description="Model and account the unattended agent runs on. Cleared = the container's ANTHROPIC_API_KEY."
-      filterCards={["claude", "openrouter"]}
+      filterCards={["claude", "openrouter", "codex"]}
       allowClear
       showTest={false}
     />

@@ -7,7 +7,7 @@ def test_stage1_cards_present():
 
 def test_card_shapes():
     assert card("claude")["modes"] == ("subscription", "apikey")
-    assert card("codex")["modes"] == ("apikey",)
+    assert card("codex")["modes"] == ("subscription", "apikey")
     assert card("openrouter")["modes"] == ("apikey",)
     assert card("ollama")["modes"] == ("url",)
     for c in CARDS.values():

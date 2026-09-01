@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Card from "@mui/material/Card";
@@ -11,7 +11,8 @@ import Link from "@mui/material/Link";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import ToggleButton from "@mui/material/ToggleButton";
 import {
-  completeClaudeLogin,
+  completeLogin,
+  pollLogin,
   logoutConnection,
   saveConnectionKey,
   startLogin,
@@ -68,11 +69,16 @@ function ConnectionCard({
   );
   const [error, setError] = useState<string | null>(null);
 
-  // Subscription (paste-code) flow state.
+  // Subscription flow state (paste-code for claude, device-code for codex).
   const [login, setLogin] = useState<StartLoginResult | null>(null);
   const [code, setCode] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [confirming, setConfirming] = useState(false);
+
+  // Device-code polling state.
+  const [polling, setPolling] = useState(false);
+  const pollTimerRef = useRef<number | null>(null);
+  const cancelledRef = useRef(false);
 
   // API key / URL entry state.
   const [apiKey, setApiKey] = useState("");
@@ -84,12 +90,27 @@ function ConnectionCard({
 
   const isOllama = status.provider === "ollama";
 
+  // Clean up polling timer on unmount.
+  useEffect(() => {
+    return () => {
+      cancelledRef.current = true;
+      if (pollTimerRef.current !== null) {
+        clearTimeout(pollTimerRef.current);
+      }
+    };
+  }, []);
+
   async function handleConnect() {
     setConnecting(true);
     setError(null);
     try {
       const result = await startLogin(status.provider);
       setLogin(result);
+      // If device-code flow, start polling immediately.
+      if (result.flow === "device-code") {
+        cancelledRef.current = false;
+        startPolling();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't start sign-in.");
     } finally {
@@ -97,11 +118,39 @@ function ConnectionCard({
     }
   }
 
+  function startPolling() {
+    setPolling(true);
+    const poll = async () => {
+      if (cancelledRef.current) return;
+      try {
+        const result = await pollLogin(status.provider);
+        if (cancelledRef.current) return;
+        if (result.status === "complete") {
+          setPolling(false);
+          setLogin(null);
+          onChanged();
+          return;
+        }
+        // Pending — use the returned interval if provided, otherwise fall back.
+        const intervalMs = (result.intervalSeconds ?? login?.intervalSeconds ?? 5) * 1000;
+        pollTimerRef.current = window.setTimeout(poll, intervalMs);
+      } catch (e) {
+        if (cancelledRef.current) return;
+        setPolling(false);
+        setError(e instanceof Error ? e.message : "Sign-in failed.");
+        setLogin(null);
+      }
+    };
+    poll();
+  }
+
   async function handleConfirmCode() {
     setConfirming(true);
     setError(null);
     try {
-      await completeClaudeLogin(code);
+      // For paste-code (claude), use completeClaudeLogin (alias to completeLogin).
+      // For device-code (codex), this shouldn't be called — but guard anyway.
+      await completeLogin(status.provider, code);
       setCode("");
       setLogin(null);
       onChanged();
@@ -110,6 +159,16 @@ function ConnectionCard({
     } finally {
       setConfirming(false);
     }
+  }
+
+  function handleCancelDeviceCode() {
+    cancelledRef.current = true;
+    if (pollTimerRef.current !== null) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    setPolling(false);
+    setLogin(null);
   }
 
   async function handleSaveKey() {
@@ -191,25 +250,63 @@ function ConnectionCard({
                 />
               ) : login ? (
                 <Stack spacing={1.5}>
-                  {login.authUrl && (
-                    <Link href={login.authUrl} target="_blank" rel="noreferrer">
-                      Open Anthropic sign-in
-                    </Link>
+                  {login.flow === "device-code" ? (
+                    <>
+                      <Typography variant="body1">
+                        <strong>Enter this code:</strong>
+                      </Typography>
+                      <Typography
+                        variant="h6"
+                        sx={{ fontFamily: "monospace", letterSpacing: "0.2em" }}
+                      >
+                        {login.userCode}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Then go to{" "}
+                        <Link
+                          href={login.verificationUri ?? undefined}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {login.verificationUri}
+                        </Link>
+                        {" and type the code."}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Polling every {login.intervalSeconds ?? 5}s…
+                        {polling && " (waiting for sign-in)"}
+                      </Typography>
+                      {/* Deliberately NOT an AsyncButton: it must stay enabled while
+                      polling is in flight — that is the whole point of
+                      cancel, and a busy-disabled control could never be
+                      clicked. */}
+                      <Button variant="outlined" onClick={handleCancelDeviceCode}>
+                        Cancel
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      {login.authUrl && (
+                        <Link href={login.authUrl} target="_blank" rel="noreferrer">
+                          Open {status.label} sign-in
+                        </Link>
+                      )}
+                      <TextField
+                        label="Code"
+                        value={code}
+                        onChange={(e) => setCode(e.target.value)}
+                        placeholder="code#state"
+                        autoComplete="off"
+                      />
+                      <AsyncButton
+                        busy={confirming}
+                        busyLabel="Confirming…"
+                        label="Confirm"
+                        onClick={handleConfirmCode}
+                        disabled={!code.trim()}
+                      />
+                    </>
                   )}
-                  <TextField
-                    label="Code"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    placeholder="code#state"
-                    autoComplete="off"
-                  />
-                  <AsyncButton
-                    busy={confirming}
-                    busyLabel="Confirming…"
-                    label="Confirm"
-                    onClick={handleConfirmCode}
-                    disabled={!code.trim()}
-                  />
                 </Stack>
               ) : (
                 <AsyncButton

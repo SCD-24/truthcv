@@ -109,7 +109,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:end comp:gmail-api -->
 
 <!-- generated:start comp:connections -->
-- **Connections** (`connections`) — backend component. Provider connection layer (connections/): a static catalog of provider connection cards (catalog.py — claude, codex, openrouter, ollama) plus per-vendor auth flows under connections/auth/. connections/auth/gmail.py owns the Gmail OAuth flow end to end: start_login builds the Google authorize URL (PKCE S256, offline access, gmail.readonly scope), complete_login exchanges the code, reads the account's email from the Gmail profile API and stores the token record; get_valid_access_token refreshes lazily behind a lock with a 300s expiry skew; mark_reconnect_required blanks the tokens and flags reauthRequired when access is revoked. Credentials are never held here — every record is persisted through secretstore.get_connection/set_connection.
+- **Connections** (`connections`) — backend component. Provider connection layer (connections/): a static catalog of connection cards plus per-vendor auth flows. Claude Pro/Max signs in with a PKCE paste-code flow; ChatGPT (OpenAI) signs in with an OAuth device-code flow; Gmail uses Google OAuth 2.0 PKCE. Tokens are persisted encrypted in the Secret Store and refreshed lazily on use.
 <!-- generated:end comp:connections -->
 
 <!-- generated:start comp:agent-config -->

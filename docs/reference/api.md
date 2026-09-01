@@ -32,6 +32,9 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **POST** | `/api/upload` | Upload a CV as PDF, DOCX, TXT or Markdown (multipart); backend extracts text per format and stores the file under its own extension. |
 | **GET** | `/api/agent/llm-credentials` | Agent-token-authenticated credential handoff for the unattended agent. Returns provider, wire format, auth type, token, model and base URL for the configured agent route; serves all four connection cards. |
 | **PATCH** | `/api/screenings/{screening_id}` | Set one screening's approval decision and/or posting URL. A cover letter is optional — approval no longer requires a drafted letter. |
+| **POST** | `/api/auth/{provider}/start` | Begin subscription sign-in for a connection card; returns a paste-code or device-code flow descriptor. |
+| **POST** | `/api/auth/{provider}/complete` | Card-generic completion of a paste-code subscription sign-in (supersedes /api/auth/claude/complete, kept as an alias). |
+| **POST** | `/api/auth/{provider}/poll` | Perform one non-blocking poll of an in-progress device-code sign-in; returns pending or complete. |
 | **GET** | `/api/settings` | Provider settings status (encryptionAvailable, activeProvider, model, *KeySet booleans, ollamaHost). Never returns raw secrets. |
 | **POST** | `/api/settings` | Save provider selection + API key/model/host; encrypts to ./data/secrets.enc via ENCRYPTION_KEY. Empty apiKey leaves the stored key unchanged. |
 | **POST** | `/api/settings/test` | Test connection: a tiny live provider call with saved/submitted credentials. Returns {ok, detail}. |

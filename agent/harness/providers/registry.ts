@@ -5,13 +5,19 @@
 
 import { createAnthropicMessagesAdapter } from './anthropicMessages.js';
 import { createOpenAiChatCompletionsAdapter } from './openaiChatCompletions.js';
+import { createOpenAiResponsesAdapter } from './openaiResponses.js';
 import type { ProviderAdapter } from './types.js';
 
 /** Known logical providers the harness can target. */
 export type Provider = 'claude' | 'codex' | 'openrouter' | 'ollama';
 
-/** The wire protocol a provider speaks. */
-export type Wire = 'anthropic-messages' | 'openai-chat-completions';
+/** The wire protocol a provider speaks.
+ *
+ * - `anthropic-messages` — Anthropic's /v1/messages API (also via OpenRouter).
+ * - `openai-chat-completions` — OpenAI's /chat/completions API.
+ * - `openai-responses` — ChatGPT Codex subscription Responses API (streaming).
+ */
+export type Wire = 'anthropic-messages' | 'openai-chat-completions' | 'openai-responses';
 
 /** How the supplied token should be presented to the provider. */
 export type AuthType = 'oauth' | 'api_key' | 'url';
@@ -69,7 +75,30 @@ function buildOpenAi(opts: ProviderAdapterOptions): ProviderAdapter {
   });
 }
 
-/** Construct the provider adapter selected by the given options. */
+/** Build an OpenAI Responses adapter (ChatGPT Codex subscription wire). */
+function buildOpenAiResponses(opts: ProviderAdapterOptions): ProviderAdapter {
+  return createOpenAiResponsesAdapter({
+    token: opts.token,
+    model: opts.model,
+    baseUrl: opts.baseUrl || undefined,
+  });
+}
+
+/** Construct the provider adapter selected by the given options.
+ *
+ * Dispatches over the `wire` field explicitly — unknown wires throw so a
+ * misconfigured env cannot silently fall through to the wrong adapter and
+ * send an OAuth token as an API key.
+ */
 export function createProviderAdapter(opts: ProviderAdapterOptions): ProviderAdapter {
-  return opts.wire === 'anthropic-messages' ? buildAnthropic(opts) : buildOpenAi(opts);
+  switch (opts.wire) {
+    case 'anthropic-messages':
+      return buildAnthropic(opts);
+    case 'openai-chat-completions':
+      return buildOpenAi(opts);
+    case 'openai-responses':
+      return buildOpenAiResponses(opts);
+    default:
+      throw new Error(`Unrecognised wire '${String(opts.wire)}'`);
+  }
 }

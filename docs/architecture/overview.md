@@ -57,7 +57,7 @@ Renders the approved CV from one Jinja-templated ATS-safe HTML source (render/):
 
 Thin LLMProvider abstraction (providers/) with three implementations — anthropic | openai | ollama — selected by the LLM_PROVIDER env var. Interface: complete(system, messages) → str and extract_json(system, messages, schema) → dict. Adding a provider later = one new file; no truthfulness logic depends on which provider is active.
 
-**Tech:** Python, anthropic SDK, openai SDK, Ollama
+**Tech:** Python, anthropic SDK, openai SDK, Ollama, httpx (Codex Responses SSE transport)
 
 **Internal structure:**
 
@@ -140,7 +140,7 @@ External Google service used for the Gmail connection: the OAuth 2.0 browser flo
 <!-- generated:start comp:connections -->
 ## Connections (`connections`, BACKEND)
 
-Provider connection layer (connections/): a static catalog of provider connection cards (catalog.py — claude, codex, openrouter, ollama) plus per-vendor auth flows under connections/auth/. connections/auth/gmail.py owns the Gmail OAuth flow end to end: start_login builds the Google authorize URL (PKCE S256, offline access, gmail.readonly scope), complete_login exchanges the code, reads the account's email from the Gmail profile API and stores the token record; get_valid_access_token refreshes lazily behind a lock with a 300s expiry skew; mark_reconnect_required blanks the tokens and flags reauthRequired when access is revoked. Credentials are never held here — every record is persisted through secretstore.get_connection/set_connection.
+Provider connection layer (connections/): a static catalog of connection cards plus per-vendor auth flows. Claude Pro/Max signs in with a PKCE paste-code flow; ChatGPT (OpenAI) signs in with an OAuth device-code flow; Gmail uses Google OAuth 2.0 PKCE. Tokens are persisted encrypted in the Secret Store and refreshed lazily on use.
 
 **Tech:** Python, httpx, Google OAuth 2.0 (PKCE)
 <!-- generated:end comp:connections -->
