@@ -57,6 +57,7 @@ from agentconfig import store as agent_config_store
 from connections import catalog
 from connections.auth.claude import AuthError, get_valid_access_token
 from connections.auth import claude as claude_auth
+from connections.auth import codex as codex_auth
 from providers import (
     ANTHROPIC_COMPAT_OPENROUTER_BASE_URL,
     OPENROUTER_BASE_URL,
@@ -141,6 +142,7 @@ from .schemas import (
     BrowserSession,
     BrowserSessionClosed,
     BrowserSessionRequest,
+    PollLoginResult,
     StartLoginResult,
     TailorRequest,
     TailorResult,
@@ -974,7 +976,12 @@ def _settings_status() -> SettingsStatus:
         active_provider=active_provider,
         model=model,
         anthropic_key_set=bool(secretstore.get_connection("claude").get("apiKey")),
-        openai_key_set=bool(secretstore.get_connection("codex").get("apiKey")),
+        # OpenAI key is set if the codex card has either an api key or a valid
+        # oauth subscription — either mode makes the card usable.
+        openai_key_set=bool(
+            secretstore.get_connection("codex").get("apiKey")
+            or secretstore.get_connection("codex").get("oauth", {}).get("accessToken")
+        ),
         ollama_host=secretstore.get_connection("ollama").get("baseUrl", ""),
     )
 
@@ -1243,8 +1250,21 @@ def _claude_credentials(model: str) -> AgentLlmCredentials:
 
 
 def _codex_credentials(model: str) -> AgentLlmCredentials:
-    """Resolve codex card credentials: apikey-only, OpenAI Chat Completions wire."""
-    api_key = secretstore.get_connection("codex").get("apiKey")
+    """Resolve codex card credentials: subscription oauth or apikey, OpenAI wire."""
+    conn = secretstore.get_connection("codex")
+    oauth = conn.get("oauth") or {}
+    if oauth.get("accessToken") and conn.get("authMode") != "apikey":
+        try:
+            token = codex_auth.get_valid_access_token()
+        except codex_auth.AuthError:
+            raise HTTPException(
+                status_code=503, detail="ChatGPT subscription needs reconnecting."
+            ) from None
+        return AgentLlmCredentials(
+            auth_type="oauth", token=token, model=model,
+            provider="codex", wire="openai-responses",
+        )
+    api_key = conn.get("apiKey")
     if not api_key:
         raise HTTPException(status_code=404)
     return AgentLlmCredentials(
@@ -1825,25 +1845,67 @@ def get_connection_status() -> ConnectionList:
     )
 
 
+# Card -> auth module registry
+_AUTH_MODULES = {"claude": claude_auth, "codex": codex_auth}
+
+
 @router.post("/auth/{provider}/start", response_model=StartLoginResult)
 def start_connection_login(provider: str) -> StartLoginResult:
     _require_card(provider)
-    if provider != "claude":
+    if provider not in _AUTH_MODULES:
         raise HTTPException(
             status_code=400,
-            detail="Subscription sign-in is not available for this provider yet.",
+            detail=f"Subscription sign-in is not available for '{provider}'.",
         )
-    return StartLoginResult.model_validate(claude_auth.start_login())
-
-
-@router.post("/auth/claude/complete", response_model=ConnectionStatus)
-def complete_connection_login(body: CompleteLoginRequest) -> ConnectionStatus:
     try:
-        claude_auth.complete_login(body.code)
-    except AuthError as e:
+        return StartLoginResult.model_validate(_AUTH_MODULES[provider].start_login())
+    except (claude_auth.AuthError, codex_auth.AuthError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+# Specific route must come BEFORE the generic /{provider}/complete to avoid
+# FastAPI matching /api/auth/claude/complete against the general pattern.
+@router.post("/auth/claude/complete", response_model=ConnectionStatus)
+def complete_claude_login_alias(body: CompleteLoginRequest) -> ConnectionStatus:
+    """Deprecated: delegates to the generic /complete handler. Retained so a
+    deployed web bundle from before this change does not break mid-deploy."""
+    return _complete_login("claude", body)
+
+
+@router.post("/auth/{provider}/complete", response_model=ConnectionStatus)
+def _complete_login(provider: str, body: CompleteLoginRequest) -> ConnectionStatus:
+    if provider not in _AUTH_MODULES:
+        raise HTTPException(status_code=404, detail=f"Unknown connection '{provider}'.")
+    try:
+        _AUTH_MODULES[provider].complete_login(body.code)
+    except (claude_auth.AuthError, codex_auth.AuthError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     reset_provider()
-    return _connection_status("claude")
+    return _connection_status(provider)
+
+
+@router.post("/auth/{provider}/poll", response_model=PollLoginResult)
+def _poll_login(provider: str) -> PollLoginResult:
+    if provider not in _AUTH_MODULES:
+        raise HTTPException(status_code=404, detail=f"Unknown connection '{provider}'.")
+    mod = _AUTH_MODULES[provider]
+    if not hasattr(mod, "poll_login"):
+        raise HTTPException(status_code=400, detail=f"Provider '{provider}' does not support polling.")
+    try:
+        result = mod.poll_login()
+    except (claude_auth.AuthError, codex_auth.AuthError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if result.get("status") == "complete":
+        return PollLoginResult(
+            status="complete",
+            connected_at=result.get("connectedAt"),
+            expires_at=result.get("expiresAt"),
+            scope=result.get("scope"),
+        )
+    return PollLoginResult(
+        status="pending",
+        interval_seconds=result.get("intervalSeconds"),
+    )
 
 
 def _probe_key(card: str, body: ApiKeyRequest) -> list[dict]:
@@ -1927,8 +1989,22 @@ def test_connection(provider: str, body: ConnectionTestRequest) -> TestResult:
 
 @router.post("/auth/{provider}/logout", response_model=ConnectionStatus)
 def logout_connection(provider: str, mode: str | None = None) -> ConnectionStatus:
+    """Disconnect `provider`, defaulting to the card's currently active mode.
+
+    Without an explicit `mode`, we clear whichever mode is currently active
+    (oauth or apikey), so the card no longer reports a connection in either
+    mode. Passing `mode` clears just that mode and leaves the other intact —
+    that is the same semantics the existing per-mode logout tests pin.
+    """
     _require_card(provider)
-    secretstore.clear_mode(provider, mode or "apikey")
+    if mode is not None:
+        secretstore.clear_mode(provider, mode)
+    else:
+        conn = secretstore.get_connection(provider)
+        # Pick the mode that is actually active: subscription if oauth is set,
+        # otherwise apikey. clear_mode is a no-op on the missing side.
+        active = "subscription" if conn.get("oauth", {}).get("accessToken") else "apikey"
+        secretstore.clear_mode(provider, active)
     reset_provider()
     return _connection_status(provider)
 

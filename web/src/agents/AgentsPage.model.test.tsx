@@ -132,16 +132,18 @@ afterEach(() => {
 });
 
 describe("AgentsPage model section", () => {
-  it("lists the Anthropic-compatible connections and no others", async () => {
-    // The agent is the `claude` CLI, so a connection is only offered here if
-    // it serves the Anthropic Messages API. OpenRouter does (reached via
-    // ANTHROPIC_BASE_URL); codex and ollama are OpenAI-shaped only.
+  it("lists the Anthropic-compatible connections AND codex (openai-responses) and no others", async () => {
+    // The agent harness now supports three wires:
+    // - anthropic-messages (claude)
+    // - openai-chat-completions (openrouter, codex api-key)
+    // - openai-responses (codex subscription)
+    // So codex is now a valid agent target when connected via subscription.
     const connections: ConnectionList = {
       encryptionAvailable: true,
       connections: [
         makeStatus({ provider: "claude", label: "Claude", subscriptionConnected: true }),
         makeStatus({ provider: "openrouter", label: "OpenRouter", apiKeyConnected: true }),
-        makeStatus({ provider: "codex", label: "Codex", subscriptionConnected: true }),
+        makeStatus({ provider: "codex", label: "ChatGPT (OpenAI)", subscriptionConnected: true }),
         makeStatus({ provider: "ollama", label: "Ollama", apiKeyConnected: true }),
       ],
     };
@@ -150,6 +152,7 @@ describe("AgentsPage model section", () => {
     fireEvent.mouseDown(screen.getByLabelText(/connection/i));
     expect(screen.getByRole("option", { name: "Claude" })).toBeTruthy();
     expect(screen.getByRole("option", { name: "OpenRouter" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "ChatGPT (OpenAI)" })).toBeTruthy();
     expect(screen.queryByRole("option", { name: "Codex" })).toBeNull();
     expect(screen.queryByRole("option", { name: "Ollama" })).toBeNull();
   });

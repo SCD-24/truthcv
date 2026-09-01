@@ -9,6 +9,7 @@ from typing import Any
 
 from .base import LLMProvider, ProviderError, env_model, supports_effort_levels
 from ._json import parse_json_object
+from .codex_responses import CODEX_SUBSCRIPTION_MODELS, complete_via_responses
 
 
 class OpenAIProvider(LLMProvider):
@@ -18,7 +19,24 @@ class OpenAIProvider(LLMProvider):
         api_key: str | None = None,
         base_url: str | None = None,
         effort: str | None = None,
+        oauth_token: str | None = None,
     ) -> None:
+        self._oauth_token = oauth_token
+        if oauth_token:
+            # Subscription mode: never touches /chat/completions, never builds
+            # an OpenAI SDK client. The base_url is ignored — the wire has its
+            # own endpoint baked into complete_via_responses.
+            from connections.auth.codex import account_id
+
+            self._account_id = account_id(oauth_token)
+            # Pin provider key explicitly. The base_url-derived default below
+            # would misclassify a subscription call with a custom base_url as
+            # "openrouter", silently breaking effort validation and list_models.
+            self._provider_key = "codex"
+            self._model = env_model(CODEX_SUBSCRIPTION_MODELS[0], model)
+            self._effort = effort or ""
+            return
+
         try:
             import openai  # noqa: F401
         except ImportError as exc:  # pragma: no cover - import guard
@@ -42,6 +60,19 @@ class OpenAIProvider(LLMProvider):
         self._effort = effort or ""
 
     def _chat(self, system: str, messages: list[dict[str, str]], json_mode: bool) -> str:
+        if self._oauth_token:
+            # Responses has no response_format; extract_json relies on the
+            # JSON-schema instruction the caller appends to the system prompt
+            # plus the existing parse_json_object() fallback.
+            return complete_via_responses(
+                access_token=self._oauth_token,
+                account_id=self._account_id,
+                model=self._model,
+                system=system,
+                messages=messages,
+                effort=self._effort or None,
+            )
+
         # Intentionally no max_tokens: unset lets the model use its full output
         # budget, so a long extraction isn't truncated. Do NOT add a small
         # max_tokens here (it would reintroduce the truncation bug and also break
@@ -66,7 +97,12 @@ class OpenAIProvider(LLMProvider):
         (``openai/gpt-4o``, ``anthropic/claude-sonnet-4``), which that narrowing
         would reject wholesale — leaving the model picker empty. So it is
         applied to OpenAI only.
+
+        In OAuth mode there is no client and no list endpoint on this wire;
+        we return the static allow-list from codex_responses.
         """
+        if self._oauth_token:
+            return [{"id": i, "label": i} for i in CODEX_SUBSCRIPTION_MODELS]
         ids = [m.id for m in self._client.models.list().data]
         if self._provider_key != "openrouter":
             ids = [i for i in ids if i.startswith("gpt-") or re.match(r"o\d", i)]

@@ -571,6 +571,18 @@ case "$AGENT_LLM_PROVIDER" in
     ;;
 esac
 
+# AGENT_LLM_WIRE must be set to one of the three known values — an empty or
+# unknown wire would silently fall through to the wrong adapter (the harness
+# only recently stopped doing that) and would send an OAuth token as an API
+# key against the wrong endpoint. Fail loudly, same style as the provider
+# gate above.
+case "${AGENT_LLM_WIRE:-}" in
+  anthropic-messages|openai-chat-completions|openai-responses) ;;
+  *)
+    abort "unrecognised or unset LLM wire '${AGENT_LLM_WIRE:-}' (expected anthropic-messages|openai-chat-completions|openai-responses)"
+    ;;
+esac
+
 # The tool allow-list is NOT passed on the command line any more: it is
 # hardcoded inside the harness (agent/harness/tools.ts), which enforces the
 # tool allow-list itself — the same 17 named truthcv tools granted

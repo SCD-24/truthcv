@@ -1104,6 +1104,20 @@ class StartLoginResult(_Camel):
     auth_url: str | None = None
     user_code: str | None = None
     verification_uri: str | None = None
+    # Poll cadence / lifetime for the device-code flow.
+    interval_seconds: float | None = None
+    expires_in_seconds: int | None = None
+
+
+class PollLoginResult(_Camel):
+    """POST /api/auth/{provider}/poll response."""
+    status: str  # "pending" | "complete"
+    # Server-suggested updated interval after a `slow_down`.
+    interval_seconds: float | None = None
+    # On complete: connection status fields.
+    connected_at: float | None = None
+    expires_at: float | None = None
+    scope: str | None = None
 
 
 class CompleteLoginRequest(_Camel):
@@ -1142,9 +1156,9 @@ class AgentLlmCredentials(_Camel):
     Serves credentials for any of the four connection cards (claude, codex,
     openrouter, ollama). `provider` names which card the credentials came
     from and `wire` names the API dialect the caller must speak
-    ("anthropic-messages" or "openai-chat-completions"), so a
-    provider-agnostic caller can dispatch on the response alone instead of
-    assuming Anthropic.
+    ("anthropic-messages", "openai-chat-completions", or "openai-responses"),
+    so a provider-agnostic caller can dispatch on the response alone instead
+    of assuming Anthropic.
     """
 
     auth_type: str
@@ -1155,7 +1169,8 @@ class AgentLlmCredentials(_Camel):
     base_url: str = ""
     # The connections/catalog.py card key this credential came from.
     provider: str = ""
-    # The wire dialect to speak: "anthropic-messages" or "openai-chat-completions".
+    # The wire dialect to speak: "anthropic-messages", "openai-chat-completions",
+    # or "openai-responses" (ChatGPT subscription).
     wire: str = ""
 
 

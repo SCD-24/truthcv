@@ -17,7 +17,7 @@ __all__ = [
     "build_connection_provider", "get_provider", "reset_provider",
 ]
 
-_cache: dict[tuple[str, str | None, str], LLMProvider] = {}
+_cache: dict[tuple[str, str | None, str, str], LLMProvider] = {}
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -50,6 +50,11 @@ def build_connection_provider(
     if card == "codex":
         from .openai_provider import OpenAIProvider
 
+        if conn.get("oauth") and conn.get("authMode") != "apikey":
+            from connections.auth import codex as codex_auth
+
+            token = codex_auth.get_valid_access_token()
+            return OpenAIProvider(model=model, oauth_token=token, effort=effort)
         return OpenAIProvider(model=model, api_key=conn.get("apiKey") or None, effort=effort)
     if card == "openrouter":
         from .openai_provider import OpenAIProvider
@@ -95,7 +100,16 @@ def get_provider(task: str | None = None, refresh: bool = False) -> LLMProvider:
                 "No model routing configured and LLM_PROVIDER is not one of "
                 "anthropic, openai, ollama."
             )
-    key = (card, model, effort or "")
+
+    # Cache key includes auth mode so switching between subscription and apikey
+    # returns a fresh provider with the new credential. The token's expiry is
+    # not in the key because reset_provider() is the mechanism for picking up
+    # a refreshed OAuth token — the provider instance captures its credential
+    # at construction.
+    from secretstore import get_connection
+
+    auth_mode = get_connection(card).get("authMode", "")
+    key = (card, model, effort or "", auth_mode)
     if refresh:
         _cache.pop(key, None)
     if key not in _cache:

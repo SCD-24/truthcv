@@ -37,7 +37,9 @@
  *                       guard (should not happen; runCli catches its own paths).
  *
  * Auth rule: `ollama` may run with an empty token but MUST have a base URL;
- * every other provider MUST have a non-empty token.
+ * every other provider MUST have a non-empty token. `claude` can be either
+ * oauth or api_key (the choice is selected by `authType`); `codex` can be
+ * either subscription OAuth (over the openai-responses wire) or api_key.
  *
  * Progress is streamed to stdout as JSON Lines (one JSON object per line):
  * a `turnStart` per turn, the harness's own `text`/`toolCall`/`usage`/`error`
@@ -343,7 +345,11 @@ export async function resolveConfig(
 /** Known providers, used to validate the resolved provider string. */
 const PROVIDERS: readonly Provider[] = ['claude', 'codex', 'openrouter', 'ollama'];
 /** Known wire protocols, used to validate the resolved wire string. */
-const WIRES: readonly Wire[] = ['anthropic-messages', 'openai-chat-completions'];
+const WIRES: readonly Wire[] = [
+  'anthropic-messages',
+  'openai-chat-completions',
+  'openai-responses',
+];
 
 /** Whether the auth rule (token, or base-url for ollama) is satisfied. */
 function validateAuth(config: CliConfig): string[] {
@@ -366,7 +372,7 @@ export function validateConfig(config: CliConfig): string[] {
   if (!config.prompt) errors.push('a prompt is required (--prompt-file, stdin, or a positional argument)');
   if (!config.model) errors.push('a model is required (--model or AGENT_LLM_MODEL)');
   if (!PROVIDERS.includes(config.provider)) errors.push('a valid --provider (claude|codex|openrouter|ollama) is required');
-  if (!WIRES.includes(config.wire)) errors.push('a valid --wire (anthropic-messages|openai-chat-completions) is required');
+  if (!WIRES.includes(config.wire)) errors.push('a valid --wire (anthropic-messages|openai-chat-completions|openai-responses) is required');
   if (!Number.isInteger(config.maxTurns) || config.maxTurns <= 0) errors.push('--max-turns must be a positive integer');
   if (!Number.isInteger(config.maxToolResultChars) || config.maxToolResultChars <= 0)
     errors.push('--max-tool-result-chars must be a positive integer');

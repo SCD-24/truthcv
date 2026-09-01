@@ -650,6 +650,20 @@ export interface StartLoginResult {
   authUrl?: string | null;
   userCode?: string | null;
   verificationUri?: string | null;
+  /** Poll cadence / lifetime for the device-code flow. */
+  intervalSeconds?: number | null;
+  expiresInSeconds?: number | null;
+}
+
+/** Response from POST /api/auth/{provider}/poll. */
+export interface PollLoginResult {
+  status: "pending" | "complete";
+  /** Server-suggested updated interval after a `slow_down`. */
+  intervalSeconds?: number | null;
+  /** On complete: connection status fields. */
+  connectedAt?: number | null;
+  expiresAt?: number | null;
+  scope?: string | null;
 }
 
 /** A routing choice for a task or agent — which model via which provider. */

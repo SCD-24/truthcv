@@ -32,6 +32,7 @@ import type {
   ConnectionStatus,
   ConnectionList,
   StartLoginResult,
+  PollLoginResult,
   Routing,
   RoutingUpdate,
   SigninQueue,
@@ -617,13 +618,24 @@ export function startLogin(provider: string): Promise<StartLoginResult> {
   return request(`/api/auth/${provider}/start`, { method: "POST" });
 }
 
-/** Complete a Claude login flow with an authorization code. */
-export function completeClaudeLogin(code: string): Promise<ConnectionStatus> {
-  return request("/api/auth/claude/complete", {
+/** Complete a login flow for any provider (code or device-code). */
+export function completeLogin(provider: string, code: string): Promise<ConnectionStatus> {
+  return request(`/api/auth/${provider}/complete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code }),
   });
+}
+
+/** Poll a device-code login flow for any provider. */
+export function pollLogin(provider: string): Promise<PollLoginResult> {
+  return request(`/api/auth/${provider}/poll`, { method: "POST" });
+}
+
+/** @deprecated Use completeLogin('claude', code) instead. Retained so call sites
+ * that haven't migrated still work against the /api/auth/claude/complete alias. */
+export function completeClaudeLogin(code: string): Promise<ConnectionStatus> {
+  return completeLogin("claude", code);
 }
 
 /** Save an API key or base URL for a provider and fetch available models. */
