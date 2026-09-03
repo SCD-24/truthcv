@@ -1074,6 +1074,22 @@ def test_record_postings_seen_is_registered_with_a_non_empty_input_schema():
     assert "count" in schema["properties"]
 
 
+def test_record_discovery_coverage_is_registered_with_a_non_empty_input_schema():
+    """The tools/list surface the agent reads must advertise
+    record_discovery_coverage with a populated inputSchema — an empty
+    property set would leave the agent unable to learn its parameters."""
+    from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
+
+    assert "record_discovery_coverage" in _TOOL_REGISTRY
+
+    fn, description = _TOOL_REGISTRY["record_discovery_coverage"]
+    assert description
+    schema = _input_schema(fn)
+    assert schema["properties"], "record_discovery_coverage advertises no parameters"
+    for name in ("run_id", "channel", "board", "status", "postings_found", "reason"):
+        assert name in schema["properties"]
+
+
 def test_record_postings_seen_accumulates_and_no_ops_on_bad_input(data_dir):
     """postings_seen is the one counter the agent reports directly, and it ADDS
     rather than sets: two calls of 3 and 2 leave the run at 5. An empty run_id

@@ -169,6 +169,83 @@ def test_start_run_tool_is_idempotent(data_dir):
     assert second["apply_cap"] == 3
 
 
+def test_add_discovery_coverage_appends_and_reloads(data_dir):
+    store.start("run-coverage", trigger="scheduled", apply_cap=0)
+
+    first = store.add_discovery_coverage(
+        "run-coverage",
+        {
+            "channel": "feed",
+            "board": "indeed",
+            "status": "searched",
+            "postings_found": 12,
+            "reason": "",
+        },
+    )
+    assert first is not None
+    assert len(first.discovery_coverage) == 1
+
+    second = store.add_discovery_coverage(
+        "run-coverage",
+        {
+            "channel": "direct",
+            "board": "linkedin",
+            "status": "login_walled",
+            "postings_found": 0,
+            "reason": "login required",
+        },
+    )
+    assert second is not None
+    assert len(second.discovery_coverage) == 2
+
+    fetched = store.get("run-coverage")
+    assert fetched.discovery_coverage == [
+        {
+            "channel": "feed",
+            "board": "indeed",
+            "status": "searched",
+            "postings_found": 12,
+            "reason": "",
+        },
+        {
+            "channel": "direct",
+            "board": "linkedin",
+            "status": "login_walled",
+            "postings_found": 0,
+            "reason": "login required",
+        },
+    ]
+
+
+def test_add_discovery_coverage_is_a_no_op_for_an_unknown_run(data_dir):
+    assert store.add_discovery_coverage("never-started", {"channel": "feed"}) is None
+
+
+def test_legacy_record_without_discovery_coverage_loads_with_empty_list(data_dir):
+    store.runs_path().parent.mkdir(parents=True, exist_ok=True)
+    legacy = {
+        "id": "legacy-run",
+        "started_at": "2024-01-01T00:00:00+00:00",
+        "finished_at": "",
+        "status": "running",
+        "trigger": "scheduled",
+        "apply_cap": 0,
+        "postings_seen": 0,
+        "screenings_recorded": 0,
+        "blocked_count": 0,
+        "applications_submitted": 0,
+        "queued_for_approval": 0,
+        "over_cap_writes": 0,
+        "stopped_reason": "",
+        "note": "",
+    }
+    store.runs_path().write_text(json.dumps([legacy]), encoding="utf-8")
+
+    record = store.get("legacy-run")
+    assert record is not None
+    assert record.discovery_coverage == []
+
+
 def test_finish_if_running_closes_a_record_the_agent_never_finished(data_dir):
     """The case this exists for: a run that died before the model's first turn.
 

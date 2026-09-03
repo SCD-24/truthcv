@@ -33,6 +33,7 @@ import {
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { ModelRoutePicker } from "../settings/ModelRoutePicker";
 import { SettingsModal } from "../settings/SettingsModal";
+import { RunCoverage } from "./RunCoverage";
 import {
   DEFAULT_TIMEZONE,
   formatInZone,
@@ -602,6 +603,7 @@ function RunSummaryRow({ run, timeZone }: { run: RunRecord; timeZone?: string })
           </Typography>
         )}
       </Stack>
+      <RunCoverage coverage={run.discoveryCoverage} />
       {run.stoppedReason && (
         <Typography
           variant="caption"

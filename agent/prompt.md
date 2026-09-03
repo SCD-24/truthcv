@@ -33,6 +33,12 @@ tools:
   blocked, postings queued for approval and applications submitted are all
   counted automatically from the records you write, PROVIDED you pass your
   `run_id` on `record_screening` and `record_application`.
+- `record_discovery_coverage` — call this after EVERY board or query you work
+  in Phase 1, across all three channels (feed, direct boards, dorks), with the
+  channel, the board (or query), a status (`searched`, `empty`,
+  `login_walled`, or `skipped`), and `postings_found`. This is what makes the
+  §9 report's per-board coverage possible — skipping the call is never
+  acceptable, even for a board that turned up nothing.
 - `record_postings_seen` — reports how many postings you looked at. Postings
   seen is the one coverage number nothing can count for you — a posting
   skipped on cooldown or dedupe leaves no record behind — so report it with
@@ -202,14 +208,18 @@ approved these postings, so apply to them before spending time on discovery.
 
 ## Phase 1: discovery
 
-After the approved queue, discover new postings. Composed search queries
-(Google-style `site:` dorks) are one route in, but not the only one: some
-configured boards are searched on-site instead, via a Direct-search boards
-block in your run prompt (their own search box, not a dork). Work both. If a
-direct board's search wall requires a sign-in you don't have, call
-`report_apply_failure` with `blocker="login_required"` and its sign-in URL
-and move on to the next board — never wait for a sign-in mid-run. The full
-procedure for both is in `agent/RUNBOOK.md`, embedded above.
+After the approved queue, discover new postings across three channels, worked
+in this order: **feed** (postings pulled from API-backed job boards), then
+**direct boards** (searched on-site, via a Direct-search boards block in your
+run prompt — their own search box, not a dork), then **dork queries**
+(Google-style `site:` dorks). Take one full pass over every board and query in
+a channel before starting a second pass on any channel. Every board and query
+gets a `record_discovery_coverage` call — skipping one is never acceptable,
+even for a board that turned up nothing. If a direct board's search wall
+requires a sign-in you don't have, call `report_apply_failure` with
+`blocker="login_required"` and its sign-in URL and move on to the next board
+— never wait for a sign-in mid-run. The full procedure for all three channels
+is in `agent/RUNBOOK.md`, embedded above.
 
 ## End of run
 
@@ -219,5 +229,6 @@ finish.
 
 Finish with the report `agent/RUNBOOK.md` §9 describes: what was submitted,
 what was rejected and why, what was blocked by cooldown, what was skipped,
+coverage per channel and board — including any board or query not reached —
 and any open issue — including a plain statement if zero applications went
 out.

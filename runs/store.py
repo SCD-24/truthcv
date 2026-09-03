@@ -180,6 +180,18 @@ def set_note(run_id: str, note: str) -> RunRecord | None:
         return record
 
 
+def add_discovery_coverage(run_id: str, entry: dict) -> RunRecord | None:
+    """Append one discovery-coverage entry to the run's record."""
+    with locked(runs_path()):
+        runs = load_all()
+        record = next((r for r in runs if r.id == run_id), None)
+        if record is None:
+            return None
+        record.discovery_coverage.append(entry)
+        _write_all(runs)
+        return record
+
+
 def finish_if_running(
     run_id: str,
     status: str = "failed",

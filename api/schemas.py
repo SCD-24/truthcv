@@ -1140,6 +1140,7 @@ class RouteModel(_Camel):
     connection: str
     model: str = ""
     effort: str = ""
+    context_window: int = 0
 
 
 class RoutingModel(_Camel):
@@ -1172,6 +1173,9 @@ class AgentLlmCredentials(_Camel):
     # The wire dialect to speak: "anthropic-messages", "openai-chat-completions",
     # or "openai-responses" (ChatGPT subscription).
     wire: str = ""
+    # The model's input context capacity in tokens, from the routed connection's
+    # stored route. 0 means unknown.
+    context_window: int = 0
 
 
 class AgentStatus(_Camel):
@@ -1196,6 +1200,17 @@ class AgentStatus(_Camel):
     last_run_id: str | None = None
 
 
+class DiscoveryCoverageModel(_Camel):
+    """One board/query's discovery coverage entry within a RunModel. Mirrors
+    the dict shape documented on runs.model.RunRecord.discovery_coverage."""
+
+    channel: str = ""
+    board: str = ""
+    status: str = ""
+    postings_found: int = 0
+    reason: str = ""
+
+
 class RunModel(_Camel):
     """One agent run record — the wire shape for GET /api/runs and
     GET /api/runs/{run_id}. Mirrors runs.model.RunRecord field-for-field."""
@@ -1214,6 +1229,7 @@ class RunModel(_Camel):
     over_cap_writes: int = 0
     stopped_reason: str = ""
     note: str = ""
+    discovery_coverage: list[DiscoveryCoverageModel] = Field(default_factory=list)
 
 
 class ApplicationListResponse(_Camel):

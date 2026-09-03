@@ -78,8 +78,10 @@ if (field === "llm_credentials") {
         // newest additions, appended after baseUrl for the same reason: a
         // reader that only wants the earlier lines keeps working, and an
         // older API server that omits provider/wire degrades to empty lines
-        // (via `|| ""`) rather than crashing, so output stays exactly 6 lines.
-        emit(`${creds.authType}\n${creds.token}\n${creds.model || ""}\n${creds.baseUrl || ""}\n${creds.provider || ""}\n${creds.wire || ""}\n`);
+        // (via `|| ""`) rather than crashing. Line 7 (contextWindow) is the
+        // route's configured context window, empty when unset so callers
+        // fall back to their own default, and output stays exactly 7 lines.
+        emit(`${creds.authType}\n${creds.token}\n${creds.model || ""}\n${creds.baseUrl || ""}\n${creds.provider || ""}\n${creds.wire || ""}\n${creds.contextWindow || ""}\n`);
       } catch { process.exit(1); }
     });
   });

@@ -82,7 +82,7 @@ def test_mcp_tools_list_returns_seventeen_tools(client: TestClient) -> None:
     assert "tools" in result, f"Missing tools in result: {result}"
 
     tools = result["tools"]
-    assert len(tools) == 17, f"Expected 17 tools, got {len(tools)}: {[t['name'] for t in tools]}"
+    assert len(tools) == 18, f"Expected 18 tools, got {len(tools)}: {[t['name'] for t in tools]}"
 
     expected_names = {
         "generate_cover_letter",
@@ -102,6 +102,7 @@ def test_mcp_tools_list_returns_seventeen_tools(client: TestClient) -> None:
         "finish_run",
         "record_run_note",
         "record_postings_seen",
+        "record_discovery_coverage",
     }
     actual_names = {t["name"] for t in tools}
     assert actual_names == expected_names, f"Tool names mismatch: {actual_names} vs {expected_names}"

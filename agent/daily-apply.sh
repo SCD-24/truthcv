@@ -402,31 +402,11 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
       PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$BOARDS"$'\n'
     fi
 
-    # Add composed search queries (deterministic entry points, not a boundary
-    # on discovery): built from each enabled profile's keywords and locations,
-    # and the configured job boards. The agent may open them with WebSearch or
-    # the browser as it prefers; free-form WebSearch remains available
-    # alongside them.
-    QUERIES="$(jq -r '.searchQueries[]? | "  - [\(.profile)] \(.source): \(.query)\n    \(.url)"' <<<"$JOB_CONFIG")"
-    if [[ -n "$QUERIES" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Composed search queries (deterministic entry points from keywords/locations and the configured job boards; use WebSearch or the browser, free-form search still applies too):"$'\n'
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$QUERIES"$'\n'
-    fi
-
-    # Direct-search boards: searched on the board's own site rather than via
-    # a Google dork (e.g. it has no useful `site:` search surface). One block
-    # per board with the sign-in URL (if any) and each enabled profile's
-    # search criteria to use there. On hitting a login wall, report the
-    # board with report_apply_failure(blocker="login_required", signin_url)
-    # and move on to the next board — see RUNBOOK.md.
-    DIRECT_BOARDS="$(jq -r '.directBoards[]? | ("  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end)), (.profiles[]? | "    [\(.profile)] keywords: \(.keywords // [] | join(", "))" + (if ((.locations // []) | length) > 0 then "; locations: \(.locations | join(", "))" else "" end) + (if ((.rejectedRoleTypes // []) | length) > 0 then "; avoid: \(.rejectedRoleTypes | join(", "))" else "" end))' <<<"$JOB_CONFIG")"
-    if [[ -n "$DIRECT_BOARDS" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Direct-search boards (search these on the board's own site using each profile's keywords/locations below; on a login wall, report_apply_failure with blocker \"login_required\" and the sign-in URL, then continue to the next board):"$'\n'
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$DIRECT_BOARDS"$'\n'
-    fi
+    # Discovery channels are rendered in the order the RUNBOOK requires them
+    # worked: feed, then direct boards, then dork queries.
 
     # Postings pulled from API-backed job boards (Remote Rocketship) by the
-    # app, using the saved API key. Unlike the composed queries above these are
+    # app, using the saved API key. Unlike the composed queries below these are
     # already-matched postings, not entry points to search from — each line is
     # a URL the agent can open and screen directly. The feed is a discovery
     # channel like any other: a posting still passes the full profile criteria
@@ -446,6 +426,36 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     FEED_ERROR="$(jq -r '.feedError // ""' <<<"$JOB_CONFIG")"
     if [[ -n "$FEED_ERROR" ]]; then
       PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Job board feed warning: ${FEED_ERROR} Continue the run using the other discovery channels; do not treat this as a reason to stop."$'\n'
+    fi
+
+    # Direct-search boards: searched on the board's own site rather than via
+    # a Google dork (e.g. it has no useful `site:` search surface). Per-profile
+    # search criteria (keywords/locations/avoid) are printed ONCE, in a
+    # preamble, rather than once per board — several direct boards commonly
+    # share the same enabled profiles, and repeating the criteria per board
+    # only bloats the prompt without adding information. The board lines below
+    # then carry only the URL and sign-in URL. On hitting a login wall, report
+    # the board with report_apply_failure(blocker="login_required", signin_url)
+    # and move on to the next board — see RUNBOOK.md.
+    DIRECT_CRITERIA="$(jq -r '[.directBoards[]? | .profiles[]?] | unique_by(.profile)[] | "  [\(.profile)] keywords: \(.keywords // [] | join(", "))" + (if ((.locations // []) | length) > 0 then "; locations: \(.locations | join(", "))" else "" end) + (if ((.rejectedRoleTypes // []) | length) > 0 then "; avoid: \(.rejectedRoleTypes | join(", "))" else "" end)' <<<"$JOB_CONFIG")"
+    DIRECT_BOARDS="$(jq -r '.directBoards[]? | "  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end)' <<<"$JOB_CONFIG")"
+    if [[ -n "$DIRECT_BOARDS" ]]; then
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Direct-search boards (search each on the board's own site using the per-profile criteria listed once below; on a login wall, report_apply_failure with blocker \"login_required\" and the sign-in URL, then continue to the next board):"$'\n'
+      if [[ -n "$DIRECT_CRITERIA" ]]; then
+        PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$DIRECT_CRITERIA"$'\n'
+      fi
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$DIRECT_BOARDS"$'\n'
+    fi
+
+    # Add composed search queries (deterministic entry points, not a boundary
+    # on discovery): built from each enabled profile's keywords and locations,
+    # and the configured job boards. The agent may open them with WebSearch or
+    # the browser as it prefers; free-form WebSearch remains available
+    # alongside them.
+    QUERIES="$(jq -r '.searchQueries[]? | "  - [\(.profile)] \(.source): \(.query)\n    \(.url)"' <<<"$JOB_CONFIG")"
+    if [[ -n "$QUERIES" ]]; then
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Composed search queries (deterministic entry points from keywords/locations and the configured job boards; use WebSearch or the browser, free-form search still applies too):"$'\n'
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$QUERIES"$'\n'
     fi
 
     PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Cooldown days (stale company filter): $(jq -r '.cooldownDays // "not configured"' <<<"$JOB_CONFIG")"$'\n'
@@ -524,15 +534,17 @@ fi
 AGENT_MODEL=""
 if [[ -n "${AGENT_API_TOKEN:-}" ]]; then
   if CREDS="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" llm_credentials 2>/dev/null)"; then
-    # Six lines, in order: authType, token, model, baseUrl, provider, wire. An
-    # older agent-config.js emitting only four lines yields empty provider/wire
-    # here (sed on a missing line prints nothing), which the final gate rejects.
+    # Seven lines, in order: authType, token, model, baseUrl, provider, wire,
+    # contextWindow. An older agent-config.js emitting fewer lines yields
+    # empty values for the missing ones here (sed on a missing line prints
+    # nothing), which the final gate rejects for the required fields.
     AUTH_TYPE="$(sed -n 1p <<<"$CREDS")"
     AUTH_TOKEN="$(sed -n 2p <<<"$CREDS")"
     AGENT_MODEL="$(sed -n 3p <<<"$CREDS")"
     AGENT_BASE_URL="$(sed -n 4p <<<"$CREDS")"
     AGENT_PROVIDER="$(sed -n 5p <<<"$CREDS")"
     AGENT_WIRE="$(sed -n 6p <<<"$CREDS")"
+    AGENT_ROUTE_CONTEXT_WINDOW="$(sed -n 7p <<<"$CREDS")"
 
     export AGENT_LLM_PROVIDER="$AGENT_PROVIDER"
     export AGENT_LLM_MODEL="$AGENT_MODEL"
@@ -636,7 +648,7 @@ node "$HARNESS_CLI" \
   --base-url "$AGENT_LLM_BASE_URL" \
   --mcp-config "$MCP_CONFIG" \
   --max-turns "${AGENT_MAX_TURNS:-400}" \
-  --context-window "${AGENT_CONTEXT_WINDOW:-0}" \
+  --context-window "${AGENT_ROUTE_CONTEXT_WINDOW:-${AGENT_CONTEXT_WINDOW:-0}}" \
   --max-tool-result-chars "${AGENT_MAX_TOOL_RESULT_CHARS:-24000}" \
   --prompt-cache "${AGENT_PROMPT_CACHE:-true}" \
   --output-file "$RUN_OUTPUT" \

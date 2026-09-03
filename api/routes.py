@@ -1366,7 +1366,9 @@ def get_agent_llm_credentials(x_agent_token: str = Header(default="")) -> AgentL
     resolve = _CARD_CREDENTIALS.get(card)
     if resolve is None:
         raise HTTPException(status_code=404)
-    return resolve(model)
+    creds = resolve(model)
+    creds.context_window = route.context_window if route else 0
+    return creds
 
 
 def _agent_token_ok(given: str) -> bool:
@@ -2107,6 +2109,12 @@ def put_routing(body: RoutingUpdate) -> RoutingModel:
                 status_code=400,
                 detail=f"effort '{effort}' is not supported for {connection}/{route_dict.get('model', '')}",
             )
+        context_window = route_dict.get("context_window", 0)
+        if context_window < 0 or 0 < context_window < 8192:
+            raise HTTPException(
+                status_code=400,
+                detail="context_window must be 0 or at least 8192",
+            )
 
     # Merge: update the stored dict with only the fields that were sent.
     # A None value clears the corresponding route rather than being ignored.
@@ -2150,4 +2158,9 @@ def _all_routes_in_dict(d: dict) -> list[dict]:
 
 def _route_model(route: modelrouting.Route) -> RouteModel:
     """Convert a stored Route to its API wire model."""
-    return RouteModel(connection=route.connection, model=route.model, effort=route.effort)
+    return RouteModel(
+        connection=route.connection,
+        model=route.model,
+        effort=route.effort,
+        context_window=route.context_window,
+    )

@@ -77,3 +77,30 @@ def test_put_absent_default_leaves_it_untouched(client):
     body = client.get("/api/routing").json()
     assert body["default"]["connection"] == "claude"
     assert body["agent"]["connection"] == "codex"
+
+
+def test_put_agent_context_window_roundtrips(client):
+    resp = client.put(
+        "/api/routing",
+        json={"agent": {"connection": "claude", "model": "m1", "contextWindow": 200000}},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["agent"]["contextWindow"] == 200000
+    body = client.get("/api/routing").json()
+    assert body["agent"]["contextWindow"] == 200000
+
+
+def test_put_context_window_below_minimum_400(client):
+    resp = client.put(
+        "/api/routing",
+        json={"agent": {"connection": "claude", "model": "m1", "contextWindow": 4096}},
+    )
+    assert resp.status_code == 400
+
+
+def test_put_context_window_negative_400(client):
+    resp = client.put(
+        "/api/routing",
+        json={"agent": {"connection": "claude", "model": "m1", "contextWindow": -1}},
+    )
+    assert resp.status_code == 400

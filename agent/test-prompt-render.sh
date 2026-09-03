@@ -295,23 +295,31 @@ echo "PASS: omitted search queries leaves prompt unchanged"
 # search boards" there), so a divergence between this simulation and the
 # real script is a bug in one of the two, not just here.
 
-# Case 12: directBoards present renders the board URL and profile keywords.
-echo "Testing: direct-search boards render into prompt..."
-DIRECT_BOARDS_CONFIG='{"profiles":[{"name":"Senior Python"}],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":null,"companyBoards":[],"directBoards":[{"url":"https://boards.acme.io/careers","signinUrl":"https://boards.acme.io/login","profiles":[{"profile":"Senior Python","keywords":["platform engineer","backend"],"locations":["Berlin"],"rejectedRoleTypes":["contract"]}]}]}'
-DIRECT_BOARDS="$(jq -r '.directBoards[]? | ("  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end)), (.profiles[]? | "    [\(.profile)] keywords: \(.keywords // [] | join(", "))" + (if ((.locations // []) | length) > 0 then "; locations: \(.locations | join(", "))" else "" end) + (if ((.rejectedRoleTypes // []) | length) > 0 then "; avoid: \(.rejectedRoleTypes | join(", "))" else "" end))' <<<"$DIRECT_BOARDS_CONFIG")"
+# Case 12: directBoards present renders the board URLs and profile keywords deduplicated.
+echo "Testing: direct-search boards render into prompt with deduplicated criteria..."
+# Test with two boards sharing the same profile to verify deduplication works.
+DIRECT_BOARDS_CONFIG='{"profiles":[{"name":"Senior Python"}],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":null,"companyBoards":[],"directBoards":[{"url":"https://boards.acme.io/careers","signinUrl":"https://boards.acme.io/login","profiles":[{"profile":"Senior Python","keywords":["platform engineer","backend"],"locations":["Berlin"],"rejectedRoleTypes":["contract"]}]},{"url":"https://boards.otherthing.io/jobs","signinUrl":"","profiles":[{"profile":"Senior Python","keywords":["platform engineer","backend"],"locations":["Berlin"],"rejectedRoleTypes":["contract"]}]}]}'
+# Extract and deduplicate criteria (profiles rendered once per unique profile)
+DIRECT_CRITERIA="$(jq -r '[.directBoards[]? | .profiles[]?] | unique_by(.profile)[] | "  [\(.profile)] keywords: \(.keywords // [] | join(", "))" + (if ((.locations // []) | length) > 0 then "; locations: \(.locations | join(", "))" else "" end) + (if ((.rejectedRoleTypes // []) | length) > 0 then "; avoid: \(.rejectedRoleTypes | join(", "))" else "" end)' <<<"$DIRECT_BOARDS_CONFIG")"
+# Extract board URLs (no deduplication of boards)
+DIRECT_BOARDS="$(jq -r '.directBoards[]? | "  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end)' <<<"$DIRECT_BOARDS_CONFIG")"
+# Combine into final output
+FINAL_DIRECT_BOARDS="Direct-search boards (search each on the board's own site using the per-profile criteria listed once below; on a login wall, report_apply_failure with blocker \"login_required\" and the sign-in URL, then continue to the next board):"$'\n'"$DIRECT_CRITERIA"$'\n'"$DIRECT_BOARDS"
 if [[ -z "$DIRECT_BOARDS" ]]; then
   echo "FAIL: expected a rendered direct-boards block, got none"
   exit 1
 fi
-if [[ "$DIRECT_BOARDS" != *"https://boards.acme.io/careers"* ]]; then
-  echo "FAIL: expected the board URL in rendered block"
+if [[ "$FINAL_DIRECT_BOARDS" != *"https://boards.acme.io/careers"* ]] || [[ "$FINAL_DIRECT_BOARDS" != *"https://boards.otherthing.io/jobs"* ]]; then
+  echo "FAIL: expected both board URLs in rendered block"
   exit 1
 fi
-if [[ "$DIRECT_BOARDS" != *"platform engineer"* ]] || [[ "$DIRECT_BOARDS" != *"backend"* ]]; then
-  echo "FAIL: expected the profile's keywords in rendered block"
+# Critical: 'platform engineer' should appear exactly once (deduplicated) even though two boards share the profile
+PLATFORM_ENGINEER_COUNT=$(echo "$FINAL_DIRECT_BOARDS" | grep -o "platform engineer" | wc -l)
+if [[ "$PLATFORM_ENGINEER_COUNT" -ne 1 ]]; then
+  echo "FAIL: expected 'platform engineer' exactly once in rendered block (two boards share one profile), got $PLATFORM_ENGINEER_COUNT"
   exit 1
 fi
-echo "PASS: direct-search boards render into prompt"
+echo "PASS: direct-search boards render into prompt with deduplicated criteria"
 
 # Case 13: directBoards omitted leaves the prompt byte-identical to baseline.
 echo "Testing: omitted direct-search boards leaves prompt unchanged..."
@@ -322,7 +330,8 @@ echo "Apply to at most 5 role(s) this run." >> "$PROMPT_FILE5"
 cp "$PROMPT_FILE5" "$BASELINE5"
 
 NO_DIRECT_BOARDS_CONFIG='{"profiles":[],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":null,"companyBoards":[]}'
-DIRECT_BOARDS_NONE="$(jq -r '.directBoards[]? | ("  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end)), (.profiles[]? | "    [\(.profile)] keywords: \(.keywords // [] | join(", "))" + (if ((.locations // []) | length) > 0 then "; locations: \(.locations | join(", "))" else "" end) + (if ((.rejectedRoleTypes // []) | length) > 0 then "; avoid: \(.rejectedRoleTypes | join(", "))" else "" end))' <<<"$NO_DIRECT_BOARDS_CONFIG")"
+DIRECT_CRITERIA_NONE="$(jq -r '[.directBoards[]? | .profiles[]?] | unique_by(.profile)[] | "  [\(.profile)] keywords: \(.keywords // [] | join(", "))" + (if ((.locations // []) | length) > 0 then "; locations: \(.locations | join(", "))" else "" end) + (if ((.rejectedRoleTypes // []) | length) > 0 then "; avoid: \(.rejectedRoleTypes | join(", "))" else "" end)' <<<"$NO_DIRECT_BOARDS_CONFIG")"
+DIRECT_BOARDS_NONE="$(jq -r '.directBoards[]? | "  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end)' <<<"$NO_DIRECT_BOARDS_CONFIG")"
 if [[ -n "$DIRECT_BOARDS_NONE" ]]; then
   echo "$DIRECT_BOARDS_NONE" >> "$PROMPT_FILE5"
 fi

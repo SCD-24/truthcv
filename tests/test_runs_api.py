@@ -277,6 +277,34 @@ def test_finish_does_not_overwrite_the_agents_own_stopped_reason(client, agent_t
     assert run["stoppedReason"] == "apply cap reached"
 
 
+def test_discovery_coverage_written_via_the_tool_survives_the_wire(client):
+    """record_discovery_coverage entries land in the stored record and are
+    served back as camelCase discoveryCoverage entries on GET /api/runs."""
+    from agenttools import tools_runs
+
+    store.start("cov-run", trigger="scheduled", apply_cap=0)
+    result = tools_runs.record_discovery_coverage(
+        run_id="cov-run",
+        channel="feed",
+        board="LinkedIn",
+        status="searched",
+        postings_found=5,
+        reason="",
+    )
+    assert result["recorded"] is True
+
+    run = client.get("/api/runs/cov-run").json()
+    assert run["discoveryCoverage"] == [
+        {
+            "channel": "feed",
+            "board": "LinkedIn",
+            "status": "searched",
+            "postingsFound": 5,
+            "reason": "",
+        }
+    ]
+
+
 def test_the_model_start_run_joins_the_host_created_record(client, agent_token):
     """runs.store.start is idempotent, so the agent's own start_run lands on the
     record the supervisor already created rather than resetting it — including
