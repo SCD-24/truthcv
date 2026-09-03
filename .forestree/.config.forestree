@@ -193,6 +193,11 @@
                   "desc": "One page of applications (limit default 25, offset, sort key, direction) with total; sorted server-side.",
                   "method": "GET",
                   "path": "/api/applications/page"
+                },
+                {
+                  "desc": "Closes the attended sign-in session; when a session existed and the close was accepted, clears the login_required apply-blocker on every pending/approved screening queued for that host so the next run retries them",
+                  "method": "DELETE",
+                  "path": "/api/browser/session"
                 }
               ]
             },

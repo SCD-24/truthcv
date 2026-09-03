@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link as RouterLink } from "react-router-dom";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Button from "@mui/material/Button";
@@ -15,7 +14,6 @@ import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
-import Link from "@mui/material/Link";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -30,17 +28,11 @@ import {
   listApplicationsPage,
   updateApplication,
 } from "../api/client";
-import type {
-  Application,
-  ApplicationCreate,
-  ApplicationDocument,
-  ApplicationSortKey,
-} from "../api/types";
+import type { Application, ApplicationCreate, ApplicationSortKey } from "../api/types";
 import { DocumentAttachModal } from "./DocumentAttachModal";
+import { ApplicationLinks } from "./ApplicationLinks";
 import { COLUMN_DEFS, DEFAULT_SORT_COLUMN, DEFAULT_SORT_DIRECTION } from "./sorting";
 import type { ColumnDef, SortDirection } from "./sorting";
-import { filledFormPath } from "../routes";
-import { safeHref } from "../utils/safeUrl";
 import "../styles/applications.css";
 
 type PreviewKind = "cv" | "cover-letter";
@@ -427,48 +419,22 @@ function ApplicationRow({
   onAttach: (kind: PreviewKind) => void;
   onOpenPosting: () => void;
 }) {
-  // Website/application URLs can be agent-scraped, so a disallowed scheme
-  // (javascript:, …) must render as inert text, never a clickable href.
-  const websiteHref = safeHref(app.website);
-  const applicationHref = safeHref(app.applicationUrl);
   return (
     <TableRow hover>
-      <TableCell className="apps__company apps__clip" title={app.company || undefined}>
-        {app.company || "—"}
+      <TableCell className="apps__company apps__clip">
+        <Stack spacing={0.5}>
+          <span className="apps__clip" title={app.company || undefined}>
+            {app.company || "—"}
+          </span>
+          <ApplicationLinks
+            app={app}
+            onOpenDocument={onOpenDocument}
+            onAttach={onAttach}
+            onOpenPosting={onOpenPosting}
+          />
+        </Stack>
       </TableCell>
       <TableCell>{app.applicationDate || "—"}</TableCell>
-      <TableCell>
-        {app.website ? (
-          websiteHref ? (
-            <Link
-              href={websiteHref}
-              target="_blank"
-              rel="noreferrer"
-              title={websiteHref}
-              aria-label={`Open website: ${websiteHref}`}
-            >
-              link
-            </Link>
-          ) : (
-            <Typography component="span">{app.website}</Typography>
-          )
-        ) : (
-          "—"
-        )}
-      </TableCell>
-      <TableCell>
-        {app.applicationUrl && app.applicationUrl !== "N/A" ? (
-          applicationHref ? (
-            <Link href={applicationHref} target="_blank" rel="noreferrer">
-              link
-            </Link>
-          ) : (
-            <Typography component="span">{app.applicationUrl}</Typography>
-          )
-        ) : (
-          app.applicationUrl || "—"
-        )}
-      </TableCell>
       <TableCell>
         <Stamp on={app.submitted} yes="Submitted" no="Draft" />
       </TableCell>
@@ -512,19 +478,6 @@ function ApplicationRow({
         </Box>
       </TableCell>
       <TableCell>
-        <PostingCell app={app} onOpen={onOpenPosting} />
-      </TableCell>
-      <TableCell>
-        <DocumentLinks
-          app={app}
-          onOpenDocument={onOpenDocument}
-          onAttach={onAttach}
-        />
-      </TableCell>
-      <TableCell>
-        <FilledFormCell app={app} />
-      </TableCell>
-      <TableCell>
         <Stack direction="row" spacing={1}>
           <Button size="small" onClick={onEdit}>
             Edit
@@ -535,115 +488,6 @@ function ApplicationRow({
         </Stack>
       </TableCell>
     </TableRow>
-  );
-}
-
-/**
- * The CV/cover-letter linked to this application. Each present document is a
- * clickable entry that opens it in the Download step for re-editing; absent
- * documents show a muted hint so it is always clear what is (and isn't) linked.
- */
-function DocumentLinks({
-  app,
-  onOpenDocument,
-  onAttach,
-}: {
-  app: Application;
-  onOpenDocument: (kind: PreviewKind, source: string) => void;
-  onAttach: (kind: PreviewKind) => void;
-}) {
-  return (
-    <Stack className="apps__docs" spacing={0.75}>
-      {app.cvDocument ? (
-        <DocLine
-          label="CV"
-          doc={app.cvDocument}
-          onOpen={() => onOpenDocument("cv", app.cvDocument!.source)}
-        />
-      ) : (
-        <AddDocLine label="Add CV" onAdd={() => onAttach("cv")} />
-      )}
-      {app.coverLetterDocument ? (
-        <DocLine
-          label="Cover letter"
-          doc={app.coverLetterDocument}
-          onOpen={() =>
-            onOpenDocument("cover-letter", app.coverLetterDocument!.source)
-          }
-        />
-      ) : (
-        <AddDocLine label="Add cover letter" onAdd={() => onAttach("cover-letter")} />
-      )}
-    </Stack>
-  );
-}
-
-/**
- * The job posting linked to this application: a link that opens the posting
- * viewer/editor when set, or an actionable "add posting" affordance when empty
- * — mirroring how a CV or cover letter is linked.
- */
-function PostingCell({ app, onOpen }: { app: Application; onOpen: () => void }) {
-  if (!app.posting) {
-    return (
-      <div className="apps__docline">
-        <Link
-          component="button"
-          type="button"
-          onClick={onOpen}
-          className="apps__docadd"
-        >
-          + Add posting
-        </Link>
-      </div>
-    );
-  }
-  const firstLine = app.posting.split("\n").find((l) => l.trim()) ?? "Posting";
-  const peek = firstLine.slice(0, 40);
-  return (
-    <div className="apps__docline">
-      <Link
-        component="button"
-        type="button"
-        onClick={onOpen}
-        className="apps__doclink"
-        title="View or edit the job posting"
-      >
-        Posting
-      </Link>
-      <span className="apps__docmeta apps__postingpeek" title={firstLine}>
-        {peek}
-        {firstLine.length > peek.length ? "…" : ""}
-      </span>
-    </div>
-  );
-}
-
-/**
- * Link to the read-only filled-form evidence page for this application —
- * the field values, confirmation and attachments the agent recorded when it
- * submitted the form. A muted dash when nothing was recorded (hand-logged
- * applications legitimately have no evidence).
- */
-function FilledFormCell({ app }: { app: Application }) {
-  const count = app.fieldsSubmitted?.length ?? 0;
-  if (count === 0) {
-    return <span className="apps__docmeta">—</span>;
-  }
-  return (
-    <div className="apps__docline">
-      <Link
-        component={RouterLink}
-        to={filledFormPath(app.id)}
-        className="apps__doclink"
-        title="View the fields the agent recorded for this application"
-      >
-        Filled form
-      </Link>
-      <span className="apps__docmeta">
-        {count} field{count === 1 ? "" : "s"}
-      </span>
-    </div>
   );
 }
 
@@ -696,62 +540,6 @@ function PostingModal({
       </DialogActions>
     </Dialog>
   );
-}
-
-/** An actionable "attach a document" line when none is linked yet. */
-function AddDocLine({ label, onAdd }: { label: string; onAdd: () => void }) {
-  return (
-    <div className="apps__docline">
-      <Link
-        component="button"
-        type="button"
-        onClick={onAdd}
-        className="apps__docadd"
-      >
-        + {label}
-      </Link>
-    </div>
-  );
-}
-
-/** One linked document: an open-in-editor link (jumps to the Download step with
- * the saved content), quick pdf/docx downloads, and the saved date. */
-function DocLine({
-  label,
-  doc,
-  onOpen,
-}: {
-  label: string;
-  doc: ApplicationDocument;
-  onOpen: () => void;
-}) {
-  const saved = savedShort(doc.updatedAt);
-  return (
-    <div className="apps__docline">
-      <Link
-        component="button"
-        type="button"
-        onClick={onOpen}
-        className="apps__doclink"
-        title="Open in the editor to re-edit and re-save"
-      >
-        {label}
-      </Link>
-      <span className="apps__docmeta">
-        {doc.pdfUrl && <Link href={doc.pdfUrl}>pdf</Link>}
-        {doc.pdfUrl && doc.docxUrl ? " · " : null}
-        {doc.docxUrl && <Link href={doc.docxUrl}>docx</Link>}
-        {saved && <span className="apps__docdate">{saved}</span>}
-      </span>
-    </div>
-  );
-}
-
-/** Short saved-date for the ledger; blank when the timestamp is unusable. */
-function savedShort(iso: string): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString();
 }
 
 /**

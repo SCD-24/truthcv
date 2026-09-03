@@ -249,6 +249,9 @@ export interface CoverLetterResult {
   renderUnavailable?: boolean;
 }
 
+/** Which of an application's two documents an action targets. */
+export type PreviewKind = "cv" | "cover-letter";
+
 /** One document an application owns: its saved editable source and the
  * per-application files it rendered to (download URLs, null if not produced). */
 export interface ApplicationDocument {

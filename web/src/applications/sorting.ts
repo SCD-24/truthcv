@@ -4,14 +4,18 @@ export type SortDirection = "asc" | "desc";
 export type ColumnDef = {
   label: string;
   sortable: boolean;
+  /** The server sort key this column orders by (GET /api/applications/page).
+   * Sorting happens server-side so it holds across pages; the comparator
+   * semantics live in applications/sorting.py. */
   sortKey?: ApplicationSortKey;
 };
 
+// The Website/URL/Posting/Documents/Filled-form columns were folded into the
+// links line under the company name (ApplicationLinks), so they are no longer
+// table columns. Their server sort keys still exist on the API.
 export const COLUMN_DEFS: ColumnDef[] = [
   { label: "Company", sortable: true, sortKey: "company" },
   { label: "Date", sortable: true, sortKey: "date" },
-  { label: "Website", sortable: true, sortKey: "website" },
-  { label: "URL", sortable: true, sortKey: "url" },
   { label: "Submitted", sortable: true, sortKey: "submitted" },
   { label: "Type", sortable: true, sortKey: "type" },
   { label: "Status", sortable: true, sortKey: "status" },
@@ -20,9 +24,6 @@ export const COLUMN_DEFS: ColumnDef[] = [
   { label: "Response", sortable: true, sortKey: "response" },
   { label: "Method", sortable: true, sortKey: "method" },
   { label: "Notes", sortable: true, sortKey: "notes" },
-  { label: "Posting", sortable: true, sortKey: "posting" },
-  { label: "Documents", sortable: true, sortKey: "documents" },
-  { label: "Filled form", sortable: true, sortKey: "filledForm" },
   { label: "", sortable: false },
 ];
 

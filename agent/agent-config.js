@@ -1,18 +1,30 @@
 // Fetch one field of the agent config from the app service. The agent image
 // has no curl (see daily-apply.sh's note); node is the only HTTP client.
-// Usage: node agent-config.js mode|enabled|run_at|run_days|run_timezone|llm_credentials
+// Usage: node agent-config.js mode|enabled|run_at|run_days|run_timezone|job_config|llm_credentials
 // Errors print nothing and exit 1 — callers fall back to env defaults.
 import nodeHttp from "node:http";
 import nodeHttps from "node:https";
 
+// Emit text to stdout and exit with the given code, ensuring the write drains
+// before exiting (prevents truncation on pipes with buffers <64KB).
+function emit(text, code = 0) {
+  process.stdout.write(text, () => process.exit(code));
+}
+
 const field = process.argv[2];
 const DAY_NUM = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
+
 // Stand-in/test hook: FAKE_AGENT_CONFIG, when set, is served as the config
 // payload without any HTTP call (used by out-of-container harnesses).
+// Set once the fake path has handed its output to emit(): the process is then
+// waiting on stdout to drain, and the HTTP path below must not run (a
+// top-level `return` is not allowed in an ES module, hence the flag).
+let servedByFake = false;
 if (process.env.FAKE_AGENT_CONFIG && field !== "llm_credentials") {
   const cfg = JSON.parse(process.env.FAKE_AGENT_CONFIG);
   if (field === "job_config") {
-    process.stdout.write(
+    servedByFake = true;
+    emit(
       JSON.stringify({
         profiles: cfg.profiles || [],
         targetCompanies: cfg.targetCompanies || [],
@@ -31,14 +43,14 @@ if (process.env.FAKE_AGENT_CONFIG && field !== "llm_credentials") {
         directBoards: cfg.directBoards || [],
       })
     );
-    process.exit(0);
-  }
-  if (field === "mode") {
+  } else if (field === "mode") {
     if (typeof cfg.mode !== "string") process.exit(1);
-    process.stdout.write(cfg.mode);
-    process.exit(0);
+    servedByFake = true;
+    emit(cfg.mode);
   }
+  // Any other field falls through to the HTTP path, as before.
 }
+if (!servedByFake) {
 const base = process.env.TRUTHCV_MCP_URL;
 if (!base || !["enabled", "mode", "run_at", "run_days", "run_timezone", "llm_credentials", "job_config"].includes(field)) process.exit(1);
 
@@ -67,8 +79,7 @@ if (field === "llm_credentials") {
         // reader that only wants the earlier lines keeps working, and an
         // older API server that omits provider/wire degrades to empty lines
         // (via `|| ""`) rather than crashing, so output stays exactly 6 lines.
-        process.stdout.write(`${creds.authType}\n${creds.token}\n${creds.model || ""}\n${creds.baseUrl || ""}\n${creds.provider || ""}\n${creds.wire || ""}\n`);
-        process.exit(0);
+        emit(`${creds.authType}\n${creds.token}\n${creds.model || ""}\n${creds.baseUrl || ""}\n${creds.provider || ""}\n${creds.wire || ""}\n`);
       } catch { process.exit(1); }
     });
   });
@@ -98,18 +109,18 @@ const req = http.get(u, { timeout }, (res) => {
       const cfg = JSON.parse(body);
       if (field === "mode") {
         if (typeof cfg.mode !== "string") { process.exit(1); return; }
-        process.stdout.write(cfg.mode);
+        emit(cfg.mode);
       }
       else if (field === "enabled") {
         if (typeof cfg.enabled !== "boolean") { process.exit(1); return; }
-        process.stdout.write(String(cfg.enabled));
+        emit(String(cfg.enabled));
       }
-      else if (field === "run_at") process.stdout.write(cfg.runAt.join(","));
-      else if (field === "run_days") process.stdout.write(cfg.runDays.map((d) => DAY_NUM[d]).filter(Boolean).join(","));
+      else if (field === "run_at") emit(cfg.runAt.join(","));
+      else if (field === "run_days") emit(cfg.runDays.map((d) => DAY_NUM[d]).filter(Boolean).join(","));
       // The IANA zone the run_at slots are wall-clock times in. Written empty
       // when an older app service omits the field, so callers fall back to
       // their own default (UTC) rather than scheduling against "undefined".
-      else if (field === "run_timezone") process.stdout.write(typeof cfg.runTimezone === "string" ? cfg.runTimezone : "");
+      else if (field === "run_timezone") emit(typeof cfg.runTimezone === "string" ? cfg.runTimezone : "");
       else if (field === "job_config") {
         const payload = {
           profiles: cfg.profiles || [],
@@ -134,12 +145,12 @@ const req = http.get(u, { timeout }, (res) => {
           // key still produces a valid, empty-but-present payload.
           directBoards: cfg.directBoards || [],
         };
-        process.stdout.write(JSON.stringify(payload));
+        emit(JSON.stringify(payload));
       }
-      process.exit(0);
     } catch { process.exit(1); }
   });
 });
 req.on("error", () => process.exit(1));
 req.on("timeout", () => { req.destroy(); process.exit(1); });
+}
 }
