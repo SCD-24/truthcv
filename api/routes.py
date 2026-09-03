@@ -99,6 +99,7 @@ from .schemas import (
     ApiKeyRequest,
     ApplicationCreate,
     ApplicationDocument,
+    ApplicationListResponse,
     ApplicationModel,
     ApplicationUpdate,
     AtsWarning,
@@ -828,6 +829,36 @@ def list_applications() -> list[ApplicationModel]:
     """Every tracked job application, most recent first."""
     apps = applications_service.list_applications()
     return [_application_model(a) for a in apps]
+
+
+@router.get("/applications/page", response_model=ApplicationListResponse)
+def list_applications_page(
+    limit: int = 25, offset: int = 0, sort: str = "date", direction: str = "desc"
+) -> ApplicationListResponse:
+    """One page of applications, server-sorted and paginated.
+
+    Reads the application store in-process and returns a paginated, sorted page
+    of applications with the total count across all records. Sort keys and
+    direction are passed through and echoed in the response.
+
+    A negative offset is clamped to 0 rather than rejected: it is a client that
+    paged past the start, and an empty first page is a worse answer than the
+    first page. An offset past the end yields an empty page — the total tells
+    the client it overshot.
+    """
+    offset = max(0, offset)
+    try:
+        apps, total = applications_service.list_applications_page(limit=limit, offset=offset, sort=sort, direction=direction)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return ApplicationListResponse(
+        applications=[_application_model(a) for a in apps],
+        total=total,
+        limit=limit,
+        offset=offset,
+        sort=sort,
+        direction=direction,
+    )
 
 
 @router.get("/applications/export")

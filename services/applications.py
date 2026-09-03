@@ -46,6 +46,37 @@ def list_applications() -> list:
     return sorted(app_store.load_all(), key=lambda a: a.created_at, reverse=True)
 
 
+def list_applications_page(limit: int, offset: int, sort: str, direction: str) -> tuple[list, int]:
+    """One page of applications, sorted by the given key and direction.
+
+    Args:
+        limit: Maximum number of applications per page. If <= 0, returns all (unlimited).
+        offset: Number of applications to skip from the start. Clamped to >= 0.
+        sort: The sort column (e.g. "company", "date").
+        direction: "asc" or "desc".
+
+    Returns:
+        A tuple of (page_of_applications, total_count).
+
+    Raises:
+        ValueError: If sort key or direction is invalid.
+    """
+    from applications.sorting import sort_applications
+
+    all_apps = app_store.load_all()
+    sorted_apps = sort_applications(all_apps, sort=sort, direction=direction)
+    total = len(sorted_apps)
+    
+    offset = max(0, offset)
+    if offset >= total:
+        return [], total
+    
+    if limit <= 0:
+        return sorted_apps[offset:], total
+    else:
+        return sorted_apps[offset:offset + limit], total
+
+
 def create_application_record(fields: dict):
     """Create an application record from already-validated editable ``fields``."""
     return app_store.create(fields)

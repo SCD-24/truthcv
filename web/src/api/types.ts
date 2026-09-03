@@ -343,6 +343,34 @@ export interface Application {
   attachments?: ApplicationAttachment[];
 }
 
+/** Application sort key: a column name the server can sort by. */
+export type ApplicationSortKey =
+  | "company"
+  | "date"
+  | "website"
+  | "url"
+  | "submitted"
+  | "type"
+  | "status"
+  | "reachedOut"
+  | "toWho"
+  | "response"
+  | "method"
+  | "notes"
+  | "posting"
+  | "documents"
+  | "filledForm";
+
+/** One page of applications from a server-paginated endpoint. */
+export interface ApplicationPage {
+  applications: Application[];
+  total: number;
+  limit: number;
+  offset: number;
+  sort: ApplicationSortKey;
+  direction: "asc" | "desc";
+}
+
 /** Editable fields the client may set when creating an application. */
 export type ApplicationCreate = Partial<
   Pick<

@@ -19,6 +19,8 @@ import type {
   BlockedClaim,
   Application,
   ApplicationCreate,
+  ApplicationPage,
+  ApplicationSortKey,
   ApplicationUpdate,
   SaveDocumentResult,
   ScreeningRecord,
@@ -273,6 +275,22 @@ export function generateCoverLetter(
 /** Every tracked job application, most recent first. */
 export function listApplications(): Promise<Application[]> {
   return request("/api/applications");
+}
+
+/** One page of applications, sorted by the given key and direction. */
+export function listApplicationsPage(opts: {
+  limit?: number;
+  offset?: number;
+  sort?: ApplicationSortKey;
+  direction?: "asc" | "desc";
+}): Promise<ApplicationPage> {
+  const params = new URLSearchParams();
+  if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts.offset !== undefined) params.set("offset", String(opts.offset));
+  if (opts.sort) params.set("sort", opts.sort);
+  if (opts.direction) params.set("direction", opts.direction);
+  const qs = params.toString();
+  return request<ApplicationPage>(`/api/applications/page${qs ? `?${qs}` : ""}`);
 }
 
 /** Create a new application record from user-entered fields. */

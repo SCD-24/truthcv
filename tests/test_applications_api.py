@@ -492,3 +492,74 @@ def test_put_does_not_clobber_evidence(client):
     assert r.status_code == 200
     assert r.json()["notes"] == "Follow up next week"
     assert r.json()["fieldsSubmitted"] == [{"label": "Full name", "value": "Jane Doe", "source": "profile"}]
+
+
+# --- PAGE ROUTE ---------------------------------------------------------------
+
+
+def test_list_applications_page_first_page(client):
+    """GET /api/applications/page returns a page with limit, offset, sort, direction, total."""
+    for i in range(30):
+        client.post("/api/applications", json={"company": f"Company {i}"})
+
+    r = client.get("/api/applications/page?limit=25&offset=0&sort=date&direction=desc")
+    assert r.status_code == 200
+    assert len(r.json()["applications"]) == 25
+    assert r.json()["total"] == 30
+    assert r.json()["limit"] == 25
+    assert r.json()["offset"] == 0
+    assert r.json()["sort"] == "date"
+    assert r.json()["direction"] == "desc"
+
+
+def test_list_applications_page_second_page(client):
+    """GET /api/applications/page with offset=25 returns the remaining 5 records."""
+    for i in range(30):
+        client.post("/api/applications", json={"company": f"Company {i}"})
+
+    r = client.get("/api/applications/page?limit=25&offset=25&sort=date&direction=desc")
+    assert r.status_code == 200
+    assert len(r.json()["applications"]) == 5
+    assert r.json()["total"] == 30
+
+
+def test_list_applications_page_sort_applied(client):
+    """GET /api/applications/page applies the sort key and direction."""
+    client.post("/api/applications", json={"company": "Acme"})
+    client.post("/api/applications", json={"company": "Beta"})
+
+    # Sort by company ascending
+    r = client.get("/api/applications/page?sort=company&direction=asc&limit=25&offset=0")
+    assert r.status_code == 200
+    apps = r.json()["applications"]
+    assert apps[0]["company"] == "Acme"
+    assert apps[1]["company"] == "Beta"
+    assert r.json()["sort"] == "company"
+    assert r.json()["direction"] == "asc"
+
+
+def test_list_applications_page_unknown_sort_400(client):
+    """GET /api/applications/page with unknown sort key returns 400."""
+    r = client.get("/api/applications/page?sort=unknown_key&direction=asc")
+    assert r.status_code == 400
+
+
+def test_list_applications_page_negative_offset_clamped(client):
+    """GET /api/applications/page with negative offset is clamped to 0."""
+    client.post("/api/applications", json={"company": "Acme"})
+
+    r = client.get("/api/applications/page?offset=-10&limit=25")
+    assert r.status_code == 200
+    assert len(r.json()["applications"]) == 1
+
+
+def test_list_applications_still_returns_bare_array(client):
+    """GET /api/applications still returns a bare array, not a page envelope."""
+    client.post("/api/applications", json={"company": "Acme"})
+
+    r = client.get("/api/applications")
+    assert r.status_code == 200
+    # Should be a list, not a dict with "applications" key
+    assert isinstance(r.json(), list)
+    assert len(r.json()) == 1
+    assert r.json()[0]["company"] == "Acme"

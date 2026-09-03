@@ -27,21 +27,17 @@ import {
   APPLICATIONS_EXPORT_URL,
   createApplication,
   deleteApplication,
-  listApplications,
+  listApplicationsPage,
   updateApplication,
 } from "../api/client";
 import type {
   Application,
   ApplicationCreate,
   ApplicationDocument,
+  ApplicationSortKey,
 } from "../api/types";
 import { DocumentAttachModal } from "./DocumentAttachModal";
-import {
-  COLUMN_DEFS,
-  DEFAULT_SORT_COLUMN,
-  DEFAULT_SORT_DIRECTION,
-  compareApplications,
-} from "./sorting";
+import { COLUMN_DEFS, DEFAULT_SORT_COLUMN, DEFAULT_SORT_DIRECTION } from "./sorting";
 import type { ColumnDef, SortDirection } from "./sorting";
 import { filledFormPath } from "../routes";
 import { safeHref } from "../utils/safeUrl";
@@ -87,9 +83,14 @@ export function ApplicationsPage({
     source: string;
   }) => void;
 }) {
+  const APPLICATIONS_PAGE_SIZE = 25;
+
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   // The row being edited: an id for an existing row, "new" for the add form.
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [draft, setDraft] = useState<ApplicationCreate>(EMPTY);
@@ -105,6 +106,15 @@ export function ApplicationsPage({
   const [sortCol, setSortCol] = useState<ColumnDef | null>(DEFAULT_SORT_COLUMN);
   const [sortDir, setSortDir] = useState<SortDirection>(DEFAULT_SORT_DIRECTION);
 
+  const pageCount = Math.max(1, Math.ceil(total / APPLICATIONS_PAGE_SIZE));
+
+  // A record finishing/being deleted while you are on the last page can shrink the history out
+  // from under the current page number. Step back rather than showing an
+  // empty page with a Previous button as the only way out.
+  useEffect(() => {
+    if (page > 0 && page > pageCount - 1) setPage(pageCount - 1);
+  }, [page, pageCount]);
+
   /** Replace an application in the list after a document is attached/edited. */
   function applyAttached(updated: Application) {
     setApps((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
@@ -118,11 +128,44 @@ export function ApplicationsPage({
   }
 
   useEffect(() => {
-    listApplications()
-      .then(setApps)
-      .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load applications."))
-      .finally(() => setLoading(false));
-  }, []);
+    let alive = true;
+    // Polls are not serialised, so a request slower than the interval can
+    // land after its own successor. Without an ordering guard that older
+    // response wins, and it carries an older `total` — which shrinks
+    // pageCount and can step the operator's page back under them.
+    let latest = 0;
+
+    function refresh() {
+      const seq = ++latest;
+      const sortKey = (sortCol?.sortKey as ApplicationSortKey) || "date";
+      listApplicationsPage({
+        limit: APPLICATIONS_PAGE_SIZE,
+        offset: page * APPLICATIONS_PAGE_SIZE,
+        sort: sortKey,
+        direction: sortDir,
+      })
+        .then((result) => {
+          if (!alive || seq !== latest) return;
+          setApps(result.applications);
+          setTotal(result.total);
+          setError(null);
+        })
+        .catch((e: unknown) => {
+          if (!alive || seq !== latest) return;
+          setError(e instanceof Error ? e.message : "Couldn't load applications.");
+        })
+        .finally(() => {
+          if (!alive || seq !== latest) return;
+          setLoading(false);
+        });
+    }
+
+    setLoading(true);
+    refresh();
+    return () => {
+      alive = false;
+    };
+  }, [page, sortCol, sortDir, reloadKey]);
 
   /** Download the whole ledger as a zip (CSV + per-company document folders).
    * A plain navigation lets the browser stream the file straight to disk. */
@@ -159,10 +202,12 @@ export function ApplicationsPage({
     setError(null);
     try {
       if (editing === "new") {
-        const created = await createApplication(draft);
-        setApps((prev) => [created, ...prev]);
+        await createApplication(draft);
+        // New applications change the list, so refetch the current page
+        setReloadKey((k) => k + 1);
       } else if (editing) {
         const updated = await updateApplication(editing, draft);
+        // Edited applications may stay on the current page; keep in-place replace
         setApps((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
       }
       setEditing(null);
@@ -178,7 +223,8 @@ export function ApplicationsPage({
     setError(null);
     try {
       await deleteApplication(id);
-      setApps((prev) => prev.filter((a) => a.id !== id));
+      // Deletion changes the list, so refetch the current page
+      setReloadKey((k) => k + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't delete the application.");
     }
@@ -246,71 +292,102 @@ export function ApplicationsPage({
         />
       )}
 
-      {!loading && apps.length === 0 && editing !== "new" ? (
+      {!loading && total === 0 && editing !== "new" ? (
         <Typography color="text.secondary" sx={{ py: 4, textAlign: "center" }}>
           No applications yet. Add one to start tracking where your CVs go.
         </Typography>
+      ) : loading && apps.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          Loading…
+        </Typography>
       ) : (
-        <TableContainer sx={{ width: "100%" }}>
-          <Table size="small" className="apps__table" sx={{ width: "100%" }}>
-            <TableHead>
-              <TableRow>
-                {COLUMN_DEFS.map((c) => (
-                  <TableCell key={c.label || "actions"}>
-                    {c.sortable ? (
-                      <TableSortLabel
-                        active={sortCol?.label === c.label}
-                        direction={sortCol?.label === c.label ? sortDir : "asc"}
-                        onClick={() => {
-                          if (sortCol?.label === c.label) setSortDir(sortDir === "asc" ? "desc" : "asc");
-                          else {
-                            setSortCol(c);
-                            setSortDir("asc");
-                          }
-                        }}
-                      >
-                        {c.label}
-                      </TableSortLabel>
-                    ) : (
-                      c.label
-                    )}
-                  </TableCell>
-                ))}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {[...apps]
-                .sort((a, b) => compareApplications(a, b, sortCol, sortDir))
-                .map((app) =>
-                editing === app.id ? (
-                  <TableRow key={app.id}>
-                    <TableCell colSpan={COLUMN_DEFS.length}>
-                      <ApplicationForm
-                        draft={draft}
-                        setDraft={setDraft}
-                        saving={saving}
-                        onSave={save}
-                        onCancel={() => setEditing(null)}
-                      />
+        <>
+          <TableContainer sx={{ width: "100%" }}>
+            <Table size="small" className="apps__table" sx={{ width: "100%" }}>
+              <TableHead>
+                <TableRow>
+                  {COLUMN_DEFS.map((c) => (
+                    <TableCell key={c.label || "actions"}>
+                      {c.sortable ? (
+                        <TableSortLabel
+                          active={sortCol?.label === c.label}
+                          direction={sortCol?.label === c.label ? sortDir : "asc"}
+                          onClick={() => {
+                            if (sortCol?.label === c.label) setSortDir(sortDir === "asc" ? "desc" : "asc");
+                            else {
+                              setSortCol(c);
+                              setSortDir("asc");
+                              setPage(0);
+                            }
+                          }}
+                        >
+                          {c.label}
+                        </TableSortLabel>
+                      ) : (
+                        c.label
+                      )}
                     </TableCell>
-                  </TableRow>
-                ) : (
-                  <ApplicationRow
-                    key={app.id}
-                    app={app}
-                    onEdit={() => startEdit(app)}
-                    onDelete={() => remove(app.id)}
-                    onOpenDocument={(kind, source) =>
-                      onEditDocument({ appId: app.id, kind, source })
-                    }
-                    onAttach={(kind) => setAttach({ app, kind })}
-                    onOpenPosting={() => setPosting(app)}
-                  />
-                ),
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                  ))}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {apps.map((app) =>
+                  editing === app.id ? (
+                    <TableRow key={app.id}>
+                      <TableCell colSpan={COLUMN_DEFS.length}>
+                        <ApplicationForm
+                          draft={draft}
+                          setDraft={setDraft}
+                          saving={saving}
+                          onSave={save}
+                          onCancel={() => setEditing(null)}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    <ApplicationRow
+                      key={app.id}
+                      app={app}
+                      onEdit={() => startEdit(app)}
+                      onDelete={() => remove(app.id)}
+                      onOpenDocument={(kind, source) =>
+                        onEditDocument({ appId: app.id, kind, source })
+                      }
+                      onAttach={(kind) => setAttach({ app, kind })}
+                      onOpenPosting={() => setPosting(app)}
+                    />
+                  ),
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+
+          {total > 0 && (
+            <Stack
+              direction="row"
+              spacing={2}
+              sx={{ alignItems: "center", justifyContent: "flex-end", mt: 2, flexWrap: "wrap" }}
+            >
+              <Typography variant="caption" color="text.secondary">
+                Page {page + 1} of {pageCount}
+              </Typography>
+              <Button
+                size="small"
+                disabled={page === 0}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+              >
+                Previous
+              </Button>
+              <Button
+                size="small"
+                disabled={page >= pageCount - 1}
+                onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+              >
+                Next
+              </Button>
+            </Stack>
+          )}
+        </>
       )}
 
       {attach && (

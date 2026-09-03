@@ -1,89 +1,30 @@
-import type { Application } from "../api/types";
+import type { ApplicationSortKey } from "../api/types";
 
 export type SortDirection = "asc" | "desc";
 export type ColumnDef = {
   label: string;
   sortable: boolean;
-  compare?: (a: Application, b: Application) => number;
-  /**
-   * Rows this reports true for sort last in BOTH directions.
-   *
-   * The plain comparators put blanks last ascending and let the descending
-   * negation flip them to the top, which is fine for a column you sorted by
-   * hand. It is not fine for Date, which is the table's default order: undated
-   * records would fill the top of a "most recent first" table, above the most
-   * recent one.
-   */
-  blank?: (a: Application) => boolean;
-};
-
-// Order applications by status; lower index sorts first. Unlisted/unset
-// statuses (e.g. "") fall to the bottom.
-const STATUS_ORDER = [
-  "Offer",
-  "Interviewing",
-  "Waiting",
-  "Applied",
-  "Draft",
-  "Rejected",
-] as const;
-
-export function statusRank(status: string): number {
-  const i = STATUS_ORDER.indexOf(status as (typeof STATUS_ORDER)[number]);
-  return i === -1 ? STATUS_ORDER.length : i;
-}
-
-const text = (get: (a: Application) => string | null | undefined) =>
-  (a: Application, b: Application) => {
-    const av = (get(a) ?? "").trim(), bv = (get(b) ?? "").trim();
-    if (!av && !bv) return 0;
-    if (!av) return 1; // blanks last in ascending; desc flips (accepted).
-    if (!bv) return -1;
-    return av.toLowerCase().localeCompare(bv.toLowerCase());
-  };
-const bool = (get: (a: Application) => boolean) =>
-  (a: Application, b: Application) => Number(get(b)) - Number(get(a)); // yes-first asc
-const presence = (get: (a: Application) => unknown) =>
-  (a: Application, b: Application) => Number(Boolean(get(b))) - Number(Boolean(get(a)));
-
-const host = (url: string | null | undefined): string => {
-  if (!url) return "";
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
+  sortKey?: ApplicationSortKey;
 };
 
 export const COLUMN_DEFS: ColumnDef[] = [
-  { label: "Company", sortable: true, compare: text((a) => a.company) },
-  // ISO strings: lexicographic = chronological. `blank` keeps undated rows at
-  // the bottom of the default newest-first order rather than the top.
-  {
-    label: "Date",
-    sortable: true,
-    compare: text((a) => a.applicationDate),
-    blank: (a) => !(a.applicationDate ?? "").trim(),
-  },
-  { label: "Website", sortable: true, compare: text((a) => host(a.website)) },
-  { label: "URL", sortable: true, compare: presence((a) => a.applicationUrl) },
-  { label: "Submitted", sortable: true, compare: bool((a) => a.submitted) },
-  { label: "Type", sortable: true, compare: text((a) => a.submissionType) },
-  { label: "Status", sortable: true, compare: (a, b) => statusRank(a.status) - statusRank(b.status) },
-  { label: "Reached Out", sortable: true, compare: bool((a) => a.reachedOut) },
-  { label: "To Who", sortable: true, compare: text((a) => a.toWho) },
-  { label: "Response", sortable: true, compare: bool((a) => a.responseReceived) },
-  { label: "Method", sortable: true, compare: text((a) => a.method) },
-  { label: "Notes", sortable: true, compare: text((a) => a.notes) },
-  { label: "Posting", sortable: true, compare: presence((a) => a.posting) },
-  { label: "Documents", sortable: true, compare: presence((a) => a.cvDocument ?? a.coverLetterDocument) },
-  { label: "Filled form", sortable: true, compare: presence((a) => a.fieldsSubmitted?.length) },
+  { label: "Company", sortable: true, sortKey: "company" },
+  { label: "Date", sortable: true, sortKey: "date" },
+  { label: "Website", sortable: true, sortKey: "website" },
+  { label: "URL", sortable: true, sortKey: "url" },
+  { label: "Submitted", sortable: true, sortKey: "submitted" },
+  { label: "Type", sortable: true, sortKey: "type" },
+  { label: "Status", sortable: true, sortKey: "status" },
+  { label: "Reached Out", sortable: true, sortKey: "reachedOut" },
+  { label: "To Who", sortable: true, sortKey: "toWho" },
+  { label: "Response", sortable: true, sortKey: "response" },
+  { label: "Method", sortable: true, sortKey: "method" },
+  { label: "Notes", sortable: true, sortKey: "notes" },
+  { label: "Posting", sortable: true, sortKey: "posting" },
+  { label: "Documents", sortable: true, sortKey: "documents" },
+  { label: "Filled form", sortable: true, sortKey: "filledForm" },
   { label: "", sortable: false },
 ];
-
-export function defaultCompare(a: Application, b: Application): number {
-  return statusRank(a.status) - statusRank(b.status);
-}
 
 /** The column the table sorts by on load, with {@link DEFAULT_SORT_DIRECTION}:
  * most recently applied first, which is what an operator scanning this page is
@@ -92,20 +33,3 @@ export const DEFAULT_SORT_COLUMN: ColumnDef =
   COLUMN_DEFS.find((c) => c.label === "Date") ?? COLUMN_DEFS[0];
 
 export const DEFAULT_SORT_DIRECTION: SortDirection = "desc";
-
-export function compareApplications(
-  a: Application,
-  b: Application,
-  col: ColumnDef | null,
-  dir: SortDirection,
-): number {
-  if (!col?.compare) return defaultCompare(a, b);
-  if (col.blank) {
-    // Decided before the direction is applied, so the negation below cannot
-    // lift blanks to the top of a descending sort.
-    const aBlank = col.blank(a);
-    if (aBlank !== col.blank(b)) return aBlank ? 1 : -1;
-  }
-  const r = col.compare(a, b);
-  return dir === "desc" ? -r : r;
-}
