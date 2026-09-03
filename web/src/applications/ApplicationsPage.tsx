@@ -431,7 +431,11 @@ export function ApplicationsPage({
   );
 }
 
-/** One ledger row, including the documents attached to the application. */
+/**
+ * One ledger row, including the documents attached to the application.
+ * Renders as a fragment with two rows: the main application data row, and a
+ * sub-row containing the links spanning all columns.
+ */
 function ApplicationRow({
   app,
   onEdit,
@@ -448,74 +452,78 @@ function ApplicationRow({
   onOpenPosting: () => void;
 }) {
   return (
-    <TableRow hover>
-      <TableCell className="apps__company apps__clip">
-        <Stack spacing={0.5}>
+    <>
+      <TableRow hover>
+        <TableCell className="apps__company">
           <span className="apps__clip" title={app.company || undefined}>
             {app.company || "—"}
           </span>
+        </TableCell>
+        <TableCell>{app.applicationDate || "—"}</TableCell>
+        <TableCell>
+          <Stamp on={app.submitted} yes="Submitted" no="Draft" />
+        </TableCell>
+        <TableCell>{app.submissionType || "—"}</TableCell>
+        <TableCell>
+          {app.status ? (
+            <Chip
+              className="apps__stamp"
+              size="small"
+              variant="outlined"
+              color={statusColor(app.status)}
+              label={app.status}
+            />
+          ) : (
+            "—"
+          )}
+        </TableCell>
+        <TableCell>
+          <Stamp on={app.reachedOut} yes="Yes" no="No" />
+        </TableCell>
+        <TableCell className="apps__clip" title={app.toWho || undefined}>
+          {app.toWho || "—"}
+        </TableCell>
+        <TableCell>
+          <Stamp on={app.responseReceived} yes="Replied" no="Waiting" />
+        </TableCell>
+        <TableCell className="apps__clip" title={app.method || undefined}>
+          {app.method || "—"}
+        </TableCell>
+        <TableCell sx={{ maxWidth: 220 }}>
+          <Box
+            sx={{
+              whiteSpace: "normal",
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+          >
+            {app.notes || "—"}
+          </Box>
+        </TableCell>
+        <TableCell>
+          <Stack direction="row" spacing={1}>
+            <Button size="small" onClick={onEdit}>
+              Edit
+            </Button>
+            <Button size="small" color="error" onClick={onDelete}>
+              Delete
+            </Button>
+          </Stack>
+        </TableCell>
+      </TableRow>
+      <TableRow className="apps__subrow">
+        <TableCell colSpan={COLUMN_DEFS.length} className="apps__subcell">
           <ApplicationLinks
             app={app}
             onOpenDocument={onOpenDocument}
             onAttach={onAttach}
             onOpenPosting={onOpenPosting}
           />
-        </Stack>
-      </TableCell>
-      <TableCell>{app.applicationDate || "—"}</TableCell>
-      <TableCell>
-        <Stamp on={app.submitted} yes="Submitted" no="Draft" />
-      </TableCell>
-      <TableCell>{app.submissionType || "—"}</TableCell>
-      <TableCell>
-        {app.status ? (
-          <Chip
-            className="apps__stamp"
-            size="small"
-            variant="outlined"
-            color={statusColor(app.status)}
-            label={app.status}
-          />
-        ) : (
-          "—"
-        )}
-      </TableCell>
-      <TableCell>
-        <Stamp on={app.reachedOut} yes="Yes" no="No" />
-      </TableCell>
-      <TableCell className="apps__clip" title={app.toWho || undefined}>
-        {app.toWho || "—"}
-      </TableCell>
-      <TableCell>
-        <Stamp on={app.responseReceived} yes="Replied" no="Waiting" />
-      </TableCell>
-      <TableCell className="apps__clip" title={app.method || undefined}>
-        {app.method || "—"}
-      </TableCell>
-      <TableCell sx={{ maxWidth: 220 }}>
-        <Box
-          sx={{
-            whiteSpace: "normal",
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-          }}
-        >
-          {app.notes || "—"}
-        </Box>
-      </TableCell>
-      <TableCell>
-        <Stack direction="row" spacing={1}>
-          <Button size="small" onClick={onEdit}>
-            Edit
-          </Button>
-          <Button size="small" color="error" onClick={onDelete}>
-            Delete
-          </Button>
-        </Stack>
-      </TableCell>
-    </TableRow>
+        </TableCell>
+      </TableRow>
+    </>
   );
 }
 
