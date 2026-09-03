@@ -45,6 +45,7 @@ _EXTRACTED_ROUTE_FUNCTIONS = (
     "create_screening",
     "mark_screening_applied",
     "list_applications",
+    "list_applications_page",
     "export_applications",
     "create_application",
     "update_application",
