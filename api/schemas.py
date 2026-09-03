@@ -1216,6 +1216,24 @@ class RunModel(_Camel):
     note: str = ""
 
 
+class ApplicationListResponse(_Camel):
+    """GET /api/applications/page: one page of applications, server-sorted.
+
+    ``total`` is the count across all pages, not this page's length — the
+    client needs it to know how many pages exist, and it cannot be derived
+    from a capped page. ``limit``/``offset`` are echoed back so a client that
+    let the server apply its default knows what it actually got. ``sort`` and
+    ``direction`` are echoed to confirm which sorting was applied.
+    """
+
+    applications: list[ApplicationModel]
+    total: int = 0
+    limit: int = 0
+    offset: int = 0
+    sort: str = "date"
+    direction: str = "desc"
+
+
 class RunListResponse(_Camel):
     """GET /api/runs: one page of runs, newest first.
 
@@ -1284,6 +1302,7 @@ class BrowserSessionClosed(_Camel):
     closed: bool
     closing: bool = False
     reserving: bool = False
+    signins_cleared: int = 0
 
 
 class AgentRunResult(_Camel):

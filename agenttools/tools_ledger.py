@@ -608,6 +608,9 @@ def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:
     - An item with no URL (many imported records predate URL capture) comes
       back with ``blocked_reason`` set to "no_url" rather than hidden, since
       the agent has nothing to open and would otherwise flail trying to apply.
+    - An item blocked by a login wall (the posting sat behind a sign-in) comes
+      back with ``blocked_reason`` set to "login_required" rather than retried
+      every run, since the operator must authorize the site first.
     - The operator's stored letter travels with the item, as text and — for an
       item that is actually going out — as ``cover_letter_path``, a rendered
       PDF of that same text on the data volume for the agent to upload where
