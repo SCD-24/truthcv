@@ -110,10 +110,10 @@ describe("ApplicationsPage search", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("Vandelay")).toBeInTheDocument();
-      expect(screen.queryByText("Acme")).not.toBeInTheDocument();
+      expect(screen.getByText("Vandelay")).toBeTruthy();
+      expect(screen.queryByText("Acme")).toBeNull();
     });
 
-    expect(screen.getByText("1 matching")).toBeInTheDocument();
+    expect(screen.getByText("1 matching")).toBeTruthy();
   });
 });
