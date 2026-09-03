@@ -199,6 +199,8 @@ def gather_approvable_screenings() -> list[dict]:
             blocked_reason = "contradictory_research"
         elif status.blocked:
             blocked_reason = "cooldown"
+        elif s.apply_blocker == "login_required":
+            blocked_reason = "login_required"
         elif not s.url.strip():
             blocked_reason = "no_url"
         else:
