@@ -71,6 +71,7 @@ export function ModelRoutePicker({
   const [error, setError] = useState<string | null>(null);
   const [test, setTest] = useState<TestState>({ kind: "idle" });
   const [effort, setEffort] = useState(route?.effort ?? "");
+  const [contextWindow, setContextWindow] = useState(route?.contextWindow ?? 0);
 
   /** Effort levels advertised by the currently selected listed model.
    * Empty when the model is a custom id, blank, or has no effort support. */
@@ -151,6 +152,7 @@ export function ModelRoutePicker({
     try {
       const routeChoice: RouteChoice = { connection, model };
       if (effort) routeChoice.effort = effort;
+      if (contextWindow > 0) routeChoice.contextWindow = contextWindow;
       await onSave(routeChoice);
       setSaved(true);
     } catch (e) {
@@ -295,6 +297,15 @@ export function ModelRoutePicker({
           ))}
         </TextField>
       )}
+
+      <TextField
+        fullWidth
+        type="number"
+        label="Context window (tokens)"
+        value={contextWindow}
+        onChange={(e) => setContextWindow(Number(e.target.value))}
+        helperText="Model input capacity; 0 = unknown, minimum 8192"
+      />
 
       {test.kind === "ok" && <Alert severity="success">{test.detail}</Alert>}
       {test.kind === "fail" && <Alert severity="error">{test.detail}</Alert>}

@@ -20,25 +20,36 @@ class Route:
     connection: str
     model: str = ""
     effort: str = ""
+    context_window: int = 0
 
     @classmethod
     def from_dict(cls, raw: object) -> Route | None:
         """Parse a route dict; unknown/missing fields use defaults.
 
-        Legacy files without an ``effort`` key load unchanged (defaults to ``""``).
+        Legacy files without an ``effort``/``context_window`` key load unchanged
+        (defaulting to ``""``/``0`` respectively).
         """
         if not isinstance(raw, dict) or not isinstance(raw.get("connection"), str):
             return None
         model = raw.get("model")
         effort = raw.get("effort")
+        context_window = raw.get("context_window")
         return cls(
             raw["connection"],
             model if isinstance(model, str) else "",
             effort if isinstance(effort, str) else "",
+            context_window
+            if isinstance(context_window, int) and not isinstance(context_window, bool)
+            else 0,
         )
 
     def to_dict(self) -> dict:
-        return {"connection": self.connection, "model": self.model, "effort": self.effort}
+        return {
+            "connection": self.connection,
+            "model": self.model,
+            "effort": self.effort,
+            "context_window": self.context_window,
+        }
 
 
 @dataclass

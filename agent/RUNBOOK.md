@@ -299,7 +299,22 @@ deliberately does not duplicate its values.
 
 ### Discovery
 
-Your run prompt may carry a list of composed search queries, built
+Discovery works three channels, and they are worked in a fixed order:
+**feed**, then **direct boards**, then **dork queries**. Take one full pass
+over every board or query in a channel before starting a second pass on any
+channel — do not dork a query twice while a direct board in the same run has
+never been touched. Skipping a board or query is never acceptable: work it
+and call `record_discovery_coverage`, described below, even when it turns up
+nothing.
+
+The **feed** channel is postings pulled from API-backed job boards — boards
+that expose a real search API rather than requiring a browser session at all.
+Your run prompt may carry a feed block listing these postings directly,
+already fetched; there is no browser step for this channel; work the list it
+gives you the same way you would work a dorked or direct-board result, into
+the normal Applying flow below.
+
+Your run prompt may also carry a list of composed search queries, built
 deterministically from each enabled profile's `keywords` and `locations`,
 plus the configured job boards. Each one ships with a ready-made search URL
 printed beneath it — use the browser MCP tool (`browser_navigate`, or the
@@ -307,14 +322,16 @@ equivalent on the browser surface described below) to open that URL, and work
 the results as entry points into discovery. They are a starting point, not a
 boundary — you may point the browser at further searches of your own alongside
 them. A composed query never changes *where* you apply, which is still the
-employer's own site, per item 1 below.
+employer's own site, per item 1 below. These are the **dork queries** channel,
+worked last.
 
-Google dorking is not the only discovery path. Some configured boards are
-"direct" boards — searched on the board's own site instead of via a `site:`
-dork, because the board has no useful dork surface. Your run prompt carries a
-Direct-search boards block for these, with the board's URL, its sign-in URL
-(if any), and each enabled profile's keywords/locations to search with. For
-each one:
+Google dorking is not the only discovery path, and it is not the first one
+either. Some configured boards are **direct** boards — searched on the
+board's own site instead of via a `site:` dork, because the board has no
+useful dork surface. Your run prompt carries a Direct-search boards block for
+these, with the board's URL, its sign-in URL (if any), and each enabled
+profile's keywords/locations to search with. Work this channel before the
+dork queries. For each one:
 
 1. `browser_navigate` to the board's URL.
 2. `browser_snapshot` to read the page and locate its search box.
@@ -331,6 +348,14 @@ with `blocker="login_required"` and the board's sign-in URL, exactly as for a
 login wall hit mid-application (see item 4 under Applying, below) — queuing
 it for the operator to sign in to before the next run — and move on to the
 next board or query.
+
+After every board or query in every channel — feed, direct boards, and dork
+queries alike — call `record_discovery_coverage` with the channel, the board
+(or query), a status (`searched`, `empty`, `login_walled`, or `skipped`), and
+`postings_found`. This is what makes the §9 coverage report possible: a board
+worked but never recorded is indistinguishable, at report time, from one
+never reached at all. Call it even for a board that turned up nothing —
+`empty` is a real, useful status, and skipping the call is never acceptable.
 
 1. Find the role on the **employer's own site** (Ashby / Greenhouse / Personio /
    Lever). Apply there, not through an aggregator.
@@ -719,6 +744,9 @@ do not apply, do not retry later, do not attempt to work around it.
   `expires` date `check_cooldown` returned.
 - Targets **not examined** this run, named — so the next run does not read
   silence as a rejection.
+- Coverage per discovery channel and board (feed, direct boards, dork
+  queries), from the `record_discovery_coverage` calls made during the run —
+  including any board or query never reached at all.
 - Any application where `generate_cover_letter` was blocked and you dropped a
   claim to proceed: name the claim you dropped and why.
 - Any application abandoned under §6 or §7, and why.

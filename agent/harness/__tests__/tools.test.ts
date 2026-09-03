@@ -24,7 +24,7 @@ const BROWSER_TOOLS = [
   'browser_handle_dialog',
 ];
 
-/** The 17 truthcv tools granted individually by daily-apply.sh. */
+/** The 18 truthcv tools granted individually by daily-apply.sh. */
 const TRUTHCV_TOOLS = [
   'generate_cover_letter',
   'record_application',
@@ -43,6 +43,7 @@ const TRUTHCV_TOOLS = [
   'finish_run',
   'record_run_note',
   'record_postings_seen',
+  'record_discovery_coverage',
 ];
 
 /** Build a one-entry registry for a (server, tool) pair. */
@@ -59,7 +60,7 @@ function callFor(namespacedName: string): ToolCall {
 }
 
 describe('isToolAllowed', () => {
-  it('grants every one of the 17 named truthcv tools', () => {
+  it('grants every one of the 18 named truthcv tools', () => {
     for (const name of TRUTHCV_TOOLS) {
       expect(isToolAllowed('truthcv', name)).toBe(true);
     }

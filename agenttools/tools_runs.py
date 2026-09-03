@@ -93,6 +93,44 @@ def record_postings_seen(run_id: str = "", count: int = 0) -> dict:
     return {"recorded": True, **record.to_dict()}
 
 
+def record_discovery_coverage(
+    run_id: str = "",
+    channel: str = "",
+    board: str = "",
+    status: str = "",
+    postings_found: int = 0,
+    reason: str = "",
+) -> dict:
+    """Record one board/query's discovery coverage for this run.
+
+    Call once per board or query you searched, so a board you never reached
+    stays absent from the record rather than getting silently reported as
+    "empty" — the operator reads a missing entry as "not reached". ``channel``
+    must be one of feed, direct or dork; ``status`` must be one of searched,
+    empty, login_walled or skipped.
+    """
+    if not run_id:
+        return {"recorded": False}
+    if channel not in ("feed", "direct", "dork"):
+        return {"recorded": False}
+    if status not in ("searched", "empty", "login_walled", "skipped"):
+        return {"recorded": False}
+    entry = {
+        "channel": channel,
+        "board": board,
+        "status": status,
+        "postings_found": postings_found,
+        "reason": reason,
+    }
+    try:
+        record = _runs_store.add_discovery_coverage(run_id, entry)
+    except Exception:
+        return {"recorded": False}
+    if record is None:
+        return {"recorded": False}
+    return {"recorded": True, **record.to_dict()}
+
+
 def bump_run_counters(run_id: str = "", **counters: int) -> dict:
     """Internal entry point for other tool modules to add to a run's coverage
     counters. Not registered as an agent-facing MCP tool — callers are other

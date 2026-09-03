@@ -28,6 +28,7 @@ from agenttools.tools_research import (
 )
 from agenttools.tools_runs import (
     finish_run as _finish_run,
+    record_discovery_coverage as _record_discovery_coverage,
     record_postings_seen as _record_postings_seen,
     record_run_note as _record_run_note,
     start_run as _start_run,
@@ -146,6 +147,15 @@ _TOOL_REGISTRY = {
         "Leaves a free-text note on the run record for context that is not captured by the "
         "run's coverage numbers — the postings-seen count you report with record_postings_seen, "
         "or the screening and application records the rest is counted from.",
+    ),
+    "record_discovery_coverage": (
+        _record_discovery_coverage,
+        "Records one board or query's discovery coverage for this run: which channel (feed, "
+        "direct or dork), which board, and its status (searched, empty, login_walled or "
+        "skipped), plus how many postings it found. Call ONE TIME per board or query you "
+        "searched. A board you never call this for is read by the operator as 'not reached', "
+        "not as searched-and-empty — so an entry left uncalled is itself an honest coverage "
+        "gap, and a board you never reached must NOT be reported as empty.",
     ),
     "record_postings_seen": (
         _record_postings_seen,

@@ -209,7 +209,9 @@ services:
       # to, and drops its oldest messages itself, which is where the agent's
       # instructions live. So set this explicitly when pointing at ollama.
       # Setting it wrong is worse than leaving it unset — too high still
-      # overflows, too low silently drops context that was fitting.
+      # overflows, too low silently drops context that was fitting. The agent
+      # route's own Context window setting (Agents page), when set, takes
+      # precedence over this env value.
       - AGENT_CONTEXT_WINDOW=${AGENT_CONTEXT_WINDOW:-0}
       # Cap on a single MCP tool result's characters before it is inserted into
       # the conversation; a longer result is truncated with an explicit marker.

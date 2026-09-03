@@ -245,11 +245,11 @@ AGENT_API_TOKEN="$_CFG_TOKEN" TRUTHCV_MCP_URL="$_CFG_BASE" \
   node "$AGENT_DIR/agent-config.js" llm_credentials >"$_CFG_OUT" 2>"$_CFG_ERR"
 _CFG_RC=$?
 _CFG_NL=$(wc -l <"$_CFG_OUT")
-if [[ $_CFG_RC -eq 0 ]] && [[ "$_CFG_NL" -eq 6 ]] \
+if [[ $_CFG_RC -eq 0 ]] && [[ "$_CFG_NL" -eq 7 ]] \
    && [[ "$(sed -n 1p "$_CFG_OUT")" == "api_key" ]] \
    && [[ "$(sed -n 5p "$_CFG_OUT")" == "anthropic" ]] \
    && [[ ! -s "$_CFG_ERR" ]]; then
-  ok "agent-config.js llm_credentials -> 6 lines, token forwarded in X-Agent-Token"
+  ok "agent-config.js llm_credentials -> 7 lines, token forwarded in X-Agent-Token"
 else
   bad "agent-config.js llm_credentials failed: exit $_CFG_RC, $_CFG_NL line(s), stderr '$(tr '\n' ' ' <"$_CFG_ERR")'"
 fi
@@ -511,6 +511,7 @@ if [[ -n "${TRUTHCV_MCP_URL:-}" ]]; then
       "recommend_salary", "record_application", "record_company_board",
       "record_screening", "report_apply_failure",
       "start_run", "finish_run", "record_run_note", "record_postings_seen",
+      "record_discovery_coverage",
     ].sort();
 
     (async () => {

@@ -485,6 +485,16 @@ export interface RunRecord {
    * that completed normally. */
   stoppedReason: string;
   note: string;
+  discoveryCoverage: DiscoveryCoverage[];
+}
+
+/** One discovery attempt's outcome on a board/channel, for coverage reporting. */
+export interface DiscoveryCoverage {
+  channel: "feed" | "direct" | "dork";
+  board: string;
+  status: "searched" | "empty" | "login_walled" | "skipped";
+  postingsFound: number;
+  reason: string;
 }
 
 /** One page of runs from GET /api/runs, newest first. `total` counts every
@@ -703,6 +713,8 @@ export interface RouteChoice {
   model: string;
   /** Chosen effort level for models that support it; omit or "" for provider default. */
   effort?: string;
+  /** Context window size in tokens, when known. */
+  contextWindow?: number;
 }
 
 /** Routing configuration for tasks and defaults. */

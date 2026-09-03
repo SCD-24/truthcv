@@ -28,6 +28,7 @@ function makeRun(overrides: Partial<RunRecord> = {}): RunRecord {
     overCapWrites: 0,
     stoppedReason: "",
     note: "",
+    discoveryCoverage: [],
     ...overrides,
   };
 }
@@ -58,6 +59,42 @@ describe("RecentRunsSection", () => {
     expect(screen.getByText(/Queued for approval: 2/)).toBeTruthy();
     expect(screen.getByText(/Applied: 3\/5/)).toBeTruthy();
     expect(screen.getByText(/Stopped: apply cap reached/)).toBeTruthy();
+  });
+
+  it("renders per-channel discovery coverage for a run that recorded it", async () => {
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([
+        makeRun({
+          id: "run-with-coverage",
+          discoveryCoverage: [
+            { channel: "feed", board: "LinkedIn", status: "searched", postingsFound: 11, reason: "" },
+            { channel: "direct", board: "Ashby", status: "searched", postingsFound: 4, reason: "" },
+            { channel: "direct", board: "Greenhouse", status: "searched", postingsFound: 2, reason: "" },
+            { channel: "direct", board: "Lever", status: "searched", postingsFound: 0, reason: "" },
+            { channel: "direct", board: "Personio", status: "login_walled", postingsFound: 0, reason: "" },
+            { channel: "direct", board: "Workday", status: "login_walled", postingsFound: 0, reason: "" },
+          ],
+        }),
+      ]),
+    );
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("run-with-coverage")).toBeTruthy());
+    expect(
+      screen.getByText("Feed: 11 postings · Direct boards: 3 searched, 2 login-walled · Dorks: not reached"),
+    ).toBeTruthy();
+  });
+
+  it("shows no discovery coverage recorded when a run has none", async () => {
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([makeRun({ id: "run-no-coverage", discoveryCoverage: [] })]),
+    );
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("run-no-coverage")).toBeTruthy());
+    expect(screen.getByText("Discovery coverage: none recorded")).toBeTruthy();
   });
 
   it("renders a running run distinctly from a finished one", async () => {

@@ -9,7 +9,7 @@ summary instead of silence. Modelled on screening/model.py.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 STATUS_VALUES = ("running", "completed", "cancelled", "failed")
 
@@ -63,6 +63,14 @@ class RunRecord:
     stopped_reason: str = ""
     # Free-text note the agent can leave via record_run_note.
     note: str = ""
+    # Per-source discovery coverage: what the agent actually searched this run,
+    # not just what it found. Each entry is a dict shaped like:
+    #   {"channel": "feed"|"direct"|"dork", "board": str,
+    #    "status": "searched"|"empty"|"login_walled"|"skipped",
+    #    "postings_found": int, "reason": str}
+    # so a run that skipped or was blocked from a source leaves that fact
+    # behind instead of just an absence of postings from it.
+    discovery_coverage: list[dict] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, raw: dict) -> "RunRecord":

@@ -25,7 +25,7 @@ import type { ToolCall, ToolDefinition, ToolResult } from './providers/types.js'
 import { readRunbookSection, readRunbookSectionTool } from './builtins/readRunbook.js';
 
 /**
- * The 17 truthcv tools granted individually by `daily-apply.sh`, as their bare
+ * The 18 truthcv tools granted individually by `daily-apply.sh`, as their bare
  * (un-namespaced) tool names.
  *
  * These are enumerated one by one ON PURPOSE: naming each tool keeps the blast
@@ -51,6 +51,7 @@ const TRUTHCV_ALLOWED_TOOL_NAMES = [
   'finish_run',
   'record_run_note',
   'record_postings_seen',
+  'record_discovery_coverage',
 ] as const;
 
 /** The MCP server key of the truthcv tool surface the named grants apply to. */
