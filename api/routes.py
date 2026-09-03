@@ -825,17 +825,25 @@ def _application_model(app) -> ApplicationModel:
 
 
 @router.get("/applications", response_model=list[ApplicationModel])
-def list_applications() -> list[ApplicationModel]:
-    """Every tracked job application, most recent first."""
-    apps = applications_service.list_applications()
+def list_applications(q: str = "") -> list[ApplicationModel]:
+    """Every tracked job application, most recent first.
+
+    q: case-insensitive substring filter over company, website, application URL,
+    notes, posting and role; empty returns everything
+    """
+    apps = applications_service.list_applications(q)
     return [_application_model(a) for a in apps]
 
 
 @router.get("/applications/page", response_model=ApplicationListResponse)
 def list_applications_page(
-    limit: int = 25, offset: int = 0, sort: str = "date", direction: str = "desc"
+    limit: int = 25, offset: int = 0, sort: str = "date", direction: str = "desc", q: str = ""
 ) -> ApplicationListResponse:
     """One page of applications, server-sorted and paginated.
+
+    ``q`` is the same case-insensitive substring filter as GET /api/applications
+    (company, website, application URL, notes, posting, role); it is applied
+    before paging so ``total`` counts matches.
 
     Reads the application store in-process and returns a paginated, sorted page
     of applications with the total count across all records. Sort keys and
@@ -848,7 +856,9 @@ def list_applications_page(
     """
     offset = max(0, offset)
     try:
-        apps, total = applications_service.list_applications_page(limit=limit, offset=offset, sort=sort, direction=direction)
+        apps, total = applications_service.list_applications_page(
+            limit=limit, offset=offset, sort=sort, direction=direction, q=q
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return ApplicationListResponse(

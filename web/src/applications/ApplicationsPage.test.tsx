@@ -103,6 +103,7 @@ describe("ApplicationsPage paging", () => {
       offset: 0,
       sort: "date",
       direction: "desc",
+      q: "",
     });
   });
 
@@ -239,5 +240,41 @@ describe("ApplicationsPage compact row layout", () => {
     fireEvent.click(link);
 
     expect(await screen.findByRole("dialog")).toBeTruthy();
+  });
+});
+
+describe("ApplicationsPage search", () => {
+  it("filters applications by search query", async () => {
+    const acme = makeApp({ id: "1", company: "Acme" });
+    const vandelay = makeApp({ id: "2", company: "Vandelay" });
+
+    await renderPage([acme, vandelay]);
+
+    // Initial load passes no filter, so the pager's first page is the whole ledger.
+    expect(listApplicationsPage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ q: "", offset: 0 }),
+    );
+
+    vi.mocked(listApplicationsPage).mockResolvedValue(makePage([vandelay], 1));
+
+    const searchInput = await screen.findByLabelText("Search applications");
+    fireEvent.change(searchInput, { target: { value: "vand" } });
+
+    // Wait past the debounce (250ms) for the search call to fire.
+    await waitFor(
+      () => {
+        expect(listApplicationsPage).toHaveBeenLastCalledWith(
+          expect.objectContaining({ q: "vand", offset: 0 }),
+        );
+      },
+      { timeout: 400 },
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Vandelay")).toBeTruthy();
+      expect(screen.queryByText("Acme")).toBeNull();
+    });
+
+    expect(screen.getByText("1 matching")).toBeTruthy();
   });
 });

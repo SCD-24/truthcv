@@ -81,6 +81,9 @@ export function ApplicationsPage({
   const [total, setTotal] = useState(0);
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const SEARCH_DEBOUNCE_MS = 250;
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   // The row being edited: an id for an existing row, "new" for the add form.
@@ -119,6 +122,17 @@ export function ApplicationsPage({
     setPosting(null);
   }
 
+  // The search box is debounced: the typed text lands in `debouncedQuery`
+  // only after the operator pauses, and a new search always restarts at page 0
+  // because the server's `total` (and so the pager) changes with the filter.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(query);
+      setPage(0);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query]);
+
   useEffect(() => {
     let alive = true;
     // Polls are not serialised, so a request slower than the interval can
@@ -135,6 +149,7 @@ export function ApplicationsPage({
         offset: page * APPLICATIONS_PAGE_SIZE,
         sort: sortKey,
         direction: sortDir,
+        q: debouncedQuery,
       })
         .then((result) => {
           if (!alive || seq !== latest) return;
@@ -157,7 +172,7 @@ export function ApplicationsPage({
     return () => {
       alive = false;
     };
-  }, [page, sortCol, sortDir, reloadKey]);
+  }, [page, sortCol, sortDir, reloadKey, debouncedQuery]);
 
   /** Download the whole ledger as a zip (CSV + per-company document folders).
    * A plain navigation lets the browser stream the file straight to disk. */
@@ -250,14 +265,25 @@ export function ApplicationsPage({
         direction="row"
         sx={{ mb: 2, alignItems: "center", justifyContent: "space-between" }}
       >
-        <Typography variant="body2" color="text.secondary">
-          {loading ? "Loading…" : `${apps.length} tracked`}
-        </Typography>
+        <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+          <Typography variant="body2" color="text.secondary">
+            {loading ? "Loading…" : query !== "" ? `${total} matching` : `${apps.length} tracked`}
+          </Typography>
+          <TextField
+            size="small"
+            type="search"
+            label="Search"
+            placeholder="Company, notes, posting…"
+            slotProps={{ input: { "aria-label": "Search applications" } }}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </Stack>
         <Stack direction="row" spacing={1}>
           <Button
             variant="outlined"
             onClick={exportApplications}
-            disabled={apps.length === 0}
+            disabled={apps.length === 0 && query === ""}
             title="Download the whole table as a CSV with documents grouped by company, zipped"
           >
             Export
@@ -286,7 +312,9 @@ export function ApplicationsPage({
 
       {!loading && total === 0 && editing !== "new" ? (
         <Typography color="text.secondary" sx={{ py: 4, textAlign: "center" }}>
-          No applications yet. Add one to start tracking where your CVs go.
+          {debouncedQuery
+            ? "No applications match your search."
+            : "No applications yet. Add one to start tracking where your CVs go."}
         </Typography>
       ) : loading && apps.length === 0 ? (
         <Typography variant="body2" color="text.secondary">

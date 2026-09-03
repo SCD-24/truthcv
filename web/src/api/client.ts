@@ -272,23 +272,32 @@ export function generateCoverLetter(
   });
 }
 
-/** Every tracked job application, most recent first. */
-export function listApplications(): Promise<Application[]> {
+/** Every tracked job application, most recent first. When `q` is a non-blank
+ * search string, filters to applications matching it server-side. */
+export function listApplications(q = ""): Promise<Application[]> {
+  if (q.trim()) {
+    const params = new URLSearchParams({ q });
+    return request(`/api/applications?${params}`);
+  }
   return request("/api/applications");
 }
 
-/** One page of applications, sorted by the given key and direction. */
+/** One page of applications, sorted by the given key and direction. A
+ * non-blank `q` filters server-side (same fields as `listApplications`)
+ * before paging, so the page's `total` is the match count. */
 export function listApplicationsPage(opts: {
   limit?: number;
   offset?: number;
   sort?: ApplicationSortKey;
   direction?: "asc" | "desc";
+  q?: string;
 }): Promise<ApplicationPage> {
   const params = new URLSearchParams();
   if (opts.limit !== undefined) params.set("limit", String(opts.limit));
   if (opts.offset !== undefined) params.set("offset", String(opts.offset));
   if (opts.sort) params.set("sort", opts.sort);
   if (opts.direction) params.set("direction", opts.direction);
+  if (opts.q && opts.q.trim()) params.set("q", opts.q);
   const qs = params.toString();
   return request<ApplicationPage>(`/api/applications/page${qs ? `?${qs}` : ""}`);
 }

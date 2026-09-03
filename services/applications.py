@@ -37,16 +37,49 @@ from screening.cooldown import cooldown
 from screening.url import normalize_application_url
 
 
-def list_applications() -> list:
-    """Every tracked application, most recent first.
+def _matches(app, needle: str) -> bool:
+    """True when ``needle`` (already lower-cased) is a substring of any of the
+    record's company, website, application_url, notes, posting or role."""
+    fields = [
+        app.company or "",
+        app.website or "",
+        app.application_url or "",
+        app.notes or "",
+        app.posting or "",
+        app.role or "",
+    ]
+    return any(needle in field.lower() for field in fields)
+
+
+def filter_applications(apps: list, q: str = "") -> list:
+    """Keep the records matching ``q`` case-insensitively; blank ``q`` keeps all.
+
+    Shared by the whole-list and the paged readers so the two can never
+    disagree about what a search term matches.
+    """
+    needle = q.strip().lower()
+    if not needle:
+        return list(apps)
+    return [a for a in apps if _matches(a, needle)]
+
+
+def list_applications(q: str = "") -> list:
+    """Every tracked application, most recent first, optionally filtered by ``q``.
 
     The single source of the sort both the HTTP list route and the export route
-    apply, so the two can never disagree about order.
+    apply, so the two can never disagree about order. The export route calls
+    this without ``q``, so export is never filtered.
+
+    ``q`` is matched case-insensitively against the company, website,
+    application_url, notes, posting, and role fields when non-blank.
     """
-    return sorted(app_store.load_all(), key=lambda a: a.created_at, reverse=True)
+    apps = sorted(app_store.load_all(), key=lambda a: a.created_at, reverse=True)
+    return filter_applications(apps, q)
 
 
-def list_applications_page(limit: int, offset: int, sort: str, direction: str) -> tuple[list, int]:
+def list_applications_page(
+    limit: int, offset: int, sort: str, direction: str, q: str = ""
+) -> tuple[list, int]:
     """One page of applications, sorted by the given key and direction.
 
     Args:
@@ -54,6 +87,9 @@ def list_applications_page(limit: int, offset: int, sort: str, direction: str) -
         offset: Number of applications to skip from the start. Clamped to >= 0.
         sort: The sort column (e.g. "company", "date").
         direction: "asc" or "desc".
+        q: Optional case-insensitive search (see ``filter_applications``). The
+           filter runs before paging, so ``total`` is the number of matches and
+           the pager reflects the search.
 
     Returns:
         A tuple of (page_of_applications, total_count).
@@ -63,14 +99,14 @@ def list_applications_page(limit: int, offset: int, sort: str, direction: str) -
     """
     from applications.sorting import sort_applications
 
-    all_apps = app_store.load_all()
+    all_apps = filter_applications(app_store.load_all(), q)
     sorted_apps = sort_applications(all_apps, sort=sort, direction=direction)
     total = len(sorted_apps)
-    
+
     offset = max(0, offset)
     if offset >= total:
         return [], total
-    
+
     if limit <= 0:
         return sorted_apps[offset:], total
     else:
