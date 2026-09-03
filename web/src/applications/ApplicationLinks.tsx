@@ -33,7 +33,7 @@ export function ApplicationLinks({
       direction="row"
       spacing={1.5}
       className="apps__links"
-      sx={{ flexWrap: "wrap", alignItems: "center" }}
+      sx={{ flexWrap: "nowrap", alignItems: "center" }}
     >
       <ExternalLink label="Website" href={app.website} />
       <ExternalLink label="URL" href={app.applicationUrl} />

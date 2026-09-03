@@ -172,13 +172,29 @@
 
 .apps__links {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: baseline;
   gap: var(--space-3);
   white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 0.72rem;
   margin-top: 2px;
+}
+
+.apps__subrow td {
+  border-top: none;
+  padding-top: 0;
+  padding-bottom: var(--space-2);
+}
+
+.apps__subcell {
+  border-top: none;
+  padding-top: 0;
+  padding-bottom: var(--space-2);
+}
+
+.apps__table tbody tr.apps__subrow + tr td {
+  border-top: 1px solid var(--line);
 }
 
 /* No document linked yet: an actionable "attach" affordance, not a dead hint. */
@@ -195,7 +211,8 @@
   text-decoration: underline;
 }
 
-/* One linked document: preview label on top, quick links + saved date below. */
+/* One linked document: preview label on top, quick links + saved date below.
+ * Links are rendered inline in a sub-row spanning all columns. */
 .apps__docline {
   display: flex;
   flex-direction: row;

@@ -7,6 +7,7 @@ import { BrowserRouter } from "react-router-dom";
 import { listApplicationsPage } from "../api/client";
 import type { Application, ApplicationPage } from "../api/types";
 import { ApplicationsPage } from "./ApplicationsPage";
+import { COLUMN_DEFS } from "./sorting";
 
 vi.mock("../api/client", () => ({
   APPLICATIONS_EXPORT_URL: "/api/applications/export",
@@ -240,6 +241,43 @@ describe("ApplicationsPage compact row layout", () => {
     fireEvent.click(link);
 
     expect(await screen.findByRole("dialog")).toBeTruthy();
+  });
+
+  it("renders each application as a main row plus a links sub-row spanning all columns", async () => {
+    await renderPage([
+      makeApp({
+        id: "a1",
+        posting: "",
+        cvDocument: null,
+        coverLetterDocument: null,
+        fieldsSubmitted: [],
+      }),
+    ]);
+
+    const table = await screen.findByRole("table");
+    const rows = within(table).getAllByRole("row");
+
+    // Header + main row + sub-row = 3 rows total
+    expect(rows).toHaveLength(3);
+
+    // The second row (index 1) is the main data row
+    const mainRow = rows[1];
+    expect(within(mainRow).getByText("Acme")).toBeTruthy();
+
+    // The third row (index 2) is the sub-row with links
+    const subRow = rows[2];
+    const subCell = within(subRow).getAllByRole("cell")[0];
+
+    // Sub-row's cell should span all columns
+    expect(subCell.getAttribute("colspan")).toBe(String(COLUMN_DEFS.length));
+
+    // Sub-row should contain the action links
+    expect(within(subCell).getByText("+ Add posting")).toBeTruthy();
+    expect(within(subCell).getByText("+ Add CV")).toBeTruthy();
+    expect(within(subCell).getByText("+ Add cover letter")).toBeTruthy();
+
+    // Main row's Company cell should NOT contain the links
+    expect(within(mainRow).queryByText("+ Add CV")).toBeNull();
   });
 });
 
