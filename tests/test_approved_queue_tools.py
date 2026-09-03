@@ -435,3 +435,25 @@ def test_expired_lease_is_reclaimable_live_lease_is_not(data_dir):
     items = get_approved_applications(run_id="run-later")
     assert [i["screening_id"] for i in items] == [s.id]
     assert items[0]["claimed_by_run"] == "run-later"
+
+
+def test_login_required_blocker_consumes_no_cap_budget(data_dir):
+    """A login-walled item is reported but never claimed, and the cap slot
+    still goes to an unblocked item."""
+    s1 = _with_letter(company="Login Wall Co", url="https://login.example/jobs/1")
+    store.record_apply_failure(
+        s1.id, "sign-in required", blocker="login_required",
+        signin_url="https://login.example/login"
+    )
+    s2 = _with_letter(company="Fresh Co", url="https://fresh.example/jobs/1")
+
+    items = get_approved_applications(run_id="run-blocked", limit=1)
+    reasons = {i["screening_id"]: i["blocked_reason"] for i in items}
+    # The login-required item is reported and the one cap slot still goes to
+    # the unblocked item.
+    assert "login_required" in reasons.values()
+    assert "" in reasons.values()
+    # Both items are in the list, but only the unblocked one is claimed.
+    claimed_ids = {i["screening_id"] for i in items if i["claimed_by_run"]}
+    assert s2.id in claimed_ids
+    assert s1.id not in claimed_ids

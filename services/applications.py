@@ -37,6 +37,32 @@ from screening.cooldown import cooldown
 from screening.url import normalize_application_url
 
 
+def _matches(app, needle: str) -> bool:
+    """True when ``needle`` (already lower-cased) is a substring of any of the
+    record's company, website, application_url, notes, posting or role."""
+    fields = [
+        app.company or "",
+        app.website or "",
+        app.application_url or "",
+        app.notes or "",
+        app.posting or "",
+        app.role or "",
+    ]
+    return any(needle in field.lower() for field in fields)
+
+
+def filter_applications(apps: list, q: str = "") -> list:
+    """Keep the records matching ``q`` case-insensitively; blank ``q`` keeps all.
+
+    Shared by the whole-list and the paged readers so the two can never
+    disagree about what a search term matches.
+    """
+    needle = q.strip().lower()
+    if not needle:
+        return list(apps)
+    return [a for a in apps if _matches(a, needle)]
+
+
 def list_applications(q: str = "") -> list:
     """Every tracked application, most recent first, optionally filtered by ``q``.
 
@@ -47,24 +73,44 @@ def list_applications(q: str = "") -> list:
     ``q`` is matched case-insensitively against the company, website,
     application_url, notes, posting, and role fields when non-blank.
     """
-
-    def _matches(app, needle: str) -> bool:
-        """Match a record across company, website, application_url, notes, posting, role fields."""
-        fields = [
-            app.company or "",
-            app.website or "",
-            app.application_url or "",
-            app.notes or "",
-            app.posting or "",
-            app.role or ""
-        ]
-        return any(needle in field.lower() for field in fields)
-
     apps = sorted(app_store.load_all(), key=lambda a: a.created_at, reverse=True)
-    if not q.strip():
-        return apps
-    needle = q.strip().lower()
-    return [a for a in apps if _matches(a, needle)]
+    return filter_applications(apps, q)
+
+
+def list_applications_page(
+    limit: int, offset: int, sort: str, direction: str, q: str = ""
+) -> tuple[list, int]:
+    """One page of applications, sorted by the given key and direction.
+
+    Args:
+        limit: Maximum number of applications per page. If <= 0, returns all (unlimited).
+        offset: Number of applications to skip from the start. Clamped to >= 0.
+        sort: The sort column (e.g. "company", "date").
+        direction: "asc" or "desc".
+        q: Optional case-insensitive search (see ``filter_applications``). The
+           filter runs before paging, so ``total`` is the number of matches and
+           the pager reflects the search.
+
+    Returns:
+        A tuple of (page_of_applications, total_count).
+
+    Raises:
+        ValueError: If sort key or direction is invalid.
+    """
+    from applications.sorting import sort_applications
+
+    all_apps = filter_applications(app_store.load_all(), q)
+    sorted_apps = sort_applications(all_apps, sort=sort, direction=direction)
+    total = len(sorted_apps)
+
+    offset = max(0, offset)
+    if offset >= total:
+        return [], total
+
+    if limit <= 0:
+        return sorted_apps[offset:], total
+    else:
+        return sorted_apps[offset:offset + limit], total
 
 
 def create_application_record(fields: dict):
@@ -220,6 +266,8 @@ def gather_approvable_screenings() -> list[dict]:
             blocked_reason = "contradictory_research"
         elif status.blocked:
             blocked_reason = "cooldown"
+        elif s.apply_blocker == "login_required":
+            blocked_reason = "login_required"
         elif not s.url.strip():
             blocked_reason = "no_url"
         else:

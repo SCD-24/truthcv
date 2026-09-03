@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link as RouterLink } from "react-router-dom";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Button from "@mui/material/Button";
@@ -15,7 +14,6 @@ import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
-import Link from "@mui/material/Link";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -27,24 +25,14 @@ import {
   APPLICATIONS_EXPORT_URL,
   createApplication,
   deleteApplication,
-  listApplications,
+  listApplicationsPage,
   updateApplication,
 } from "../api/client";
-import type {
-  Application,
-  ApplicationCreate,
-  ApplicationDocument,
-} from "../api/types";
+import type { Application, ApplicationCreate, ApplicationSortKey } from "../api/types";
 import { DocumentAttachModal } from "./DocumentAttachModal";
-import {
-  COLUMN_DEFS,
-  DEFAULT_SORT_COLUMN,
-  DEFAULT_SORT_DIRECTION,
-  compareApplications,
-} from "./sorting";
+import { ApplicationLinks } from "./ApplicationLinks";
+import { COLUMN_DEFS, DEFAULT_SORT_COLUMN, DEFAULT_SORT_DIRECTION } from "./sorting";
 import type { ColumnDef, SortDirection } from "./sorting";
-import { filledFormPath } from "../routes";
-import { safeHref } from "../utils/safeUrl";
 import "../styles/applications.css";
 
 type PreviewKind = "cv" | "cover-letter";
@@ -87,11 +75,17 @@ export function ApplicationsPage({
     source: string;
   }) => void;
 }) {
+  const APPLICATIONS_PAGE_SIZE = 25;
+
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const SEARCH_DEBOUNCE_MS = 250;
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   // The row being edited: an id for an existing row, "new" for the add form.
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [draft, setDraft] = useState<ApplicationCreate>(EMPTY);
@@ -107,6 +101,15 @@ export function ApplicationsPage({
   const [sortCol, setSortCol] = useState<ColumnDef | null>(DEFAULT_SORT_COLUMN);
   const [sortDir, setSortDir] = useState<SortDirection>(DEFAULT_SORT_DIRECTION);
 
+  const pageCount = Math.max(1, Math.ceil(total / APPLICATIONS_PAGE_SIZE));
+
+  // A record finishing/being deleted while you are on the last page can shrink the history out
+  // from under the current page number. Step back rather than showing an
+  // empty page with a Previous button as the only way out.
+  useEffect(() => {
+    if (page > 0 && page > pageCount - 1) setPage(pageCount - 1);
+  }, [page, pageCount]);
+
   /** Replace an application in the list after a document is attached/edited. */
   function applyAttached(updated: Application) {
     setApps((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
@@ -119,19 +122,57 @@ export function ApplicationsPage({
     setPosting(null);
   }
 
+  // The search box is debounced: the typed text lands in `debouncedQuery`
+  // only after the operator pauses, and a new search always restarts at page 0
+  // because the server's `total` (and so the pager) changes with the filter.
   useEffect(() => {
-    const isInitialLoad = loading;
     const timer = setTimeout(() => {
-      listApplications(query)
-        .then(setApps)
-        .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load applications."))
-        .finally(() => {
-          if (isInitialLoad) setLoading(false);
-        });
-    }, isInitialLoad ? 0 : SEARCH_DEBOUNCE_MS);
+      setDebouncedQuery(query);
+      setPage(0);
+    }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
+
+  useEffect(() => {
+    let alive = true;
+    // Polls are not serialised, so a request slower than the interval can
+    // land after its own successor. Without an ordering guard that older
+    // response wins, and it carries an older `total` — which shrinks
+    // pageCount and can step the operator's page back under them.
+    let latest = 0;
+
+    function refresh() {
+      const seq = ++latest;
+      const sortKey = (sortCol?.sortKey as ApplicationSortKey) || "date";
+      listApplicationsPage({
+        limit: APPLICATIONS_PAGE_SIZE,
+        offset: page * APPLICATIONS_PAGE_SIZE,
+        sort: sortKey,
+        direction: sortDir,
+        q: debouncedQuery,
+      })
+        .then((result) => {
+          if (!alive || seq !== latest) return;
+          setApps(result.applications);
+          setTotal(result.total);
+          setError(null);
+        })
+        .catch((e: unknown) => {
+          if (!alive || seq !== latest) return;
+          setError(e instanceof Error ? e.message : "Couldn't load applications.");
+        })
+        .finally(() => {
+          if (!alive || seq !== latest) return;
+          setLoading(false);
+        });
+    }
+
+    setLoading(true);
+    refresh();
+    return () => {
+      alive = false;
+    };
+  }, [page, sortCol, sortDir, reloadKey, debouncedQuery]);
 
   /** Download the whole ledger as a zip (CSV + per-company document folders).
    * A plain navigation lets the browser stream the file straight to disk. */
@@ -168,10 +209,12 @@ export function ApplicationsPage({
     setError(null);
     try {
       if (editing === "new") {
-        const created = await createApplication(draft);
-        setApps((prev) => [created, ...prev]);
+        await createApplication(draft);
+        // New applications change the list, so refetch the current page
+        setReloadKey((k) => k + 1);
       } else if (editing) {
         const updated = await updateApplication(editing, draft);
+        // Edited applications may stay on the current page; keep in-place replace
         setApps((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
       }
       setEditing(null);
@@ -187,7 +230,8 @@ export function ApplicationsPage({
     setError(null);
     try {
       await deleteApplication(id);
-      setApps((prev) => prev.filter((a) => a.id !== id));
+      // Deletion changes the list, so refetch the current page
+      setReloadKey((k) => k + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't delete the application.");
     }
@@ -223,7 +267,7 @@ export function ApplicationsPage({
       >
         <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
           <Typography variant="body2" color="text.secondary">
-            {loading ? "Loading…" : query !== "" ? `${apps.length} matching` : `${apps.length} tracked`}
+            {loading ? "Loading…" : query !== "" ? `${total} matching` : `${apps.length} tracked`}
           </Typography>
           <TextField
             size="small"
@@ -266,71 +310,104 @@ export function ApplicationsPage({
         />
       )}
 
-      {!loading && apps.length === 0 && editing !== "new" ? (
+      {!loading && total === 0 && editing !== "new" ? (
         <Typography color="text.secondary" sx={{ py: 4, textAlign: "center" }}>
-          No applications yet. Add one to start tracking where your CVs go.
+          {debouncedQuery
+            ? "No applications match your search."
+            : "No applications yet. Add one to start tracking where your CVs go."}
+        </Typography>
+      ) : loading && apps.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          Loading…
         </Typography>
       ) : (
-        <TableContainer sx={{ width: "100%" }}>
-          <Table size="small" className="apps__table" sx={{ width: "100%" }}>
-            <TableHead>
-              <TableRow>
-                {COLUMN_DEFS.map((c) => (
-                  <TableCell key={c.label || "actions"}>
-                    {c.sortable ? (
-                      <TableSortLabel
-                        active={sortCol?.label === c.label}
-                        direction={sortCol?.label === c.label ? sortDir : "asc"}
-                        onClick={() => {
-                          if (sortCol?.label === c.label) setSortDir(sortDir === "asc" ? "desc" : "asc");
-                          else {
-                            setSortCol(c);
-                            setSortDir("asc");
-                          }
-                        }}
-                      >
-                        {c.label}
-                      </TableSortLabel>
-                    ) : (
-                      c.label
-                    )}
-                  </TableCell>
-                ))}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {[...apps]
-                .sort((a, b) => compareApplications(a, b, sortCol, sortDir))
-                .map((app) =>
-                editing === app.id ? (
-                  <TableRow key={app.id}>
-                    <TableCell colSpan={COLUMN_DEFS.length}>
-                      <ApplicationForm
-                        draft={draft}
-                        setDraft={setDraft}
-                        saving={saving}
-                        onSave={save}
-                        onCancel={() => setEditing(null)}
-                      />
+        <>
+          <TableContainer sx={{ width: "100%" }}>
+            <Table size="small" className="apps__table" sx={{ width: "100%" }}>
+              <TableHead>
+                <TableRow>
+                  {COLUMN_DEFS.map((c) => (
+                    <TableCell key={c.label || "actions"}>
+                      {c.sortable ? (
+                        <TableSortLabel
+                          active={sortCol?.label === c.label}
+                          direction={sortCol?.label === c.label ? sortDir : "asc"}
+                          onClick={() => {
+                            if (sortCol?.label === c.label) setSortDir(sortDir === "asc" ? "desc" : "asc");
+                            else {
+                              setSortCol(c);
+                              setSortDir("asc");
+                              setPage(0);
+                            }
+                          }}
+                        >
+                          {c.label}
+                        </TableSortLabel>
+                      ) : (
+                        c.label
+                      )}
                     </TableCell>
-                  </TableRow>
-                ) : (
-                  <ApplicationRow
-                    key={app.id}
-                    app={app}
-                    onEdit={() => startEdit(app)}
-                    onDelete={() => remove(app.id)}
-                    onOpenDocument={(kind, source) =>
-                      onEditDocument({ appId: app.id, kind, source })
-                    }
-                    onAttach={(kind) => setAttach({ app, kind })}
-                    onOpenPosting={() => setPosting(app)}
-                  />
-                ),
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                  ))}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {apps.map((app) =>
+                  editing === app.id ? (
+                    <TableRow key={app.id}>
+                      <TableCell colSpan={COLUMN_DEFS.length}>
+                        <ApplicationForm
+                          draft={draft}
+                          setDraft={setDraft}
+                          saving={saving}
+                          onSave={save}
+                          onCancel={() => setEditing(null)}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    <ApplicationRow
+                      key={app.id}
+                      app={app}
+                      onEdit={() => startEdit(app)}
+                      onDelete={() => remove(app.id)}
+                      onOpenDocument={(kind, source) =>
+                        onEditDocument({ appId: app.id, kind, source })
+                      }
+                      onAttach={(kind) => setAttach({ app, kind })}
+                      onOpenPosting={() => setPosting(app)}
+                    />
+                  ),
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+
+          {total > 0 && (
+            <Stack
+              direction="row"
+              spacing={2}
+              sx={{ alignItems: "center", justifyContent: "flex-end", mt: 2, flexWrap: "wrap" }}
+            >
+              <Typography variant="caption" color="text.secondary">
+                Page {page + 1} of {pageCount}
+              </Typography>
+              <Button
+                size="small"
+                disabled={page === 0}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+              >
+                Previous
+              </Button>
+              <Button
+                size="small"
+                disabled={page >= pageCount - 1}
+                onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+              >
+                Next
+              </Button>
+            </Stack>
+          )}
+        </>
       )}
 
       {attach && (
@@ -370,48 +447,22 @@ function ApplicationRow({
   onAttach: (kind: PreviewKind) => void;
   onOpenPosting: () => void;
 }) {
-  // Website/application URLs can be agent-scraped, so a disallowed scheme
-  // (javascript:, …) must render as inert text, never a clickable href.
-  const websiteHref = safeHref(app.website);
-  const applicationHref = safeHref(app.applicationUrl);
   return (
     <TableRow hover>
-      <TableCell className="apps__company apps__clip" title={app.company || undefined}>
-        {app.company || "—"}
+      <TableCell className="apps__company apps__clip">
+        <Stack spacing={0.5}>
+          <span className="apps__clip" title={app.company || undefined}>
+            {app.company || "—"}
+          </span>
+          <ApplicationLinks
+            app={app}
+            onOpenDocument={onOpenDocument}
+            onAttach={onAttach}
+            onOpenPosting={onOpenPosting}
+          />
+        </Stack>
       </TableCell>
       <TableCell>{app.applicationDate || "—"}</TableCell>
-      <TableCell>
-        {app.website ? (
-          websiteHref ? (
-            <Link
-              href={websiteHref}
-              target="_blank"
-              rel="noreferrer"
-              title={websiteHref}
-              aria-label={`Open website: ${websiteHref}`}
-            >
-              link
-            </Link>
-          ) : (
-            <Typography component="span">{app.website}</Typography>
-          )
-        ) : (
-          "—"
-        )}
-      </TableCell>
-      <TableCell>
-        {app.applicationUrl && app.applicationUrl !== "N/A" ? (
-          applicationHref ? (
-            <Link href={applicationHref} target="_blank" rel="noreferrer">
-              link
-            </Link>
-          ) : (
-            <Typography component="span">{app.applicationUrl}</Typography>
-          )
-        ) : (
-          app.applicationUrl || "—"
-        )}
-      </TableCell>
       <TableCell>
         <Stamp on={app.submitted} yes="Submitted" no="Draft" />
       </TableCell>
@@ -455,19 +506,6 @@ function ApplicationRow({
         </Box>
       </TableCell>
       <TableCell>
-        <PostingCell app={app} onOpen={onOpenPosting} />
-      </TableCell>
-      <TableCell>
-        <DocumentLinks
-          app={app}
-          onOpenDocument={onOpenDocument}
-          onAttach={onAttach}
-        />
-      </TableCell>
-      <TableCell>
-        <FilledFormCell app={app} />
-      </TableCell>
-      <TableCell>
         <Stack direction="row" spacing={1}>
           <Button size="small" onClick={onEdit}>
             Edit
@@ -478,115 +516,6 @@ function ApplicationRow({
         </Stack>
       </TableCell>
     </TableRow>
-  );
-}
-
-/**
- * The CV/cover-letter linked to this application. Each present document is a
- * clickable entry that opens it in the Download step for re-editing; absent
- * documents show a muted hint so it is always clear what is (and isn't) linked.
- */
-function DocumentLinks({
-  app,
-  onOpenDocument,
-  onAttach,
-}: {
-  app: Application;
-  onOpenDocument: (kind: PreviewKind, source: string) => void;
-  onAttach: (kind: PreviewKind) => void;
-}) {
-  return (
-    <Stack className="apps__docs" spacing={0.75}>
-      {app.cvDocument ? (
-        <DocLine
-          label="CV"
-          doc={app.cvDocument}
-          onOpen={() => onOpenDocument("cv", app.cvDocument!.source)}
-        />
-      ) : (
-        <AddDocLine label="Add CV" onAdd={() => onAttach("cv")} />
-      )}
-      {app.coverLetterDocument ? (
-        <DocLine
-          label="Cover letter"
-          doc={app.coverLetterDocument}
-          onOpen={() =>
-            onOpenDocument("cover-letter", app.coverLetterDocument!.source)
-          }
-        />
-      ) : (
-        <AddDocLine label="Add cover letter" onAdd={() => onAttach("cover-letter")} />
-      )}
-    </Stack>
-  );
-}
-
-/**
- * The job posting linked to this application: a link that opens the posting
- * viewer/editor when set, or an actionable "add posting" affordance when empty
- * — mirroring how a CV or cover letter is linked.
- */
-function PostingCell({ app, onOpen }: { app: Application; onOpen: () => void }) {
-  if (!app.posting) {
-    return (
-      <div className="apps__docline">
-        <Link
-          component="button"
-          type="button"
-          onClick={onOpen}
-          className="apps__docadd"
-        >
-          + Add posting
-        </Link>
-      </div>
-    );
-  }
-  const firstLine = app.posting.split("\n").find((l) => l.trim()) ?? "Posting";
-  const peek = firstLine.slice(0, 40);
-  return (
-    <div className="apps__docline">
-      <Link
-        component="button"
-        type="button"
-        onClick={onOpen}
-        className="apps__doclink"
-        title="View or edit the job posting"
-      >
-        Posting
-      </Link>
-      <span className="apps__docmeta apps__postingpeek" title={firstLine}>
-        {peek}
-        {firstLine.length > peek.length ? "…" : ""}
-      </span>
-    </div>
-  );
-}
-
-/**
- * Link to the read-only filled-form evidence page for this application —
- * the field values, confirmation and attachments the agent recorded when it
- * submitted the form. A muted dash when nothing was recorded (hand-logged
- * applications legitimately have no evidence).
- */
-function FilledFormCell({ app }: { app: Application }) {
-  const count = app.fieldsSubmitted?.length ?? 0;
-  if (count === 0) {
-    return <span className="apps__docmeta">—</span>;
-  }
-  return (
-    <div className="apps__docline">
-      <Link
-        component={RouterLink}
-        to={filledFormPath(app.id)}
-        className="apps__doclink"
-        title="View the fields the agent recorded for this application"
-      >
-        Filled form
-      </Link>
-      <span className="apps__docmeta">
-        {count} field{count === 1 ? "" : "s"}
-      </span>
-    </div>
   );
 }
 
@@ -639,62 +568,6 @@ function PostingModal({
       </DialogActions>
     </Dialog>
   );
-}
-
-/** An actionable "attach a document" line when none is linked yet. */
-function AddDocLine({ label, onAdd }: { label: string; onAdd: () => void }) {
-  return (
-    <div className="apps__docline">
-      <Link
-        component="button"
-        type="button"
-        onClick={onAdd}
-        className="apps__docadd"
-      >
-        + {label}
-      </Link>
-    </div>
-  );
-}
-
-/** One linked document: an open-in-editor link (jumps to the Download step with
- * the saved content), quick pdf/docx downloads, and the saved date. */
-function DocLine({
-  label,
-  doc,
-  onOpen,
-}: {
-  label: string;
-  doc: ApplicationDocument;
-  onOpen: () => void;
-}) {
-  const saved = savedShort(doc.updatedAt);
-  return (
-    <div className="apps__docline">
-      <Link
-        component="button"
-        type="button"
-        onClick={onOpen}
-        className="apps__doclink"
-        title="Open in the editor to re-edit and re-save"
-      >
-        {label}
-      </Link>
-      <span className="apps__docmeta">
-        {doc.pdfUrl && <Link href={doc.pdfUrl}>pdf</Link>}
-        {doc.pdfUrl && doc.docxUrl ? " · " : null}
-        {doc.docxUrl && <Link href={doc.docxUrl}>docx</Link>}
-        {saved && <span className="apps__docdate">{saved}</span>}
-      </span>
-    </div>
-  );
-}
-
-/** Short saved-date for the ledger; blank when the timestamp is unusable. */
-function savedShort(iso: string): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString();
 }
 
 /**

@@ -175,3 +175,142 @@ class TestDeleteSession:
         assert body["closed"] is False
         assert body["closing"] is False
         assert body["reserving"] is True
+
+    def test_accepted_close_with_closing_true_clears_matching_host_blockers(self, client, monkeypatch, data_dir):
+        """When a session closes successfully, login blockers for matching hosts are cleared."""
+        import screening.store as store
+
+        monkeypatch.setenv("AGENT_API_TOKEN", "t")
+        
+        # Create a login-blocked approved screening
+        s = store.create({
+            "company": "Acme",
+            "role": "Dev",
+            "verdict": "passed",
+            "url": "https://acme.wd3.myworkdayjobs.com/careers/job/1"
+        })
+        store.set_approval(s.id, "approved")
+        store.record_apply_failure(
+            s.id,
+            "sign-in required",
+            blocker="login_required",
+            signin_url="https://acme.wd3.myworkdayjobs.com/login"
+        )
+        
+        # Mock the session server responses: GET /session returns the session, 
+        # POST /session/close returns closing=true
+        with patch("urllib.request.urlopen") as urlopen_mock:
+            # side_effect list for sequential calls
+            urlopen_mock.side_effect = [
+                _response({"url": "https://acme.wd3.myworkdayjobs.com/login"}),  # GET /session
+                _response({"closed": False, "closing": True})  # POST /session/close
+            ]
+            r = client.delete("/api/browser/session")
+        
+        assert r.status_code == 200
+        body = r.json()
+        assert body["closing"] is True
+        assert body["signinsCleared"] == 1
+        
+        # Verify the blocker was actually cleared
+        s_after = store.get(s.id)
+        assert s_after.apply_blocker == ""
+        assert s_after.signin_url == ""
+
+    def test_accepted_close_with_closed_true_clears_matching_host_blockers(self, client, monkeypatch, data_dir):
+        """When closed=true, blockers are also cleared."""
+        import screening.store as store
+
+        monkeypatch.setenv("AGENT_API_TOKEN", "t")
+        
+        s = store.create({
+            "company": "Acme",
+            "role": "Dev",
+            "verdict": "passed",
+            "url": "https://acme.wd3.myworkdayjobs.com/careers/job/1"
+        })
+        store.set_approval(s.id, "approved")
+        store.record_apply_failure(
+            s.id,
+            "sign-in required",
+            blocker="login_required",
+            signin_url="https://acme.wd3.myworkdayjobs.com/login"
+        )
+        
+        with patch("urllib.request.urlopen") as urlopen_mock:
+            urlopen_mock.side_effect = [
+                _response({"url": "https://acme.wd3.myworkdayjobs.com/login"}),
+                _response({"closed": True, "closing": False})
+            ]
+            r = client.delete("/api/browser/session")
+        
+        assert r.status_code == 200
+        body = r.json()
+        assert body["closed"] is True
+        assert body["signinsCleared"] == 1
+
+    def test_no_session_does_not_clear_blockers(self, client, monkeypatch, data_dir):
+        """When no session exists (reserving=true), no blockers are cleared."""
+        import screening.store as store
+
+        monkeypatch.setenv("AGENT_API_TOKEN", "t")
+        
+        s = store.create({
+            "company": "Acme",
+            "role": "Dev",
+            "verdict": "passed",
+            "url": "https://acme.wd3.myworkdayjobs.com/careers/job/1"
+        })
+        store.set_approval(s.id, "approved")
+        store.record_apply_failure(
+            s.id,
+            "sign-in required",
+            blocker="login_required",
+            signin_url="https://acme.wd3.myworkdayjobs.com/login"
+        )
+        
+        with patch("urllib.request.urlopen") as urlopen_mock:
+            urlopen_mock.side_effect = [
+                _response({"url": None}),  # No session
+                _response({"closed": False, "reserving": True})
+            ]
+            r = client.delete("/api/browser/session")
+        
+        assert r.status_code == 200
+        assert r.json()["signinsCleared"] == 0
+        
+        # Blocker should still be there
+        assert store.get(s.id).apply_blocker == "login_required"
+
+    def test_different_host_blockers_are_not_cleared(self, client, monkeypatch, data_dir):
+        """Blockers for a different host are left untouched."""
+        import screening.store as store
+
+        monkeypatch.setenv("AGENT_API_TOKEN", "t")
+        
+        s = store.create({
+            "company": "Globex",
+            "role": "Dev",
+            "verdict": "passed",
+            "url": "https://globex.example.com/jobs/1"
+        })
+        store.set_approval(s.id, "approved")
+        store.record_apply_failure(
+            s.id,
+            "sign-in required",
+            blocker="login_required",
+            signin_url="https://globex.example.com/login"
+        )
+        
+        with patch("urllib.request.urlopen") as urlopen_mock:
+            urlopen_mock.side_effect = [
+                _response({"url": "https://acme.wd3.myworkdayjobs.com/login"}),  # Different host
+                _response({"closed": False, "closing": True})
+            ]
+            r = client.delete("/api/browser/session")
+        
+        assert r.status_code == 200
+        assert r.json()["signinsCleared"] == 0
+        
+        # Blocker should still be there
+        assert store.get(s.id).apply_blocker == "login_required"

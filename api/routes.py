@@ -99,6 +99,7 @@ from .schemas import (
     ApiKeyRequest,
     ApplicationCreate,
     ApplicationDocument,
+    ApplicationListResponse,
     ApplicationModel,
     ApplicationUpdate,
     AtsWarning,
@@ -832,6 +833,42 @@ def list_applications(q: str = "") -> list[ApplicationModel]:
     """
     apps = applications_service.list_applications(q)
     return [_application_model(a) for a in apps]
+
+
+@router.get("/applications/page", response_model=ApplicationListResponse)
+def list_applications_page(
+    limit: int = 25, offset: int = 0, sort: str = "date", direction: str = "desc", q: str = ""
+) -> ApplicationListResponse:
+    """One page of applications, server-sorted and paginated.
+
+    ``q`` is the same case-insensitive substring filter as GET /api/applications
+    (company, website, application URL, notes, posting, role); it is applied
+    before paging so ``total`` counts matches.
+
+    Reads the application store in-process and returns a paginated, sorted page
+    of applications with the total count across all records. Sort keys and
+    direction are passed through and echoed in the response.
+
+    A negative offset is clamped to 0 rather than rejected: it is a client that
+    paged past the start, and an empty first page is a worse answer than the
+    first page. An offset past the end yields an empty page — the total tells
+    the client it overshot.
+    """
+    offset = max(0, offset)
+    try:
+        apps, total = applications_service.list_applications_page(
+            limit=limit, offset=offset, sort=sort, direction=direction, q=q
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return ApplicationListResponse(
+        applications=[_application_model(a) for a in apps],
+        total=total,
+        limit=limit,
+        offset=offset,
+        sort=sort,
+        direction=direction,
+    )
 
 
 @router.get("/applications/export")
@@ -1632,12 +1669,31 @@ def post_browser_session(payload: BrowserSessionRequest) -> BrowserSession:
 
 @router.delete("/browser/session", response_model=BrowserSessionClosed)
 def delete_browser_session() -> BrowserSessionClosed:
-    """Close the attended session and release the browser."""
+    """Close the attended session and release the browser.
+    
+    When closing a session, re-arm any login-blocked items whose host matches
+    the closed session's URL, so they re-enter the queue for the next run.
+    """
+    # Read the current session URL before closing it
+    session_data = _forward_to_session_server("/session")
+    session_url = session_data.get("url", "")
+    
+    # Forward the close request
     data = _forward_to_session_server("/session/close", method="POST")
+    
+    signins_cleared = 0
+    # Only clear blockers if the session existed and the close was accepted
+    if session_url and (data.get("closed", False) or data.get("closing", False)):
+        # Clear login blockers for this host
+        host = _host_of(session_url)
+        if host:
+            signins_cleared = screenings_service.clear_login_blockers_for_host(host)
+    
     return BrowserSessionClosed(
         closed=data.get("closed", False),
         closing=data.get("closing", False),
         reserving=data.get("reserving", False),
+        signins_cleared=signins_cleared,
     )
 
 

@@ -72,8 +72,10 @@ its browser — on discovery.
   NOT be applied to — treat this as true of the field itself, not of a list
   of known values, so a value you don't recognise still blocks rather than
   being read as unset. The values that exist today: `cooldown` (in cooldown,
-  §8 still governs) and `no_url` (no posting URL was ever captured, so there
-  is nothing to open). Name the reason in the run report and move on. An
+  §8 still governs), `no_url` (no posting URL was ever captured, so there
+  is nothing to open), and `login_required` (the posting sat behind a sign-in
+  wall; the item is held until the operator signs in to that host between runs,
+  then returns to the queue). Name the reason in the run report and move on. An
   empty `cover_letter` with a null `cover_letter_path` means apply with no
   cover letter attached, not skip — the agent now submits letterless rather
   than leaving an approved item stranded without the draft-gate gate.
@@ -94,8 +96,9 @@ its browser — on discovery.
 - **On success**, call `record_application` with that entry's `screening_id`
   so the item retires from the queue.
 - **On failure**, call `report_apply_failure` with the reason. The item stays
-  queued and is retried next run; the operator sees the attempt count and your
-  error on the Approvals page.
+  queued: if it is a `login_required` failure it is held until the operator
+  signs in to that host, otherwise it is retried on the next run. The operator
+  sees the attempt count and your error on the Approvals page.
 
 ## 1. There is no daily quota
 
@@ -448,8 +451,8 @@ likelier to be silently blocked by ATS bot detection.
    reuse the operator's address as a login unless the site already recognises
    it. Call `report_apply_failure` with `blocker="login_required"`, `error`
    describing what you saw, and `signin_url` set to the login page's URL, then
-   move to the next posting. The operator signs in once, on the Agents page,
-   and the item is retried on a later run.
+   move to the next posting. The item is held until the operator signs in to
+   that host, after which it re-enters the queue on a later run.
 5. Fill every field from the `get_profile_answers` result (§3), calling it
    with `company` for this application so the email returned is the
    per-company tracking address. If `name`, `email`, or

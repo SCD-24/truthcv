@@ -364,11 +364,19 @@ def fmt_band(min_v; max_v; cur): if (min_v != null and max_v != null and cur != 
 # run aborts before invoking the LLM instead of silently applying someone
 # else's defaults.
 if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_config 2>/dev/null)"; then
+  # Parse check first: a payload that is not JSON at all (a truncated or
+  # corrupt fetch) must be reported as such, not as a profiles problem — the
+  # shape check below cannot tell the two apart.
+  if ! jq -e . <<<"$JOB_CONFIG" >/dev/null 2>&1; then
+    abort "Agent config payload was not valid JSON (fetch was truncated or corrupt; ${#JOB_CONFIG} characters received) - check the app service log and rerun"
+  fi
   # A malformed payload must not read as "zero profiles configured": that
   # message sends the operator to add profiles they already have. Probe the
-  # payload's shape first, so a broken config gets its own diagnosis. The
-  # every() guard catches non-object elements, which jq would otherwise skip
-  # silently (or error on, depending on version).
+  # payload's shape next (the parse check above has already run, so a
+  # truncated payload is no longer reported as a profiles problem), so a
+  # broken config gets its own diagnosis. The every() guard catches
+  # non-object elements, which jq would otherwise skip silently (or error on,
+  # depending on version).
   if ! jq -e '.profiles // [] | (type == "array") and all(.[]; type == "object" or . == null)' <<<"$JOB_CONFIG" >/dev/null; then
     abort "Agent config fetched but is malformed (.profiles is missing, not an array, or contains non-object entries) - fix data/agent_config.json or the Agents page before the agent can run"
   fi

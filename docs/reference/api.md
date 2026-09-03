@@ -15,6 +15,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **DELETE** | `/api/applications/{id}` | Delete an application and its owned document files. |
 | **PUT** | `/api/applications/{id}/cv` | Save edited CV content for an application and re-render its pdf/docx (guardrail-checked). |
 | **PUT** | `/api/applications/{id}/cover-letter` | Save edited cover-letter content for an application and re-render its pdf/docx. |
+| **GET** | `/api/applications/page` | One page of applications, server-sorted and paginated. Query: limit (25), offset (0, negative clamped to 0), sort (date), direction (desc). Returns {applications, total, limit, offset, sort, direction}; 400 on an invalid sort/direction. |
 | **GET** | `/api/runs` | One page of agent runs, newest first. `limit` (default 50; 0 or negative means no limit) and `offset` (default 0, clamped at 0, applied before the limit). Returns {runs, total, limit, offset}; `total` counts every run currently retained, which a capped page cannot report. An offset past the end is an empty page, not an error. Only the 200 most recent runs are retained (runs.store trims on write), so `total` is a count of what is kept, not of every run ever. Read in-process from runs.store on the data volume, not proxied to the supervisor. |
 | **GET** | `/api/runs/{run_id}` | One agent run record by id, read in-process from runs.store.get; 404 when unknown. |
 | **POST** | `/api/extract` | LLM extracts structured truth.yaml from the uploaded PDF text. |
@@ -36,6 +37,8 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **POST** | `/api/auth/{provider}/complete` | Card-generic completion of a paste-code subscription sign-in (supersedes /api/auth/claude/complete, kept as an alias). |
 | **POST** | `/api/auth/{provider}/poll` | Perform one non-blocking poll of an in-progress device-code sign-in; returns pending or complete. |
 | **GET** | `/api/applications?q=` | Optional q: case-insensitive substring filter over company, website, application URL, notes, posting, role; empty returns all. |
+| **GET** | `/api/applications/page` | One page of applications (limit default 25, offset, sort key, direction) with total; sorted server-side. |
+| **DELETE** | `/api/browser/session` | Closes the attended sign-in session; when a session existed and the close was accepted, clears the login_required apply-blocker on every pending/approved screening queued for that host so the next run retries them |
 | **GET** | `/api/settings` | Provider settings status (encryptionAvailable, activeProvider, model, *KeySet booleans, ollamaHost). Never returns raw secrets. |
 | **POST** | `/api/settings` | Save provider selection + API key/model/host; encrypts to ./data/secrets.enc via ENCRYPTION_KEY. Empty apiKey leaves the stored key unchanged. |
 | **POST** | `/api/settings/test` | Test connection: a tiny live provider call with saved/submitted credentials. Returns {ok, detail}. |

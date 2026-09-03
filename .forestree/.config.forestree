@@ -193,6 +193,16 @@
                   "desc": "Optional q: case-insensitive substring filter over company, website, application URL, notes, posting, role; empty returns all.",
                   "method": "GET",
                   "path": "/api/applications?q="
+                },
+                {
+                  "desc": "One page of applications (limit default 25, offset, sort key, direction) with total; sorted server-side.",
+                  "method": "GET",
+                  "path": "/api/applications/page"
+                },
+                {
+                  "desc": "Closes the attended sign-in session; when a session existed and the close was accepted, clears the login_required apply-blocker on every pending/approved screening queued for that host so the next run retries them",
+                  "method": "DELETE",
+                  "path": "/api/browser/session"
                 }
               ]
             },
@@ -361,6 +371,11 @@
                   "desc": "Save edited cover-letter content for an application and re-render its pdf/docx.",
                   "method": "PUT",
                   "path": "/api/applications/{id}/cover-letter"
+                },
+                {
+                  "desc": "One page of applications, server-sorted and paginated. Query: limit (25), offset (0, negative clamped to 0), sort (date), direction (desc). Returns {applications, total, limit, offset, sort, direction}; 400 on an invalid sort/direction.",
+                  "method": "GET",
+                  "path": "/api/applications/page"
                 }
               ]
             },
