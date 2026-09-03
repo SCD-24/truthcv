@@ -34,6 +34,47 @@ def create_screening(fields: dict) -> tuple[Screening, bool]:
     return screening_store.create_or_get(fields)
 
 
+def clear_login_blockers_for_host(host: str) -> int:
+    """Clear login_required blockers for approved/pending items at a given host.
+
+    When the operator signs in to a site, re-arm the queued items that were
+    blocked waiting for that sign-in. Iterate all screenings, find those with
+    apply_blocker == "login_required" and approval in ("pending", "approved")
+    whose signin_url (falling back to url) has the same host, and clear their
+    apply_blocker. Preserve apply_attempts and other fields.
+
+    Host comparison parses each record URL with urlparse and casefolded netloc,
+    matching the same logic as api/routes.py's _host_of.
+
+    Return the count of items cleared.
+    """
+    from urllib.parse import urlparse
+
+    def _host_of_local(url: str) -> str:
+        """The full host of an absolute http(s) URL, or "" if it is not one."""
+        try:
+            parsed = urlparse(url or "")
+        except ValueError:
+            return ""
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return ""
+        return parsed.netloc.casefold()
+
+    target_host = host.casefold() if host else ""
+    count = 0
+    for s in screening_store.load_all():
+        if s.apply_blocker != "login_required":
+            continue
+        if s.approval not in ("pending", "approved"):
+            continue
+        # Use signin_url if available, otherwise fall back to the posting url
+        url_to_check = s.signin_url or s.url
+        if _host_of_local(url_to_check) == target_host:
+            screening_store.clear_apply_failure(s.id)
+            count += 1
+    return count
+
+
 @dataclass
 class ApplyClaimResult:
     """The outcome of claiming a screening for a manual/agent apply."""

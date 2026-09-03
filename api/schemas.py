@@ -1284,6 +1284,7 @@ class BrowserSessionClosed(_Camel):
     closed: bool
     closing: bool = False
     reserving: bool = False
+    signins_cleared: int = 0
 
 
 class AgentRunResult(_Camel):
