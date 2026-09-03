@@ -361,6 +361,11 @@
                   "desc": "Save edited cover-letter content for an application and re-render its pdf/docx.",
                   "method": "PUT",
                   "path": "/api/applications/{id}/cover-letter"
+                },
+                {
+                  "desc": "One page of applications, server-sorted and paginated. Query: limit (25), offset (0, negative clamped to 0), sort (date), direction (desc). Returns {applications, total, limit, offset, sort, direction}; 400 on an invalid sort/direction.",
+                  "method": "GET",
+                  "path": "/api/applications/page"
                 }
               ]
             },
