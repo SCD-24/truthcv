@@ -37,13 +37,34 @@ from screening.cooldown import cooldown
 from screening.url import normalize_application_url
 
 
-def list_applications() -> list:
-    """Every tracked application, most recent first.
+def list_applications(q: str = "") -> list:
+    """Every tracked application, most recent first, optionally filtered by ``q``.
 
     The single source of the sort both the HTTP list route and the export route
-    apply, so the two can never disagree about order.
+    apply, so the two can never disagree about order. The export route calls
+    this without ``q``, so export is never filtered.
+
+    ``q`` is matched case-insensitively against the company, website,
+    application_url, notes, posting, and role fields when non-blank.
     """
-    return sorted(app_store.load_all(), key=lambda a: a.created_at, reverse=True)
+
+    def _matches(app, needle: str) -> bool:
+        """Match a record across company, website, application_url, notes, posting, role fields."""
+        fields = [
+            app.company or "",
+            app.website or "",
+            app.application_url or "",
+            app.notes or "",
+            app.posting or "",
+            app.role or ""
+        ]
+        return any(needle in field.lower() for field in fields)
+
+    apps = sorted(app_store.load_all(), key=lambda a: a.created_at, reverse=True)
+    if not q.strip():
+        return apps
+    needle = q.strip().lower()
+    return [a for a in apps if _matches(a, needle)]
 
 
 def create_application_record(fields: dict):

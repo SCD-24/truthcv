@@ -270,8 +270,13 @@ export function generateCoverLetter(
   });
 }
 
-/** Every tracked job application, most recent first. */
-export function listApplications(): Promise<Application[]> {
+/** Every tracked job application, most recent first. When `q` is a non-blank
+ * search string, filters to applications matching it server-side. */
+export function listApplications(q = ""): Promise<Application[]> {
+  if (q.trim()) {
+    const params = new URLSearchParams({ q });
+    return request(`/api/applications?${params}`);
+  }
   return request("/api/applications");
 }
 

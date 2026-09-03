@@ -2,7 +2,7 @@
 /** Applications ledger: the outbound record. Stubbing follows
  * ApprovalsPage.test.tsx — mock the API client directly. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { listApplications } from "../api/client";
 import type { Application } from "../api/types";
 import { ApplicationsPage } from "./ApplicationsPage";
@@ -83,5 +83,37 @@ describe("ApplicationsPage link safety", () => {
     expect(text.closest("a")).toBeNull();
     const anchors = Array.from(document.querySelectorAll("a"));
     expect(anchors.some((a) => (a.getAttribute("href") ?? "").startsWith("javascript:"))).toBe(false);
+  });
+});
+
+describe("ApplicationsPage search", () => {
+  it("filters applications by search query", async () => {
+    const acme = makeApp({ id: "1", company: "Acme" });
+    const vandelay = makeApp({ id: "2", company: "Vandelay" });
+
+    await renderPage([acme, vandelay]);
+
+    // Initial load passes no filter, so other pages' expectations still hold.
+    expect(listApplications).toHaveBeenCalledWith("");
+
+    vi.mocked(listApplications).mockResolvedValueOnce([vandelay]);
+
+    const searchInput = screen.getByLabelText("Search applications") as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: "vand" } });
+
+    // Wait past the debounce (250ms) for the search call to fire.
+    await waitFor(
+      () => {
+        expect(listApplications).toHaveBeenLastCalledWith("vand");
+      },
+      { timeout: 400 },
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Vandelay")).toBeInTheDocument();
+      expect(screen.queryByText("Acme")).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByText("1 matching")).toBeInTheDocument();
   });
 });

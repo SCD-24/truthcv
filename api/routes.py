@@ -824,9 +824,13 @@ def _application_model(app) -> ApplicationModel:
 
 
 @router.get("/applications", response_model=list[ApplicationModel])
-def list_applications() -> list[ApplicationModel]:
-    """Every tracked job application, most recent first."""
-    apps = applications_service.list_applications()
+def list_applications(q: str = "") -> list[ApplicationModel]:
+    """Every tracked job application, most recent first.
+
+    q: case-insensitive substring filter over company, website, application URL,
+    notes, posting and role; empty returns everything
+    """
+    apps = applications_service.list_applications(q)
     return [_application_model(a) for a in apps]
 
 

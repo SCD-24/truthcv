@@ -89,6 +89,8 @@ export function ApplicationsPage({
 }) {
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const SEARCH_DEBOUNCE_MS = 250;
   const [error, setError] = useState<string | null>(null);
   // The row being edited: an id for an existing row, "new" for the add form.
   const [editing, setEditing] = useState<string | "new" | null>(null);
@@ -118,11 +120,18 @@ export function ApplicationsPage({
   }
 
   useEffect(() => {
-    listApplications()
-      .then(setApps)
-      .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load applications."))
-      .finally(() => setLoading(false));
-  }, []);
+    const isInitialLoad = loading;
+    const timer = setTimeout(() => {
+      listApplications(query)
+        .then(setApps)
+        .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load applications."))
+        .finally(() => {
+          if (isInitialLoad) setLoading(false);
+        });
+    }, isInitialLoad ? 0 : SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
 
   /** Download the whole ledger as a zip (CSV + per-company document folders).
    * A plain navigation lets the browser stream the file straight to disk. */
@@ -212,14 +221,25 @@ export function ApplicationsPage({
         direction="row"
         sx={{ mb: 2, alignItems: "center", justifyContent: "space-between" }}
       >
-        <Typography variant="body2" color="text.secondary">
-          {loading ? "Loading…" : `${apps.length} tracked`}
-        </Typography>
+        <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+          <Typography variant="body2" color="text.secondary">
+            {loading ? "Loading…" : query !== "" ? `${apps.length} matching` : `${apps.length} tracked`}
+          </Typography>
+          <TextField
+            size="small"
+            type="search"
+            label="Search"
+            placeholder="Company, notes, posting…"
+            inputProps={{ "aria-label": "Search applications" }}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </Stack>
         <Stack direction="row" spacing={1}>
           <Button
             variant="outlined"
             onClick={exportApplications}
-            disabled={apps.length === 0}
+            disabled={apps.length === 0 && query === ""}
             title="Download the whole table as a CSV with documents grouped by company, zipped"
           >
             Export

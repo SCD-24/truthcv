@@ -492,3 +492,68 @@ def test_put_does_not_clobber_evidence(client):
     assert r.status_code == 200
     assert r.json()["notes"] == "Follow up next week"
     assert r.json()["fieldsSubmitted"] == [{"label": "Full name", "value": "Jane Doe", "source": "profile"}]
+
+
+def test_list_applications_search_q(client):
+    """Test search filtering on GET /api/applications."""
+    # Create two test applications
+    vandelay_resp = client.post("/api/applications", json={
+        "company": "Vandelay",
+        "notes": "platform team"
+    })
+    vandelay = vandelay_resp.json()
+
+    acme_resp = client.post("/api/applications", json={
+        "company": "Acme",
+        "posting": "Senior Engineer"
+    })
+    acme = acme_resp.json()
+
+    # Test case-insensitive match on company
+    resp = client.get("/api/applications?q=VAND")
+    assert resp.status_code == 200
+    results = resp.json()
+    assert len(results) == 1
+    assert results[0]["company"] == "Vandelay"
+
+    # Test match on notes
+    resp = client.get("/api/applications?q=platform")
+    assert resp.status_code == 200
+    results = resp.json()
+    assert len(results) == 1
+    assert results[0]["company"] == "Vandelay"
+
+    # Test match on posting
+    resp = client.get("/api/applications?q=engineer")
+    assert resp.status_code == 200
+    results = resp.json()
+    assert len(results) == 1
+    assert results[0]["company"] == "Acme"
+
+    # Test no match
+    resp = client.get("/api/applications?q=zzz")
+    assert resp.status_code == 200
+    results = resp.json()
+    assert len(results) == 0
+
+    # Test empty query param and no query both return all in order
+    resp_empty_q = client.get("/api/applications?q=")
+    resp_no_q = client.get("/api/applications")
+    assert resp_empty_q.status_code == 200
+    assert resp_no_q.status_code == 200
+
+    results_empty_q = resp_empty_q.json()
+    results_no_q = resp_no_q.json()
+    assert len(results_empty_q) == 2
+    assert len(results_no_q) == 2
+
+    # Both should have Acme then Vandelay (reverse created_at)
+    # Since Vandelay was created first, it should be second in both
+    assert results_empty_q[0]["company"] == "Acme"
+    assert results_empty_q[1]["company"] == "Vandelay"
+    assert results_no_q[0]["company"] == "Acme"
+    assert results_no_q[1]["company"] == "Vandelay"
+
+    # Test export still works after a filtered call
+    resp = client.get("/api/applications/export")
+    assert resp.status_code == 200
