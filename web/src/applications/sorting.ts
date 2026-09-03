@@ -43,17 +43,6 @@ const text = (get: (a: Application) => string | null | undefined) =>
   };
 const bool = (get: (a: Application) => boolean) =>
   (a: Application, b: Application) => Number(get(b)) - Number(get(a)); // yes-first asc
-const presence = (get: (a: Application) => unknown) =>
-  (a: Application, b: Application) => Number(Boolean(get(b))) - Number(Boolean(get(a)));
-
-const host = (url: string | null | undefined): string => {
-  if (!url) return "";
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-};
 
 export const COLUMN_DEFS: ColumnDef[] = [
   { label: "Company", sortable: true, compare: text((a) => a.company) },
@@ -65,8 +54,6 @@ export const COLUMN_DEFS: ColumnDef[] = [
     compare: text((a) => a.applicationDate),
     blank: (a) => !(a.applicationDate ?? "").trim(),
   },
-  { label: "Website", sortable: true, compare: text((a) => host(a.website)) },
-  { label: "URL", sortable: true, compare: presence((a) => a.applicationUrl) },
   { label: "Submitted", sortable: true, compare: bool((a) => a.submitted) },
   { label: "Type", sortable: true, compare: text((a) => a.submissionType) },
   { label: "Status", sortable: true, compare: (a, b) => statusRank(a.status) - statusRank(b.status) },
@@ -75,9 +62,6 @@ export const COLUMN_DEFS: ColumnDef[] = [
   { label: "Response", sortable: true, compare: bool((a) => a.responseReceived) },
   { label: "Method", sortable: true, compare: text((a) => a.method) },
   { label: "Notes", sortable: true, compare: text((a) => a.notes) },
-  { label: "Posting", sortable: true, compare: presence((a) => a.posting) },
-  { label: "Documents", sortable: true, compare: presence((a) => a.cvDocument ?? a.coverLetterDocument) },
-  { label: "Filled form", sortable: true, compare: presence((a) => a.fieldsSubmitted?.length) },
   { label: "", sortable: false },
 ];
 
