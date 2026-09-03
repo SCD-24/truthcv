@@ -188,6 +188,11 @@
                   "desc": "Perform one non-blocking poll of an in-progress device-code sign-in; returns pending or complete.",
                   "method": "POST",
                   "path": "/api/auth/{provider}/poll"
+                },
+                {
+                  "desc": "Closes the attended sign-in session; when a session existed and the close was accepted, clears the login_required apply-blocker on every pending/approved screening queued for that host so the next run retries them",
+                  "method": "DELETE",
+                  "path": "/api/browser/session"
                 }
               ]
             },
