@@ -98,7 +98,7 @@ describe("ApplicationsPage search", () => {
 
     vi.mocked(listApplications).mockResolvedValueOnce([vandelay]);
 
-    const searchInput = screen.getByLabelText("Search applications") as HTMLInputElement;
+    const searchInput = await screen.findByLabelText("Search applications");
     fireEvent.change(searchInput, { target: { value: "vand" } });
 
     // Wait past the debounce (250ms) for the search call to fire.

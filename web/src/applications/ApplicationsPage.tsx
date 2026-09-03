@@ -230,7 +230,7 @@ export function ApplicationsPage({
             type="search"
             label="Search"
             placeholder="Company, notes, posting…"
-            inputProps={{ "aria-label": "Search applications" }}
+            slotProps={{ input: { "aria-label": "Search applications" } }}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
