@@ -172,15 +172,15 @@
 
 .apps__docs {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+  flex-direction: row;
+  align-items: baseline;
+  gap: var(--space-3);
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 0.72rem;
-  min-width: 140px;
 }
 /* No document linked yet: an actionable "attach" affordance, not a dead hint. */
 .apps__docadd {
-  align-self: flex-start;
   font-family: var(--font-mono);
   font-size: 0.72rem;
   letter-spacing: 0.02em;
@@ -196,11 +196,12 @@
 /* One linked document: preview label on top, quick links + saved date below. */
 .apps__docline {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  flex-direction: row;
+  align-items: baseline;
+  gap: var(--space-2);
+  white-space: nowrap;
 }
 .apps__doclink {
-  align-self: flex-start;
   font-family: var(--font-mono);
   font-size: 0.74rem;
   font-weight: var(--w-medium);
@@ -215,7 +216,7 @@
 .apps__docmeta {
   display: flex;
   align-items: baseline;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
   color: var(--ink-soft);
   font-size: 0.68rem;

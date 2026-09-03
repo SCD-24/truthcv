@@ -476,7 +476,7 @@ function DocumentLinks({
   onAttach: (kind: PreviewKind) => void;
 }) {
   return (
-    <Stack className="apps__docs" spacing={0.75}>
+    <Stack className="apps__docs" direction="row" spacing={1.5}>
       {app.cvDocument ? (
         <DocLine
           label="CV"
