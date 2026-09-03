@@ -35,6 +35,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **POST** | `/api/auth/{provider}/start` | Begin subscription sign-in for a connection card; returns a paste-code or device-code flow descriptor. |
 | **POST** | `/api/auth/{provider}/complete` | Card-generic completion of a paste-code subscription sign-in (supersedes /api/auth/claude/complete, kept as an alias). |
 | **POST** | `/api/auth/{provider}/poll` | Perform one non-blocking poll of an in-progress device-code sign-in; returns pending or complete. |
+| **GET** | `/api/applications?q=` | Optional q: case-insensitive substring filter over company, website, application URL, notes, posting, role; empty returns all. |
 | **GET** | `/api/settings` | Provider settings status (encryptionAvailable, activeProvider, model, *KeySet booleans, ollamaHost). Never returns raw secrets. |
 | **POST** | `/api/settings` | Save provider selection + API key/model/host; encrypts to ./data/secrets.enc via ENCRYPTION_KEY. Empty apiKey leaves the stored key unchanged. |
 | **POST** | `/api/settings/test` | Test connection: a tiny live provider call with saved/submitted credentials. Returns {ok, detail}. |

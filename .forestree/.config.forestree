@@ -188,6 +188,11 @@
                   "desc": "Perform one non-blocking poll of an in-progress device-code sign-in; returns pending or complete.",
                   "method": "POST",
                   "path": "/api/auth/{provider}/poll"
+                },
+                {
+                  "desc": "Optional q: case-insensitive substring filter over company, website, application URL, notes, posting, role; empty returns all.",
+                  "method": "GET",
+                  "path": "/api/applications?q="
                 }
               ]
             },
