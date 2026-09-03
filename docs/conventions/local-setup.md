@@ -25,4 +25,4 @@ docker compose up
 
 ---
 
-Generated from `.aether/runbook.json`, which is the source of truth. Edit it there (or in the Commands tab) rather than here — this file is overwritten on every save.
+Generated from `.forestree/runbook.json`, which is the source of truth. Edit it there (or in the Commands tab) rather than here — this file is overwritten on every save.
