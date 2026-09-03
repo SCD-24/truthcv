@@ -1628,12 +1628,31 @@ def post_browser_session(payload: BrowserSessionRequest) -> BrowserSession:
 
 @router.delete("/browser/session", response_model=BrowserSessionClosed)
 def delete_browser_session() -> BrowserSessionClosed:
-    """Close the attended session and release the browser."""
+    """Close the attended session and release the browser.
+    
+    When closing a session, re-arm any login-blocked items whose host matches
+    the closed session's URL, so they re-enter the queue for the next run.
+    """
+    # Read the current session URL before closing it
+    session_data = _forward_to_session_server("/session")
+    session_url = session_data.get("url", "")
+    
+    # Forward the close request
     data = _forward_to_session_server("/session/close", method="POST")
+    
+    signins_cleared = 0
+    # Only clear blockers if the session existed and the close was accepted
+    if session_url and (data.get("closed", False) or data.get("closing", False)):
+        # Clear login blockers for this host
+        host = _host_of(session_url)
+        if host:
+            signins_cleared = screenings_service.clear_login_blockers_for_host(host)
+    
     return BrowserSessionClosed(
         closed=data.get("closed", False),
         closing=data.get("closing", False),
         reserving=data.get("reserving", False),
+        signins_cleared=signins_cleared,
     )
 
 
