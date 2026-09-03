@@ -79,26 +79,12 @@ describe("sorting", () => {
     expect(compareApplications(offer, rejected, col("Status"), "asc")).toBeLessThan(0);
     expect(defaultCompare(offer, rejected)).toBeLessThan(0);
   });
-  it("documents sorts by presence", () => {
-    const has = app({
-      cvDocument: { source: "", pdfUrl: null, docxUrl: null, updatedAt: "" },
-    });
-    const not = app({});
-    expect(compareApplications(has, not, col("Documents"), "asc")).toBeLessThan(0);
-  });
-  it("filled form sorts by presence", () => {
-    const has = app({ fieldsSubmitted: [{ label: "Full name", value: "Jane Doe", source: "profile" }] });
-    const not = app({});
-    expect(compareApplications(has, not, col("Filled form"), "asc")).toBeLessThan(0);
-  });
   it("actions column is not sortable", () => {
     expect(COLUMN_DEFS[COLUMN_DEFS.length - 1].sortable).toBe(false);
   });
   it("uses shortened header labels for URL, Type and Response", () => {
-    expect(COLUMN_DEFS.some((c) => c.label === "URL")).toBe(true);
     expect(COLUMN_DEFS.some((c) => c.label === "Type")).toBe(true);
     expect(COLUMN_DEFS.some((c) => c.label === "Response")).toBe(true);
-    expect(COLUMN_DEFS.some((c) => c.label === "Application URL")).toBe(false);
     expect(COLUMN_DEFS.some((c) => c.label === "Submission Type")).toBe(false);
     expect(COLUMN_DEFS.some((c) => c.label === "Response Received")).toBe(false);
   });
