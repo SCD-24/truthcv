@@ -39,6 +39,7 @@ graph TD
     api -->|HTTPS| gmail-api
     api -->|in-process| guardrail-validator
     api -->|in-process| onboarding-store
+    api -->|in-process| prompt-store
     api -->|in-process| renderer
     api -->|in-process| run-store
     api -->|in-process| screening-engine
@@ -75,6 +76,7 @@ graph TD
     llm-provider-layer -->|in-process| secret-store
     onboarding-store -->|in-process| storage-leaf
     onboarding-store -->|file I/O| truth-data-volume
+    prompt-store -->|in-process| storage-leaf
     renderer -->|in-process| keyword-vocabulary
     renderer -->|in-process| prompt-store
     renderer -->|in-process| storage-leaf
@@ -155,6 +157,7 @@ graph TD
 - [api → gmail-api](interactions/api--gmail-api.md) via `HTTPS`
 - [api → guardrail-validator](interactions/api--guardrail-validator.md) via `in-process`
 - [api → onboarding-store](interactions/api--onboarding-store.md) via `in-process`
+- [api → prompt-store](interactions/api--prompt-store.md) via `in-process`
 - [api → renderer](interactions/api--renderer.md) via `in-process`
 - [api → run-store](interactions/api--run-store.md) via `in-process`
 - [api → screening-engine](interactions/api--screening-engine.md) via `in-process`
@@ -191,6 +194,7 @@ graph TD
 - [llm-provider-layer → secret-store](interactions/llm-provider-layer--secret-store.md) via `in-process`
 - [onboarding-store → storage-leaf](interactions/onboarding-store--storage-leaf.md) via `in-process`
 - [onboarding-store → truth-data-volume](interactions/onboarding-store--truth-data-volume.md) via `file I/O`
+- [prompt-store → storage-leaf](interactions/prompt-store--storage-leaf.md) via `in-process`
 - [renderer → keyword-vocabulary](interactions/renderer--keyword-vocabulary.md) via `in-process`
 - [renderer → prompt-store](interactions/renderer--prompt-store.md) via `in-process`
 - [renderer → storage-leaf](interactions/renderer--storage-leaf.md) via `in-process`

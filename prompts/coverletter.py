@@ -14,85 +14,9 @@ from truth.model import Truth
 from .conventions import CvConventions, DEFAULT_CONVENTIONS
 from .style import letter_style, letter_anti_slop
 
-
-_TONE_DIRECTION = {
-    "professional": (
-        " Voice: confident and polished, measured, businesslike, and self-assured "
-        "without stiffness, letting concrete results speak."
-    ),
-    "warm": (
-        " Voice: warm and personable, genuinely engaged and human, writing about "
-        "why this role and organization fit the candidate."
-    ),
-    "concise": (
-        " Voice: tight and direct. Every sentence earns its place, short and "
-        "specific with no filler, while still reading as a real person, not a list."
-    ),
-}
-
-
-def _tone_direction(tone: str) -> str:
-    """The voice guidance for ``tone``.
-
-    A recognised tone maps to its direction; an UNRECOGNISED one is passed
-    through as the caller's own words rather than silently rewritten to
-    'professional' — the caller may know a tone this module does not, and a
-    silent substitution hides the mismatch.
-    """
-    key = tone.lower()
-    if key in _TONE_DIRECTION:
-        return _TONE_DIRECTION[key]
-    return f" Voice: {tone.strip()}."
-
-
-# The craft standard the letter is written to: elite career-services quality plus
-# hard constraints that strip the usual AI-generated tells. Style only; it adds
-# no facts and never overrides the guardrail contract below.
-_WRITING_STANDARD = (
-    " You are a professional career writer trained to elite university "
-    "career-services standards. Produce a tailored, compelling, concise letter "
-    "that is personalized to the target company and role, shows real understanding "
-    "of the organization, and connects the candidate's background to the "
-    "employer's needs. Highlight relevant accomplishments and transferable skills. "
-    "Sound confident, articulate, and professional; avoid generic phrasing and "
-    "empty enthusiasm. {PARAGRAPH_GUIDANCE} "
-    "Principles: clear, direct prose in active voice; prioritize evidence and "
-    "examples over claims; show impact through measurable outcomes when the facts "
-    "support them; do not repeat the resume verbatim, reframe achievements toward "
-    "the employer's needs; keep the tone natural, not robotic; and go easy on the "
-    "word 'I', focusing on value to the employer rather than the candidate's "
-    "wishes. Structure: an opening paragraph that names the role, gives a specific "
-    "concrete hook tied to the company or posting, and surfaces the strongest "
-    "qualification; middle paragraph(s) that connect past accomplishments to the "
-    "employer's likely needs, reference specific projects or outcomes, and show "
-    "understanding of the company's goals or industry; and a closing paragraph that "
-    "briefly reaffirms fit, states the ability to contribute, thanks the reader, and "
-    "ends professionally. Tailoring: match qualifications directly to the posting, "
-    "incorporate its keywords naturally, emphasize the candidate's strongest aligned "
-    "experience, and address the employer's likely priorities. Never fabricate "
-    "experience, metrics, or company facts that are not in the inputs."
-)
-
-
-# Constraints that remove the common markers of AI-written prose. Purely
-# mechanical style rules; no facts.
-_ANTI_TELL_RULES = (
-    " Hard style constraints: Do NOT use em dashes or en dashes. Use commas, "
-    "parentheses, or semicolons, or split into two sentences. Use straight quotes "
-    "(' and \"), never curly quotes. Do not open with 'I am thrilled', 'excited', "
-    "'delighted', 'writing to express my interest', 'I hope this letter finds you "
-    "well', or 'As a [adjective] professional with X years'; open with a specific "
-    "concrete hook tied to the posting or company. Do not use these words: "
-    "leverage, delve, foster, unlock, harness, navigate, spearhead, orchestrate, "
-    "robust, comprehensive, seamless, vibrant, intricate, transformative, synergy, "
-    "paradigm, tapestry, ecosystem (as metaphor), holistic, innovative, passionate, "
-    "dynamic. Avoid contrastive cliches such as 'not just X, but Y' or 'it's not "
-    "merely A, it's B'. Avoid stock closers like 'I look forward to the opportunity "
-    "to discuss how my skills can contribute to your team's success'; close briefly "
-    "and directly. Prefer short, varied sentences; avoid rule-of-three lists when "
-    "one or two items say it better. Prefer concrete numbers and outcomes over "
-    "abstract praise."
-)
+from prompts.assemble import assemble_system_prompt, GUARDRAIL_CONTRACT, framing
+from prompts.fragments import Preset, SEEDED_PRESETS, seeded_fragments
+from prompts.library import get_preset, list_fragments
 
 
 def cover_letter_system(
@@ -108,31 +32,34 @@ def cover_letter_system(
     caller's ``length`` argument shapes the rendered guidance rather than
     being overridden by a hardcoded paragraph count.
     """
-    direction = _tone_direction(tone)
-    standard = _WRITING_STANDARD.replace(
-        "{PARAGRAPH_GUIDANCE}",
-        (
-            f"Keep it to {conventions.letter_paragraphs_min} to "
-            f"{conventions.letter_paragraphs_max} short paragraphs, under "
-            f"{conventions.page_target}."
-        ),
-    )
-    return (
-        f"You are writing a compelling, {length.lower()}-length cover letter that "
-        "makes a hiring manager want to meet this candidate. Write a genuine, engaging "
-        "letter with a clear throughline about why this candidate fits this specific "
-        "role, not a dry recitation of facts."
-        + standard
-        + direction
-        + letter_style(conventions)
-        + _ANTI_TELL_RULES
-        + letter_anti_slop()
-        + " Guardrail contract: every sentence that states a FACT about the candidate "
-        "(employer, title, date, metric, skill, achievement) must list that fact "
-        "verbatim in its 'claims'. Never invent a fact absent from the candidate's "
-        "truth. Connective and interpretive sentences carry no claims, that is where "
-        "your voice lives, so use them freely."
-    )
+    preset = next((p for p in SEEDED_PRESETS if p.id == tone.lower()), None)
+    if preset is not None:
+        voice_override = None
+    else:
+        preset = next(p for p in SEEDED_PRESETS if p.is_default)
+        voice_override = tone.strip()
+    fragments = seeded_fragments(conventions)
+    return assemble_system_prompt(preset, length, fragments, voice_override=voice_override)
+
+
+def cover_letter_system_for_preset(
+    preset_id: str | None,
+    tone: str,
+    length: str,
+    conventions: CvConventions = DEFAULT_CONVENTIONS,
+) -> str:
+    """Use a named preset for the system prompt, falling back to
+    cover_letter_system for tone-based selection. tone is passed to
+    cover_letter_system only when preset_id is None.
+    """
+    if preset_id is None:
+        return cover_letter_system(tone, length, conventions)
+    try:
+        preset = get_preset(preset_id)
+    except KeyError:
+        raise ValueError(f"unknown preset {preset_id}")
+    fragments = list_fragments(conventions)
+    return assemble_system_prompt(preset, length, fragments, voice_override=None)
 
 
 def _profile_lines(profile) -> list[str]:

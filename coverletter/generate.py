@@ -163,6 +163,7 @@ def build_letter(
     paragraphs: list[dict] | None = None,
     answers: Answers | None = None,
     sign_off_name: str = "",
+    preset_id: str | None = None,
 ) -> dict:
     """Generate a guardrailed cover letter.
 
@@ -191,9 +192,14 @@ def build_letter(
     can get subtly wrong. Appended text is the operator's own stored name, so
     it asserts nothing new. A blank name appends nothing: a letter with no
     sign-off is correct, a letter signed "[Your Name]" is not.
+
+    ``preset_id`` (optional) selects a writing style preset; when omitted,
+    tone-based selection applies (backward compatible).
     """
     if paragraphs is None:
-        paragraphs = _generate_paragraphs(posting, tone, length, truth, provider, answers)
+        paragraphs = _generate_paragraphs(
+            posting, tone, length, truth, provider, answers, preset_id=preset_id
+        )
         save_letter_draft(paragraphs, posting)
 
     shown = _excise_denied(paragraphs, denied_texts or set())
@@ -301,11 +307,16 @@ def _generate_paragraphs(
     truth: Truth,
     provider: LLMProvider,
     answers: Answers | None = None,
+    preset_id: str | None = None,
 ) -> list[dict]:
-    """Ask the provider for the letter's paragraphs + tagged factual claims."""
+    """Ask the provider for the letter's paragraphs + tagged factual claims.
+
+    ``preset_id`` (optional) selects a writing style preset via the library;
+    when omitted, tone-based selection applies.
+    """
     user = f"POSTING:\n{posting}\n\nCANDIDATE FACTS:\n{prompts.cover_letter_facts_block(truth, answers)}"
     result = provider.extract_json(
-        prompts.cover_letter_system(tone, length),
+        prompts.cover_letter_system_for_preset(preset_id, tone, length),
         [{"role": "user", "content": user}],
         _SCHEMA,
     )

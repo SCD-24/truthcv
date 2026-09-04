@@ -23,7 +23,11 @@ from .tailor import (
     select_system,
     select_truth_block,
 )
-from .coverletter import cover_letter_system, cover_letter_facts_block
+from .coverletter import (
+    cover_letter_system,
+    cover_letter_system_for_preset,
+    cover_letter_facts_block,
+)
 
 __all__ = [
     "CV_STYLE",
@@ -37,5 +41,6 @@ __all__ = [
     "select_system",
     "select_truth_block",
     "cover_letter_system",
+    "cover_letter_system_for_preset",
     "cover_letter_facts_block",
 ]

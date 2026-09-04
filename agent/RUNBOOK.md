@@ -371,7 +371,9 @@ never reached at all. Call it even for a board that turned up nothing —
 3. **Never write a cover letter free-hand.** Call `generate_cover_letter` with
    the posting text, a tone, and a length to get a per-role letter grounded in
    the operator's actual work — outside this tool, a letter has no guardrail
-   behind it at all. See §6 for what to do when it comes back blocked. Always
+   behind it at all. PresetId: optional; selects a writing style preset from
+   the prompt store; if omitted, falls back to tone-based selection.
+   See §6 for what to do when it comes back blocked. Always
    pass `company` (the name as posted) to `generate_cover_letter` so the
    blocklist can refuse before any text is generated. A letter generated this way
    reaches the form as **text**: paste it. Only an approved queue item carries a

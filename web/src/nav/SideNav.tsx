@@ -4,6 +4,7 @@ import Typography from "@mui/material/Typography";
 import Badge from "@mui/material/Badge";
 import UploadFileOutlinedIcon from "@mui/icons-material/UploadFileOutlined";
 import EditNoteOutlinedIcon from "@mui/icons-material/EditNoteOutlined";
+import FormatPaintOutlinedIcon from "@mui/icons-material/FormatPaintOutlined";
 import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import InsightsOutlinedIcon from "@mui/icons-material/InsightsOutlined";
 import SmartToyOutlinedIcon from "@mui/icons-material/SmartToyOutlined";
@@ -53,6 +54,12 @@ export function SideNav({
       label: "Manual",
       icon: <EditNoteOutlinedIcon fontSize="small" />,
       dataTour: "nav-manual",
+    },
+    {
+      path: ROUTES.writingStyle,
+      label: "Writing Style",
+      icon: <FormatPaintOutlinedIcon fontSize="small" />,
+      dataTour: "nav-writing-style",
     },
     {
       path: ROUTES.jobBoards,

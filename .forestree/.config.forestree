@@ -2158,6 +2158,16 @@
       "from": "services-layer",
       "protocol": "in-process",
       "to": "storage-leaf"
+    },
+    {
+      "from": "prompt-store",
+      "protocol": "in-process",
+      "to": "storage-leaf"
+    },
+    {
+      "from": "api",
+      "protocol": "in-process",
+      "to": "prompt-store"
     }
   ],
   "definitions": [
