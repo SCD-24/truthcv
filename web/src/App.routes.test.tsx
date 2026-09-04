@@ -25,6 +25,12 @@ vi.mock("./api/client", async (importOriginal) => {
       skills: [],
       profile: { name: "", email: "", phone: "", location: "", links: [], summary: "" },
     }),
+    getTruth: vi.fn().mockResolvedValue({
+      experiences: [],
+      education: [],
+      skills: [],
+      profile: { name: "", email: "", phone: "", location: "", links: [], summary: "" },
+    }),
     listPendingApprovals: vi.fn().mockResolvedValue([]),
     listApplications: vi.fn().mockResolvedValue([]),
     listConnections: vi.fn().mockResolvedValue({ connections: [] }),
@@ -93,6 +99,11 @@ describe("App routing", () => {
   it("shows the Upload CV page at /cv", async () => {
     renderAt(ROUTES.uploadCv);
     expect(await screen.findByText("Every line, traceable.")).toBeTruthy();
+  });
+
+  it("shows the Truth file page at /truth", async () => {
+    renderAt(ROUTES.truthFile);
+    expect(await screen.findByText("Your truth file")).toBeTruthy();
   });
 
   it("redirects an unknown path to Analytics", async () => {

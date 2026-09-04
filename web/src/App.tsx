@@ -18,6 +18,7 @@ import { ScreeningsPage } from "./screenings/ScreeningsPage";
 import { CompanyResearchPage } from "./companyresearch/CompanyResearchPage";
 import { ApprovalsPage } from "./approvals/ApprovalsPage";
 import { UploadCvPage } from "./cv/UploadCvPage";
+import { TruthFilePage } from "./truth/TruthFilePage";
 import { ManualPage } from "./manual/ManualPage";
 import { WritingStylePage } from "./writingStyle/WritingStylePage";
 import { DocumentEditPage } from "./documents/DocumentEditPage";
@@ -163,6 +164,7 @@ function TopLevelRoutes({ onOnboardingComplete }: { onOnboardingComplete: () => 
         path={ROUTES.uploadCv}
         element={<UploadCvPage onDone={() => navigate(ROUTES.analytics)} />}
       />
+      <Route path={ROUTES.truthFile} element={<TruthFilePage onBack={onBack} />} />
       <Route path={ROUTES.documentEdit} element={<DocumentEditPage />} />
       <Route path={ROUTES.manual} element={<ManualPage />} />
       <Route path={ROUTES.writingStyle} element={<WritingStylePage />} />

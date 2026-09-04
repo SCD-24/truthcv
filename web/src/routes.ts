@@ -10,6 +10,7 @@ export const ROUTES = {
   approvals: "/approvals",
   onboarding: "/onboarding",
   uploadCv: "/cv",
+  truthFile: "/truth",
   manual: "/manual",
   writingStyle: "/writing-style",
   documentEdit: "/documents/edit",
