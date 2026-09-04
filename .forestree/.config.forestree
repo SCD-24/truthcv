@@ -1699,7 +1699,27 @@
     },
     {
       "canvas": {
-        "widgets": []
+        "widgets": [
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "derived on read",
+                  "name": "boardBreakdown",
+                  "notes": "Per job board (from screening URL host): postingsSeen, forReview, rejected",
+                  "type": "BoardBreakdown[]"
+                }
+              ]
+            },
+            "h": 200,
+            "id": "widget-schema-run-store",
+            "title": "Schema",
+            "type": "schema",
+            "w": 350,
+            "x": 0,
+            "y": 0
+          }
+        ]
       },
       "id": "run-store",
       "name": "Run Store",

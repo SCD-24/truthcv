@@ -68,7 +68,7 @@ from providers.base import supports_effort_levels
 from companyresearch import store as company_findings_store
 from screening import store as screening_store
 from runs import store as runs_store
-from runs.derive import counters_by_run
+from runs.derive import board_breakdown_by_run, counters_by_run
 from screening.company import company_identity_key
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
@@ -192,9 +192,9 @@ def _run_models(records: list) -> list[RunModel]:
     applications_submitted are recomputed from the records each run actually
     produced and OVERRIDE whatever is stored on the run record; postings_seen,
     over_cap_writes, stopped_reason, note, status and the timestamps are read
-    from the stored record unchanged. Both run routes go through here so the
-    two surfaces cannot disagree — the same reasoning check_cooldown gives for
-    sharing one function.
+    from the stored record unchanged. board_breakdown is derived from screenings
+    per board. Both run routes go through here so the two surfaces cannot
+    disagree — the same reasoning check_cooldown gives for sharing one function.
 
     Each store is loaded ONCE for the whole list, not once per run. A run still
     "running" derives live counts, which is intended: the numbers describe the
@@ -210,7 +210,13 @@ def _run_models(records: list) -> list[RunModel]:
     except Exception:
         return [RunModel(**r.to_dict()) for r in records]
     counters = counters_by_run([r.id for r in records], screenings, applications)
-    return [RunModel(**{**r.to_dict(), **counters.get(r.id, {})}) for r in records]
+    breakdown = board_breakdown_by_run([r.id for r in records], screenings)
+    return [
+        RunModel(
+            **{**r.to_dict(), **counters.get(r.id, {}), "board_breakdown": breakdown.get(r.id, [])}
+        )
+        for r in records
+    ]
 
 
 @router.get("/runs", response_model=RunListResponse)

@@ -34,6 +34,7 @@ import { ButtonSpinner } from "../components/ButtonSpinner";
 import { ModelRoutePicker } from "../settings/ModelRoutePicker";
 import { SettingsModal } from "../settings/SettingsModal";
 import { RunCoverage } from "./RunCoverage";
+import { RunDetailModal } from "./RunDetailModal";
 import {
   DEFAULT_TIMEZONE,
   formatInZone,
@@ -445,6 +446,7 @@ function RecentRunsSection({ timeZone }: { timeZone?: string } = {}) {
   const [page, setPage] = useState(0);
   const [result, setResult] = useState<RunPage | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedRun, setSelectedRun] = useState<RunRecord | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -519,7 +521,12 @@ function RecentRunsSection({ timeZone }: { timeZone?: string } = {}) {
       {runs !== null && runs.length > 0 && (
         <Stack spacing={1}>
           {runs.map((run) => (
-            <RunSummaryRow key={run.id} run={run} timeZone={timeZone || DEFAULT_TIMEZONE} />
+            <RunSummaryRow
+              key={run.id}
+              run={run}
+              timeZone={timeZone || DEFAULT_TIMEZONE}
+              onSelect={() => setSelectedRun(run)}
+            />
           ))}
         </Stack>
       )}
@@ -550,17 +557,57 @@ function RecentRunsSection({ timeZone }: { timeZone?: string } = {}) {
           </Button>
         </Stack>
       )}
+      {selectedRun && (
+        <RunDetailModal
+          run={selectedRun}
+          timeZone={timeZone || DEFAULT_TIMEZONE}
+          onClose={() => setSelectedRun(null)}
+        />
+      )}
     </Section>
   );
 }
 
-function RunSummaryRow({ run, timeZone }: { run: RunRecord; timeZone?: string }) {
+function RunSummaryRow({
+  run,
+  timeZone,
+  onSelect,
+}: {
+  run: RunRecord;
+  timeZone?: string;
+  onSelect?: () => void;
+}) {
   const isRunning = run.status === "running";
   const capLabel = run.applyCap > 0 ? `${run.applicationsSubmitted}/${run.applyCap}` : `${run.applicationsSubmitted}`;
+  
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.key === "Enter" || e.key === " ") && onSelect) {
+      e.preventDefault();
+      onSelect();
+    }
+  };
+  
   return (
     <Paper
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={handleKeyDown}
       variant="outlined"
-      sx={{ p: 1.5, borderColor: isRunning ? "info.main" : undefined }}
+      sx={{
+        p: 1.5,
+        borderColor: isRunning ? "info.main" : undefined,
+        cursor: "pointer",
+        "&:focus-visible": {
+          outline: "2px solid",
+          outlineColor: "primary.main",
+          outlineOffset: "2px",
+        },
+        transition: "all 0.2s ease-in-out",
+        "&:hover": {
+          backgroundColor: "rgba(0, 0, 0, 0.02)",
+        },
+      }}
       aria-label={`Run ${run.id}`}
     >
       <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>

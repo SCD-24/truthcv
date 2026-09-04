@@ -1211,6 +1211,15 @@ class DiscoveryCoverageModel(_Camel):
     reason: str = ""
 
 
+class BoardBreakdownModel(_Camel):
+    """Per-board screening summary within a RunModel."""
+
+    board: str = ""
+    postings_seen: int = 0
+    for_review: int = 0
+    rejected: int = 0
+
+
 class RunModel(_Camel):
     """One agent run record — the wire shape for GET /api/runs and
     GET /api/runs/{run_id}. Mirrors runs.model.RunRecord field-for-field."""
@@ -1230,6 +1239,7 @@ class RunModel(_Camel):
     stopped_reason: str = ""
     note: str = ""
     discovery_coverage: list[DiscoveryCoverageModel] = Field(default_factory=list)
+    board_breakdown: list[BoardBreakdownModel] = Field(default_factory=list)
 
 
 class ApplicationListResponse(_Camel):
