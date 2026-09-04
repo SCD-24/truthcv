@@ -652,6 +652,7 @@ class PromptFragmentOut(_Camel):
     title: str
     text: str
     seeded: bool
+    recommended: bool = False
     conflicts_with: list[str] = Field(default_factory=list)
 
 

@@ -8,11 +8,29 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Alert from "@mui/material/Alert";
+import { SLOTS } from "./FragmentList";
 import type { PromptConflict, PromptFragment, PromptPreset } from "../api/client";
 import { savePromptPreset, setDefaultPromptPreset, validatePromptPreset } from "../api/client";
-import { SLOTS } from "./FragmentList";
 
 const NEW_PRESET = "__new__";
+
+/** Alert for missing recommended fragments. */
+function MissingRecommendedAlert({
+  fragments,
+  fragmentIds,
+}: {
+  fragments: PromptFragment[];
+  fragmentIds: string[];
+}) {
+  const missingRecommended = fragments.filter((f) => f.recommended && !fragmentIds.includes(f.id));
+  if (missingRecommended.length === 0) return null;
+  const titles = missingRecommended.map((f) => f.title).join(", ");
+  return (
+    <Alert severity="info" sx={{ mb: 2 }}>
+      Recommended fragments not selected: {titles}. Letters may lose formatting or quality guardrails without them.
+    </Alert>
+  );
+}
 
 /** Messages for the fragments a conflict names, keyed by fragment id, so
  * each offending checkbox can show its own inline reason. */
@@ -129,6 +147,7 @@ export function PresetBuilder({
             ))}
           </Alert>
         )}
+        <MissingRecommendedAlert fragments={fragments} fragmentIds={fragmentIds} />
       </Box>
 
       {SLOTS.map((slot) => (
@@ -188,15 +207,22 @@ function PresetSlotGroup({
         const reasons = reasonsByFragment.get(f.id);
         return (
           <Box key={f.id}>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={fragmentIds.includes(f.id)}
-                  onChange={() => onToggle(f.id)}
-                />
-              }
-              label={f.title}
-            />
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={fragmentIds.includes(f.id)}
+                    onChange={() => onToggle(f.id)}
+                  />
+                }
+                label={f.title}
+              />
+              {f.recommended && (
+                <Typography variant="caption" color="text.secondary">
+                  Recommended
+                </Typography>
+              )}
+            </Box>
             {reasons && (
               <Typography
                 component="span"

@@ -23,9 +23,10 @@ vi.mock("../api/client", () => ({
 }));
 
 const FRAGMENTS: PromptFragment[] = [
-  { id: "voice-1", slot: "voice", title: "Warm voice", text: "Be warm.", seeded: true, conflictsWith: [] },
-  { id: "voice-2", slot: "voice", title: "Direct voice", text: "Be direct.", seeded: true, conflictsWith: [] },
-  { id: "structure-1", slot: "structure", title: "Three paragraphs", text: "Use 3 paragraphs.", seeded: true, conflictsWith: [] },
+  { id: "voice-1", slot: "voice", title: "Warm voice", text: "Be warm.", seeded: true, recommended: false, conflictsWith: [] },
+  { id: "voice-2", slot: "voice", title: "Direct voice", text: "Be direct.", seeded: true, recommended: false, conflictsWith: [] },
+  { id: "structure-1", slot: "structure", title: "Three paragraphs", text: "Use 3 paragraphs.", seeded: true, recommended: false, conflictsWith: [] },
+  { id: "rules-1", slot: "rules", title: "Letter style", text: "Keep to one page.", seeded: true, recommended: true, conflictsWith: [] },
 ];
 
 const PRESETS: PromptPreset[] = [
@@ -80,14 +81,14 @@ describe("WritingStylePage", () => {
     render(<WritingStylePage />);
     await (await findLibrary()).findByText("Warm voice");
 
-    fireEvent.click(screen.getByRole("checkbox", { name: "Warm voice" }));
+    const presetBuilder = within(screen.getByRole("region", { name: "Preset builder" }));
+    fireEvent.click(presetBuilder.getByRole("checkbox", { name: "Warm voice" }));
     vi.mocked(validatePromptPreset).mockResolvedValue(EXCLUSIVE_CONFLICT);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Direct voice" }));
+    fireEvent.click(presetBuilder.getByRole("checkbox", { name: "Direct voice" }));
 
-    // The message shows in the conflict alert and inline beside each
-    // offending checkbox; assert on the alert.
-    const alert = await screen.findByRole("alert");
-    expect(within(alert).getByText(/only one voice fragment/i)).toBeTruthy();
+    // The message shows in the status box when conflicts are present.
+    const statusBox = await screen.findByRole("status");
+    expect(statusBox.textContent).toMatch(/only one voice fragment/i);
     const saveButton = screen.getByRole("button", { name: "Save preset" }) as HTMLButtonElement;
     await waitFor(() => expect(saveButton.disabled).toBe(true));
   });
@@ -96,10 +97,11 @@ describe("WritingStylePage", () => {
     render(<WritingStylePage />);
     await (await findLibrary()).findByText("Warm voice");
 
-    fireEvent.change(screen.getByLabelText("Preset name"), {
+    const presetBuilder = within(screen.getByRole("region", { name: "Preset builder" }));
+    fireEvent.change(presetBuilder.getByLabelText("Preset name"), {
       target: { value: "My preset" },
     });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Warm voice" }));
+    fireEvent.click(presetBuilder.getByRole("checkbox", { name: "Warm voice" }));
 
     await waitFor(() => expect(validatePromptPreset).toHaveBeenCalledWith(["voice-1"]));
 
@@ -115,5 +117,56 @@ describe("WritingStylePage", () => {
         isDefault: false,
       }),
     );
+  });
+
+  it("expands fragment text when the expand button is clicked", async () => {
+    render(<WritingStylePage />);
+    const library = await findLibrary();
+    await library.findByText("Warm voice");
+
+    // Initially the text is hidden
+    expect(library.queryByText("Be warm.")).toBeNull();
+
+    // Click the expand button for "Warm voice"
+    const expandButton = library.getByRole("button", { name: "Show text for Warm voice" });
+    fireEvent.click(expandButton);
+
+    // Text becomes visible
+    expect(library.getByText("Be warm.")).toBeTruthy();
+  });
+
+  it("warns when a preset omits recommended fragments", async () => {
+    render(<WritingStylePage />);
+    const library = await findLibrary();
+    await library.findByText("Warm voice");
+
+    const presetBuilder = within(screen.getByRole("region", { name: "Preset builder" }));
+
+    fireEvent.change(presetBuilder.getByLabelText("Preset name"), {
+      target: { value: "Test preset" },
+    });
+
+    // Select only "Warm voice" (rules-1 is recommended but not selected)
+    fireEvent.click(presetBuilder.getByRole("checkbox", { name: "Warm voice" }));
+
+    // Check that the recommended warning appears
+    await waitFor(() => {
+      const statusBox = screen.getByRole("status");
+      expect(statusBox.textContent).toMatch(/recommended fragments not selected/i);
+      expect(statusBox.textContent).toMatch(/letter style/i);
+    });
+
+    // The Save button should still be enabled
+    const saveButton = screen.getByRole("button", { name: "Save preset" }) as HTMLButtonElement;
+    expect(saveButton.disabled).toBe(false);
+
+    // Select the recommended fragment
+    fireEvent.click(presetBuilder.getByRole("checkbox", { name: "Letter style" }));
+
+    // The warning should disappear
+    await waitFor(() => {
+      const statusBox = screen.getByRole("status");
+      expect(statusBox.textContent).not.toMatch(/recommended fragments not selected/i);
+    });
   });
 });

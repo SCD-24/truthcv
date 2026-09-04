@@ -255,6 +255,49 @@ def test_persistence_round_trip():
     assert any(p.id == "test-preset" for p in presets)
 
 
+def test_recommended_flag_on_seeded_fragments():
+    """Verify exactly the four rules-* fragments are marked recommended."""
+    recommended_ids = {f.id for f in SEEDED_FRAGMENTS if f.recommended}
+    expected = {"rules-career-services-standard", "rules-tailoring", "rules-anti-slop", "rules-letter-style"}
+    assert recommended_ids == expected
+
+
+def test_recommended_round_trip():
+    """Verify recommended flag round-trips through to_dict/from_dict."""
+    frag_true = Fragment(id="test-rec-true", slot="voice", title="T", text="T.", recommended=True)
+    dict_form = frag_true.to_dict()
+    restored = Fragment.from_dict(dict_form)
+    assert restored.recommended is True
+
+    frag_false = Fragment(id="test-rec-false", slot="voice", title="F", text="F.", recommended=False)
+    dict_form = frag_false.to_dict()
+    restored = Fragment.from_dict(dict_form)
+    assert restored.recommended is False
+
+
+def test_recommended_defaults_to_false():
+    """Verify from_dict without recommended key defaults to False."""
+    d = {
+        "id": "test-no-rec",
+        "slot": "voice",
+        "title": "No Rec",
+        "text": "Text.",
+        "seeded": False,
+        "conflicts_with": [],
+    }
+    frag = Fragment.from_dict(d)
+    assert frag.recommended is False
+
+
+def test_user_fragment_recommended_persists_false():
+    """Verify upsert_fragment/list_fragments round-trips user fragment with default recommended."""
+    user_frag = Fragment(id="user-voice", slot="voice", title="User", text="User voice.")
+    upsert_fragment(user_frag)
+    fragments = list_fragments()
+    persisted = next(f for f in fragments if f.id == "user-voice")
+    assert persisted.recommended is False
+
+
 def test_validate_preset_exclusive_slot_conflict():
     frag1 = Fragment(id="voice-a", slot="voice", title="A", text="Voice A.")
     frag2 = Fragment(id="voice-b", slot="voice", title="B", text="Voice B.")

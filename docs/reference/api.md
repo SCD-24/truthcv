@@ -41,7 +41,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **GET** | `/api/applications/page` | One page of applications (limit default 25, offset, sort key, direction) with total; sorted server-side. |
 | **DELETE** | `/api/browser/session` | Closes the attended sign-in session; when a session existed and the close was accepted, clears the login_required apply-blocker on every pending/approved screening queued for that host so the next run retries them |
 | **POST** | `/api/runs/{run_id}/stop` | Stop a run: forwards cancel to the supervisor when it owns the run, otherwise closes the record as failed/orphaned. 404 unknown run, 409 already finished. |
-| **GET** | `/api/prompt-fragments` | List all prompt fragments (seeded + operator-defined) |
+| **GET** | `/api/prompt-fragments` | List all prompt fragments (seeded + operator-defined) with `seeded` and `recommended` flags; each fragment is a seeded snippet (unchangeable) or an operator-authored one. Recommended fragments should be included in presets (UI warns but does not block when omitted). |
 | **POST** | `/api/prompt-fragments` | Create a prompt fragment; id derived from title if omitted (403 when clashing with a seeded fragment) |
 | **PUT** | `/api/prompt-fragments/{id}` | Update a prompt fragment by id (403 for seeded fragments) |
 | **DELETE** | `/api/prompt-fragments/{id}` | Delete a prompt fragment (204; 403 seeded, 404 unknown) |
