@@ -55,6 +55,7 @@ export interface PromptFragment {
   title: string;
   text: string;
   seeded: boolean;
+  recommended: boolean;
   conflictsWith: string[];
 }
 
@@ -870,7 +871,7 @@ export function listPromptFragments(): Promise<PromptFragment[]> {
 
 /** Create or update a prompt fragment — PUT when it already has an id, POST
  * (server assigns the id) otherwise. */
-export function savePromptFragment(fragment: Omit<PromptFragment, "seeded">): Promise<PromptFragment> {
+export function savePromptFragment(fragment: Omit<PromptFragment, "seeded" | "recommended">): Promise<PromptFragment> {
   return request("/api/prompt-fragments" + (fragment.id ? `/${fragment.id}` : ""), {
     method: fragment.id ? "PUT" : "POST",
     headers: { "Content-Type": "application/json" },

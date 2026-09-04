@@ -46,7 +46,9 @@ class Fragment:
     ``id`` is the stable identifier referenced by presets and by the ORM/DB
     layer built on top of this model. ``slot`` places it in one of ``SLOTS``.
     ``seeded`` marks a fragment that shipped with the product rather than one
-    an operator authored. ``conflicts_with`` lists other fragment ids this
+    an operator authored. ``recommended`` marks a fragment that a preset should
+    include; UI warnings (non-blocking) appear when a preset omits any
+    recommended fragment. ``conflicts_with`` lists other fragment ids this
     fragment should not be combined with, independent of slot exclusivity.
     """
 
@@ -55,6 +57,7 @@ class Fragment:
     title: str
     text: str
     seeded: bool = False
+    recommended: bool = False
     conflicts_with: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -65,6 +68,7 @@ class Fragment:
             "title": self.title,
             "text": self.text,
             "seeded": self.seeded,
+            "recommended": self.recommended,
             "conflicts_with": list(self.conflicts_with),
         }
 
@@ -84,6 +88,7 @@ class Fragment:
             title=d["title"],
             text=d["text"],
             seeded=bool(d.get("seeded", False)),
+            recommended=bool(d.get("recommended", False)),
             conflicts_with=list(d.get("conflicts_with", [])),
         )
 
@@ -270,6 +275,7 @@ def seeded_fragments(conventions: CvConventions = DEFAULT_CONVENTIONS) -> list[F
             title="Career-services writing standard",
             text=f"{_CAREER_SERVICES_INTRO} {_ANTI_TELL_RULES_TEXT}",
             seeded=True,
+            recommended=True,
         ),
         Fragment(
             id="rules-tailoring",
@@ -277,6 +283,7 @@ def seeded_fragments(conventions: CvConventions = DEFAULT_CONVENTIONS) -> list[F
             title="Tailoring to the posting",
             text=_TAILORING_SENTENCE,
             seeded=True,
+            recommended=True,
         ),
         Fragment(
             id="rules-anti-slop",
@@ -284,6 +291,7 @@ def seeded_fragments(conventions: CvConventions = DEFAULT_CONVENTIONS) -> list[F
             title="Anti-slop guardrails",
             text=letter_anti_slop().strip(),
             seeded=True,
+            recommended=True,
         ),
         Fragment(
             id="rules-letter-style",
@@ -291,6 +299,7 @@ def seeded_fragments(conventions: CvConventions = DEFAULT_CONVENTIONS) -> list[F
             title="Letter style",
             text=letter_style(conventions).strip(),
             seeded=True,
+            recommended=True,
         ),
     ]
 

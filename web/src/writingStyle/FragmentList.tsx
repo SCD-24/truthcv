@@ -5,6 +5,7 @@ import Typography from "@mui/material/Typography";
 import Chip from "@mui/material/Chip";
 import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
+import Collapse from "@mui/material/Collapse";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -12,6 +13,8 @@ import DialogActions from "@mui/material/DialogActions";
 import TextField from "@mui/material/TextField";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import AddIcon from "@mui/icons-material/Add";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import type { PromptFragment } from "../api/client";
@@ -106,8 +109,17 @@ function FragmentEditor({
   );
 }
 
-/** One fragment row: title, slot badge, seeded badge, and — for user
- * fragments only — edit/delete controls. */
+/** Fragment text display with pre-wrapped whitespace. */
+function FragmentText({ text }: { text: string }) {
+  return (
+    <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: "pre-wrap" }}>
+      {text}
+    </Typography>
+  );
+}
+
+/** One fragment row: title, slot badge, seeded badge, recommended chip (if applicable),
+ * expand button to reveal text, and — for user fragments only — edit/delete controls. */
 function FragmentRow({
   fragment,
   onEdit,
@@ -117,40 +129,64 @@ function FragmentRow({
   onEdit: () => void;
   onDeleted: () => void;
 }) {
+  const [open, setOpen] = useState(false);
+
   return (
-    <Box
-      component="li"
-      sx={{ display: "flex", alignItems: "center", gap: 1, py: 0.5, listStyle: "none" }}
-    >
-      <Typography component="span" sx={{ flexGrow: 1 }}>
-        {fragment.title}
-      </Typography>
-      {fragment.seeded && (
-        <Chip
+    <Box component="li" sx={{ listStyle: "none" }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, py: 0.5 }}>
+        <IconButton
           size="small"
-          icon={<LockOutlinedIcon fontSize="small" aria-hidden="true" />}
-          label="Seeded"
-          aria-label={`${fragment.title} is a seeded, read-only fragment`}
-        />
-      )}
-      {!fragment.seeded && (
-        <>
-          <IconButton
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          aria-label={`Show text for ${fragment.title}`}
+          sx={{ ml: -1 }}
+        >
+          {open ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+        </IconButton>
+        <Typography component="span" sx={{ flexGrow: 1 }}>
+          {fragment.title}
+        </Typography>
+        {fragment.seeded && (
+          <Chip
             size="small"
-            aria-label={`Edit ${fragment.title}`}
-            onClick={onEdit}
-          >
-            <EditOutlinedIcon fontSize="small" />
-          </IconButton>
-          <IconButton
+            icon={<LockOutlinedIcon fontSize="small" aria-hidden="true" />}
+            label="Seeded"
+            aria-label={`${fragment.title} is a seeded, read-only fragment`}
+          />
+        )}
+        {fragment.recommended && (
+          <Chip
             size="small"
-            aria-label={`Delete ${fragment.title}`}
-            onClick={() => deletePromptFragment(fragment.id).then(onDeleted)}
-          >
-            <DeleteOutlineIcon fontSize="small" />
-          </IconButton>
-        </>
-      )}
+            label="Recommended"
+            color="primary"
+            variant="outlined"
+            aria-label={`${fragment.title} is recommended; presets should include it`}
+          />
+        )}
+        {!fragment.seeded && (
+          <>
+            <IconButton
+              size="small"
+              aria-label={`Edit ${fragment.title}`}
+              onClick={onEdit}
+            >
+              <EditOutlinedIcon fontSize="small" />
+            </IconButton>
+            <IconButton
+              size="small"
+              aria-label={`Delete ${fragment.title}`}
+              onClick={() => deletePromptFragment(fragment.id).then(onDeleted)}
+            >
+              <DeleteOutlineIcon fontSize="small" />
+            </IconButton>
+          </>
+        )}
+      </Box>
+      <Collapse in={open} timeout="auto" unmountOnExit>
+        <Box sx={{ pl: 4, pr: 2, pb: 1 }}>
+          <FragmentText text={fragment.text} />
+        </Box>
+      </Collapse>
     </Box>
   );
 }
