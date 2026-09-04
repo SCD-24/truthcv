@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
+from api.routes import reconcile_orphaned_runs
 from runs import store
 
 
@@ -461,3 +462,144 @@ def test_board_breakdown_empty_for_run_with_no_screenings(client):
     run = r.json()
     assert "boardBreakdown" in run
     assert run["boardBreakdown"] == []
+
+
+# --- POST /api/runs/{run_id}/stop and startup reconciliation ----------------
+
+
+def test_post_run_stop_404_on_unknown_id(client):
+    r = client.post("/api/runs/unknown-run/stop")
+    assert r.status_code == 404
+
+
+def test_post_run_stop_409_on_completed_record(client):
+    store.start("completed-run", trigger="manual", apply_cap=0)
+    store.finish("completed-run", status="completed")
+
+    r = client.post("/api/runs/completed-run/stop")
+    assert r.status_code == 409
+
+
+def test_post_run_stop_supervisor_owns_run(client, monkeypatch):
+    import api.routes as routes
+
+    calls = []
+
+    def fake_forward(path, method="GET", **kwargs):
+        calls.append((path, method))
+        if path == "/status":
+            return {"running": True, "currentRunId": "owned-run"}
+        if path == "/cancel":
+            return {"cancelled": True}
+        return {}
+
+    monkeypatch.setattr(routes, "_forward_to_supervisor", fake_forward)
+
+    store.start("owned-run", trigger="manual", apply_cap=0)
+
+    r = client.post("/api/runs/owned-run/stop")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["outcome"] == "cancelling"
+    assert body["run"]["status"] == "running"
+
+    assert ("/status", "GET") in calls
+    assert ("/cancel", "POST") in calls
+
+
+def test_post_run_stop_orphaned_record(client, monkeypatch):
+    import api.routes as routes
+
+    def fake_forward(path, method="GET", **kwargs):
+        if path == "/status":
+            return {"running": False}
+        raise Exception("should not reach supervisor")
+
+    monkeypatch.setattr(routes, "_forward_to_supervisor", fake_forward)
+
+    store.start("running-A", trigger="manual", apply_cap=0)
+    store.start("running-B", trigger="manual", apply_cap=0)
+
+    r = client.post("/api/runs/running-B/stop")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["outcome"] == "closed"
+    assert body["run"]["status"] == "failed"
+
+    record_a = store.get("running-A")
+    assert record_a.status == "running"
+    record_b = store.get("running-B")
+    assert record_b.status == "failed"
+    assert record_b.stopped_reason == "orphaned"
+
+
+def test_post_run_stop_supervisor_unreachable(client, monkeypatch):
+    import api.routes as routes
+    from fastapi import HTTPException
+
+    def fake_forward(path, method="GET", **kwargs):
+        raise HTTPException(status_code=503, detail="supervisor unreachable")
+
+    monkeypatch.setattr(routes, "_forward_to_supervisor", fake_forward)
+
+    store.start("unreachable-run", trigger="manual", apply_cap=0)
+
+    r = client.post("/api/runs/unreachable-run/stop")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["outcome"] == "closed"
+    assert body["run"]["status"] == "failed"
+
+    record = store.get("unreachable-run")
+    assert record.status == "failed"
+    assert record.stopped_reason == "orphaned"
+
+
+def test_reconcile_orphaned_runs_with_supervisor_owning_run(client, monkeypatch):
+    import api.routes as routes
+
+    def fake_forward(path, method="GET", **kwargs):
+        return {"running": True, "currentRunId": "run-A"}
+
+    monkeypatch.setattr(routes, "_forward_to_supervisor", fake_forward)
+
+    store.start("run-A", trigger="manual", apply_cap=0)
+    store.start("run-B", trigger="manual", apply_cap=0)
+    store.start("run-C", trigger="manual", apply_cap=0)
+
+    closed = reconcile_orphaned_runs()
+    closed_ids = {r.id for r in closed}
+    assert closed_ids == {"run-B", "run-C"}
+
+    record_a = store.get("run-A")
+    assert record_a.status == "running"
+
+    record_b = store.get("run-B")
+    assert record_b.status == "failed"
+    assert record_b.stopped_reason == "orphaned"
+
+    record_c = store.get("run-C")
+    assert record_c.status == "failed"
+    assert record_c.stopped_reason == "orphaned"
+
+
+def test_reconcile_orphaned_runs_with_supervisor_unreachable(client, monkeypatch):
+    import api.routes as routes
+    from fastapi import HTTPException
+
+    def fake_forward(path, method="GET", **kwargs):
+        raise HTTPException(status_code=503, detail="supervisor unreachable")
+
+    monkeypatch.setattr(routes, "_forward_to_supervisor", fake_forward)
+
+    store.start("run-A", trigger="manual", apply_cap=0)
+    store.start("run-B", trigger="manual", apply_cap=0)
+
+    closed = reconcile_orphaned_runs()
+    closed_ids = {r.id for r in closed}
+    assert closed_ids == {"run-A", "run-B"}
+
+    for run_id in ("run-A", "run-B"):
+        record = store.get(run_id)
+        assert record.status == "failed"
+        assert record.stopped_reason == "orphaned"

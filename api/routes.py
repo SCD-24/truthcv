@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 import os
 from datetime import date
 import urllib.error
@@ -129,6 +130,7 @@ from .schemas import (
     RouteModel,
     RunListResponse,
     RunModel,
+    RunStopResult,
     RoutingModel,
     RoutingUpdate,
     SaveCoverLetterRequest,
@@ -152,6 +154,8 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/api")
+
+logger = logging.getLogger(__name__)
 
 
 def _screening_model(screening: Screening) -> ScreeningModel:
@@ -253,6 +257,68 @@ def get_run(run_id: str) -> RunModel:
     if record is None:
         raise HTTPException(status_code=404, detail="run not found")
     return _run_models([record])[0]
+
+
+def _supervisor_owns_run(run_id: str) -> bool:
+    """Whether the supervisor is the one currently watching this run.
+
+    The supervisor tracks only what it currently owns, in memory: if its
+    status does not name this run as the one it is running, nothing will ever
+    call finish_run for it — the run is orphaned and we close it ourselves.
+    """
+    try:
+        data = _forward_to_supervisor("/status")
+    except HTTPException as exc:
+        logger.warning("could not reach supervisor to check run ownership: %s", exc.detail)
+        return False
+    return data.get("running") is True and data.get("currentRunId") == run_id
+
+
+@router.post("/runs/{run_id}/stop", response_model=RunStopResult)
+def post_run_stop(run_id: str) -> RunStopResult:
+    """Stop a run: cancel it through the supervisor if it owns the run, or
+    close an orphaned record as failed/orphaned otherwise.
+    """
+    record = runs_store.get(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    if record.status != "running":
+        raise HTTPException(status_code=409, detail="run is not running")
+
+    if _supervisor_owns_run(run_id):
+        _forward_to_supervisor("/cancel", method="POST")
+        return RunStopResult(outcome="cancelling", run=_run_models([record])[0])
+
+    closed = runs_store.finish_if_running(run_id, "failed", stopped_reason="orphaned")
+    if closed is None:
+        closed = runs_store.get(run_id)
+    return RunStopResult(outcome="closed", run=_run_models([closed])[0])
+
+
+def reconcile_orphaned_runs() -> list:
+    """Reconcile orphaned runs at API startup.
+
+    Checks which run (if any) the supervisor currently owns, then closes
+    every other "running" record as orphaned — those have nothing left that
+    could ever close them, since the supervisor keeps run state in memory.
+    """
+    live_run_id = None
+    try:
+        data = _forward_to_supervisor("/status")
+        if data.get("running") is True:
+            live_run_id = data.get("currentRunId")
+    except HTTPException:
+        logger.warning(
+            "Supervisor was unreachable during startup reconciliation; "
+            "all running records will be treated as orphaned"
+        )
+
+    closed = runs_store.close_orphaned(except_run_id=live_run_id)
+    logger.info(
+        "reconciled orphaned runs at startup",
+        extra={"count": len(closed), "closed_run_ids": [r.id for r in closed]},
+    )
+    return closed
 
 
 @router.post("/screenings", response_model=ScreeningModel, status_code=201)

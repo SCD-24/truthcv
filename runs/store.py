@@ -219,6 +219,32 @@ def finish_if_running(
         return record
 
 
+def close_orphaned(
+    except_run_id: str | None = None,
+    stopped_reason: str = "orphaned",
+) -> list[RunRecord]:
+    """Mark stale ``running`` records as failed after a restart.
+
+    The supervisor keeps process state in memory only, so once the agent or
+    app restarts, a record still marked "running" has nothing left that could
+    ever close it — the process that would have called ``finish_run`` or
+    ``finish_if_running`` is gone. This closes every such orphan out as
+    failed, except (optionally) the one run currently starting up.
+    """
+    with locked(runs_path()):
+        runs = load_all()
+        closed = [
+            r for r in runs if r.status == "running" and r.id != except_run_id
+        ]
+        for record in closed:
+            record.status = validate_status("failed")
+            record.finished_at = _now()
+            record.stopped_reason = stopped_reason
+        if closed:
+            _write_all(runs)
+        return closed
+
+
 def finish(
     run_id: str,
     status: str = "completed",

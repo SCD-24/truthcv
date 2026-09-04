@@ -37,6 +37,7 @@ import type {
   PollLoginResult,
   Routing,
   RoutingUpdate,
+  RunStopResult,
   SigninQueue,
   JobBoardKeyStatus,
   BrowserSession,
@@ -663,6 +664,14 @@ export function listRuns(limit?: number, offset?: number): Promise<RunPage> {
 /** A single run record, or throws (404) if no run with this id was recorded. */
 export function getRun(id: string): Promise<RunRecord> {
   return request(`/api/runs/${encodeURIComponent(id)}`);
+}
+
+/** Stop a running run: signals it through the supervisor when it is live
+ * (outcome "cancelling"), or closes an orphaned record as failed when there
+ * is no live supervisor to signal (outcome "closed"). Pass the run id.
+ * Returns the outcome plus the updated run record. */
+export function stopRun(id: string): Promise<RunStopResult> {
+  return request(`/api/runs/${encodeURIComponent(id)}/stop`, { method: "POST" });
 }
 
 /** List all provider connections and their status. */

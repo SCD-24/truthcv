@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -20,7 +21,9 @@ from storage import data_dir
 
 from .config import cors_origins, port, public_url, static_dir
 from .prompt_routes import prompt_router
-from .routes import router
+from .routes import reconcile_orphaned_runs, router
+
+logger = logging.getLogger(__name__)
 
 # Build MCP Server app for streamable-HTTP JSON-RPC endpoint
 _mcp_server = Server(name="truthcv")
@@ -118,6 +121,12 @@ async def lifespan(app: FastAPI):
     POST /mcp is dispatched through; without it each request raises
     "Task group is not initialized".
     """
+    try:
+        reconcile_orphaned_runs()
+    except Exception as e:
+        logger.exception("startup reconciliation of orphaned runs failed: %s", e)
+        # Startup must not fail because of runs.json
+
     async with _mcp_server.session_manager.run():
         yield
 

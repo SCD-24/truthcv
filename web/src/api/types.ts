@@ -506,6 +506,14 @@ export interface BoardBreakdown {
   rejected: number;
 }
 
+/** Result of POST /api/runs/:id/stop. "cancelling" means the supervisor was
+ * signalled and the run is still winding down; "closed" means the record was
+ * orphaned (no live supervisor) and was closed out as failed directly. */
+export interface RunStopResult {
+  outcome: "cancelling" | "closed";
+  run: RunRecord;
+}
+
 /** One page of runs from GET /api/runs, newest first. `total` counts every
  * recorded run, not this page — it is what tells the caller how many pages
  * exist, and it cannot be derived from a capped page. */
