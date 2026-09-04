@@ -60,7 +60,7 @@ no longer behind a compose profile. The agent waits for the browser to report
 healthy before its first run:
 
 ```bash
-export ANTHROPIC_API_KEY=...           # never commit this
+export AGENT_LLM_PROVIDER=... AGENT_LLM_API_KEY=...           # never commit this
 docker compose up -d                            # app, browser, agent
 docker compose logs -f agent
 ```
@@ -100,8 +100,8 @@ under the operator's name. Watch it.
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Injected at runtime, never baked into the image. Checked at container start. **Fallback only** when `AGENT_API_TOKEN` is unset; when it is set, credentials are fetched from `GET /api/agent/llm-credentials` at run start. |
-| `AGENT_API_TOKEN` | unset | Shared secret (generate with `openssl rand -hex 32`). When set, the agent fetches LLM credentials from the app at run start via a guarded endpoint; when unset, it uses `ANTHROPIC_API_KEY` directly (original behavior). |
+| `AGENT_API_TOKEN` | unset | Shared secret (generate with `openssl rand -hex 32`). When set, the agent fetches LLM credentials from the app at run start via a guarded endpoint; when unset, it uses the `AGENT_LLM_*` container env. |
+| `AGENT_LLM_API_KEY` | unset | Provider-neutral container-level fallback for LLM credentials, used only when `AGENT_API_TOKEN` is unset. Required for non-ollama providers; may be empty only for ollama (via `AGENT_LLM_BASE_URL`). Never log its value. |
 | `RUN_AT` | `09:00,15:00` | Comma-separated `HH:MM` (24h, container TZ). Fallback only — used when the agent config API is unreachable; see below. |
 | `RUN_DAYS` | `1,2,3,4,5` | Days to run, `1`=Mon … `7`=Sun. Fallback only — used when the agent config API is unreachable; see below. |
 | `RUN_ONCE` | unset | `1` = run immediately and exit. |
@@ -112,6 +112,8 @@ under the operator's name. Watch it.
 | `BROWSER_MCP_URL` | `http://browser:8931/mcp` | In-network address of the `browser` compose service's MCP endpoint (see [`browser/README.md`](../browser/README.md)). Also in-network only. Used by the `browser` driver. |
 | `MAX_APPLICATIONS_PER_RUN` | empty | Fallback only: `maxApplicationsPerRun` on the Agents page takes precedence. Empty in both means **no cap**, matching RUNBOOK §1 ("there is no daily quota"). Not zero. Enforced server-side on the approved-queue path (`get_approved_applications` caps and leases what it hands out); on a posting the agent discovers itself in FULL AUTO it is prompt-level only. |
 | `RUN_LOG_DIR` | `/app/runs` | Where `daily-apply.sh` writes per-run logs. Must stay inside the `agent-runs` volume or logs vanish on restart. |
+
+The container no longer aborts at start without an LLM credential — it logs a warning and continues; each scheduled run aborts (with a recorded reason on the Agents page) until a credential is available.
 
 The agent runs a provider-neutral harness (`agent/harness`, compiled into the image), so the **Model** setting on the Agents page can point at any supported provider — `claude`, `codex`, `openrouter`, or `ollama` — chosen via the connection configured in Settings. The harness's credentials are resolved at run start through `GET /api/agent/llm-credentials`.
 
