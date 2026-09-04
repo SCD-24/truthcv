@@ -39,11 +39,34 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **GET** | `/api/applications?q=` | Optional q: case-insensitive substring filter over company, website, application URL, notes, posting, role; empty returns all. |
 | **GET** | `/api/applications/page` | One page of applications (limit default 25, offset, sort key, direction) with total; sorted server-side. |
 | **DELETE** | `/api/browser/session` | Closes the attended sign-in session; when a session existed and the close was accepted, clears the login_required apply-blocker on every pending/approved screening queued for that host so the next run retries them |
+| **GET** | `/api/prompt-fragments` | List all prompt fragments (seeded + operator-defined) |
+| **POST** | `/api/prompt-fragments` | Create a prompt fragment; id derived from title if omitted (403 when clashing with a seeded fragment) |
+| **PUT** | `/api/prompt-fragments/{id}` | Update a prompt fragment by id (403 for seeded fragments) |
+| **DELETE** | `/api/prompt-fragments/{id}` | Delete a prompt fragment (204; 403 seeded, 404 unknown) |
+| **GET** | `/api/prompt-presets` | List prompt presets |
+| **POST** | `/api/prompt-presets` | Create a prompt preset (422 with conflicts on incompatible fragments) |
+| **PUT** | `/api/prompt-presets/{id}` | Update a prompt preset by id |
+| **DELETE** | `/api/prompt-presets/{id}` | Delete a prompt preset (204; 403 default/seeded, 404 unknown) |
+| **POST** | `/api/prompt-presets/validate` | Validate a fragment_ids selection; returns conflicts |
+| **PUT** | `/api/prompt-presets/{id}/default` | Mark a preset as the default |
+| **GET** | `/api/prompt-presets` | List operator-editable writing-style presets |
+| **POST** | `/api/prompt-presets` | Create a preset (id, name, fragment_ids, is_default); 422 on fragment conflicts, 403 if seeded |
+| **PUT** | `/api/prompt-presets/{id}` | Update a preset in place; 422 on fragment conflicts, 403 if seeded |
+| **DELETE** | `/api/prompt-presets/{id}` | Delete a preset (204); 404 if unknown, seeded presets refused |
+| **POST** | `/api/prompt-presets/validate` | Validate a fragment_ids set, returning conflicts without saving |
+| **PUT** | `/api/prompt-presets/{id}/default` | Mark a preset as the default; 404 if unknown |
+| **POST** | `/api/prompt-presets` | Create a new prompt preset (api/prompt_routes.py) |
+| **PUT** | `/api/prompt-presets/{id}` | Update an existing prompt preset (body: PromptPresetIn; id taken from the path); returns PromptPresetOut |
+| **DELETE** | `/api/prompt-presets/{id}` | Delete a user prompt preset (204); seeded presets rejected with 400, unknown id 404 |
+| **PUT** | `/api/prompt-presets/{id}/default` | Mark the given prompt preset as the default; returns the updated preset |
+| **POST** | `/api/prompt-fragments` | Create an operator-authored prompt fragment (id derived from title via slugify when omitted); returns the saved PromptFragmentOut |
+| **PUT** | `/api/prompt-fragments/{id}` | Update an existing prompt fragment (PromptFragmentIn body; returns PromptFragmentOut) |
 | **GET** | `/api/settings` | Provider settings status (encryptionAvailable, activeProvider, model, *KeySet booleans, ollamaHost). Never returns raw secrets. |
 | **POST** | `/api/settings` | Save provider selection + API key/model/host; encrypts to ./data/secrets.enc via ENCRYPTION_KEY. Empty apiKey leaves the stored key unchanged. |
 | **POST** | `/api/settings/test` | Test connection: a tiny live provider call with saved/submitted credentials. Returns {ok, detail}. |
 | **POST** | `/api/models` | List available models for a provider (live model-list lookup). |
 | **POST** | `/mcp` | Streamable-HTTP JSON-RPC MCP tool surface (agenttools/mcp_app.py) used by the Application Agent container; in-network only. |
+| **DELETE** | `/api/prompt-fragments/{id}` | Delete a user prompt fragment by id; 204 on success, 404 if unknown, 400 if seeded/undeletable |
 | **GET** | `/api/screenings` | Every screening record, most recent first; optional ?approval= narrows to the queue. |
 | **POST** | `/api/screenings` | Create a screening record from client-supplied fields. |
 | **PATCH** | `/api/screenings/approvals` | Apply one approval decision to many screenings; reports per-id outcomes. |

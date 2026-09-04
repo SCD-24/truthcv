@@ -552,6 +552,173 @@
             "w": 440,
             "x": 50,
             "y": 50
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "List all prompt fragments (seeded + operator-defined)",
+                  "method": "GET",
+                  "path": "/api/prompt-fragments"
+                },
+                {
+                  "desc": "Create a prompt fragment; id derived from title if omitted (403 when clashing with a seeded fragment)",
+                  "method": "POST",
+                  "path": "/api/prompt-fragments"
+                },
+                {
+                  "desc": "Update a prompt fragment by id (403 for seeded fragments)",
+                  "method": "PUT",
+                  "path": "/api/prompt-fragments/{id}"
+                },
+                {
+                  "desc": "Delete a prompt fragment (204; 403 seeded, 404 unknown)",
+                  "method": "DELETE",
+                  "path": "/api/prompt-fragments/{id}"
+                },
+                {
+                  "desc": "List prompt presets",
+                  "method": "GET",
+                  "path": "/api/prompt-presets"
+                },
+                {
+                  "desc": "Create a prompt preset (422 with conflicts on incompatible fragments)",
+                  "method": "POST",
+                  "path": "/api/prompt-presets"
+                },
+                {
+                  "desc": "Update a prompt preset by id",
+                  "method": "PUT",
+                  "path": "/api/prompt-presets/{id}"
+                },
+                {
+                  "desc": "Delete a prompt preset (204; 403 default/seeded, 404 unknown)",
+                  "method": "DELETE",
+                  "path": "/api/prompt-presets/{id}"
+                },
+                {
+                  "desc": "Validate a fragment_ids selection; returns conflicts",
+                  "method": "POST",
+                  "path": "/api/prompt-presets/validate"
+                },
+                {
+                  "desc": "Mark a preset as the default",
+                  "method": "PUT",
+                  "path": "/api/prompt-presets/{id}/default"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1788519499667-16",
+            "title": "Prompt library routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 110,
+            "y": 110
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "List operator-editable writing-style presets",
+                  "method": "GET",
+                  "path": "/api/prompt-presets"
+                },
+                {
+                  "desc": "Create a preset (id, name, fragment_ids, is_default); 422 on fragment conflicts, 403 if seeded",
+                  "method": "POST",
+                  "path": "/api/prompt-presets"
+                },
+                {
+                  "desc": "Update a preset in place; 422 on fragment conflicts, 403 if seeded",
+                  "method": "PUT",
+                  "path": "/api/prompt-presets/{id}"
+                },
+                {
+                  "desc": "Delete a preset (204); 404 if unknown, seeded presets refused",
+                  "method": "DELETE",
+                  "path": "/api/prompt-presets/{id}"
+                },
+                {
+                  "desc": "Validate a fragment_ids set, returning conflicts without saving",
+                  "method": "POST",
+                  "path": "/api/prompt-presets/validate"
+                },
+                {
+                  "desc": "Mark a preset as the default; 404 if unknown",
+                  "method": "PUT",
+                  "path": "/api/prompt-presets/{id}/default"
+                },
+                {
+                  "desc": "Create a new prompt preset (api/prompt_routes.py)",
+                  "method": "POST",
+                  "path": "/api/prompt-presets"
+                },
+                {
+                  "desc": "Update an existing prompt preset (body: PromptPresetIn; id taken from the path); returns PromptPresetOut",
+                  "method": "PUT",
+                  "path": "/api/prompt-presets/{id}"
+                },
+                {
+                  "desc": "Delete a user prompt preset (204); seeded presets rejected with 400, unknown id 404",
+                  "method": "DELETE",
+                  "path": "/api/prompt-presets/{id}"
+                },
+                {
+                  "desc": "Mark the given prompt preset as the default; returns the updated preset",
+                  "method": "PUT",
+                  "path": "/api/prompt-presets/{id}/default"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1788519500185-17",
+            "title": "Prompt preset routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 140,
+            "y": 140
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "Create an operator-authored prompt fragment (id derived from title via slugify when omitted); returns the saved PromptFragmentOut",
+                  "method": "POST",
+                  "path": "/api/prompt-fragments"
+                },
+                {
+                  "desc": "Update an existing prompt fragment (PromptFragmentIn body; returns PromptFragmentOut)",
+                  "method": "PUT",
+                  "path": "/api/prompt-fragments/{id}"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1788519502734-18",
+            "title": "Prompt fragment routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 170,
+            "y": 170
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "Delete a user prompt fragment by id; 204 on success, 404 if unknown, 400 if seeded/undeletable",
+                  "method": "DELETE",
+                  "path": "/api/prompt-fragments/{id}"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1788519511746-19",
+            "title": "Prompt routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 200,
+            "y": 200
           }
         ]
       },
@@ -2168,6 +2335,11 @@
       "from": "api",
       "protocol": "in-process",
       "to": "prompt-store"
+    },
+    {
+      "from": "prompt-store",
+      "protocol": "file I/O",
+      "to": "truth-data-volume"
     }
   ],
   "definitions": [

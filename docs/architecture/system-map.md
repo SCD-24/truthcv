@@ -77,6 +77,7 @@ graph TD
     onboarding-store -->|in-process| storage-leaf
     onboarding-store -->|file I/O| truth-data-volume
     prompt-store -->|in-process| storage-leaf
+    prompt-store -->|file I/O| truth-data-volume
     renderer -->|in-process| keyword-vocabulary
     renderer -->|in-process| prompt-store
     renderer -->|in-process| storage-leaf
@@ -195,6 +196,7 @@ graph TD
 - [onboarding-store → storage-leaf](interactions/onboarding-store--storage-leaf.md) via `in-process`
 - [onboarding-store → truth-data-volume](interactions/onboarding-store--truth-data-volume.md) via `file I/O`
 - [prompt-store → storage-leaf](interactions/prompt-store--storage-leaf.md) via `in-process`
+- [prompt-store → truth-data-volume](interactions/prompt-store--truth-data-volume.md) via `file I/O`
 - [renderer → keyword-vocabulary](interactions/renderer--keyword-vocabulary.md) via `in-process`
 - [renderer → prompt-store](interactions/renderer--prompt-store.md) via `in-process`
 - [renderer → storage-leaf](interactions/renderer--storage-leaf.md) via `in-process`
