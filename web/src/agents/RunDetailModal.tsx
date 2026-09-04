@@ -55,14 +55,14 @@ export function RunDetailModal({ run, timeZone, onClose }: RunDetailModalProps) 
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth aria-labelledby="run-detail-title">
-      <DialogTitle id="run-detail-title">Run {run.id}</DialogTitle>
+      <DialogTitle id="run-detail-title">Run <Box component="span" sx={{ fontFamily: "var(--font-mono)", fontSize: "0.9em" }}>{run.id}</Box></DialogTitle>
 
       <DialogContent>
         <Box sx={{ mb: 2 }}>
-          <Typography variant="body2" color="textSecondary">
+          <Typography variant="body2" color="text.secondary">
             Status: <strong>{run.status}</strong>
           </Typography>
-          <Typography variant="body2" color="textSecondary">
+          <Typography variant="body2" color="text.secondary">
             {formatInZone(run.startedAt, timeZone)} – {formatInZone(run.finishedAt, timeZone)}
           </Typography>
         </Box>
@@ -70,7 +70,7 @@ export function RunDetailModal({ run, timeZone, onClose }: RunDetailModalProps) 
         {hasBreakdown ? (
           <Table size="small" sx={{ mt: 2 }}>
             <TableHead>
-              <TableRow sx={{ backgroundColor: "#f5f5f5" }}>
+              <TableRow>
                 <TableCell>Job board</TableCell>
                 <TableCell align="right">Postings seen</TableCell>
                 <TableCell align="right">For review</TableCell>
@@ -86,22 +86,22 @@ export function RunDetailModal({ run, timeZone, onClose }: RunDetailModalProps) 
                   <TableCell align="right">{entry.rejected}</TableCell>
                 </TableRow>
               ))}
-              <TableRow sx={{ backgroundColor: "#f9f9f9", fontWeight: "bold" }}>
-                <TableCell sx={{ fontWeight: "bold" }}>Total</TableCell>
-                <TableCell align="right" sx={{ fontWeight: "bold" }}>
+              <TableRow sx={{ backgroundColor: "var(--ground)" }}>
+                <TableCell sx={{ fontWeight: "bold", borderTop: "2px solid var(--line)" }}>Total</TableCell>
+                <TableCell align="right" sx={{ fontWeight: "bold", borderTop: "2px solid var(--line)" }}>
                   {totals.postingsSeen}
                 </TableCell>
-                <TableCell align="right" sx={{ fontWeight: "bold" }}>
+                <TableCell align="right" sx={{ fontWeight: "bold", borderTop: "2px solid var(--line)" }}>
                   {totals.forReview}
                 </TableCell>
-                <TableCell align="right" sx={{ fontWeight: "bold" }}>
+                <TableCell align="right" sx={{ fontWeight: "bold", borderTop: "2px solid var(--line)" }}>
                   {totals.rejected}
                 </TableCell>
               </TableRow>
             </TableBody>
           </Table>
         ) : (
-          <Typography color="textSecondary" sx={{ mt: 2 }}>
+          <Typography color="text.secondary" sx={{ mt: 2 }}>
             No screenings recorded.
           </Typography>
         )}

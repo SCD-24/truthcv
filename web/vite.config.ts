@@ -28,5 +28,14 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    // AgentsPage.*.test.tsx mount the whole page (MUI + router + every
+    // section) in jsdom — ~2s per test when idle. With the default one worker
+    // per core (16 on the dev box) and ~30 test files in flight at once they
+    // starve each other and cross vitest's 5s default, so the pre-PR gate
+    // sees timeouts that never reproduce in isolation. Bound the fan-out and
+    // give those renders real headroom; do not lower these back to defaults.
+    testTimeout: 15000,
+    minWorkers: 1,
+    maxWorkers: 4,
   },
 });
