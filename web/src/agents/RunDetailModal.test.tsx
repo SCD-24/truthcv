@@ -31,7 +31,13 @@ describe("RunDetailModal", () => {
     const onClose = () => {};
     render(<RunDetailModal run={run} onClose={onClose} />);
 
-    expect(screen.getByText("Run run-test")).toBeTruthy();
+    // Text is split across elements due to mono-font span, so check with regex
+    expect(screen.getByText((content, element) => {
+      if (element?.tagName === "H2") {
+        return element.textContent?.includes("Run") && element.textContent?.includes("run-test");
+      }
+      return false;
+    })).toBeTruthy();
   });
 
   it("renders board breakdown table with two boards", () => {
