@@ -48,6 +48,7 @@ log() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 # and are checked there,
 # every run - do not duplicate them here. This preflight only checks what is
 # worth failing fast at container START, before the first sleep.
+# Credential enforcement lives in daily-apply.sh per run.
 validate_run_at() {
   local t
   IFS=',' read -ra _slots <<< "$RUN_AT"
@@ -60,14 +61,24 @@ validate_run_at() {
   return 0
 }
 
+# Reports the container's LLM credential posture at boot. Never fatal - actual
+# enforcement happens per run in daily-apply.sh - and never logs key/URL values.
+report_credentials() {
+  if [[ -n "${AGENT_API_TOKEN:-}" ]]; then
+    log "INFO: credentials will be fetched from app at run time"
+  elif [[ -n "${AGENT_LLM_API_KEY:-}" ]]; then
+    log "INFO: using container-level AGENT_LLM_* credentials (provider=${AGENT_LLM_PROVIDER:-unset})"
+  elif [[ "${AGENT_LLM_PROVIDER:-}" == "ollama" && -n "${AGENT_LLM_BASE_URL:-}" ]]; then
+    log "INFO: using container-level AGENT_LLM_* credentials (provider=ollama)"
+  else
+    log "WARN: no LLM credential configured - runs will abort until AGENT_API_TOKEN is set and a provider key is saved on the Agents page, or AGENT_LLM_API_KEY is set in the container env"
+  fi
+  return 0
+}
+
 preflight() {
   local ok=0
-  if [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${AGENT_API_TOKEN:-}" ]]; then
-    log "ABORT: neither ANTHROPIC_API_KEY nor AGENT_API_TOKEN is set"
-    ok=1
-  elif [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-    log "credentials will be fetched from app at run time"
-  fi
+  report_credentials
   [[ -x "$DAILY_APPLY" ]] || { log "ABORT: $DAILY_APPLY missing or not executable"; ok=1; }
 
   # Browser-driver switch, validated at BOOT so an unknown value is reported
@@ -163,7 +174,7 @@ refresh_schedule() {
 # times) explicitly, where `date -d` here just takes the system's answer, so on
 # a DST transition day the printed instant can differ by an hour. Deliberately runs BEFORE preflight: it submits
 # nothing (it only reads the schedule via refresh_schedule), so it must not
-# require ANTHROPIC_API_KEY.
+# require credentials.
 check_schedule() {
   local cursor secs i
   cursor=$(date +%s)
