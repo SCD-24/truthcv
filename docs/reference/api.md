@@ -18,6 +18,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **GET** | `/api/applications/page` | One page of applications, server-sorted and paginated. Query: limit (25), offset (0, negative clamped to 0), sort (date), direction (desc). Returns {applications, total, limit, offset, sort, direction}; 400 on an invalid sort/direction. |
 | **GET** | `/api/runs` | One page of agent runs, newest first. `limit` (default 50; 0 or negative means no limit) and `offset` (default 0, clamped at 0, applied before the limit). Returns {runs, total, limit, offset}; `total` counts every run currently retained, which a capped page cannot report. An offset past the end is an empty page, not an error. Only the 200 most recent runs are retained (runs.store trims on write), so `total` is a count of what is kept, not of every run ever. Read in-process from runs.store on the data volume, not proxied to the supervisor. |
 | **GET** | `/api/runs/{run_id}` | One agent run record by id, read in-process from runs.store.get; 404 when unknown. |
+| **POST** | `/api/runs/{run_id}/stop` | Stop a running run: cancels via the agent supervisor if it owns the run (outcome "cancelling"), otherwise closes the orphaned record as failed/orphaned. Returns RunStopResult {outcome, run}; 404 if unknown, 409 if not running. |
 | **POST** | `/api/extract` | LLM extracts structured truth.yaml from the uploaded PDF text. |
 | **GET** | `/api/truth` | Return the current truth.yaml for the Review step. |
 | **PUT** | `/api/truth` | Save user corrections to truth.yaml (Review step); after this it is trusted. |
@@ -39,6 +40,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 | **GET** | `/api/applications?q=` | Optional q: case-insensitive substring filter over company, website, application URL, notes, posting, role; empty returns all. |
 | **GET** | `/api/applications/page` | One page of applications (limit default 25, offset, sort key, direction) with total; sorted server-side. |
 | **DELETE** | `/api/browser/session` | Closes the attended sign-in session; when a session existed and the close was accepted, clears the login_required apply-blocker on every pending/approved screening queued for that host so the next run retries them |
+| **POST** | `/api/runs/{run_id}/stop` | Stop a run: forwards cancel to the supervisor when it owns the run, otherwise closes the record as failed/orphaned. 404 unknown run, 409 already finished. |
 | **GET** | `/api/prompt-fragments` | List all prompt fragments (seeded + operator-defined) |
 | **POST** | `/api/prompt-fragments` | Create a prompt fragment; id derived from title if omitted (403 when clashing with a seeded fragment) |
 | **PUT** | `/api/prompt-fragments/{id}` | Update a prompt fragment by id (403 for seeded fragments) |
@@ -105,4 +107,5 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) — not 
 |---|---|---|
 | **POST** | `/run` | Trigger a run immediately, fire-and-forget. Requires X-Agent-Token matching AGENT_API_TOKEN. |
 | **GET** | `/status` | {running, lastStartedAt, lastFinishedAt, lastExitCode}. Requires X-Agent-Token. |
+| **POST** | `/cancel` | Stop the run in progress (fire-and-forget); called by API on run stop and orphan reconciliation |
 <!-- generated:end comp:application-agent -->
