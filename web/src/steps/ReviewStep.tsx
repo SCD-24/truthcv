@@ -9,6 +9,7 @@ import type {
   Bullet,
   Education,
   Experience,
+  Hobby,
   Profile,
   Skill,
   TruthDoc,
@@ -27,7 +28,7 @@ function Stamp({ source }: { source: TruthSource }) {
 }
 
 const isEmpty = (t: TruthDoc) =>
-  t.experiences.length === 0 && t.education.length === 0 && t.skills.length === 0;
+  t.experiences.length === 0 && t.education.length === 0 && t.skills.length === 0 && t.hobbies.length === 0;
 
 let seq = 0;
 const newId = (p: string) => `${p}-new-${Date.now().toString(36)}-${seq++}`;
@@ -80,11 +81,11 @@ export function ReviewStep({
       run(async () => {
         const loaded = await getTruth();
         setTruth(loaded);
-        setDoc(loaded);
+        setDoc({ ...loaded, hobbies: loaded.hobbies ?? [] });
         return true;
       });
     } else {
-      setDoc(truth);
+      setDoc({ ...truth, hobbies: truth.hobbies ?? [] });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -182,6 +183,19 @@ export function ReviewStep({
       skills: [...d.skills, { id: newId("sk"), value: "", source: "user-confirmed" }],
     }));
 
+  const patchHobby = (id: string, value: string) =>
+    setDoc((d) => ({
+      ...d,
+      hobbies: d.hobbies.map((h) => (h.id === id ? { ...h, value } : h)),
+    }));
+  const removeHobby = (id: string) =>
+    setDoc((d) => ({ ...d, hobbies: d.hobbies.filter((h) => h.id !== id) }));
+  const addHobby = () =>
+    setDoc((d) => ({
+      ...d,
+      hobbies: [...d.hobbies, { id: newId("hb"), value: "", source: "user-confirmed" }],
+    }));
+
   // ---- save: drop empties, persist ---------------------------------------
   const save = async () => {
     const cleaned: TruthDoc = {
@@ -190,6 +204,7 @@ export function ReviewStep({
         .filter((e) => e.role.trim() || e.company.trim() || e.bullets.length),
       education: doc.education.filter((e) => e.degree.trim() || e.school.trim()),
       skills: doc.skills.filter((s) => s.value.trim()),
+      hobbies: doc.hobbies.filter((h) => h.value.trim()),
       profile: {
         ...doc.profile,
         links: doc.profile.links.filter((l) => l.label.trim() || l.url.trim()),
@@ -394,6 +409,31 @@ export function ReviewStep({
           </div>
           <button type="button" className="mini-btn" onClick={addSkill}>
             + Add skill
+          </button>
+        </section>
+
+        <section className="group">
+          <header className="group__head">
+            <h2 className="group__title">Hobbies</h2>
+            <span className="group__count">{doc.hobbies.length}</span>
+          </header>
+          <div className="skills-edit">
+            {(doc.hobbies ?? []).map((h: Hobby) => (
+              <div className="skill-row" key={h.id}>
+                <input
+                  className="input"
+                  value={h.value}
+                  aria-label="Hobby"
+                  onChange={(ev) => patchHobby(h.id, ev.target.value)}
+                />
+                <button type="button" className="entry__remove" onClick={() => removeHobby(h.id)}>
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+          <button type="button" className="mini-btn" onClick={addHobby}>
+            + Add hobby
           </button>
         </section>
       </div>

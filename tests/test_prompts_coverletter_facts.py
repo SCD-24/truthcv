@@ -1,7 +1,7 @@
 """Test cover_letter_facts_block output with profile and answers."""
 
 from truth.answers import Answers
-from truth.model import Bullet, Experience, Link, Profile, Skill, Truth
+from truth.model import Bullet, Experience, Hobby, Link, Profile, Skill, Truth
 from prompts.coverletter import cover_letter_facts_block
 
 EM_DASH = "\u2014"
@@ -32,6 +32,7 @@ def _truth() -> Truth:
             )
         ],
         skills=[Skill(id="s1", value="Python", source="linkedin-pdf")],
+        hobbies=[Hobby(id="h1", value="Chess", source="user-confirmed")],
     )
 
 
@@ -175,3 +176,35 @@ def test_facts_block_blank_profile_skipped():
     assert "Candidate profile:" not in output
     # But answer values should still appear
     assert "Current role: Staff Engineer" in output
+
+
+def test_facts_block_hobbies_included():
+    """When hobbies are present, they appear after skills."""
+    truth = Truth(
+        profile=Profile(name="Alice"),
+        experiences=[],
+        education=[],
+        skills=[Skill(id="s1", value="Python", source="linkedin-pdf")],
+        hobbies=[Hobby(id="h1", value="Chess", source="user-confirmed")],
+    )
+    output = cover_letter_facts_block(truth)
+    assert "Skills: Python" in output
+    assert "Hobbies: Chess" in output
+    # Hobbies line should come after Skills line
+    skills_idx = output.index("Skills: Python")
+    hobbies_idx = output.index("Hobbies: Chess")
+    assert skills_idx < hobbies_idx
+
+
+def test_facts_block_no_hobbies_line_when_empty():
+    """When hobbies are empty, no 'Hobbies:' line appears."""
+    truth = Truth(
+        profile=Profile(name="Bob"),
+        experiences=[],
+        education=[],
+        skills=[Skill(id="s1", value="Python", source="linkedin-pdf")],
+        hobbies=[],  # Explicitly empty
+    )
+    output = cover_letter_facts_block(truth)
+    assert "Skills: Python" in output
+    assert "Hobbies:" not in output

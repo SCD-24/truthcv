@@ -154,6 +154,26 @@ class Skill:
 
 
 @dataclass
+class Hobby:
+    """A standalone hobby/interest; cover-letter-only, never rendered into the CV."""
+
+    id: str
+    value: str
+    source: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"id": self.id, "value": self.value, "source": self.source}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Hobby":
+        return cls(
+            id=str(d["id"]),
+            value=str(d["value"]),
+            source=str(d.get("source", "uploaded-cv")),
+        )
+
+
+@dataclass
 class Link:
     """A labelled profile link (e.g. LinkedIn, portfolio)."""
 
@@ -213,6 +233,7 @@ class Truth:
     experiences: list[Experience] = field(default_factory=list)
     education: list[Education] = field(default_factory=list)
     skills: list[Skill] = field(default_factory=list)
+    hobbies: list[Hobby] = field(default_factory=list)
     profile: Profile = field(default_factory=Profile)
 
     def to_dict(self) -> dict[str, Any]:
@@ -220,6 +241,7 @@ class Truth:
             "experiences": [e.to_dict() for e in self.experiences],
             "education": [e.to_dict() for e in self.education],
             "skills": [s.to_dict() for s in self.skills],
+            "hobbies": [h.to_dict() for h in self.hobbies],
             "profile": self.profile.to_dict(),
         }
 
@@ -229,16 +251,17 @@ class Truth:
             experiences=[Experience.from_dict(e) for e in d.get("experiences", []) or []],
             education=[Education.from_dict(e) for e in d.get("education", []) or []],
             skills=[Skill.from_dict(s) for s in d.get("skills", []) or []],
+            hobbies=[Hobby.from_dict(h) for h in d.get("hobbies", []) or []],
             profile=Profile.from_dict(d.get("profile") or {}),
         )
 
     @classmethod
     def empty(cls) -> "Truth":
-        return cls([], [], [], Profile())
+        return cls([], [], [], [], Profile())
 
     def is_empty(self) -> bool:
         # Content-wise: a profile alone is still 'empty' (bootstrap unchanged).
-        return not (self.experiences or self.education or self.skills)
+        return not (self.experiences or self.education or self.skills or self.hobbies)
 
     def all_ids(self) -> set[str]:
         ids: set[str] = set()
@@ -247,4 +270,5 @@ class Truth:
             ids.update(b.id for b in e.bullets)
         ids.update(e.id for e in self.education)
         ids.update(s.id for s in self.skills)
+        ids.update(h.id for h in self.hobbies)
         return ids

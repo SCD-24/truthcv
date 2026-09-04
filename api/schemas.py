@@ -59,6 +59,12 @@ class SkillModel(_Camel):
     source: str = "uploaded-cv"
 
 
+class HobbyModel(_Camel):
+    id: str
+    value: str
+    source: str = "uploaded-cv"
+
+
 class LinkModel(_Camel):
     label: str = ""
     url: str = ""
@@ -81,6 +87,7 @@ class TruthDoc(_Camel):
     experiences: list[ExperienceModel] = Field(default_factory=list)
     education: list[EducationModel] = Field(default_factory=list)
     skills: list[SkillModel] = Field(default_factory=list)
+    hobbies: list[HobbyModel] = Field(default_factory=list)
     profile: ProfileModel = Field(default_factory=ProfileModel)
 
 

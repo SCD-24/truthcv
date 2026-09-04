@@ -15,6 +15,7 @@ Projected from `schema` widgets on the architecture canvas.
 | `kind` | enum | - | role \| company \| date \| bullet \| skill |
 | `value` | string | - | The factual content. |
 | `source` | enum | provenance | linkedin-pdf \| user-confirmed — the trust tag. |
+| `hobbies` | list[Hobby] | optional, default [] | Hobby = {id, value, source}, same shape as Skill. Editable in the Truth File page; offered to the Cover Letter Engine only — never tailored or rendered into the CV. |
 
 ### profile header
 
@@ -26,6 +27,14 @@ Projected from `schema` widgets on the architecture canvas.
 | `location` | string | - | Contact — identity, guardrail-exempt. |
 | `links` | array&lt;{label,url}&gt; | - | Profile links — identity, guardrail-exempt. |
 | `summary` | string | - | Free-text description/headline — a CLAIM; validated by the guardrail against the truth/source. |
+
+### hobbies[] entry (Hobby)
+
+| Field | Type | Flags | Notes |
+|---|---|---|---|
+| `id` | string | required, unique | make_id-derived stable id |
+| `value` | string | required | the hobby/interest text as stated in the source CV |
+| `source` | enum | default uploaded-cv | provenance of the fact |
 <!-- generated:end comp:truth-store -->
 
 <!-- generated:start comp:application-tracker -->

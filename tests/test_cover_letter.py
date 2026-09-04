@@ -5,7 +5,7 @@ from __future__ import annotations
 from coverletter.generate import build_letter, load_letter_draft, save_letter_draft
 from providers.fake import FakeProvider
 from truth.answers import Answers
-from truth.model import Bullet, Experience, Profile, Skill, Truth
+from truth.model import Bullet, Experience, Hobby, Profile, Skill, Truth
 
 
 def _truth() -> Truth:
@@ -116,6 +116,29 @@ def test_denied_claim_empties_letter_when_it_is_the_only_paragraph(data_dir):
     )
     assert out["blocked"] is False
     assert out["text"] == ""
+
+
+def test_hobby_value_passes_guardrail(data_dir):
+    """A letter mentioning a hobby value from the truth file passes the guardrail."""
+    def _router_hobby_claim(system, messages, schema):
+        return {
+            "paragraphs": [
+                {
+                    "text": "Outside of work, I enjoy playing Chess and building projects.",
+                    "claims": ["Chess"],
+                }
+            ]
+        }
+
+    truth = Truth(
+        experiences=[],
+        education=[],
+        skills=[],
+        hobbies=[Hobby(id="h-chess", value="Chess", source="user-confirmed")],
+    )
+    out = build_letter("A role", "Professional", "Short", truth, FakeProvider(router=_router_hobby_claim))
+    assert out["blocked"] is False
+    assert "Chess" in out["text"]
 
 
 def test_profile_header_is_allowed_claim_source(data_dir):

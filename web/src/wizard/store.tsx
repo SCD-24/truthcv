@@ -21,6 +21,7 @@ const emptyTruth: TruthDoc = {
   experiences: [],
   education: [],
   skills: [],
+  hobbies: [],
   profile: emptyProfile,
 };
 import { extractTruth, getOnboarding } from "../api/client";

@@ -794,6 +794,12 @@
                   "name": "source",
                   "notes": "linkedin-pdf | user-confirmed — the trust tag.",
                   "type": "enum"
+                },
+                {
+                  "flags": "optional, default []",
+                  "name": "hobbies",
+                  "notes": "Hobby = {id, value, source}, same shape as Skill. Editable in the Truth File page; offered to the Cover Letter Engine only — never tailored or rendered into the CV.",
+                  "type": "list[Hobby]"
                 }
               ]
             },
@@ -804,18 +810,6 @@
             "w": 440,
             "x": 90,
             "y": 90
-          },
-          {
-            "data": {
-              "text": "TruthEntry.kind ∈ {role, company, date, bullet, skill}; TruthEntry.source ∈ {linkedin-pdf, user-confirmed}. The store enforces non-empty, unique id and valid kind/source. Persisted YAML is wrapped as { entries: [...] }, not a bare list."
-            },
-            "h": 200,
-            "id": "widget-1783605716326-3",
-            "title": "Schema enums & envelope",
-            "type": "note",
-            "w": 350,
-            "x": 120,
-            "y": 120
           },
           {
             "data": {
@@ -865,6 +859,49 @@
             "w": 440,
             "x": 150,
             "y": 150
+          },
+          {
+            "data": {
+              "text": "TruthEntry.kind ∈ {role, company, date, bullet, skill, hobby}; TruthEntry.source ∈ {linkedin-pdf, user-confirmed, uploaded-cv}. The store enforces non-empty, unique id and valid kind/source. Persisted YAML is wrapped as { entries: [...] }, not a bare list. Hobbies (truth/model.py Hobby) are extracted from the uploaded CV as a standalone hobbies[] list, guardrail-validated like any other fact, and used by the Cover Letter Engine only — never rendered into the CV."
+            },
+            "h": 200,
+            "id": "widget-1788554941333-4",
+            "title": "Schema enums & envelope",
+            "type": "note",
+            "w": 350,
+            "x": 150,
+            "y": 150
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "required, unique",
+                  "name": "id",
+                  "notes": "make_id-derived stable id",
+                  "type": "string"
+                },
+                {
+                  "flags": "required",
+                  "name": "value",
+                  "notes": "the hobby/interest text as stated in the source CV",
+                  "type": "string"
+                },
+                {
+                  "flags": "default uploaded-cv",
+                  "name": "source",
+                  "notes": "provenance of the fact",
+                  "type": "enum"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1788554941458-5",
+            "title": "hobbies[] entry (Hobby)",
+            "type": "schema",
+            "w": 440,
+            "x": 180,
+            "y": 180
           }
         ]
       },
@@ -912,7 +949,7 @@
         "widgets": [
           {
             "data": {
-              "text": "The core truthfulness guardrail (guardrail/): a pure, deterministic, scoped token-diff of a draft against truth — no LLM. validate(scopes, global_values) returns ok plus BOTH a flat unverifiable[] token list (back-compat) and structured blocked_claims grouping untraceable tokens under the specific source text (bullet) and scope id they came from, so callers can present whole-claim approve/deny. A token is verifiable if it is a stopword or appears (post-tokenization) in its own scope's allowed set (or global skills). Render-scoped approvals are passed in by merging an approved claim's text into that scope's allowed set for a single render — the guardrail itself never mutates truth."
+              "text": "The core truthfulness guardrail (guardrail/): a pure, deterministic, scoped token-diff of a draft against truth — no LLM. validate(scopes, global_values) returns ok plus BOTH a flat unverifiable[] token list (back-compat) and structured blocked_claims grouping untraceable tokens under the specific source text (bullet) and scope id they came from, so callers can present whole-claim approve/deny. A token is verifiable if it is a stopword or appears (post-tokenization) in its own scope's allowed set (or the caller-supplied global_values — global skills for CV renders; for cover letters the Cover Letter Engine passes every truth value, including hobbies and the profile header, since a letter weaves the whole career). Render-scoped approvals are passed in by merging an approved claim's text into that scope's allowed set for a single render — the guardrail itself never mutates truth."
             },
             "h": 180,
             "id": "widget-1783591752977-0",
