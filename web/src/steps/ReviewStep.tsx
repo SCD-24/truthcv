@@ -35,11 +35,44 @@ const newId = (p: string) => `${p}-new-${Date.now().toString(36)}-${seq++}`;
 export interface ReviewStepProps {
   onNext: () => void;
   onBack?: () => void;
+  /**
+   * Header overline text (e.g. "Step 2 of 2"). Defaults to "Step 2 of 2".
+   */
+  eyebrow?: string;
+  /**
+   * Main header title (e.g. "Review what we found"). Defaults to "Review what we found".
+   */
+  title?: string;
+  /**
+   * Leading paragraph text. Defaults to the standard onboarding lede about CV facts.
+   */
+  lede?: string;
+  /**
+   * Primary button label (e.g. "Save & continue"). Defaults to "Save & continue".
+   */
+  nextLabel?: string;
+  /**
+   * Back button label (e.g. "Back"). Defaults to "Back". Only rendered if onBack is defined.
+   */
+  backLabel?: string;
 }
 
-export function ReviewStep({ onNext, onBack }: ReviewStepProps) {
+export function ReviewStep({
+  onNext,
+  onBack,
+  eyebrow = "Step 2 of 2",
+  title = "Review what we found",
+  lede,
+  nextLabel = "Save & continue",
+  backLabel = "Back",
+}: ReviewStepProps) {
   const { truth, setTruth, run, loading, error } = useWizard();
   const [doc, setDoc] = useState<TruthDoc>(truth);
+  const defaultLede =
+    "Each job keeps its own dates and highlights, so nothing drifts between " +
+    "roles. Correct anything wrong — once you save, these are the facts we " +
+    "stand behind.";
+  const displayLede = lede ?? defaultLede;
 
   // Load the truth file on first visit if the store has none yet.
   useEffect(() => {
@@ -173,13 +206,9 @@ export function ReviewStep({ onNext, onBack }: ReviewStepProps) {
   return (
     <section>
       <div className="stage__head">
-        <Typography variant="overline" className="eyebrow">Step 2 of 2</Typography>
-        <h1 className="stage__title">Review what we found</h1>
-        <p className="stage__lede">
-          Each job keeps its own dates and highlights, so nothing drifts between
-          roles. Correct anything wrong — once you save, these are the facts we
-          stand behind.
-        </p>
+        <Typography variant="overline" className="eyebrow">{eyebrow}</Typography>
+        <h1 className="stage__title">{title}</h1>
+        <p className="stage__lede">{displayLede}</p>
       </div>
 
       {error && (
@@ -370,11 +399,13 @@ export function ReviewStep({ onNext, onBack }: ReviewStepProps) {
       </div>
 
       <Box className="stage__actions" sx={{ display: "flex", gap: 2 }}>
-        <Button variant="outlined" onClick={() => onBack?.()}>
-          Back
-        </Button>
+        {onBack && (
+          <Button variant="outlined" onClick={() => onBack?.()}>
+            {backLabel}
+          </Button>
+        )}
         <Button variant="contained" disabled={loading} onClick={save}>
-          Save &amp; continue
+          {nextLabel}
         </Button>
       </Box>
     </section>

@@ -50,6 +50,12 @@ export function SideNav({
       dataTour: "nav-upload-cv",
     },
     {
+      path: ROUTES.truthFile,
+      label: "Truth file",
+      icon: <FactCheckOutlinedIcon fontSize="small" />,
+      dataTour: "nav-truth-file",
+    },
+    {
       path: ROUTES.manual,
       label: "Manual",
       icon: <EditNoteOutlinedIcon fontSize="small" />,
