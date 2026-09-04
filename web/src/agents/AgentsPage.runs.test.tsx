@@ -222,7 +222,13 @@ describe("RecentRunsSection", () => {
     fireEvent.keyDown(runRow, { key: "Enter" });
 
     await waitFor(() => {
-      expect(screen.getByText(/Run run-keyboard/)).toBeTruthy();
+      // Text is split across elements due to mono-font span
+      expect(screen.getByText((_content, element) => {
+        if (element?.tagName === "H2") {
+          return element.textContent?.includes("Run") && element.textContent?.includes("run-keyboard");
+        }
+        return false;
+      })).toBeTruthy();
     });
   });
 
@@ -237,14 +243,25 @@ describe("RecentRunsSection", () => {
     fireEvent.click(screen.getByRole("button", { name: /run-closeable/ }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Run run-closeable/)).toBeTruthy();
+      // Text is split across elements due to mono-font span
+      expect(screen.getByText((_content, element) => {
+        if (element?.tagName === "H2") {
+          return element.textContent?.includes("Run") && element.textContent?.includes("run-closeable");
+        }
+        return false;
+      })).toBeTruthy();
     });
 
     const closeButton = screen.getByRole("button", { name: "Close" });
     fireEvent.click(closeButton);
 
     await waitFor(() => {
-      expect(screen.queryByText(/Run run-closeable/)).toBeNull();
+      expect(screen.queryByText((_content, element) => {
+        if (element?.tagName === "H2") {
+          return element.textContent?.includes("Run") && element.textContent?.includes("run-closeable");
+        }
+        return false;
+      })).toBeNull();
     });
   });
 

@@ -32,7 +32,7 @@ describe("RunDetailModal", () => {
     render(<RunDetailModal run={run} onClose={onClose} />);
 
     // Text is split across elements due to mono-font span, so check with regex
-    expect(screen.getByText((content, element) => {
+    expect(screen.getByText((_content, element) => {
       if (element?.tagName === "H2") {
         return element.textContent?.includes("Run") && element.textContent?.includes("run-test");
       }
