@@ -16,6 +16,7 @@ vi.mock("./api/client", async (importOriginal) => {
       experiences: [],
       education: [],
       skills: [],
+      hobbies: [],
       profile: { name: "", email: "", phone: "", location: "", links: [], summary: "" },
     }),
     listPendingApprovals: vi.fn().mockResolvedValue([]),

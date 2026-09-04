@@ -29,6 +29,7 @@ function emptyTruth(): TruthDoc {
     experiences: [],
     education: [],
     skills: [],
+    hobbies: [],
     profile: { name: "", email: "", phone: "", location: "", links: [], summary: "" },
   };
 }
@@ -63,6 +64,13 @@ function seedTruth(): TruthDoc {
         id: "skill-cv-2",
         value: "TypeScript",
         source: "linkedin-pdf",
+      },
+    ],
+    hobbies: [
+      {
+        id: "hobby-cv-1",
+        value: "Chess",
+        source: "user-confirmed",
       },
     ],
     profile: { name: "", email: "", phone: "", location: "", links: [], summary: "" },
@@ -184,5 +192,67 @@ describe("TruthFilePage", () => {
     fireEvent.click(screen.getByRole("button", { name: /back/i }));
 
     expect(onBack).toHaveBeenCalled();
+  });
+
+  it("adds a hobby and shows it under the Hobbies heading", async () => {
+    vi.mocked(getTruth).mockResolvedValue(emptyTruth());
+    vi.mocked(saveTruth).mockResolvedValue(undefined);
+
+    renderPage();
+    await screen.findByText("Your truth file");
+
+    // Click "+ Add hobby"
+    fireEvent.click(screen.getByRole("button", { name: /\+ Add hobby/i }));
+
+    // Type in the new hobby input (the last one added)
+    const hobbyInputs = screen.getAllByLabelText("Hobby");
+    fireEvent.change(hobbyInputs[hobbyInputs.length - 1], { target: { value: "Chess" } });
+
+    // Click Save
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
+
+    // Verify saveTruth was called with the new hobby having source: "user-confirmed"
+    await waitFor(() =>
+      expect(saveTruth).toHaveBeenCalledWith(
+        expect.objectContaining({
+          hobbies: expect.arrayContaining([
+            expect.objectContaining({
+              value: "Chess",
+              source: "user-confirmed",
+            }),
+          ]),
+        }),
+      ),
+    );
+    expect(await screen.findByText("Truth file saved.")).toBeTruthy();
+  });
+
+  it("removes a hobby and it is absent from the saveTruth call", async () => {
+    const truthWithHobby = {
+      ...emptyTruth(),
+      hobbies: [{ id: "h1", value: "Chess", source: "user-confirmed" as const }],
+    };
+    vi.mocked(getTruth).mockResolvedValue(truthWithHobby);
+    vi.mocked(saveTruth).mockResolvedValue(undefined);
+
+    renderPage();
+    await screen.findByText("Your truth file");
+
+    // Ensure the hobby is displayed
+    expect(screen.getByDisplayValue("Chess")).toBeTruthy();
+
+    // Click the × button for the hobby
+    const removeHobbyButtons = screen.getAllByRole("button", { name: /×/i });
+    fireEvent.click(removeHobbyButtons[0]); // Remove the hobby (should be first × button)
+
+    // Click Save
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
+
+    // Verify saveTruth was called with an empty hobbies array
+    await waitFor(() => {
+      const call = vi.mocked(saveTruth).mock.calls[0]?.[0];
+      expect(call?.hobbies).toEqual([]);
+    });
+    expect(await screen.findByText("Truth file saved.")).toBeTruthy();
   });
 });

@@ -104,7 +104,7 @@ def has_existing_cv() -> bool:
     except ValueError:
         return False
     has_header = bool(truth.profile.name or truth.profile.summary)
-    return bool(truth.experiences or truth.education or truth.skills or has_header)
+    return bool(truth.experiences or truth.education or truth.skills or truth.hobbies or has_header)
 
 
 def ensure_initialized() -> OnboardingState:

@@ -129,11 +129,11 @@ def _answer_lines(answers: Answers | None) -> list[str]:
 
 
 def cover_letter_facts_block(truth: Truth, answers: Answers | None = None) -> str:
-    """Render the candidate's whole career plus profile and screening answers.
+    """Render the candidate's whole career plus profile, hobbies, and screening answers.
 
     The CANDIDATE FACTS the letter may draw from: experiences, education, skills,
-    profile header, and any supplied screening answers (name, email, location,
-    years of experience, etc). All facts are plain text, never fabricated.
+    hobbies, profile header, and any supplied screening answers (name, email,
+    location, years of experience, etc). All facts are plain text, never fabricated.
     """
     lines: list[str] = []
     profile_lines = _profile_lines(truth.profile)
@@ -153,6 +153,8 @@ def cover_letter_facts_block(truth: Truth, answers: Answers | None = None) -> st
         lines.append(f"{ed.degree}, {ed.school} ({span})" if span else f"{ed.degree}, {ed.school}")
     if truth.skills:
         lines.append("Skills: " + ", ".join(s.value for s in truth.skills))
+    if truth.hobbies:
+        lines.append("Hobbies: " + ", ".join(h.value for h in truth.hobbies))
     answer_lines = _answer_lines(answers)
     lines.extend(answer_lines)
     return "\n".join(lines)

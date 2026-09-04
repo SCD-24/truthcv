@@ -8,6 +8,7 @@ from providers.fake import FakeProvider
 from truth import (
     Bullet,
     Experience,
+    Hobby,
     Link,
     Profile,
     Skill,
@@ -43,6 +44,29 @@ def test_save_load_round_trip(data_dir):
     assert load().to_dict() == _truth().to_dict()
 
 
+def test_hobby_round_trip(data_dir):
+    t = Truth(
+        experiences=[
+            Experience(
+                id="exp-1",
+                role="Engineer",
+                company="Acme",
+                start="2020",
+                end="Present",
+                source="linkedin-pdf",
+                bullets=[Bullet("exp-1-b-1", "Shipped the thing", "linkedin-pdf")],
+            )
+        ],
+        skills=[Skill("sk-python", "Python", "linkedin-pdf")],
+        hobbies=[Hobby("hb-chess", "Chess", "user-confirmed")],
+    )
+    save(t)
+    loaded = load()
+    assert loaded.hobbies[0].id == "hb-chess"
+    assert loaded.hobbies[0].value == "Chess"
+    assert loaded.hobbies[0].source == "user-confirmed"
+
+
 def test_profile_round_trips(data_dir):
     t = _truth()
     t.profile = Profile(
@@ -65,6 +89,23 @@ def test_profile_defaults_empty_when_absent(data_dir):
     # Legacy doc with no "profile" key loads a blank profile, not a crash.
     save(_truth())  # _truth() carries a default (empty) profile
     assert load().profile == Profile()
+
+
+def test_hobbies_missing_key_defaults_to_empty(data_dir):
+    # Legacy doc with no "hobbies" key loads hobbies=[], not a crash.
+    from truth.store import truth_path
+
+    from truth import save as save_truth
+
+    t = _truth()
+    save_truth(t)
+    # Simulate legacy file by removing hobbies key
+    import yaml
+    doc = yaml.safe_load(truth_path().read_text(encoding="utf-8"))
+    doc.pop("hobbies", None)
+    truth_path().write_text(yaml.safe_dump(doc), encoding="utf-8")
+    loaded = load()
+    assert loaded.hobbies == []
 
 
 def test_load_empty_when_no_file(data_dir):
@@ -95,6 +136,31 @@ def test_validate_rejects_duplicate_ids():
 def test_validate_rejects_empty_id():
     with pytest.raises(ValueError):
         validate(Truth(skills=[Skill("", "A", "linkedin-pdf")]))
+
+
+def test_validate_rejects_duplicate_hobby_id(data_dir):
+    dup = Truth(
+        hobbies=[Hobby("hb-chess", "Chess", "user-confirmed"), Hobby("hb-chess", "Reading", "user-confirmed")]
+    )
+    with pytest.raises(ValueError):
+        validate(dup)
+
+
+def test_validate_rejects_duplicate_id_across_skills_and_hobbies(data_dir):
+    dup = Truth(
+        skills=[Skill("dup-id", "Python", "user-confirmed")],
+        hobbies=[Hobby("dup-id", "Chess", "user-confirmed")],
+    )
+    with pytest.raises(ValueError):
+        validate(dup)
+
+
+def test_validate_rejects_bad_hobby_source(data_dir):
+    bad = Truth(
+        hobbies=[Hobby("hb-chess", "Chess", "invalid-source")]
+    )
+    with pytest.raises(ValueError):
+        validate(bad)
 
 
 def test_source_hash_round_trips(data_dir):
@@ -162,6 +228,25 @@ def test_extraction_without_profile_is_blank(data_dir):
     )
     truth = extract.build_truth_from_text("profile text", provider)
     assert truth.profile == Profile()  # absent profile -> blank, no crash
+
+
+def test_extraction_with_hobbies(data_dir):
+    provider = FakeProvider(
+        json_responses=[
+            {
+                "experiences": [],
+                "education": [],
+                "skills": [],
+                "hobbies": ["Chess", "chess", "Reading"],  # dup "chess" dropped
+                "profile": {},
+            }
+        ]
+    )
+    truth = extract.build_truth_from_text("profile text", provider)
+    assert len(truth.hobbies) == 2
+    assert [h.value for h in truth.hobbies] == ["Chess", "Reading"]
+    assert all(h.source == "uploaded-cv" for h in truth.hobbies)
+    assert all(h.id.startswith("hb") for h in truth.hobbies)
 
 
 def _extract_provider():

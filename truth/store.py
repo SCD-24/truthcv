@@ -52,8 +52,8 @@ def loaded_source_hash() -> str | None:
 
 
 def validate(truth: Truth) -> None:
-    """Enforce unique ids (across experiences, bullets, education, skills) and
-    valid sources. Raises ValueError on violation."""
+    """Enforce unique ids (across experiences, bullets, education, skills, hobbies)
+    and valid sources. Raises ValueError on violation."""
     seen: set[str] = set()
 
     def check_id(oid: str) -> None:
@@ -81,6 +81,9 @@ def validate(truth: Truth) -> None:
     for sk in truth.skills:
         check_id(sk.id)
         check_source(sk.source, sk.id)
+    for hb in truth.hobbies:
+        check_id(hb.id)
+        check_source(hb.source, hb.id)
 
 
 def load() -> Truth:

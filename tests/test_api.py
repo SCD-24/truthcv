@@ -88,7 +88,7 @@ def test_full_happy_path(client):
     r = client.post("/api/extract")
     assert r.status_code == 200
     doc = r.json()
-    assert set(doc.keys()) == {"experiences", "education", "skills", "profile"}
+    assert set(doc.keys()) == {"experiences", "education", "skills", "hobbies", "profile"}
     exp = doc["experiences"][0]
     assert exp["role"] == "Senior Software Engineer"
     assert exp["source"] == "uploaded-cv"
@@ -369,6 +369,7 @@ def test_truth_put_get_round_trips_profile(client):
         "experiences": [],
         "education": [],
         "skills": [],
+        "hobbies": [],
         "profile": {
             "name": "Jane Doe",
             "email": "jane@example.com",
@@ -385,8 +386,23 @@ def test_truth_put_get_round_trips_profile(client):
     assert got == body["profile"]  # camelCase, intact
 
 
+def test_truth_put_get_round_trips_hobby(client):
+    body = {
+        "experiences": [],
+        "education": [],
+        "skills": [],
+        "hobbies": [{"id": "hb-1", "value": "Chess", "source": "user-confirmed"}],
+        "profile": {},
+    }
+    r = client.put("/api/truth", json=body)
+    assert r.status_code == 204, r.text
+
+    got = client.get("/api/truth").json()
+    assert got["hobbies"] == body["hobbies"]  # camelCase JSON, intact
+
+
 def test_truth_put_persists_summary_edit(client):
-    base = {"experiences": [], "education": [], "skills": []}
+    base = {"experiences": [], "education": [], "skills": [], "hobbies": []}
     client.put("/api/truth", json={**base, "profile": {"summary": "First"}})
     client.put("/api/truth", json={**base, "profile": {"summary": "Second"}})
     assert client.get("/api/truth").json()["profile"]["summary"] == "Second"

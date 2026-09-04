@@ -93,7 +93,7 @@ _SCHEMA: dict[str, Any] = {
 def _all_values(truth: Truth) -> list[str]:
     """Every factual value in the truth — the letter may reference any of them.
 
-    Includes experiences, education, skills, and the profile header (name, email,
+    Includes experiences, education, skills, hobbies, and the profile header (name, email,
     phone, location, links, summary). A cover letter weaves the whole career, so
     validation is global here. Falsy values are dropped.
     """
@@ -104,6 +104,7 @@ def _all_values(truth: Truth) -> list[str]:
     for ed in truth.education:
         vals += [ed.degree, ed.school, ed.start, ed.end]
     vals += [s.value for s in truth.skills]
+    vals += [h.value for h in truth.hobbies]
     # Profile header values
     profile = truth.profile
     vals += [profile.name, profile.email, profile.phone, profile.location, profile.summary]

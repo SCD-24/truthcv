@@ -38,6 +38,13 @@ export interface Skill {
   source: TruthSource;
 }
 
+/** A standalone hobby/interest; offered to cover letters, never rendered into the CV. */
+export interface Hobby {
+  id: string;
+  value: string;
+  source: TruthSource;
+}
+
 /** A labelled profile link (e.g. LinkedIn, portfolio). */
 export interface ProfileLink {
   label: string;
@@ -55,12 +62,13 @@ export interface Profile {
   summary: string;
 }
 
-/** The whole truth record: grouped experiences and education, flat skills, and
- * the personal header. */
+/** The whole truth record: grouped experiences and education, flat skills and
+ * hobbies, and the personal header. */
 export interface TruthDoc {
   experiences: Experience[];
   education: Education[];
   skills: Skill[];
+  hobbies: Hobby[];
   profile: Profile;
 }
 

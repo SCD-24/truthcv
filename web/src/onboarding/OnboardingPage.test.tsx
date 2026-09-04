@@ -41,6 +41,7 @@ function emptyTruth(): TruthDoc {
     experiences: [],
     education: [],
     skills: [],
+    hobbies: [],
     profile: { name: "", email: "", phone: "", location: "", links: [], summary: "" },
   };
 }

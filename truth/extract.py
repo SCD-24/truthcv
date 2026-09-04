@@ -15,7 +15,7 @@ from providers.base import LLMProvider
 
 import prompts
 
-from .model import Bullet, Education, Experience, Link, Profile, Skill, Truth, make_id
+from .model import Bullet, Education, Experience, Hobby, Link, Profile, Skill, Truth, make_id
 from . import store
 
 _EXTRACTION_SCHEMA: dict[str, Any] = {
@@ -49,6 +49,7 @@ _EXTRACTION_SCHEMA: dict[str, Any] = {
             },
         },
         "skills": {"type": "array", "items": {"type": "string"}},
+        "hobbies": {"type": "array", "items": {"type": "string"}},
         "profile": {
             "type": "object",
             "properties": {
@@ -179,10 +180,22 @@ def build_truth_from_text(text: str, provider: LLMProvider) -> Truth:
         taken.add(sid)
         skills.append(Skill(id=sid, value=value, source="uploaded-cv"))
 
+    hobbies: list[Hobby] = []
+    seen_h: set[str] = set()
+    for hv in result.get("hobbies", []) or []:
+        value = str(hv).strip()
+        if not value or value.lower() in seen_h:
+            continue
+        seen_h.add(value.lower())
+        hid = make_id("hb", value, taken)
+        taken.add(hid)
+        hobbies.append(Hobby(id=hid, value=value, source="uploaded-cv"))
+
     truth = Truth(
         experiences=experiences,
         education=education,
         skills=skills,
+        hobbies=hobbies,
         profile=_build_profile(result.get("profile")),
     )
     store.save(truth)
