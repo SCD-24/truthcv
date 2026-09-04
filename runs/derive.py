@@ -1,4 +1,4 @@
-"""Derive an agent run's coverage counters from the records it produced.
+"""Derive an agent run's coverage counters and board breakdown from its records.
 
 These counters are DERIVED evidence: they are recomputed on read from the
 screening and application records that carry this run's ``run_id``, rather
@@ -9,6 +9,9 @@ all and were displayed as a confident 0 beside an accurate prose summary.
 ``postings_seen`` is deliberately NOT derived here and stays agent-reported:
 a posting the agent looked at and skipped on cooldown, on dedupe, or because
 it was already screened leaves no record behind to count.
+
+board_breakdown_by_run derives a per-board summary of screenings attributed to
+each run, grouping them by the job board derived from their URL host.
 
 This module never imports or calls ``screening.store`` / ``applications.store``
 itself. It takes already-loaded lists so a caller rendering fifty runs loads
@@ -72,3 +75,62 @@ def derive_counters(run_id: str, screenings: list, applications: list) -> dict:
     if not run_id:
         return _empty_counters()
     return counters_by_run([run_id], screenings, applications)[run_id]
+
+
+def board_breakdown_by_run(run_ids, screenings) -> dict[str, list[dict]]:
+    """Derive a per-board summary of screenings for each run in one pass.
+
+    Attributes each screening to a board derived from its URL host. For each
+    board, accumulates postings_seen (all screenings for that board), for_review
+    (approval == 'pending'), and rejected (verdict == 'rejected').
+
+    Args:
+        run_ids: A list of run ids to initialize in the result dict. Empty ids
+                 are included but yield empty lists (unlinked screenings are
+                 skipped).
+        screenings: A list of Screening records. Only those with a run_id in
+                    run_ids are attributed to a board.
+
+    Returns:
+        A dict mapping each run_id to a list of {board, postings_seen,
+        for_review, rejected} dicts, sorted by postings_seen descending, then
+        board ascending. A run with no screenings attributed to it has an empty
+        list.
+    """
+    from agentconfig.boards import board_for_url
+
+    wanted = {rid for rid in run_ids if rid}
+    result = {rid: {} for rid in run_ids}
+
+    for screening in screenings:
+        rid = getattr(screening, "run_id", "")
+        if rid not in wanted:
+            continue
+
+        url = getattr(screening, "url", "")
+        board = board_for_url(url)
+        verdict = getattr(screening, "verdict", "")
+        approval = getattr(screening, "approval", "")
+
+        if board not in result[rid]:
+            result[rid][board] = {
+                "board": board,
+                "postings_seen": 0,
+                "for_review": 0,
+                "rejected": 0,
+            }
+
+        result[rid][board]["postings_seen"] += 1
+        if approval == "pending":
+            result[rid][board]["for_review"] += 1
+        if verdict == "rejected":
+            result[rid][board]["rejected"] += 1
+
+    # Convert dict of dicts to list of dicts, sorted
+    return {
+        rid: sorted(
+            list(breakdown.values()),
+            key=lambda x: (-x["postings_seen"], x["board"]),
+        )
+        for rid, breakdown in result.items()
+    }

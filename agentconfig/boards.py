@@ -168,3 +168,72 @@ def resolve_signin_url(source: str, override: str = "") -> str:
 def is_default_source(source: str) -> bool:
     """Check whether source is one of the always-searched, unremovable default boards."""
     return source.strip().casefold() in {s.casefold() for s in DEFAULT_BOARD_SOURCES}
+
+
+def board_for_url(url: str) -> str:
+    """Derive a job board catalog key from a URL host.
+
+    Parses the URL, extracts the host, casefolded and with leading 'www.'
+    stripped. Matches against SOURCE_DOMAINS: a catalog key whose domain's
+    host part (up to the first '/') matches the URL host exactly or as a
+    suffix (with a leading dot for suffix matching, e.g., '.example.com')
+    wins and is returned. If no catalog match, returns the bare host. If the
+    URL is empty or unparseable, returns 'unknown'.
+
+    Args:
+        url: A URL string, e.g. 'https://jobs.lever.co/acme' or
+             'careers.example.com'.
+
+    Returns:
+        A catalog key string if matched (e.g., 'lever', 'linkedin'), a bare
+        host if no match (e.g., 'careers.example.com'), or 'unknown' if the
+        URL could not be parsed.
+    """
+    from urllib.parse import urlparse
+
+    if not url or not url.strip():
+        return "unknown"
+
+    # Reject URLs with spaces (unparseable)
+    if " " in url:
+        return "unknown"
+
+    # Parse the URL to extract the netloc (host:port part)
+    try:
+        parsed = urlparse(url if "://" in url else f"http://{url}")
+        host = parsed.netloc or parsed.path.split("/")[0]
+    except Exception:
+        return "unknown"
+
+    if not host:
+        return "unknown"
+
+    # Casefold and strip leading 'www.'
+    host = host.casefold()
+    if host.startswith("www."):
+        host = host[4:]
+
+    # Strip port number if present
+    if ":" in host:
+        host = host.split(":")[0]
+
+    if not host:
+        return "unknown"
+
+    # Try to match against SOURCE_DOMAINS
+    for key, domain in SOURCE_DOMAINS.items():
+        # Extract the host part of the domain (before any '/')
+        domain_host = domain.split("/")[0].casefold()
+        if domain_host.startswith("www."):
+            domain_host = domain_host[4:]
+
+        # Exact match
+        if host == domain_host:
+            return key
+
+        # Suffix match with a leading dot (e.g., jobs.lever.co matches .lever.co)
+        if host.endswith("." + domain_host):
+            return key
+
+    # No catalog match; return the bare host
+    return host

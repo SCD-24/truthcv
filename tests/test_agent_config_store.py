@@ -366,3 +366,57 @@ def test_resolved_boards_skips_a_default_reconfigured_by_the_operator():
     ashby_entries = [b for b in resolved if b.source.strip().casefold() == "ashby"]
     assert len(ashby_entries) == 1
     assert ashby_entries[0].mode == "dork"
+
+
+# --- board_for_url: URL-to-board derivation --------------------------------
+
+
+def test_board_for_url_catalog_exact_match():
+    """Exact host match against a SOURCE_DOMAINS entry returns the catalog key."""
+    from agentconfig.boards import board_for_url
+
+    assert board_for_url("https://linkedin.com/jobs/view/1") == "linkedin"
+    assert board_for_url("linkedin.com/jobs") == "linkedin"
+
+
+def test_board_for_url_catalog_subdomain_match():
+    """Subdomain match (suffix) against a SOURCE_DOMAINS host returns the key."""
+    from agentconfig.boards import board_for_url
+
+    assert board_for_url("https://jobs.lever.co/acme") == "lever"
+    assert board_for_url("jobs.lever.co") == "lever"
+    assert board_for_url("https://myapp.myworkdayjobs.com/jobs") == "workday"
+
+
+def test_board_for_url_www_prefix_stripped():
+    """Leading 'www.' is stripped before matching."""
+    from agentconfig.boards import board_for_url
+
+    assert board_for_url("https://www.linkedin.com/jobs/view/1") == "linkedin"
+    assert board_for_url("www.linkedin.com") == "linkedin"
+
+
+def test_board_for_url_custom_host_fallback():
+    """No catalog match returns the bare host."""
+    from agentconfig.boards import board_for_url
+
+    assert board_for_url("https://careers.example.com/jobs") == "careers.example.com"
+    assert board_for_url("careers.example.com") == "careers.example.com"
+    assert board_for_url("https://www.careers.example.com") == "careers.example.com"
+
+
+def test_board_for_url_port_stripped():
+    """Port numbers are stripped before matching."""
+    from agentconfig.boards import board_for_url
+
+    assert board_for_url("https://linkedin.com:8080/jobs") == "linkedin"
+    assert board_for_url("careers.example.com:9000") == "careers.example.com"
+
+
+def test_board_for_url_empty_or_unparseable():
+    """Empty, None, or unparseable URLs return 'unknown'."""
+    from agentconfig.boards import board_for_url
+
+    assert board_for_url("") == "unknown"
+    assert board_for_url("   ") == "unknown"
+    assert board_for_url("not a url at all with spaces") == "unknown"

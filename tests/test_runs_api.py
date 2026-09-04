@@ -357,3 +357,107 @@ def test_limit_zero_means_every_retained_run(client):
     assert len(body["runs"]) == 10
     assert body["total"] == 12
     assert body["runs"][0]["id"] == "run-9"
+
+
+def test_board_breakdown_on_list_runs(client):
+    """GET /api/runs returns boardBreakdown with per-board screening counts."""
+    from screening import store as screening_store
+
+    store.start("bd-run", trigger="scheduled", apply_cap=0)
+    screening_store.create(
+        {
+            "company": "Acme",
+            "role": "Engineer",
+            "url": "https://linkedin.com/jobs/view/1",
+            "verdict": "rejected",
+            "run_id": "bd-run",
+        }
+    )
+    screening_store.create(
+        {
+            "company": "Beta",
+            "role": "Manager",
+            "url": "https://jobs.lever.co/acme/1",
+            "verdict": "deferred",
+            "run_id": "bd-run",
+        }
+    )
+    r = client.get("/api/runs")
+    assert r.status_code == 200
+    runs = r.json()["runs"]
+    run = [r for r in runs if r["id"] == "bd-run"][0]
+    assert "boardBreakdown" in run
+    assert len(run["boardBreakdown"]) == 2
+    assert run["boardBreakdown"][0] == {
+        "board": "lever",
+        "postingsSeen": 1,
+        "forReview": 1,
+        "rejected": 0,
+    }
+    assert run["boardBreakdown"][1] == {
+        "board": "linkedin",
+        "postingsSeen": 1,
+        "forReview": 0,
+        "rejected": 1,
+    }
+
+
+def test_board_breakdown_custom_host_fallback(client):
+    """GET /api/runs returns custom hosts when not in the board catalog."""
+    from screening import store as screening_store
+
+    store.start("bd-custom", trigger="scheduled", apply_cap=0)
+    screening_store.create(
+        {
+            "company": "Custom Corp",
+            "role": "Engineer",
+            "url": "https://careers.example.com/jobs/1",
+            "verdict": "passed",
+            "approval": "",
+            "run_id": "bd-custom",
+        }
+    )
+    r = client.get("/api/runs")
+    assert r.status_code == 200
+    runs = r.json()["runs"]
+    run = [r for r in runs if r["id"] == "bd-custom"][0]
+    assert len(run["boardBreakdown"]) == 1
+    assert run["boardBreakdown"][0]["board"] == "careers.example.com"
+
+
+def test_board_breakdown_on_get_run(client):
+    """GET /api/runs/{id} returns boardBreakdown with per-board screening counts."""
+    from screening import store as screening_store
+
+    store.start("bd-run-2", trigger="scheduled", apply_cap=0)
+    screening_store.create(
+        {
+            "company": "Acme",
+            "role": "Engineer",
+            "url": "https://linkedin.com/jobs/view/1",
+            "verdict": "passed",
+            "approval": "",
+            "run_id": "bd-run-2",
+        }
+    )
+    r = client.get("/api/runs/bd-run-2")
+    assert r.status_code == 200
+    run = r.json()
+    assert "boardBreakdown" in run
+    assert len(run["boardBreakdown"]) == 1
+    assert run["boardBreakdown"][0] == {
+        "board": "linkedin",
+        "postingsSeen": 1,
+        "forReview": 0,
+        "rejected": 0,
+    }
+
+
+def test_board_breakdown_empty_for_run_with_no_screenings(client):
+    """GET /api/runs/{id} returns empty boardBreakdown when no screenings exist."""
+    store.start("bd-run-3", trigger="scheduled", apply_cap=0)
+    r = client.get("/api/runs/bd-run-3")
+    assert r.status_code == 200
+    run = r.json()
+    assert "boardBreakdown" in run
+    assert run["boardBreakdown"] == []

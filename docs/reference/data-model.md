@@ -96,3 +96,13 @@ Projected from `schema` widgets on the architecture canvas.
 |---|---|---|---|
 | `jobBoards` | JobBoardModel[] |  | On GET/PUT /api/agent/config. Each entry: source, signinUrl, plus response-only domain, effectiveSigninUrl and isDefault resolved server-side. GET returns the resolved list, defaults first. |
 <!-- generated:end comp:api -->
+
+<!-- generated:start comp:run-store -->
+## Run Store (`run-store`)
+
+### Schema
+
+| Field | Type | Flags | Notes |
+|---|---|---|---|
+| `boardBreakdown` | BoardBreakdown[] | derived on read | Per job board (from screening URL host): postingsSeen, forReview, rejected |
+<!-- generated:end comp:run-store -->

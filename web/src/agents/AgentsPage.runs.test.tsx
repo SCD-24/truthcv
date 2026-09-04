@@ -29,6 +29,7 @@ function makeRun(overrides: Partial<RunRecord> = {}): RunRecord {
     stoppedReason: "",
     note: "",
     discoveryCoverage: [],
+    boardBreakdown: [],
     ...overrides,
   };
 }
@@ -180,6 +181,71 @@ describe("RecentRunsSection", () => {
 
     await waitFor(() => expect(screen.getByText("Page 1 of 1")).toBeTruthy());
     expect(screen.queryByText(/not listed here/)).toBeNull();
+  });
+
+  it("clicking a run row opens a dialog with the board breakdown table", async () => {
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([
+        makeRun({
+          id: "run-with-breakdown",
+          boardBreakdown: [
+            { board: "linkedin", postingsSeen: 2, forReview: 0, rejected: 1 },
+            { board: "lever", postingsSeen: 1, forReview: 1, rejected: 0 },
+          ],
+        }),
+      ]),
+    );
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("run-with-breakdown")).toBeTruthy());
+    const runRow = screen.getByRole("button", { name: /run-with-breakdown/ });
+    fireEvent.click(runRow);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Job board/)).toBeTruthy();
+      expect(screen.getByText("linkedin")).toBeTruthy();
+      expect(screen.getByText("lever")).toBeTruthy();
+    });
+  });
+
+  it("pressing Enter on a focused run row opens the modal", async () => {
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([makeRun({ id: "run-keyboard", boardBreakdown: [] })]),
+    );
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("run-keyboard")).toBeTruthy());
+    const runRow = screen.getByRole("button", { name: /run-keyboard/ });
+    runRow.focus();
+    fireEvent.keyDown(runRow, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Run run-keyboard/)).toBeTruthy();
+    });
+  });
+
+  it("closing the modal hides it", async () => {
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([makeRun({ id: "run-closeable", boardBreakdown: [] })]),
+    );
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("run-closeable")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /run-closeable/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Run run-closeable/)).toBeTruthy();
+    });
+
+    const closeButton = screen.getByRole("button", { name: "Close" });
+    fireEvent.click(closeButton);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Run run-closeable/)).toBeNull();
+    });
   });
 
   it("steps back when the page it is on stops existing", async () => {

@@ -486,6 +486,7 @@ export interface RunRecord {
   stoppedReason: string;
   note: string;
   discoveryCoverage: DiscoveryCoverage[];
+  boardBreakdown: BoardBreakdown[];
 }
 
 /** One discovery attempt's outcome on a board/channel, for coverage reporting. */
@@ -495,6 +496,14 @@ export interface DiscoveryCoverage {
   status: "searched" | "empty" | "login_walled" | "skipped";
   postingsFound: number;
   reason: string;
+}
+
+/** Per-board screening summary for a run. */
+export interface BoardBreakdown {
+  board: string;
+  postingsSeen: number;
+  forReview: number;
+  rejected: number;
 }
 
 /** One page of runs from GET /api/runs, newest first. `total` counts every
