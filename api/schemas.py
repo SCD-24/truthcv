@@ -630,6 +630,62 @@ class CoverLetterRequest(_Camel):
     # data/posting.txt (the last posting written by /api/tailor) is used as a
     # fallback for callers that do not send one.
     posting: str | None = None
+    preset_id: str | None = None
+
+
+class PromptFragmentIn(_Camel):
+    """Input for creating/updating a prompt fragment."""
+
+    id: str
+    slot: str
+    title: str
+    text: str
+    conflicts_with: list[str] = Field(default_factory=list)
+
+
+class PromptFragmentOut(_Camel):
+    """Response fragment from the library."""
+
+    id: str
+    slot: str
+    title: str
+    text: str
+    seeded: bool
+    conflicts_with: list[str] = Field(default_factory=list)
+
+
+class PromptPresetIn(_Camel):
+    """Input for creating/updating a prompt preset."""
+
+    id: str
+    name: str
+    fragment_ids: list[str]
+    is_default: bool = False
+
+
+class PromptPresetOut(_Camel):
+    """Response preset from the library."""
+
+    id: str
+    name: str
+    fragment_ids: list[str]
+    is_default: bool
+    seeded: bool
+
+
+class PromptConflict(_Camel):
+    """One conflict in a preset's fragment selection."""
+
+    kind: str  # 'exclusive_slot'|'declared'|'unknown_fragment'
+    fragment_ids: list[str]
+    slot: str | None = None
+    message: str
+
+
+class PresetValidateRequest(_Camel):
+    """POST /api/prompt-presets/validate payload."""
+
+    fragment_ids: list[str]
 
 
 class CoverLetterResult(_Camel):
@@ -973,6 +1029,7 @@ class LetterGenerateRequest(_Camel):
     length: str = "Standard"
     approvals: CoverLetterApprovals | None = None
     paragraphs: list[dict] | None = None
+    preset_id: str | None = None
 
 
 class LetterSaveRequest(_Camel):

@@ -11,6 +11,7 @@ export const ROUTES = {
   onboarding: "/onboarding",
   uploadCv: "/cv",
   manual: "/manual",
+  writingStyle: "/writing-style",
   documentEdit: "/documents/edit",
   browserSession: "/browser-session",
 } as const;

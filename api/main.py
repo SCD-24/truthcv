@@ -19,6 +19,7 @@ from services.errors import Conflict, NotFound, Refused, ServiceError, Unavailab
 from storage import data_dir
 
 from .config import cors_origins, port, public_url, static_dir
+from .prompt_routes import prompt_router
 from .routes import router
 
 # Build MCP Server app for streamable-HTTP JSON-RPC endpoint
@@ -132,6 +133,7 @@ app.add_middleware(
 
 app.include_router(router)
 app.include_router(mcp_router)
+app.include_router(prompt_router)
 
 
 # services/* raises framework-free domain exceptions; map them to the HTTP

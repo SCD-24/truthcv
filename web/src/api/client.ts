@@ -47,6 +47,35 @@ import type {
 } from "./types";
 import { errorDetailToMessage } from "./errorDetail";
 
+/** One reusable text block for the LLM prompt library, slotted into a preset. */
+export interface PromptFragment {
+  id: string;
+  slot: string;
+  title: string;
+  text: string;
+  seeded: boolean;
+  conflictsWith: string[];
+}
+
+/** A named, ordered set of prompt fragments; one preset can be the default. */
+export interface PromptPreset {
+  id: string;
+  name: string;
+  fragmentIds: string[];
+  isDefault: boolean;
+  seeded: boolean;
+}
+
+/** A conflict found among a preset's fragments — two fragments claiming the
+ * same exclusive slot, a fragment declaring a conflict with another, or a
+ * fragment id that doesn't exist. */
+export interface PromptConflict {
+  kind: "exclusive_slot" | "declared" | "unknown_fragment";
+  fragmentIds: string[];
+  slot: string | null;
+  message: string;
+}
+
 /**
  * Typed wrappers over the wizard's REST routes. Served same-origin by the API
  * (dev proxies /api to the backend), so the base is empty. Every wrapper throws
@@ -264,11 +293,12 @@ export function generateCoverLetter(
   approvals?: CoverLetterApprovals,
   applicationId?: string,
   posting?: string,
+  presetId?: string,
 ): Promise<CoverLetterResult> {
   return request("/api/cover-letter", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tone, length, approvals, applicationId, posting }),
+    body: JSON.stringify({ tone, length, approvals, applicationId, posting, presetId }),
   });
 }
 
@@ -822,4 +852,59 @@ export async function openBrowserSession(url: string): Promise<BrowserSession> {
     );
   }
   return (await res.json()) as BrowserSession;
+}
+
+/** Every prompt fragment in the library. */
+export function listPromptFragments(): Promise<PromptFragment[]> {
+  return request("/api/prompt-fragments");
+}
+
+/** Create or update a prompt fragment — PUT when it already has an id, POST
+ * (server assigns the id) otherwise. */
+export function savePromptFragment(fragment: Omit<PromptFragment, "seeded">): Promise<PromptFragment> {
+  return request("/api/prompt-fragments" + (fragment.id ? `/${fragment.id}` : ""), {
+    method: fragment.id ? "PUT" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fragment),
+  });
+}
+
+/** Delete a prompt fragment from the library. */
+export function deletePromptFragment(id: string): Promise<void> {
+  return request(`/api/prompt-fragments/${id}`, { method: "DELETE" });
+}
+
+/** Every prompt preset in the library. */
+export function listPromptPresets(): Promise<PromptPreset[]> {
+  return request("/api/prompt-presets");
+}
+
+/** Create or update a prompt preset — PUT when it already has an id, POST
+ * (server assigns the id) otherwise. */
+export function savePromptPreset(preset: Omit<PromptPreset, "seeded">): Promise<PromptPreset> {
+  return request("/api/prompt-presets" + (preset.id ? `/${preset.id}` : ""), {
+    method: preset.id ? "PUT" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(preset),
+  });
+}
+
+/** Delete a prompt preset from the library. */
+export function deletePromptPreset(id: string): Promise<void> {
+  return request(`/api/prompt-presets/${id}`, { method: "DELETE" });
+}
+
+/** Check a candidate set of fragment ids for slot/declared conflicts before
+ * saving a preset. */
+export function validatePromptPreset(fragmentIds: string[]): Promise<PromptConflict[]> {
+  return request<{ conflicts: PromptConflict[] }>("/api/prompt-presets/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fragmentIds }),
+  }).then((result) => result.conflicts);
+}
+
+/** Mark a preset as the default used when no presetId is passed to generation. */
+export function setDefaultPromptPreset(id: string): Promise<PromptPreset> {
+  return request(`/api/prompt-presets/${id}/default`, { method: "PUT" });
 }

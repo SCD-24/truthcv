@@ -95,12 +95,16 @@ def generate_cover_letter(
     provider,
     approved_ids: set[str],
     denied_ids: set[str],
+    preset_id: str | None = None,
 ) -> CoverLetterOutcome:
     """Run the full cover-letter workflow and return a plain outcome.
 
     Raises ``DraftMissing`` when no posting text is available (so the adapter can
     return its own 400), and lets any failure from ``build_letter`` propagate
     uncaught (so the adapter converts it to the exact 502 response).
+
+    ``preset_id`` (optional) selects a writing style preset; when omitted,
+    tone-based selection applies.
     """
     # The caller supplies the posting this letter is about; data/posting.txt
     # (the last posting written by /api/tailor) is only the fallback for
@@ -140,6 +144,7 @@ def generate_cover_letter(
         # truth-store profile name is the fallback, so a letter is never left
         # unsigned just because that field has not been filled in.
         sign_off_name=answers.name or truth.profile.name,
+        preset_id=preset_id,
     )
 
     if letter["blocked"]:

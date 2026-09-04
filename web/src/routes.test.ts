@@ -12,6 +12,7 @@ describe("ROUTES", () => {
     expect(ROUTES.onboarding).toBe("/onboarding");
     expect(ROUTES.uploadCv).toBe("/cv");
     expect(ROUTES.manual).toBe("/manual");
+    expect(ROUTES.writingStyle).toBe("/writing-style");
     expect(ROUTES.documentEdit).toBe("/documents/edit");
     expect(ROUTES.jobBoards).toBe("/job-boards");
   });

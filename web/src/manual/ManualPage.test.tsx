@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import {
   confirmInferences,
   createApplication,
   generateCoverLetter,
   listApplications,
+  listPromptPresets,
   render as apiRender,
   tailor,
 } from "../api/client";
@@ -19,6 +21,7 @@ vi.mock("../api/client", () => ({
   generateCoverLetter: vi.fn(),
   createApplication: vi.fn(),
   listApplications: vi.fn(),
+  listPromptPresets: vi.fn(),
   saveApplicationCv: vi.fn(),
   saveApplicationCoverLetter: vi.fn(),
 }));
@@ -28,6 +31,15 @@ vi.mock("../api/client", () => ({
 vi.mock("../wizard/store", () => ({
   useWizard: vi.fn(() => ({ posting: "" })),
 }));
+
+/** Render the page inside a router — the style picker links to /writing-style. */
+function renderPage() {
+  return render(
+    <MemoryRouter>
+      <ManualPage />
+    </MemoryRouter>,
+  );
+}
 
 beforeEach(() => {
   vi.mocked(createApplication).mockResolvedValue({ id: "app-123" } as Application);
@@ -51,6 +63,11 @@ beforeEach(() => {
     text: "Dear hiring manager…",
   });
   vi.mocked(listApplications).mockResolvedValue([]);
+  vi.mocked(listPromptPresets).mockResolvedValue([
+    { id: "professional", name: "Professional", fragmentIds: [], isDefault: true, seeded: true },
+    { id: "warm", name: "Warm", fragmentIds: [], isDefault: false, seeded: true },
+    { id: "concise", name: "Concise", fragmentIds: [], isDefault: false, seeded: true },
+  ]);
 });
 
 afterEach(() => {
@@ -90,7 +107,7 @@ async function runCvThenLetter() {
 
 describe("ManualPage", () => {
   it("disables submit until posting, all four company fields, and an output are set", () => {
-    render(<ManualPage />);
+    renderPage();
     // Empty form: disabled.
     expect(submitButton().disabled).toBe(true);
 
@@ -108,7 +125,7 @@ describe("ManualPage", () => {
   });
 
   it("creates an application record exactly once when 'Yes' is chosen", async () => {
-    render(<ManualPage />);
+    renderPage();
     fillForm();
     fireEvent.click(screen.getByRole("radio", { name: "Yes" }));
     fireEvent.click(submitButton());
@@ -124,7 +141,7 @@ describe("ManualPage", () => {
   });
 
   it("never creates a record when 'No' is chosen", async () => {
-    render(<ManualPage />);
+    renderPage();
     fillForm();
     fireEvent.click(submitButton()); // default toggle is No
 
@@ -134,7 +151,7 @@ describe("ManualPage", () => {
   });
 
   it("never tailors or confirms inferences when only a cover letter is requested", async () => {
-    render(<ManualPage />);
+    renderPage();
     fillForm();
     fireEvent.click(checkbox("Tailor my CV")); // uncheck CV
     fireEvent.click(checkbox("Write a cover letter")); // check letter
@@ -145,8 +162,21 @@ describe("ManualPage", () => {
     expect(confirmInferences).not.toHaveBeenCalled();
   });
 
-  it("passes the created record's id to both render and generateCoverLetter", async () => {
-    render(<ManualPage />);
+  it("loads presets on mount and defaults the style picker to the default preset", async () => {
+    renderPage();
+    fillForm();
+    fireEvent.click(checkbox("Tailor my CV")); // uncheck CV
+    fireEvent.click(checkbox("Write a cover letter")); // check letter
+    fireEvent.click(submitButton());
+
+    await screen.findByRole("button", { name: "Generate cover letter" });
+    await waitFor(() => expect(listPromptPresets).toHaveBeenCalledTimes(1));
+    const profesButton = await screen.findByRole("button", { name: "Professional" });
+    expect((profesButton as HTMLButtonElement).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("passes the created record's id to both render and generateCoverLetter, sending the default preset id as tone", async () => {
+    renderPage();
     fillForm();
     fireEvent.click(checkbox("Write a cover letter")); // both CV + letter
     fireEvent.click(screen.getByRole("radio", { name: "Yes" }));
@@ -159,13 +189,14 @@ describe("ManualPage", () => {
         undefined,
         "app-123",
         "Senior engineer wanted",
+        "professional",
       ),
     );
     expect(apiRender).toHaveBeenCalledWith(undefined, "app-123");
   });
 
   it("passes applicationId as undefined when no record was created", async () => {
-    render(<ManualPage />);
+    renderPage();
     fillForm();
     fireEvent.click(checkbox("Write a cover letter")); // both CV + letter, toggle stays No
     await runCvThenLetter();
@@ -177,13 +208,14 @@ describe("ManualPage", () => {
         undefined,
         undefined,
         "Senior engineer wanted",
+        "professional",
       ),
     );
     expect(apiRender).toHaveBeenCalledWith(undefined, undefined);
   });
 
   it("sends the typed posting even on the letter-only path (no tailor call)", async () => {
-    render(<ManualPage />);
+    renderPage();
     fillForm();
     fireEvent.click(checkbox("Tailor my CV")); // uncheck CV
     fireEvent.click(checkbox("Write a cover letter")); // check letter
@@ -199,6 +231,7 @@ describe("ManualPage", () => {
         undefined,
         undefined,
         "Senior engineer wanted",
+        "professional",
       ),
     );
     expect(tailor).not.toHaveBeenCalled();
