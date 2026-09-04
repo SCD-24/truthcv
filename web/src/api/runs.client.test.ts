@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { listDidNotPass, listRuns, getRun } from "./client";
+import { listDidNotPass, listRuns, getRun, stopRun } from "./client";
 import type { ScreeningRecord } from "./types";
 
 function makeScreening(overrides: Partial<ScreeningRecord> = {}): ScreeningRecord {
@@ -112,5 +112,21 @@ describe("listRuns / getRun", () => {
 
     const run = await getRun("run-1");
     expect(run.id).toBe("run-1");
+  });
+
+  it("stopRun calls the correct endpoint with POST method", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ outcome: "cancelling", run: { id: "test-run-id" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await stopRun("test-run-id");
+
+    expect(fetchMock.mock.calls[0][0]).toContain("/api/runs/test-run-id/stop");
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("POST");
+    expect(result.outcome).toBe("cancelling");
+    expect(result.run.id).toBe("test-run-id");
   });
 });

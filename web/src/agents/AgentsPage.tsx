@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Paper from "@mui/material/Paper";
@@ -52,6 +52,7 @@ import type {
   Routing,
   RunPage,
   RunRecord,
+  RunStopResult,
 } from "../api/types";
 
 /** The 20 text answers to ATS screening questions and cover-letter claim sources.
@@ -448,35 +449,45 @@ function RecentRunsSection({ timeZone }: { timeZone?: string } = {}) {
   const [error, setError] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<RunRecord | null>(null);
 
+  // Polls are not serialised, so a request slower than the interval can land
+  // after its own successor. Without an ordering guard that older response
+  // wins, and it carries an older `total` — which shrinks pageCount and can
+  // step the operator's page back under them. `aliveRef` additionally guards
+  // against setting state after this component has unmounted.
+  const latestRef = useRef(0);
+  const aliveRef = useRef(true);
+
+  const refresh = useCallback(() => {
+    const seq = ++latestRef.current;
+    listRuns(RUNS_PAGE_SIZE, page * RUNS_PAGE_SIZE)
+      .then((r) => {
+        if (!aliveRef.current || seq !== latestRef.current) return;
+        setResult(r);
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        if (!aliveRef.current || seq !== latestRef.current) return;
+        setError(e instanceof Error ? e.message : "Could not load recent runs");
+      });
+  }, [page]);
+
   useEffect(() => {
-    let alive = true;
-    // Polls are not serialised, so a request slower than the interval can
-    // land after its own successor. Without an ordering guard that older
-    // response wins, and it carries an older `total` — which shrinks
-    // pageCount and can step the operator's page back under them.
-    let latest = 0;
-
-    function refresh() {
-      const seq = ++latest;
-      listRuns(RUNS_PAGE_SIZE, page * RUNS_PAGE_SIZE)
-        .then((r) => {
-          if (!alive || seq !== latest) return;
-          setResult(r);
-          setError(null);
-        })
-        .catch((e: unknown) => {
-          if (!alive || seq !== latest) return;
-          setError(e instanceof Error ? e.message : "Could not load recent runs");
-        });
-    }
-
+    aliveRef.current = true;
     refresh();
     const id = setInterval(refresh, STATUS_POLL_IDLE_MS);
     return () => {
-      alive = false;
+      aliveRef.current = false;
       clearInterval(id);
     };
-  }, [page]);
+  }, [refresh]);
+
+  const handleRunStopped = useCallback(
+    (result: RunStopResult) => {
+      if (result.outcome === "closed") setSelectedRun(result.run);
+      refresh();
+    },
+    [refresh],
+  );
 
   // Only the newest RUNS_PAGE_SIZE * RUNS_MAX_PAGES runs are reachable here,
   // and the store keeps only the newest 200 at all (runs.store trims on
@@ -562,6 +573,7 @@ function RecentRunsSection({ timeZone }: { timeZone?: string } = {}) {
           run={selectedRun}
           timeZone={timeZone || DEFAULT_TIMEZONE}
           onClose={() => setSelectedRun(null)}
+          onStopped={handleRunStopped}
         />
       )}
     </Section>

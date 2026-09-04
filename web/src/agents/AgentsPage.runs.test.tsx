@@ -320,4 +320,39 @@ describe("RecentRunsSection", () => {
     // And there is a way back off it.
     expect(screen.getByRole("button", { name: "Previous" })).toBeTruthy();
   });
+
+  it("refreshes the list when a run is stopped from the detail modal", async () => {
+    const runningRun = makeRun({ id: "stop-test-run", status: "running", finishedAt: "" });
+    const failedRun = makeRun({ id: "stop-test-run", status: "failed", stoppedReason: "orphaned" });
+    const listSpy = vi
+      .spyOn(client, "listRuns")
+      .mockResolvedValueOnce(makePage([runningRun]))
+      .mockResolvedValue(makePage([failedRun]));
+    const stopSpy = vi.spyOn(client, "stopRun").mockResolvedValue({ outcome: "closed", run: failedRun });
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("stop-test-run")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Run stop-test-run" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText((_content, element) => {
+          if (element?.tagName === "H2") {
+            return element.textContent?.includes("Run") && element.textContent?.includes("stop-test-run");
+          }
+          return false;
+        }),
+      ).toBeTruthy(),
+    );
+
+    const stopButton = screen.getByRole("button", { name: /Stop run/ });
+    fireEvent.click(stopButton);
+
+    await waitFor(() => expect(stopSpy).toHaveBeenCalledWith("stop-test-run"));
+    await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(2));
+
+    // The dialog now shows the stopped run's record, not the stale one.
+    await waitFor(() => expect(screen.getByText("failed", { selector: "strong" })).toBeTruthy());
+  });
 });

@@ -31,6 +31,7 @@ graph TD
     agent-config -->|in-process| storage-leaf
     agent-config -->|file I/O| truth-data-volume
     api -->|in-process| agent-config
+    api -->|HTTP/REST| application-agent
     api -->|in-process| application-tracker
     api -->|WebSocket (noVNC relay) + HTTP| browser-service
     api -->|in-process| company-research
@@ -150,6 +151,7 @@ graph TD
 - [agent-config → storage-leaf](interactions/agent-config--storage-leaf.md) via `in-process`
 - [agent-config → truth-data-volume](interactions/agent-config--truth-data-volume.md) via `file I/O`
 - [api → agent-config](interactions/api--agent-config.md) via `in-process`
+- [api → application-agent](interactions/api--application-agent.md) via `HTTP/REST`
 - [api → application-tracker](interactions/api--application-tracker.md) via `in-process`
 - [api → browser-service](interactions/api--browser-service.md) via `WebSocket (noVNC relay) + HTTP`
 - [api → company-research](interactions/api--company-research.md) via `in-process`

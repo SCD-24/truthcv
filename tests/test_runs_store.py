@@ -280,6 +280,52 @@ def test_finish_if_running_is_a_no_op_for_an_unknown_run(data_dir):
     assert store.get("never-started") is None
 
 
+def test_close_orphaned_closes_only_running_records(data_dir):
+    store.start("running-1", trigger="scheduled")
+    store.start("running-2", trigger="scheduled")
+    store.start("completed-1", trigger="scheduled")
+    store.finish("completed-1", status="completed")
+
+    closed = store.close_orphaned()
+
+    assert {r.id for r in closed} == {"running-1", "running-2"}
+    for record in closed:
+        assert record.status == "failed"
+        assert record.stopped_reason == "orphaned"
+        assert record.finished_at
+
+    completed = store.get("completed-1")
+    assert completed.status == "completed"
+
+
+def test_close_orphaned_spares_except_run_id(data_dir):
+    store.start("run-A", trigger="scheduled")
+    store.start("run-B", trigger="scheduled")
+
+    closed = store.close_orphaned(except_run_id="run-A")
+
+    assert [r.id for r in closed] == ["run-B"]
+
+    run_a = store.get("run-A")
+    assert run_a.status == "running"
+
+    run_b = store.get("run-B")
+    assert run_b.status == "failed"
+    assert run_b.stopped_reason == "orphaned"
+
+
+def test_close_orphaned_returns_empty_when_nothing_running(data_dir):
+    store.start("done-1", trigger="scheduled")
+    store.finish("done-1", status="completed")
+    store.start("done-2", trigger="scheduled")
+    store.finish("done-2", status="completed")
+
+    assert store.close_orphaned() == []
+
+    all_runs = store.load_all()
+    assert all(r.status == "completed" for r in all_runs)
+
+
 def test_a_negative_offset_reads_from_the_newest_not_the_end(data_dir):
     """A negative index into a Python list reads from the END, so an unguarded
     slice would answer a paged-past-the-start client with the OLDEST runs while

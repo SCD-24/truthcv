@@ -12,13 +12,68 @@ import {
   Button,
   Typography,
   Box,
+  Alert,
 } from "@mui/material";
-import type { RunRecord, BoardBreakdown } from "../api/types";
+import type { RunRecord, BoardBreakdown, RunStopResult } from "../api/types";
+import { stopRun } from "../api/client";
+import { ButtonSpinner } from "../components/ButtonSpinner";
 
 interface RunDetailModalProps {
   run: RunRecord;
   timeZone?: string;
   onClose: () => void;
+  onStopped?: (result: RunStopResult) => void;
+}
+
+const STOP_OUTCOME_MESSAGES: Record<RunStopResult["outcome"], string> = {
+  cancelling: "Stop requested — the agent is shutting the run down.",
+  closed: "No live process owned this run; it was closed as failed (orphaned).",
+};
+
+/** Encapsulates the stop-run request lifecycle so RunDetailModal stays small. */
+function useStopRun(runId: string, onStopped?: (result: RunStopResult) => void) {
+  const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useState<string | null>(null);
+  const [stopMessage, setStopMessage] = useState<string | null>(null);
+
+  const handleStop = async () => {
+    setStopping(true);
+    setStopError(null);
+    setStopMessage(null);
+    try {
+      const result = await stopRun(runId);
+      setStopMessage(STOP_OUTCOME_MESSAGES[result.outcome]);
+      onStopped?.(result);
+    } catch (err) {
+      setStopError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setStopping(false);
+    }
+  };
+
+  return { stopping, stopError, stopMessage, handleStop };
+}
+
+interface StopRunButtonProps {
+  runId: string;
+  stopping: boolean;
+  onClick: () => void;
+}
+
+/** The Stop button itself; RunDetailModal only renders it for a running run. */
+function StopRunButton({ runId, stopping, onClick }: StopRunButtonProps) {
+  return (
+    <Button onClick={onClick} disabled={stopping} color="warning" variant="outlined" aria-label={`Stop run ${runId}`}>
+      {stopping ? (
+        <>
+          <ButtonSpinner size={14} />
+          Stopping…
+        </>
+      ) : (
+        "Stop run"
+      )}
+    </Button>
+  );
 }
 
 /**
@@ -26,8 +81,9 @@ interface RunDetailModalProps {
  * breakdown of screenings with counts for postings seen, for review, and
  * rejected.
  */
-export function RunDetailModal({ run, timeZone, onClose }: RunDetailModalProps) {
+export function RunDetailModal({ run, timeZone, onClose, onStopped }: RunDetailModalProps) {
   const [open] = useState(true);
+  const { stopping, stopError, stopMessage, handleStop } = useStopRun(run.id, onStopped);
 
   const formatInZone = (isoString: string, zone?: string): string => {
     if (!isoString) return "";
@@ -66,6 +122,17 @@ export function RunDetailModal({ run, timeZone, onClose }: RunDetailModalProps) 
             {formatInZone(run.startedAt, timeZone)} – {formatInZone(run.finishedAt, timeZone)}
           </Typography>
         </Box>
+
+        {stopMessage && (
+          <Typography variant="body2" color="success.main" sx={{ mb: 2 }}>
+            {stopMessage}
+          </Typography>
+        )}
+        {stopError && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {stopError}
+          </Alert>
+        )}
 
         {hasBreakdown ? (
           <Table size="small" sx={{ mt: 2 }}>
@@ -108,6 +175,7 @@ export function RunDetailModal({ run, timeZone, onClose }: RunDetailModalProps) 
       </DialogContent>
 
       <DialogActions>
+        {run.status === "running" && <StopRunButton runId={run.id} stopping={stopping} onClick={handleStop} />}
         <Button onClick={onClose}>Close</Button>
       </DialogActions>
     </Dialog>

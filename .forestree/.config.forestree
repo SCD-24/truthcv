@@ -203,6 +203,11 @@
                   "desc": "Closes the attended sign-in session; when a session existed and the close was accepted, clears the login_required apply-blocker on every pending/approved screening queued for that host so the next run retries them",
                   "method": "DELETE",
                   "path": "/api/browser/session"
+                },
+                {
+                  "desc": "Stop a run: forwards cancel to the supervisor when it owns the run, otherwise closes the record as failed/orphaned. 404 unknown run, 409 already finished.",
+                  "method": "POST",
+                  "path": "/api/runs/{run_id}/stop"
                 }
               ]
             },
@@ -542,6 +547,11 @@
                   "desc": "One agent run record by id, read in-process from runs.store.get; 404 when unknown.",
                   "method": "GET",
                   "path": "/api/runs/{run_id}"
+                },
+                {
+                  "desc": "Stop a running run: cancels via the agent supervisor if it owns the run (outcome \"cancelling\"), otherwise closes the orphaned record as failed/orphaned. Returns RunStopResult {outcome, run}; 404 if unknown, 409 if not running.",
+                  "method": "POST",
+                  "path": "/api/runs/{run_id}/stop"
                 }
               ]
             },
@@ -1490,6 +1500,11 @@
                   "desc": "{running, lastStartedAt, lastFinishedAt, lastExitCode}. Requires X-Agent-Token.",
                   "method": "GET",
                   "path": "/status"
+                },
+                {
+                  "desc": "Stop the run in progress (fire-and-forget); called by API on run stop and orphan reconciliation",
+                  "method": "POST",
+                  "path": "/cancel"
                 }
               ]
             },
@@ -2360,6 +2375,11 @@
       "from": "prompt-store",
       "protocol": "file I/O",
       "to": "truth-data-volume"
+    },
+    {
+      "from": "api",
+      "protocol": "HTTP/REST",
+      "to": "application-agent"
     }
   ],
   "definitions": [

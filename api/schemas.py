@@ -7,6 +7,7 @@ frontend client (web/src/api/types.ts) expects.
 from __future__ import annotations
 
 import re
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -1405,6 +1406,19 @@ class AgentCancelResult(_Camel):
 
     cancelled: bool
     running: bool
+
+
+class RunStopResult(_Camel):
+    """POST /api/runs/{run_id}/stop result.
+
+    ``outcome`` is "cancelling" when the supervisor was signalled and will
+    close the record itself, or "closed" when the record was orphaned (no
+    supervisor was watching it) and has been marked failed/orphaned now.
+    ``run`` is the run record's current state at the time of the response.
+    """
+
+    outcome: Literal["cancelling", "closed"]
+    run: RunModel
 
 
 class AgentRunStart(_Camel):
