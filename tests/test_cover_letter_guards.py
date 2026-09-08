@@ -46,7 +46,6 @@ class _Provider:
 def _build(paragraphs):
     return build_letter(
         posting="Backend Engineer",
-        tone="professional",
         length="short",
         truth=_truth(),
         provider=_Provider(),

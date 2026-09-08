@@ -155,7 +155,6 @@ LETTER_SCOPE_ID = "letter"
 
 def build_letter(
     posting: str,
-    tone: str,
     length: str,
     truth: Truth,
     provider: LLMProvider,
@@ -194,12 +193,12 @@ def build_letter(
     it asserts nothing new. A blank name appends nothing: a letter with no
     sign-off is correct, a letter signed "[Your Name]" is not.
 
-    ``preset_id`` (optional) selects a writing style preset; when omitted,
-    tone-based selection applies (backward compatible).
+    ``preset_id`` (optional) selects a writing style preset; when omitted, the
+    operator's default preset applies.
     """
     if paragraphs is None:
         paragraphs = _generate_paragraphs(
-            posting, tone, length, truth, provider, answers, preset_id=preset_id
+            posting, length, truth, provider, answers, preset_id=preset_id
         )
         save_letter_draft(paragraphs, posting)
 
@@ -303,7 +302,6 @@ def _placeholders(text: str) -> list[str]:
 
 def _generate_paragraphs(
     posting: str,
-    tone: str,
     length: str,
     truth: Truth,
     provider: LLMProvider,
@@ -313,11 +311,11 @@ def _generate_paragraphs(
     """Ask the provider for the letter's paragraphs + tagged factual claims.
 
     ``preset_id`` (optional) selects a writing style preset via the library;
-    when omitted, tone-based selection applies.
+    when omitted, the operator's default preset applies.
     """
     user = f"POSTING:\n{posting}\n\nCANDIDATE FACTS:\n{prompts.cover_letter_facts_block(truth, answers)}"
     result = provider.extract_json(
-        prompts.cover_letter_system_for_preset(preset_id, tone, length),
+        prompts.cover_letter_system_for_preset(preset_id, length),
         [{"role": "user", "content": user}],
         _SCHEMA,
     )

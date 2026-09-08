@@ -4,18 +4,22 @@ Seeded fragments and presets (from ``prompts.fragments``) always exist and can
 never be edited or deleted; operator-authored ("user") fragments and presets
 are layered on top, stored as flat JSON lists in ``data_dir()``. A user record
 sharing an id with a seeded one overrides it in the merged view.
+
+Nothing here validates a fragment selection: slots group fragments for
+display only, and a preset may combine any number of fragments from any slot.
+The default-preset marker lives on its own in ``prompt_default.json`` so that
+marking a seeded preset as the default never persists a copy of it.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .conventions import DEFAULT_CONVENTIONS
-from .fragments import EXCLUSIVE_SLOTS, SEEDED_FRAGMENTS, SEEDED_PRESETS, Fragment, Preset
+from .conventions import CvConventions, DEFAULT_CONVENTIONS
+from .fragments import SEEDED_FRAGMENTS, SEEDED_PRESETS, Fragment, Preset, seeded_fragments
 from storage.atomic import atomic_write_text, locked
 from storage.paths import data_dir
 
@@ -23,24 +27,7 @@ logger = logging.getLogger(__name__)
 
 FRAGMENTS_FILE = "prompt_fragments.json"
 PRESETS_FILE = "prompt_presets.json"
-
-
-@dataclass
-class Conflict:
-    """One reason a preset's fragment selection is invalid."""
-
-    kind: str
-    fragment_ids: list[str]
-    slot: str | None
-    message: str
-
-
-class PresetConflictError(Exception):
-    """Raised by ``upsert_preset`` when the fragment selection has conflicts."""
-
-    def __init__(self, conflicts: list[Conflict]) -> None:
-        self.conflicts = conflicts
-        super().__init__("; ".join(c.message for c in conflicts))
+DEFAULT_FILE = "prompt_default.json"
 
 
 def _records_path(filename: str) -> Path:
@@ -63,9 +50,9 @@ def _load_records(filename: str) -> list[dict[str, Any]]:
         return []
 
 
-def list_fragments(conventions=DEFAULT_CONVENTIONS) -> list[Fragment]:
-    """Seeded fragments overridden/extended by user fragments from disk."""
-    merged: dict[str, Fragment] = {f.id: f for f in SEEDED_FRAGMENTS}
+def list_fragments(conventions: CvConventions = DEFAULT_CONVENTIONS) -> list[Fragment]:
+    """Seeded fragments (rendered for ``conventions``) overridden by user ones."""
+    merged: dict[str, Fragment] = {f.id: f for f in seeded_fragments(conventions)}
     for record in _load_records(FRAGMENTS_FILE):
         try:
             fragment = Fragment.from_dict(record)
@@ -111,17 +98,60 @@ def delete_fragment(id: str) -> None:
         atomic_write_text(path, json.dumps(records, indent=2))
 
 
+def _load_default_marker() -> str | None:
+    """Read the default-preset id from ``prompt_default.json``, or ``None``."""
+    path = _records_path(DEFAULT_FILE)
+    if not path.exists():
+        return None
+    try:
+        marker = json.loads(path.read_text(encoding="utf-8"))
+        preset_id = marker["presetId"]
+        if not isinstance(preset_id, str) or not preset_id:
+            raise ValueError("presetId must be a non-empty string")
+        return preset_id
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        logger.warning("could not load %s, ignoring default marker: %s", path, exc)
+        return None
+
+
+def _load_preset_records() -> tuple[list[dict[str, Any]], str | None]:
+    """User preset records with seeded-id records dropped, plus a legacy default.
+
+    Older versions persisted every merged preset — seeded ones included — into
+    ``prompt_presets.json``, which then permanently shadowed the code
+    definitions. Those records are dropped on read; if one of them carried the
+    default flag it is returned as the legacy default id so the operator's
+    choice survives the migration.
+    """
+    seeded_ids = _seeded_preset_ids()
+    kept: list[dict[str, Any]] = []
+    legacy_default: str | None = None
+    for record in _load_records(PRESETS_FILE):
+        if record.get("id") in seeded_ids:
+            if record.get("is_default"):
+                legacy_default = record["id"]
+            continue
+        kept.append(record)
+    return kept, legacy_default
+
+
 def list_presets() -> list[Preset]:
     """Seeded presets overridden/extended by user presets from disk."""
-    merged: dict[str, Preset] = {p.id: p for p in SEEDED_PRESETS}
-    for record in _load_records(PRESETS_FILE):
+    merged: dict[str, Preset] = {p.id: Preset.from_dict(p.to_dict()) for p in SEEDED_PRESETS}
+    records, legacy_default = _load_preset_records()
+    for record in records:
         try:
             preset = Preset.from_dict(record)
         except (KeyError, ValueError) as exc:
             logger.warning("skipping corrupt preset record %r: %s", record, exc)
             continue
         merged[preset.id] = preset
-    return list(merged.values())
+    presets = list(merged.values())
+    marked = _load_default_marker() or legacy_default
+    if marked is not None and any(p.id == marked for p in presets):
+        for preset in presets:
+            preset.is_default = preset.id == marked
+    return presets
 
 
 def get_preset(id: str) -> Preset:
@@ -143,27 +173,24 @@ def _seeded_preset_ids() -> set[str]:
 
 
 def set_default_preset(id: str) -> None:
-    presets = list_presets()
-    if not any(p.id == id for p in presets):
+    """Mark ``id`` as the default preset by writing the standalone marker file.
+
+    Only ``prompt_default.json`` is written: seeded presets are never copied
+    into ``prompt_presets.json``, so the shipped definitions keep winning.
+    """
+    if not any(p.id == id for p in list_presets()):
         raise KeyError(id)
-    path = _records_path(PRESETS_FILE)
+    path = _records_path(DEFAULT_FILE)
     with locked(path):
-        records = []
-        for preset in presets:
-            preset.is_default = preset.id == id
-            records.append(preset.to_dict())
-        atomic_write_text(path, json.dumps(records, indent=2))
+        atomic_write_text(path, json.dumps({"presetId": id}, indent=2))
 
 
 def upsert_preset(preset: Preset) -> None:
     if preset.id in _seeded_preset_ids():
         raise ValueError(f"cannot edit seeded preset {preset.id}")
-    conflicts = validate_preset(preset.fragment_ids)
-    if conflicts:
-        raise PresetConflictError(conflicts)
     path = _records_path(PRESETS_FILE)
     with locked(path):
-        records = _load_records(PRESETS_FILE)
+        records, _ = _load_preset_records()
         records = [r for r in records if r.get("id") != preset.id]
         records.append(preset.to_dict())
         atomic_write_text(path, json.dumps(records, indent=2))
@@ -176,64 +203,6 @@ def delete_preset(id: str) -> None:
         raise ValueError("cannot delete default preset")
     path = _records_path(PRESETS_FILE)
     with locked(path):
-        records = _load_records(PRESETS_FILE)
+        records, _ = _load_preset_records()
         records = [r for r in records if r.get("id") != id]
         atomic_write_text(path, json.dumps(records, indent=2))
-
-
-def _exclusive_slot_conflicts(fragment_ids: list[str], fragments_by_id: dict[str, Fragment]) -> list[Conflict]:
-    conflicts: list[Conflict] = []
-    seen_by_slot: dict[str, str] = {}
-    for fid in fragment_ids:
-        fragment = fragments_by_id.get(fid)
-        if fragment is None or fragment.slot not in EXCLUSIVE_SLOTS:
-            continue
-        prior = seen_by_slot.get(fragment.slot)
-        if prior is not None:
-            conflicts.append(Conflict(
-                kind="exclusive_slot",
-                fragment_ids=[prior, fid],
-                slot=fragment.slot,
-                message=f"Fragments {prior} and {fid} both use slot {fragment.slot}",
-            ))
-        else:
-            seen_by_slot[fragment.slot] = fid
-    return conflicts
-
-
-def _declared_conflicts(fragment_ids: list[str], fragments_by_id: dict[str, Fragment]) -> list[Conflict]:
-    conflicts: list[Conflict] = []
-    for fid in fragment_ids:
-        fragment = fragments_by_id.get(fid)
-        if fragment is None:
-            continue
-        for other_id in fragment_ids:
-            other = fragments_by_id.get(other_id)
-            if other is None or other.id == fragment.id:
-                continue
-            if other.id in fragment.conflicts_with:
-                conflicts.append(Conflict(
-                    kind="declared",
-                    fragment_ids=[fragment.id, other.id],
-                    slot=None,
-                    message=f"Fragment {other.id} declared conflict with {fragment.id}",
-                ))
-    return conflicts
-
-
-def validate_preset(fragment_ids: list[str], fragments: list[Fragment] | None = None) -> list[Conflict]:
-    if fragments is None:
-        fragments = list_fragments()
-    fragments_by_id = {f.id: f for f in fragments}
-    conflicts: list[Conflict] = []
-    conflicts.extend(_exclusive_slot_conflicts(fragment_ids, fragments_by_id))
-    conflicts.extend(_declared_conflicts(fragment_ids, fragments_by_id))
-    for fid in fragment_ids:
-        if fid not in fragments_by_id:
-            conflicts.append(Conflict(
-                kind="unknown_fragment",
-                fragment_ids=[fid],
-                slot=None,
-                message=f"Unknown fragment {fid}",
-            ))
-    return conflicts

@@ -191,8 +191,8 @@ def test_two_applications_do_not_share_letter_state(data_dir):
         ]
     )
 
-    result_a = tools_letter.generate_cover_letter("Posting A", "Professional", "Short", provider=fake_a)
-    result_b = tools_letter.generate_cover_letter("Posting B", "Professional", "Short", provider=fake_b)
+    result_a = tools_letter.generate_cover_letter("Posting A", "Short", provider=fake_a)
+    result_b = tools_letter.generate_cover_letter("Posting B", "Short", provider=fake_b)
 
     assert result_a["blocked"] is False
     assert result_b["blocked"] is False
@@ -224,7 +224,7 @@ def test_a_denied_claim_retries_without_a_second_llm_call(data_dir):
         ]
     )
 
-    first = tools_letter.generate_cover_letter("A role", "Professional", "Short", provider=fake)
+    first = tools_letter.generate_cover_letter("A role", "Short", provider=fake)
     assert first["blocked"] is True
     denied_text = "Led Mars colony operations"
     assert denied_text in [c["text"] for c in first["blocked_claims"]]
@@ -232,7 +232,6 @@ def test_a_denied_claim_retries_without_a_second_llm_call(data_dir):
 
     second = tools_letter.generate_cover_letter(
         "A role",
-        "Professional",
         "Short",
         denied_texts=[denied_text],
         paragraphs=first["paragraphs"],
@@ -689,7 +688,7 @@ def test_generate_cover_letter_refuses_blocked_company(data_dir):
     agent_config_store.save(cfg)
 
     result = tools_letter.generate_cover_letter(
-        "posting text", "neutral", "short", company="acme gmbh"
+        "posting text", "short", company="acme gmbh"
     )
     assert result == {
         "text": "",

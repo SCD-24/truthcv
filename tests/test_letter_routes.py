@@ -295,6 +295,97 @@ def test_denying_the_blocked_claim_drops_it(client, monkeypatch):
     assert r.json()["source"] == "generated"
 
 
+def test_generate_without_preset_id_uses_default_preset_prompt(client, monkeypatch):
+    """Omitting presetId must resolve through prompts.library.default_preset(),
+    not silently fall back to some other preset (or error) — the system
+    prompt the provider actually receives must match what that default
+    preset produces."""
+    import agenttools.letter_operator as letter_operator
+    from prompts import cover_letter_system_for_preset
+    from prompts.library import default_preset
+
+    captured: dict = {}
+
+    class _CapturingProvider:
+        def extract_json(self, system, messages, schema=None):
+            captured["system"] = system
+            return {"paragraphs": [{"text": "It is the work that was created.", "claims": []}]}
+
+    monkeypatch.setattr(letter_operator, "get_provider", lambda _name: _CapturingProvider())
+    s = _queued()
+    r = client.post(f"/api/screenings/{s.id}/letter", json={})
+    assert r.status_code == 200, r.text
+    assert captured["system"] == cover_letter_system_for_preset(default_preset().id, "Standard")
+
+
+def test_generate_with_explicit_preset_id_uses_that_presets_prompt(client, monkeypatch):
+    """A presetId in the request body selects that preset's prompt — one that
+    is distinctly not the default preset's — proving the given id actually
+    reaches prompt assembly rather than being ignored."""
+    import agenttools.letter_operator as letter_operator
+    from prompts import cover_letter_system_for_preset
+    from prompts.library import default_preset
+
+    captured: dict = {}
+
+    class _CapturingProvider:
+        def extract_json(self, system, messages, schema=None):
+            captured["system"] = system
+            return {"paragraphs": [{"text": "It is the work that was created.", "claims": []}]}
+
+    monkeypatch.setattr(letter_operator, "get_provider", lambda _name: _CapturingProvider())
+    s = _queued()
+    r = client.post(f"/api/screenings/{s.id}/letter", json={"presetId": "concise"})
+    assert r.status_code == 200, r.text
+    expected = cover_letter_system_for_preset("concise", "Standard")
+    assert captured["system"] == expected
+    assert captured["system"] != cover_letter_system_for_preset(default_preset().id, "Standard")
+
+
+def test_unknown_preset_id_errors_instead_of_silently_falling_back(client, monkeypatch):
+    """An unknown presetId must surface to the caller as an error, never a
+    silent fallback to the default preset's letter: no 200 is acceptable
+    here, whatever the exact status code turns out to be."""
+    import api.routes as routes
+    from providers.fake import FakeProvider
+    from truth import save
+    from truth.model import Experience, Skill, Truth
+
+    def router(system, messages, schema):
+        return {
+            "paragraphs": [
+                {"text": "I use Python at Acme Corp.", "claims": ["Python", "Acme Corp"]}
+            ]
+        }
+
+    monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
+    save(
+        Truth(
+            experiences=[
+                Experience(
+                    id="c1",
+                    role="Engineer",
+                    company="Acme Corp",
+                    start="2020",
+                    end="2023",
+                    source="linkedin-pdf",
+                )
+            ],
+            education=[],
+            skills=[Skill(id="s1", value="Python", source="linkedin-pdf")],
+        )
+    )
+    from storage import data_dir as dd
+
+    (dd() / "posting.txt").write_text("Python role at a startup")
+
+    r = client.post(
+        "/api/cover-letter", json={"length": "Short", "presetId": "no-such-preset"}
+    )
+    assert r.status_code >= 400
+    assert r.status_code != 200
+
+
 def test_company_blocked_letter_has_no_claims_and_blocked_reason(client):
     """The blocklist refusal keeps its distinct shape: no claims, a named reason."""
     import agentconfig.store as agent_config_store

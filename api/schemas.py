@@ -627,7 +627,12 @@ class CoverLetterApprovals(_Camel):
 
 
 class CoverLetterRequest(_Camel):
-    tone: str = "Professional"
+    """Request to generate a cover letter.
+
+    The writing style is chosen by ``preset_id``; omitting it applies the
+    user's default writing-style preset.
+    """
+
     length: str = "Standard"
     # When present, the letter is saved as this application's owned document.
     application_id: str | None = None
@@ -648,7 +653,6 @@ class PromptFragmentIn(_Camel):
     slot: str
     title: str
     text: str
-    conflicts_with: list[str] = Field(default_factory=list)
 
 
 class PromptFragmentOut(_Camel):
@@ -660,7 +664,6 @@ class PromptFragmentOut(_Camel):
     text: str
     seeded: bool
     recommended: bool = False
-    conflicts_with: list[str] = Field(default_factory=list)
 
 
 class PromptPresetIn(_Camel):
@@ -680,21 +683,6 @@ class PromptPresetOut(_Camel):
     fragment_ids: list[str]
     is_default: bool
     seeded: bool
-
-
-class PromptConflict(_Camel):
-    """One conflict in a preset's fragment selection."""
-
-    kind: str  # 'exclusive_slot'|'declared'|'unknown_fragment'
-    fragment_ids: list[str]
-    slot: str | None = None
-    message: str
-
-
-class PresetValidateRequest(_Camel):
-    """POST /api/prompt-presets/validate payload."""
-
-    fragment_ids: list[str]
 
 
 class CoverLetterResult(_Camel):
@@ -1031,10 +1019,12 @@ class LetterGenerateRequest(_Camel):
     written to truth.yaml. `paragraphs` echoes back the paragraphs from a
     blocked attempt so the retry re-validates that SAME letter instead of
     paying for a second LLM call; omitted, a fresh letter is generated.
+
+    The writing style is chosen by `preset_id`; omitting it applies the user's
+    default writing-style preset.
     """
 
     force: bool = False
-    tone: str = "Professional"
     length: str = "Standard"
     approvals: CoverLetterApprovals | None = None
     paragraphs: list[dict] | None = None

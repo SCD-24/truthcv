@@ -24,7 +24,6 @@ from .tailor import (
     select_truth_block,
 )
 from .coverletter import (
-    cover_letter_system,
     cover_letter_system_for_preset,
     cover_letter_facts_block,
 )
@@ -40,7 +39,6 @@ __all__ = [
     "infer_truth_block",
     "select_system",
     "select_truth_block",
-    "cover_letter_system",
     "cover_letter_system_for_preset",
     "cover_letter_facts_block",
 ]

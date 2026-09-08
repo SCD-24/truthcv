@@ -9,8 +9,8 @@ import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Alert from "@mui/material/Alert";
 import { SLOTS } from "./FragmentList";
-import type { PromptConflict, PromptFragment, PromptPreset } from "../api/client";
-import { savePromptPreset, setDefaultPromptPreset, validatePromptPreset } from "../api/client";
+import type { PromptFragment, PromptPreset } from "../api/client";
+import { savePromptPreset, setDefaultPromptPreset } from "../api/client";
 
 const NEW_PRESET = "__new__";
 
@@ -32,18 +32,6 @@ function MissingRecommendedAlert({
   );
 }
 
-/** Messages for the fragments a conflict names, keyed by fragment id, so
- * each offending checkbox can show its own inline reason. */
-function conflictsByFragment(conflicts: PromptConflict[]): Map<string, string[]> {
-  const map = new Map<string, string[]>();
-  for (const c of conflicts) {
-    for (const id of c.fragmentIds) {
-      map.set(id, [...(map.get(id) ?? []), c.message]);
-    }
-  }
-  return map;
-}
-
 /** Loads the given preset's fields into local state, or clears them for
  * "New preset". */
 function useSelectedPreset(presets: PromptPreset[], selectedId: string) {
@@ -59,35 +47,38 @@ function useSelectedPreset(presets: PromptPreset[], selectedId: string) {
   return { name, setName, fragmentIds, setFragmentIds };
 }
 
-/** Right panel: pick or start a preset, toggle its fragments, see conflicts
- * live, and save. Conflicts are re-checked against the server on every
- * toggle so "Save" can never submit a preset the backend would reject. */
+/** Human-readable message from a thrown value, preferring the server's own. */
+function errText(e: unknown, fallback: string): string {
+  return e instanceof Error ? e.message : fallback;
+}
+
+/** Right panel: pick or start a preset, toggle any combination of its
+ * fragments, and save. Slots group fragments for display only — a preset may
+ * hold several fragments from the same slot, and nothing checks them against
+ * one another. */
 export function PresetBuilder({
   fragments,
   presets,
   onPresetsChange,
+  onError,
 }: {
   fragments: PromptFragment[];
   presets: PromptPreset[];
   onPresetsChange: () => void;
+  onError: (message: string | null) => void;
 }) {
   const [selectedId, setSelectedId] = useState<string>(NEW_PRESET);
   const { name, setName, fragmentIds, setFragmentIds } = useSelectedPreset(presets, selectedId);
-  const [conflicts, setConflicts] = useState<PromptConflict[]>([]);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    validatePromptPreset(fragmentIds).then(setConflicts);
-  }, [fragmentIds]);
-
   const selectedPreset = presets.find((p) => p.id === selectedId) ?? null;
-  const reasonsByFragment = conflictsByFragment(conflicts);
 
   const toggle = (id: string) => {
     setFragmentIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
   const save = async () => {
+    onError(null);
     setSaving(true);
     try {
       const saved = await savePromptPreset({
@@ -98,6 +89,8 @@ export function PresetBuilder({
       });
       onPresetsChange();
       setSelectedId(saved.id);
+    } catch (e) {
+      onError(errText(e, "Couldn't save the preset."));
     } finally {
       setSaving(false);
     }
@@ -105,8 +98,13 @@ export function PresetBuilder({
 
   const makeDefault = async () => {
     if (selectedId === NEW_PRESET) return;
-    await setDefaultPromptPreset(selectedId);
-    onPresetsChange();
+    onError(null);
+    try {
+      await setDefaultPromptPreset(selectedId);
+      onPresetsChange();
+    } catch (e) {
+      onError(errText(e, "Couldn't set the default preset."));
+    }
   };
 
   return (
@@ -140,13 +138,6 @@ export function PresetBuilder({
       />
 
       <Box role="status" aria-live="polite" aria-atomic="true">
-        {conflicts.length > 0 && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            {conflicts.map((c, i) => (
-              <div key={i}>{c.message}</div>
-            ))}
-          </Alert>
-        )}
         <MissingRecommendedAlert fragments={fragments} fragmentIds={fragmentIds} />
       </Box>
 
@@ -156,7 +147,6 @@ export function PresetBuilder({
           slot={slot}
           fragments={fragments}
           fragmentIds={fragmentIds}
-          reasonsByFragment={reasonsByFragment}
           onToggle={toggle}
         />
       ))}
@@ -164,36 +154,38 @@ export function PresetBuilder({
       <Box sx={{ display: "flex", gap: 2, mt: 2 }}>
         <Button
           variant="contained"
-          disabled={saving || conflicts.length > 0 || !name.trim()}
+          disabled={saving || !name.trim() || !!selectedPreset?.seeded}
           onClick={save}
         >
           Save preset
         </Button>
         <Button
           variant="outlined"
-          disabled={selectedId === NEW_PRESET || !!selectedPreset?.seeded}
+          disabled={selectedId === NEW_PRESET}
           onClick={makeDefault}
         >
           Set as default
         </Button>
       </Box>
+      {selectedPreset?.seeded && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+          Shipped presets can't be edited. Pick "New preset" to build your own.
+        </Typography>
+      )}
     </Box>
   );
 }
 
-/** One slot's checkboxes in the preset builder, each with its own inline
- * conflict reason (if any) right next to it. */
+/** One slot's checkboxes in the preset builder. Any number may be ticked. */
 function PresetSlotGroup({
   slot,
   fragments,
   fragmentIds,
-  reasonsByFragment,
   onToggle,
 }: {
   slot: string;
   fragments: PromptFragment[];
   fragmentIds: string[];
-  reasonsByFragment: Map<string, string[]>;
   onToggle: (id: string) => void;
 }) {
   const rows = fragments.filter((f) => f.slot === slot);
@@ -203,38 +195,26 @@ function PresetSlotGroup({
       <Typography component="legend" variant="subtitle2" sx={{ textTransform: "capitalize" }}>
         {slot}
       </Typography>
-      {rows.map((f) => {
-        const reasons = reasonsByFragment.get(f.id);
-        return (
-          <Box key={f.id}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={fragmentIds.includes(f.id)}
-                    onChange={() => onToggle(f.id)}
-                  />
-                }
-                label={f.title}
-              />
-              {f.recommended && (
-                <Typography variant="caption" color="text.secondary">
-                  Recommended
-                </Typography>
-              )}
-            </Box>
-            {reasons && (
-              <Typography
-                component="span"
-                variant="caption"
-                sx={{ color: "error.main", ml: 1 }}
-              >
-                {reasons.join("; ")}
+      {rows.map((f) => (
+        <Box key={f.id}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={fragmentIds.includes(f.id)}
+                  onChange={() => onToggle(f.id)}
+                />
+              }
+              label={f.title}
+            />
+            {f.recommended && (
+              <Typography variant="caption" color="text.secondary">
+                Recommended
               </Typography>
             )}
           </Box>
-        );
-      })}
+        </Box>
+      ))}
     </Paper>
   );
 }

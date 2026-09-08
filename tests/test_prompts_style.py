@@ -8,7 +8,7 @@ them. Guards against a future edit reintroducing a banned character.
 
 from truth.model import Bullet, Experience, Skill, Truth
 from prompts.tailor import select_system, select_truth_block
-from prompts.coverletter import cover_letter_system, cover_letter_facts_block
+from prompts.coverletter import cover_letter_system_for_preset, cover_letter_facts_block
 from prompts.style import (
     CV_STYLE,
     LETTER_STYLE,
@@ -53,8 +53,8 @@ def test_cv_system_prompt_has_no_ai_tell_characters():
 
 
 def test_cover_letter_system_prompt_has_no_ai_tell_characters():
-    for tone in ("professional", "warm", "concise", "unknown"):
-        _assert_no_tells(cover_letter_system(tone, "short"))
+    for preset_id in ("professional", "warm", "concise"):
+        _assert_no_tells(cover_letter_system_for_preset(preset_id, "short"))
 
 
 def test_cover_letter_facts_block_has_no_ai_tell_characters():
@@ -75,17 +75,17 @@ def test_cv_system_prompt_has_anti_slop_bans():
     assert "dramatic clauses" in prompt
 
 
-def test_cover_letter_system_prompt_has_anti_slop_bans_for_every_tone():
-    for tone in ("professional", "warm", "concise", "unknown"):
-        prompt = cover_letter_system(tone, "one page")
+def test_cover_letter_system_prompt_has_anti_slop_bans_for_every_seeded_preset():
+    for preset_id in ("professional", "warm", "concise"):
+        prompt = cover_letter_system_for_preset(preset_id, "one page")
         assert "portability test" in prompt
         assert "summary-recap paragraph" in prompt
         assert "Avoid hollow adverbs in the letter" in prompt
 
 
 def test_cover_letter_system_prompt_ends_with_guardrail_contract():
-    for tone in ("professional", "warm", "concise", "unknown"):
-        prompt = cover_letter_system(tone, "one page")
+    for preset_id in ("professional", "warm", "concise"):
+        prompt = cover_letter_system_for_preset(preset_id, "one page")
         assert prompt.rstrip().endswith(
             "Connective and interpretive sentences carry no claims, that is "
             "where your voice lives, so use them freely."

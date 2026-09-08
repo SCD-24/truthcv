@@ -175,7 +175,7 @@ describe("ManualPage", () => {
     expect((profesButton as HTMLButtonElement).getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("passes the created record's id to both render and generateCoverLetter, sending the default preset id as tone", async () => {
+  it("passes the created record's id to both render and generateCoverLetter, sending the default preset id as presetId", async () => {
     renderPage();
     fillForm();
     fireEvent.click(checkbox("Write a cover letter")); // both CV + letter
@@ -184,7 +184,6 @@ describe("ManualPage", () => {
 
     await waitFor(() =>
       expect(generateCoverLetter).toHaveBeenCalledWith(
-        "professional",
         "standard",
         undefined,
         "app-123",
@@ -203,7 +202,6 @@ describe("ManualPage", () => {
 
     await waitFor(() =>
       expect(generateCoverLetter).toHaveBeenCalledWith(
-        "professional",
         "standard",
         undefined,
         undefined,
@@ -226,7 +224,6 @@ describe("ManualPage", () => {
 
     await waitFor(() =>
       expect(generateCoverLetter).toHaveBeenCalledWith(
-        "professional",
         "standard",
         undefined,
         undefined,

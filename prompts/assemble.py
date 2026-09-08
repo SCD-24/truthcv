@@ -40,10 +40,10 @@ def assemble_system_prompt(
 
     Fragments are ordered by slot (voice, structure, opener, rules) and,
     within a slot, by their appearance in ``preset.fragment_ids``. When
-    ``voice_override`` is given it replaces the voice fragment's text with a
-    plain ``" Voice: {override}."`` sentence instead of the fragment's own
-    text, letting a caller supply a free-form tone the fragment store does
-    not have a fragment for.
+    ``voice_override`` is given it replaces the voice slot as a whole with a
+    single plain ``" Voice: {override}."`` sentence, letting a caller supply a
+    free-form tone the fragment store does not have a fragment for. However
+    many voice fragments a preset selects, the override is emitted once.
     """
     fragments_by_id = {f.id: f for f in fragments}
     ordered: list[Fragment] = []
@@ -54,9 +54,13 @@ def assemble_system_prompt(
                 ordered.append(fragment)
 
     pieces = [framing(length)]
+    override_emitted = False
     for fragment in ordered:
         if voice_override is not None and fragment.slot == "voice":
+            if override_emitted:
+                continue
             pieces.append(f" Voice: {voice_override}.")
+            override_emitted = True
         else:
             pieces.append(f" {fragment.text}")
     pieces.append(GUARDRAIL_CONTRACT)
