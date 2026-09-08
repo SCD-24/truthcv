@@ -28,15 +28,12 @@ function fragmentsInSlot(fragments: PromptFragment[], slot: string): PromptFragm
   return fragments.filter((f) => f.slot === slot);
 }
 
-/** Parses the comma-separated "conflicts with" field back into an id list. */
-function parseConflicts(text: string): string[] {
-  return text
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+/** Human-readable message from a thrown value, preferring the server's own. */
+function errText(e: unknown, fallback: string): string {
+  return e instanceof Error ? e.message : fallback;
 }
 
-type DraftFragment = { id: string; slot: string; title: string; text: string; conflictsWith: string };
+type DraftFragment = { id: string; slot: string; title: string; text: string };
 
 /** Modal form for creating or editing a user fragment. Slot is always fixed
  * (a fragment can't move between slots after creation) and id is server
@@ -45,17 +42,19 @@ function FragmentEditor({
   draft,
   onCancel,
   onSaved,
+  onError,
 }: {
   draft: DraftFragment;
   onCancel: () => void;
   onSaved: () => void;
+  onError: (message: string | null) => void;
 }) {
   const [title, setTitle] = useState(draft.title);
   const [text, setText] = useState(draft.text);
-  const [conflicts, setConflicts] = useState(draft.conflictsWith);
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
+    onError(null);
     setSaving(true);
     try {
       await savePromptFragment({
@@ -63,9 +62,10 @@ function FragmentEditor({
         slot: draft.slot,
         title,
         text,
-        conflictsWith: parseConflicts(conflicts),
       });
       onSaved();
+    } catch (e) {
+      onError(errText(e, "Couldn't save the fragment."));
     } finally {
       setSaving(false);
     }
@@ -90,12 +90,6 @@ function FragmentEditor({
           onChange={(e) => setText(e.target.value)}
           multiline
           minRows={3}
-          fullWidth
-        />
-        <TextField
-          label="Conflicts with (comma-separated fragment ids)"
-          value={conflicts}
-          onChange={(e) => setConflicts(e.target.value)}
           fullWidth
         />
       </DialogContent>
@@ -124,10 +118,12 @@ function FragmentRow({
   fragment,
   onEdit,
   onDeleted,
+  onError,
 }: {
   fragment: PromptFragment;
   onEdit: () => void;
   onDeleted: () => void;
+  onError: (message: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -175,7 +171,15 @@ function FragmentRow({
             <IconButton
               size="small"
               aria-label={`Delete ${fragment.title}`}
-              onClick={() => deletePromptFragment(fragment.id).then(onDeleted)}
+              onClick={async () => {
+                onError(null);
+                try {
+                  await deletePromptFragment(fragment.id);
+                  onDeleted();
+                } catch (e) {
+                  onError(errText(e, "Couldn't delete the fragment."));
+                }
+              }}
             >
               <DeleteOutlineIcon fontSize="small" />
             </IconButton>
@@ -197,18 +201,19 @@ function SlotGroup({
   slot,
   fragments,
   onChange,
+  onError,
 }: {
   slot: string;
   fragments: PromptFragment[];
   onChange: () => void;
+  onError: (message: string | null) => void;
 }) {
   const [draft, setDraft] = useState<DraftFragment | null>(null);
   const rows = fragmentsInSlot(fragments, slot);
 
-  const startCreate = () =>
-    setDraft({ id: "", slot, title: "", text: "", conflictsWith: "" });
+  const startCreate = () => setDraft({ id: "", slot, title: "", text: "" });
   const startEdit = (f: PromptFragment) =>
-    setDraft({ id: f.id, slot: f.slot, title: f.title, text: f.text, conflictsWith: f.conflictsWith.join(", ") });
+    setDraft({ id: f.id, slot: f.slot, title: f.title, text: f.text });
 
   return (
     <Paper component="section" aria-labelledby={`slot-${slot}-label`} sx={{ p: 2, mb: 2 }}>
@@ -217,7 +222,13 @@ function SlotGroup({
       </Typography>
       <Box component="ul" sx={{ p: 0, m: 0 }}>
         {rows.map((f) => (
-          <FragmentRow key={f.id} fragment={f} onEdit={() => startEdit(f)} onDeleted={onChange} />
+          <FragmentRow
+            key={f.id}
+            fragment={f}
+            onEdit={() => startEdit(f)}
+            onDeleted={onChange}
+            onError={onError}
+          />
         ))}
       </Box>
       <Button size="small" startIcon={<AddIcon fontSize="small" />} onClick={startCreate}>
@@ -226,6 +237,7 @@ function SlotGroup({
       {draft && (
         <FragmentEditor
           draft={draft}
+          onError={onError}
           onCancel={() => setDraft(null)}
           onSaved={() => {
             setDraft(null);
@@ -242,9 +254,11 @@ function SlotGroup({
 export function FragmentList({
   fragments,
   onChange,
+  onError,
 }: {
   fragments: PromptFragment[];
   onChange: () => void;
+  onError: (message: string | null) => void;
 }) {
   return (
     <Box component="section" aria-label="Prompt fragments">
@@ -252,7 +266,13 @@ export function FragmentList({
         Fragments
       </Typography>
       {SLOTS.map((slot) => (
-        <SlotGroup key={slot} slot={slot} fragments={fragments} onChange={onChange} />
+        <SlotGroup
+          key={slot}
+          slot={slot}
+          fragments={fragments}
+          onChange={onChange}
+          onError={onError}
+        />
       ))}
     </Box>
   );

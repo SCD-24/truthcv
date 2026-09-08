@@ -13,7 +13,7 @@ fragment out.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from .conventions import CvConventions, DEFAULT_CONVENTIONS
@@ -24,19 +24,11 @@ from .style import letter_anti_slop, letter_style
 SLOTS: tuple[str, ...] = ("voice", "structure", "opener", "rules")
 """The recognised fragment slots.
 
-Every ``Fragment.slot`` must be one of these four. ``voice`` picks the letter's
-tone, ``structure`` picks the paragraph plan, ``opener`` picks how the first
-paragraph is framed, and ``rules`` holds additive style/behaviour constraints
-that are not mutually exclusive with one another.
-"""
-
-EXCLUSIVE_SLOTS: set[str] = {"voice", "structure", "opener"}
-"""Slots where a preset may select at most one fragment.
-
-``rules`` is deliberately excluded: an operator may want several rules
-fragments active at once (career-services standard, tailoring, anti-slop,
-letter style), whereas selecting two voices or two structures at the same
-time would be contradictory guidance sent to the model.
+Every ``Fragment.slot`` must be one of these four. Slots group fragments for
+display and ordering only: ``voice`` holds tone guidance, ``structure`` holds
+paragraph plans, ``opener`` holds first-paragraph framings, and ``rules``
+holds additive style/behaviour constraints. Any number of fragments may be
+combined within a slot; nothing enforces exclusivity.
 """
 
 
@@ -49,8 +41,7 @@ class Fragment:
     ``seeded`` marks a fragment that shipped with the product rather than one
     an operator authored. ``recommended`` marks a fragment that a preset should
     include; UI warnings (non-blocking) appear when a preset omits any
-    recommended fragment. ``conflicts_with`` lists other fragment ids this
-    fragment should not be combined with, independent of slot exclusivity.
+    recommended fragment.
     """
 
     id: str
@@ -59,7 +50,6 @@ class Fragment:
     text: str
     seeded: bool = False
     recommended: bool = False
-    conflicts_with: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Render this fragment as a plain ``dict`` suitable for JSON/YAML."""
@@ -70,7 +60,6 @@ class Fragment:
             "text": self.text,
             "seeded": self.seeded,
             "recommended": self.recommended,
-            "conflicts_with": list(self.conflicts_with),
         }
 
     @staticmethod
@@ -90,7 +79,6 @@ class Fragment:
             text=d["text"],
             seeded=bool(d.get("seeded", False)),
             recommended=bool(d.get("recommended", False)),
-            conflicts_with=list(d.get("conflicts_with", [])),
         )
 
 
@@ -306,15 +294,6 @@ def seeded_fragments(conventions: CvConventions = DEFAULT_CONVENTIONS) -> list[F
     ]
 
 
-# The practitioner voice is incompatible with the career-services standard
-# ("go easy on the word 'I'") and with the tailoring fragment ("incorporate
-# its keywords naturally"): the practitioner guidance is first-person and
-# explicitly tells the model not to optimise for keyword coverage.
-_PRACTITIONER_VOICE_CONFLICTS: tuple[str, ...] = (
-    "rules-career-services-standard",
-    "rules-tailoring",
-)
-
 
 def _practitioner_fragments() -> list[Fragment]:
     """Build the practitioner fragments from ``prompts.practitioner`` specs.
@@ -323,6 +302,13 @@ def _practitioner_fragments() -> list[Fragment]:
     what the Writing Style page warns about when a preset omits it, and
     marking these recommended would raise that warning on the professional,
     warm, and concise presets, which do not select them.
+
+    ``voice-practitioner`` is incompatible with ``rules-career-services-standard``
+    ("go easy on the word 'I'") and ``rules-tailoring`` ("incorporate its
+    keywords naturally"), since the practitioner guidance is first-person and
+    tells the model not to optimise for keyword coverage. Fragments no longer
+    declare conflicts, so that incompatibility is expressed by the
+    practitioner preset simply not selecting those two.
     """
     return [
         Fragment(
@@ -332,11 +318,6 @@ def _practitioner_fragments() -> list[Fragment]:
             text=spec["text"],
             seeded=True,
             recommended=False,
-            conflicts_with=(
-                list(_PRACTITIONER_VOICE_CONFLICTS)
-                if spec["id"] == "voice-practitioner"
-                else []
-            ),
         )
         for spec in PRACTITIONER_SPECS
     ]
@@ -347,13 +328,10 @@ SEEDED_FRAGMENTS: list[Fragment] = seeded_fragments(DEFAULT_CONVENTIONS)
 
 
 def _seeded_preset(preset_id: str, name: str, voice_id: str, is_default: bool = False) -> Preset:
-    """Build one of the shipped presets, validating its slot coverage.
+    """Build one of the shipped presets.
 
     Every seeded preset shares the same structure, opener, and rules
-    fragments and differs only by voice; this validates, at import time,
-    that the assembled fragment id list has exactly one fragment per
-    exclusive slot (``KEY CONSTRAINT``: a preset must never select two
-    fragments from the same exclusive slot).
+    fragments and differs only by voice.
     """
     fragment_ids = [
         voice_id,
@@ -364,7 +342,6 @@ def _seeded_preset(preset_id: str, name: str, voice_id: str, is_default: bool = 
         "rules-anti-slop",
         "rules-letter-style",
     ]
-    _assert_one_per_exclusive_slot(fragment_ids)
     return Preset(
         id=preset_id,
         name=name,
@@ -374,45 +351,32 @@ def _seeded_preset(preset_id: str, name: str, voice_id: str, is_default: bool = 
     )
 
 
-def _assert_one_per_exclusive_slot(fragment_ids: list[str]) -> None:
-    """Raise ``ValueError`` unless ``fragment_ids`` has one fragment per exclusive slot."""
-    fragments_by_id = {f.id: f for f in SEEDED_FRAGMENTS}
-    counts: dict[str, int] = {}
-    for fid in fragment_ids:
-        slot = fragments_by_id[fid].slot
-        if slot in EXCLUSIVE_SLOTS:
-            counts[slot] = counts.get(slot, 0) + 1
-    for slot in EXCLUSIVE_SLOTS:
-        if counts.get(slot, 0) != 1:
-            raise ValueError(
-                f"preset must select exactly one fragment for exclusive slot "
-                f"{slot!r}, got {counts.get(slot, 0)}"
-            )
-
-
 def _practitioner_preset() -> Preset:
     """Build the self-contained "Practitioner narrative" preset.
 
     ``_seeded_preset`` hardcodes the classic fragment list, so this preset is
     assembled separately from the practitioner fragment ids. It deliberately
-    omits ``rules-career-services-standard`` and ``rules-tailoring`` (declared
-    conflicts of ``voice-practitioner``) and ``rules-letter-style``, whose
-    one-page, 1-2 body paragraph structure contradicts the narrative arc's
-    eight-part order and 2,500 to 4,000 character target. The two mechanical
-    instructions that omission would otherwise lose are carried by the
-    practitioner rules themselves, so the preset stays self-contained: the
-    never-write-the-candidate's-name-or-a-sign-off rule lives in
-    ``rules-letter-body-discipline`` (the renderer prints the name in the
-    letterhead and appends the sign-off), and the en-dash/curly-quote output
-    ban lives in ``rules-no-em-dashes``. ``rules-anti-slop`` is style-only and
-    contradicts nothing here, so it is kept.
+    omits ``rules-career-services-standard`` ("go easy on the word 'I'") and
+    ``rules-tailoring`` ("incorporate its keywords naturally"), both of which
+    contradict the practitioner voice and ``rules-select-dont-dump``, and
+    ``rules-letter-style``, whose one-page, 1-2 body paragraph structure
+    contradicts the narrative arc's eight-part order and 2,500 to 4,000
+    character target. Slots no longer enforce exclusivity, so nothing stops an
+    operator combining these in a preset of their own; keeping them out of
+    this one is what expresses the incompatibility.
+
+    The two mechanical instructions those omissions would otherwise lose are
+    carried by the practitioner rules themselves, so the preset stays
+    self-contained: the never-write-the-candidate's-name-or-a-sign-off rule
+    lives in ``rules-letter-body-discipline`` (the renderer prints the name in
+    the letterhead and appends the sign-off), and the en-dash/curly-quote
+    output ban lives in ``rules-no-em-dashes``. ``rules-anti-slop`` is
+    style-only and contradicts nothing here, so it is kept.
     """
-    fragment_ids = [*PRACTITIONER_FRAGMENT_IDS, "rules-anti-slop"]
-    _assert_one_per_exclusive_slot(fragment_ids)
     return Preset(
         id="practitioner",
         name="Practitioner narrative",
-        fragment_ids=fragment_ids,
+        fragment_ids=[*PRACTITIONER_FRAGMENT_IDS, "rules-anti-slop"],
         is_default=False,
         seeded=True,
     )
@@ -427,6 +391,7 @@ SEEDED_PRESETS: list[Preset] = [
 """The presets TruthCV ships with: professional (default), warm, concise, and
 practitioner narrative.
 
-Each references only fragment ids present in ``SEEDED_FRAGMENTS`` and selects
-exactly one fragment per exclusive slot.
+Each references only fragment ids present in ``SEEDED_FRAGMENTS``. Slots are a
+display grouping only, so a preset may combine any number of fragments from
+the same slot.
 """

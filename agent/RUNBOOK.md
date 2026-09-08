@@ -369,10 +369,11 @@ never reached at all. Call it even for a board that turned up nothing —
    issue in the §9 report (the operator fix lives in browser/README.md's
    "Data Volume" section) and move on.
 3. **Never write a cover letter free-hand.** Call `generate_cover_letter` with
-   the posting text, a tone, and a length to get a per-role letter grounded in
+   the posting text and a length to get a per-role letter grounded in
    the operator's actual work — outside this tool, a letter has no guardrail
    behind it at all. PresetId: optional; selects a writing style preset from
-   the prompt store; if omitted, falls back to tone-based selection.
+   the prompt store; if omitted, the operator's default preset applies. There
+   is no `tone` argument.
    See §6 for what to do when it comes back blocked. Always
    pass `company` (the name as posted) to `generate_cover_letter` so the
    blocklist can refuse before any text is generated. A letter generated this way
@@ -615,6 +616,56 @@ verdict in the named argument — never in `posting_text` prose. `posting_text`
 is the posting, and the operator drafts a letter from it verbatim. A `passed`
 or `deferred` verdict is **rejected**, storing nothing, without usable
 `posting_text` — a real posting body, not a login wall or a 404 page.
+
+### `record_screening` — `profile`, `remote_arrangement` and `language_requirement`
+
+These three carry the criteria evidence behind a queueing verdict, and the
+tool checks them against the config, not just against each other.
+
+`profile` is the name of the ENABLED profile whose criteria you screened this
+posting against — the same name rendered in the run prompt's "Profile
+criteria" block and returned by `get_job_profiles`. It is mandatory for any
+`passed` or `deferred` verdict. An unknown name, or the name of a profile
+that is DISABLED in the config, is refused outright — there is no criteria
+set to check the posting against, so there is nothing to queue on.
+
+`remote_arrangement` is what the POSTING says, not what the profile wants and
+not what you'd guess from the role: `"remote"`, `"hybrid"`, `"on_site"`, or
+`"unstated"` when the posting simply does not say. It is mandatory for any
+queueing verdict. Never guess it to get a posting past the gate —
+`"unstated"` is the honest answer for a posting that is silent, and the tool
+accepts it as such.
+
+`language_requirement` is a working language the posting EXPLICITLY
+requires — "fließend Deutsch" or "German C1 required" becomes `"German"`. A
+posting merely WRITTEN in German for a role that does not itself demand
+German has no language requirement: pass `""`. This one is never mandatory;
+"" is a legitimate, common answer, not an omission.
+
+A posting whose stated evidence CONTRADICTS the named profile's remote model
+or working language is stored as a REJECTION automatically — the verdict you
+asserted is discarded, `failing_criterion` is set, and the record never
+reaches the approval queue. This is not an error to retry and not a bug to
+work around: it is the gate doing its job. Do not vary the profile, the
+arrangement, or the language and call it again to see if a different
+combination gets through.
+
+Fabricating `remote_arrangement` as `"remote"` when the posting doesn't say
+so, or leaving `language_requirement` empty when the posting names one, to
+get a posting past this gate, is the one failure mode this gate exists to
+catch. Doing it does not fool the tool into queuing the posting anyway — the
+check compares the values YOU report against the profile, not the posting's
+own text against the profile, so the only way past it is to report the
+truth — and it destroys the only record of why a posting was or wasn't a
+match.
+
+Both fields are exempt from the mandatory-for-queueing REQUIREMENT above on a
+`verdict='rejected'` call, and on any call carrying a `screening_blocker` —
+a posting you're rejecting outright, or one you never got to screen, has no
+queueing decision for this gate to protect. That exemption is only from the
+requirement to pass them: any `remote_arrangement` or `language_requirement`
+you DO pass, on a rejected or blocked call, is still validated by the store,
+so an unknown arrangement value is still refused.
 
 ### A posting you could not read is not a verdict
 

@@ -125,7 +125,6 @@ def test_generated_letters_are_never_rendered(data_dir, fake_renderer):
 
     result = tools_letter.generate_cover_letter(
         "A posting",
-        "Professional",
         "Short",
         # The bypass shape: prose the guardrail never sees, because it declares
         # no claims. It passes validation and must still produce no file.

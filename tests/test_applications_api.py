@@ -431,7 +431,7 @@ def test_cover_letter_rejects_unknown_application_id(client, monkeypatch):
 
     r = client.post(
         "/api/cover-letter",
-        json={"applicationId": "does-not-exist", "tone": "Professional", "length": "Short"},
+        json={"applicationId": "does-not-exist", "length": "Short"},
     )
     assert r.status_code == 404
     assert r.json()["detail"] == "Application not found."

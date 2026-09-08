@@ -77,6 +77,16 @@ tools:
   `screening_blocker` instead. `not_found` and `expired` blockers are
   recorded but are not queued for the operator — there is nothing they can
   decide about a posting that no longer exists.
+  `profile` and `remote_arrangement` are also MANDATORY for a `passed` or
+  `deferred` verdict, and the call is REJECTED without them: `profile` is
+  the enabled JobProfile name you screened against, and `remote_arrangement`
+  is what the posting itself states about remote work — `remote`, `hybrid`,
+  `on_site`, or `unstated` when it does not say. Also pass
+  `language_requirement`, the language the posting EXPLICITLY requires (e.g.
+  "German"), or `""` when it states none. Evidence that contradicts the
+  named profile's remote model or working language is stored as an
+  automatic rejection (the verdict is downgraded to `rejected`) — not an
+  error to retry, and never fabricate `remote`/`""` to get past it.
   One posting gets ONE record, forever. If a screening already exists for the
   `url` you pass, nothing is written and the existing record comes back with
   `"created": false` — the verdict you reached is discarded, because that

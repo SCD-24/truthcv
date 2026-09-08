@@ -40,6 +40,9 @@ from screening.model import validate_blocker as _validate_blocker
 from screening.model import validate_verdict as _validate_verdict
 from screening.posting import validate_posting_text as _validate_posting_text
 from screening.role import validate_role_title as _validate_role_title
+from screening.criteria import validate_remote_arrangement as _validate_remote_arrangement
+from screening.criteria import validate_language_requirement as _validate_language_requirement
+from screening.criteria import evaluate as _evaluate_criteria
 from services.screenings import create_screening as create_or_get_screening
 import services.applications as _applications_service
 from screening.url import validate_posting_url as _validate_posting_url
@@ -295,6 +298,112 @@ def record_application(
     return result
 
 
+def _evaluate_profile_criteria(
+    profile_name: str, arrangement: str, requirement: str, agent_reason: str
+) -> dict:
+    """Check ``profile_name``'s criteria against the posting's stated evidence.
+
+    Loads the agent config and matches ``profile_name`` among ENABLED
+    profiles only — a disabled or unknown name raises ``ValueError`` naming
+    the profiles that are actually enabled, since evaluating against a
+    profile nobody is currently searching under would be meaningless.
+    Returns ``{}`` when the posting is compatible. Otherwise returns a dict
+    with ``verdict='rejected'``, the failing criterion, and a reason that
+    prefixes the criteria evidence onto whatever reason the agent supplied,
+    so the operator sees both why the posting failed and what the agent said
+    about it.
+    """
+    cfg = _agentconfig_store.load()
+    enabled = [p for p in cfg.profiles if p.enabled]
+    needle = profile_name.strip().casefold()
+    profile = next((p for p in enabled if p.name.strip().casefold() == needle), None)
+    if profile is None:
+        names = ", ".join(p.name for p in enabled) or "(none enabled)"
+        raise ValueError(
+            f"Unknown or disabled profile {profile_name!r}. Enabled profiles: {names}."
+        )
+    failing_criterion, evidence_reason = _evaluate_criteria(
+        profile.remote_model, profile.working_language, arrangement, requirement
+    )
+    if not failing_criterion:
+        return {}
+    combined_reason = f"{evidence_reason} {agent_reason}".strip()
+    return {
+        "verdict": "rejected",
+        "failing_criterion": failing_criterion,
+        "reason": combined_reason,
+    }
+
+
+def _gate_queueing_verdict(
+    validated_verdict: str,
+    posting_text: str,
+    profile: str,
+    remote_arrangement: str,
+    language_requirement: str,
+    failing_criterion: str,
+    reason: str,
+) -> dict:
+    """Enforce the queueing gate for a validated 'passed'/'deferred' verdict.
+
+    Called only when the record is about to queue (no ``screening_blocker``).
+    Validates ``posting_text``, refuses (raises ``ValueError``) a call with no
+    ``profile`` or no ``remote_arrangement``, normalises the arrangement and
+    language requirement, then evaluates them against the named ENABLED
+    profile. A contradicted verdict is downgraded to ``rejected`` — with
+    ``failing_criterion`` set and the criteria evidence prefixed onto
+    ``reason`` — rather than raised, so a genuinely bad call still gets a
+    stored, explained record instead of nothing. Returns the (possibly
+    updated) posting_text/verdict/failing_criterion/reason/remote_arrangement/
+    language_requirement as a dict.
+    """
+    posting_text = _validate_posting_text(posting_text)
+    if not profile or not remote_arrangement:
+        raise ValueError(
+            "profile and remote_arrangement are required to queue a "
+            "passed/deferred verdict — without profile the operator cannot "
+            "tell which profile's criteria this posting supposedly met, and "
+            "an unchecked remote_arrangement is how non-remote postings "
+            "reached the queue. Pass the JobProfile name and the posting's "
+            "stated remote arrangement (screening_blocker exempts a posting "
+            "the agent could not read)."
+        )
+    remote_arrangement = _validate_remote_arrangement(remote_arrangement)
+    language_requirement = _validate_language_requirement(language_requirement)
+    override = _evaluate_profile_criteria(
+        profile, remote_arrangement, language_requirement, reason
+    )
+    if override:
+        validated_verdict = override["verdict"]
+        failing_criterion = override["failing_criterion"]
+        reason = override["reason"]
+    return {
+        "posting_text": posting_text,
+        "verdict": validated_verdict,
+        "failing_criterion": failing_criterion,
+        "reason": reason,
+        "remote_arrangement": remote_arrangement,
+        "language_requirement": language_requirement,
+    }
+
+
+def _finalize_screening(fields: dict, named: dict) -> dict:
+    """Merge non-empty ``named`` fields into ``fields``, persist, and shape the result.
+
+    Split out of ``record_screening`` purely to keep that function short: the
+    optional-field merge (an omitted field never overwrites a stored value,
+    which is why only truthy values are copied), the store call, and the
+    ``created`` flag on the result all belong together as one step.
+    """
+    for name, value in named.items():
+        if value:
+            fields[name] = value
+    screening, created = create_or_get_screening(fields)
+    result = screening.to_dict()
+    result["created"] = created
+    return result
+
+
 def record_screening(
     url: str,
     role: str,
@@ -309,6 +418,9 @@ def record_screening(
     posted_date: str = "",
     screening_blocker: str = "",
     run_id: str = "",
+    profile: str = "",
+    remote_arrangement: str = "",
+    language_requirement: str = "",
     **fields,
 ) -> dict:
     """Persist one screening verdict via ``screening.store.create``.
@@ -374,6 +486,25 @@ def record_screening(
     This is a normal outcome, not an error: do not retry the call, do not
     vary the URL to get past it, and count the posting as a skip.
 
+    ``profile`` and ``remote_arrangement`` are likewise mandatory whenever the
+    record is about to queue — a validated verdict of "passed" or "deferred"
+    with no ``screening_blocker`` — because a queued verdict with no criteria
+    evidence is unverifiable: the operator cannot tell which profile's
+    criteria this posting supposedly met, and an unchecked remote_arrangement
+    is exactly how non-remote postings reached the queue before this gate
+    existed. ``language_requirement`` is NOT required — "" legitimately means
+    the posting stated no language requirement. Both are normalised by
+    ``screening.criteria``'s validators, then checked against the named
+    profile's ``remote_model``/``working_language`` (the profile must be one
+    of the agent config's ENABLED profiles, or the call is refused naming the
+    ones that are). When the posting's stated evidence conflicts with the
+    profile, the asserted verdict is NOT stored: the record is downgraded to
+    ``verdict='rejected'`` with ``failing_criterion`` set and the criteria
+    evidence prefixed onto any ``reason`` supplied, and — being rejected — it
+    never reaches the approval queue. A "rejected" verdict, or any call
+    carrying a ``screening_blocker``, is exempt from this gate exactly as
+    they are exempt from the ``posting_text`` requirement above.
+
     Every field above is named explicitly rather than left to ``**fields``,
     because the MCP inputSchema is derived from this signature: a field absent
     from it is invisible to the agent reading the schema, and one model will
@@ -391,11 +522,25 @@ def record_screening(
     validated_verdict = _validate_verdict(verdict, blocker=validated_blocker)
     fields["verdict"] = validated_verdict
     if validated_verdict in ("passed", "deferred") and not validated_blocker:
-        # This is about to queue for the operator's decision: no usable
-        # posting text means nothing to draft the letter from, so the call is
-        # rejected and nothing is stored (see the posting_text docstring
-        # paragraph above).
-        posting_text = _validate_posting_text(posting_text)
+        # This is about to queue for the operator's decision: see
+        # _gate_queueing_verdict for the posting_text/profile/criteria checks
+        # that guard what reaches the approval queue.
+        gated = _gate_queueing_verdict(
+            validated_verdict,
+            posting_text,
+            profile,
+            remote_arrangement,
+            language_requirement,
+            failing_criterion,
+            reason,
+        )
+        posting_text = gated["posting_text"]
+        validated_verdict = gated["verdict"]
+        fields["verdict"] = validated_verdict
+        failing_criterion = gated["failing_criterion"]
+        reason = gated["reason"]
+        remote_arrangement = gated["remote_arrangement"]
+        language_requirement = gated["language_requirement"]
     named = {
         "failing_criterion": failing_criterion,
         "reason": reason,
@@ -406,14 +551,11 @@ def record_screening(
         "posted_date": posted_date,
         "screening_blocker": validated_blocker,
         "run_id": run_id,
+        "profile": profile,
+        "remote_arrangement": remote_arrangement,
+        "language_requirement": language_requirement,
     }
-    for name, value in named.items():
-        if value:
-            fields[name] = value
-    screening, created = create_or_get_screening(fields)
-    result = screening.to_dict()
-    result["created"] = created
-    return result
+    return _finalize_screening(fields, named)
 
 
 def check_cooldown(company: str, role: str | None = None) -> dict:

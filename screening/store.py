@@ -21,6 +21,7 @@ from companyresearch.store import open_contradictions as _open_contradictions
 from storage import atomic_write_text, locked
 from storage import data_dir
 
+from .criteria import validate_language_requirement, validate_remote_arrangement
 from .model import APPROVAL_VALUES, Screening, new_id, validate_blocker
 from .url import posting_dedupe_key
 
@@ -170,6 +171,18 @@ def create_or_get(fields: dict) -> tuple[Screening, bool]:
         # importer: this field is new and has no legacy data to tolerate, and an
         # unrecognised blocker would silently strand the record.
         screening.screening_blocker = validate_blocker(screening.screening_blocker)
+    if screening.profile:
+        # Free text naming a JobProfile; no fixed vocabulary to validate against.
+        screening.profile = screening.profile.strip()
+    if screening.remote_arrangement:
+        # Same rationale as screening_blocker above: new field, no legacy data.
+        screening.remote_arrangement = validate_remote_arrangement(
+            screening.remote_arrangement
+        )
+    if screening.language_requirement:
+        screening.language_requirement = validate_language_requirement(
+            screening.language_requirement
+        )
     # A deferred screening is an unresolved decision, so it enters the operator's
     # approval queue. In semi-auto a *passing* one does too: the operator, not
     # the agent, decides whether to apply. A screening_blocker means the agent

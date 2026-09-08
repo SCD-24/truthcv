@@ -90,7 +90,6 @@ def generate_cover_letter(
     *,
     application_id: str | None,
     posting: str | None,
-    tone: str,
     length: str,
     provider,
     approved_ids: set[str],
@@ -103,8 +102,8 @@ def generate_cover_letter(
     return its own 400), and lets any failure from ``build_letter`` propagate
     uncaught (so the adapter converts it to the exact 502 response).
 
-    ``preset_id`` (optional) selects a writing style preset; when omitted,
-    tone-based selection applies.
+    ``preset_id`` (optional) selects a writing style preset; when omitted, the
+    operator's default preset applies.
     """
     # The caller supplies the posting this letter is about; data/posting.txt
     # (the last posting written by /api/tailor) is only the fallback for
@@ -132,7 +131,6 @@ def generate_cover_letter(
     # this module's own local binding — still take effect.
     letter = coverletter.build_letter(
         posting,
-        tone,
         length,
         truth,
         provider,

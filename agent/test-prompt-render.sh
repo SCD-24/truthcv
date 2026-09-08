@@ -163,7 +163,12 @@ write a cover letter for it. For a posting that passes every criterion, call
 record_screening passing \"passed\" in verdict, the employing entity's name
 in company, the posting's own job title (as posted, not a placeholder)
 in role, the posting's own URL in url, the full posting text in posting_text,
-and the employer's publication date in posted_date when the board states one.
+the employer's publication date in posted_date when the board states one,
+the enabled profile's name you screened against in profile, what the
+posting itself says about remote work — remote, hybrid, on_site, or
+unstated when it does not say — in remote_arrangement, and any language the
+posting EXPLICITLY requires (e.g. 'German') in language_requirement, or ''
+when it states none.
 company, verdict, role and url are each required.
 It enters the operator's approval queue; they draft the letter and decide.
 
@@ -172,7 +177,11 @@ role and url all carry usable values — this applies to every screening you
 record, rejections included, not only to passing ones. A \"passed\" verdict
 is also rejected, storing nothing, without usable posting_text — a real
 posting body, not a login wall or a 404 page; a posting you could not read
-takes a screening_blocker instead.
+takes a screening_blocker instead. A \"passed\" or \"deferred\" verdict is
+also rejected, storing nothing, without usable profile and remote_arrangement
+values. Evidence that contradicts the profile's remote model or working
+language is stored as an automatic rejection — not an error to retry, and
+never fabricate 'remote'/'' to get past it.
 
 Phase 0 is unchanged: postings the operator already approved ARE applied to,
 using the cover_letter text that arrives with each item, verbatim."
@@ -183,14 +192,21 @@ A posting that passes every criterion is applied to this run, as described in
 agent/RUNBOOK.md. On every record_screening call pass the employing entity's
 name in company, the verdict (rejected, passed or deferred) in verdict, the
 posting's own job title (as posted, not a placeholder) in role, the posting's
-own URL in url, the full posting text in posting_text, and the employer's
-publication date in posted_date when the board states one.
+own URL in url, the full posting text in posting_text, the employer's
+publication date in posted_date when the board states one, the enabled
+profile's name you screened against in profile, what the posting itself says
+about remote work — remote, hybrid, on_site, or unstated when it does not
+say — in remote_arrangement, and any language the posting EXPLICITLY
+requires (e.g. 'German') in language_requirement, or '' when it states none.
 
 record_screening REJECTS the call and stores nothing unless company, verdict,
 role and url all carry usable values. A \"passed\" or \"deferred\" verdict is
 also rejected, storing nothing, without usable posting_text — a real posting
 body, not a login wall or a 404 page; a posting you could not read takes a
-screening_blocker instead."
+screening_blocker instead. profile and remote_arrangement are also required
+for a passed/deferred verdict. Evidence that contradicts the profile's
+remote model or working language is stored as an automatic rejection — not
+an error to retry, and never fabricate 'remote'/'' to get past it."
   fi
   echo "$prompt"
 }
@@ -210,7 +226,7 @@ FULL_BLOCK="$(sed -n '/## Autonomy mode: FULL AUTO/,/^fi$/p' "$DAILY_APPLY_SRC")
 # Match "in <field>" — the phrasing that actually tells the agent where the
 # value goes. A bare word match is not enough: every field name also appears in
 # the "each required" sentence, so removing an argument still passed.
-for field in company verdict role url; do
+for field in company verdict role url profile remote_arrangement; do
   case "$SEMI_BLOCK" in
     *"in $field"*) ;;
     *) echo "FAIL: daily-apply.sh SEMI-AUTO block never passes a value 'in $field'"; exit 1 ;;
