@@ -150,6 +150,51 @@ def test_create_screening_passed_verdict_without_posting_text_is_rejected(client
     assert r.status_code == 422, r.text
 
 
+def test_get_screenings_returns_criteria_evidence_fields(client):
+    """GET /api/screenings surfaces profile/remoteArrangement/
+    languageRequirement for a record that carries them — the approval queue
+    needs the evidence trail, not just the verdict."""
+    import screening.store as screening_store
+
+    screening_store.create(
+        {
+            "company": "Acme",
+            "role": "Engineer",
+            "url": "https://acme.example/jobs/criteria-1",
+            "verdict": "rejected",
+            "profile": "default",
+            "remote_arrangement": "on_site",
+            "language_requirement": "German",
+        }
+    )
+
+    r = client.get("/api/screenings")
+    assert r.status_code == 200
+    listed = next(s for s in r.json() if s["url"] == "https://acme.example/jobs/criteria-1")
+    assert listed["profile"] == "default"
+    assert listed["remoteArrangement"] == "on_site"
+    assert listed["languageRequirement"] == "german"
+
+
+def test_create_screening_queueing_verdict_stays_ungated(client):
+    """POST /api/screenings is deliberately NOT gated on profile/
+    remote_arrangement — that gate applies only to the agent's
+    record_screening tool. The operator may record whatever they judge."""
+    r = client.post(
+        "/api/screenings",
+        json={
+            "company": "Acme",
+            "role": "Engineer",
+            "url": "https://acme.example/jobs/10",
+            "verdict": "passed",
+            "postingText": "We are hiring an Engineer. " * 10,
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["profile"] == ""
+    assert r.json()["remoteArrangement"] == ""
+
+
 def test_create_list_screening_carries_posting_text_and_posted_date(client):
     # Regression test: ScreeningModel omitted posting_text/posted_date, so
     # Pydantic's extra="ignore" silently dropped both from the response even

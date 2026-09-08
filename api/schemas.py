@@ -954,6 +954,9 @@ class ScreeningModel(_Camel):
     source: str = ""
     posting_text: str = ""
     posted_date: str = ""
+    profile: str = ""
+    remote_arrangement: str = ""
+    language_requirement: str = ""
     approval: str = ""
     apply_attempts: int = 0
     apply_error: str = ""
