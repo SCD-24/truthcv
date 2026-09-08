@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .conventions import CvConventions, DEFAULT_CONVENTIONS
+from .practitioner import PRACTITIONER_FRAGMENT_IDS, PRACTITIONER_SPECS
 from .style import letter_anti_slop, letter_style
 
 
@@ -289,6 +290,36 @@ def seeded_fragments(conventions: CvConventions = DEFAULT_CONVENTIONS) -> list[F
             seeded=True,
             recommended=True,
         ),
+        *_practitioner_fragments(),
+    ]
+
+
+
+def _practitioner_fragments() -> list[Fragment]:
+    """Build the practitioner fragments from ``prompts.practitioner`` specs.
+
+    Every one is ``seeded`` but never ``recommended``: the recommended set is
+    what the Writing Style page warns about when a preset omits it, and
+    marking these recommended would raise that warning on the professional,
+    warm, and concise presets, which do not select them.
+
+    ``voice-practitioner`` is incompatible with ``rules-career-services-standard``
+    ("go easy on the word 'I'") and ``rules-tailoring`` ("incorporate its
+    keywords naturally"), since the practitioner guidance is first-person and
+    tells the model not to optimise for keyword coverage. Fragments no longer
+    declare conflicts, so that incompatibility is expressed by the
+    practitioner preset simply not selecting those two.
+    """
+    return [
+        Fragment(
+            id=spec["id"],
+            slot=spec["slot"],
+            title=spec["title"],
+            text=spec["text"],
+            seeded=True,
+            recommended=False,
+        )
+        for spec in PRACTITIONER_SPECS
     ]
 
 
@@ -320,12 +351,45 @@ def _seeded_preset(preset_id: str, name: str, voice_id: str, is_default: bool = 
     )
 
 
+def _practitioner_preset() -> Preset:
+    """Build the self-contained "Practitioner narrative" preset.
+
+    ``_seeded_preset`` hardcodes the classic fragment list, so this preset is
+    assembled separately from the practitioner fragment ids. It deliberately
+    omits ``rules-career-services-standard`` ("go easy on the word 'I'") and
+    ``rules-tailoring`` ("incorporate its keywords naturally"), both of which
+    contradict the practitioner voice and ``rules-select-dont-dump``, and
+    ``rules-letter-style``, whose one-page, 1-2 body paragraph structure
+    contradicts the narrative arc's eight-part order and 2,500 to 4,000
+    character target. Slots no longer enforce exclusivity, so nothing stops an
+    operator combining these in a preset of their own; keeping them out of
+    this one is what expresses the incompatibility.
+
+    The two mechanical instructions those omissions would otherwise lose are
+    carried by the practitioner rules themselves, so the preset stays
+    self-contained: the never-write-the-candidate's-name-or-a-sign-off rule
+    lives in ``rules-letter-body-discipline`` (the renderer prints the name in
+    the letterhead and appends the sign-off), and the en-dash/curly-quote
+    output ban lives in ``rules-no-em-dashes``. ``rules-anti-slop`` is
+    style-only and contradicts nothing here, so it is kept.
+    """
+    return Preset(
+        id="practitioner",
+        name="Practitioner narrative",
+        fragment_ids=[*PRACTITIONER_FRAGMENT_IDS, "rules-anti-slop"],
+        is_default=False,
+        seeded=True,
+    )
+
+
 SEEDED_PRESETS: list[Preset] = [
     _seeded_preset("professional", "Professional", "voice-professional", is_default=True),
     _seeded_preset("warm", "Warm", "voice-warm"),
     _seeded_preset("concise", "Concise", "voice-concise"),
+    _practitioner_preset(),
 ]
-"""The presets TruthCV ships with: professional (default), warm, and concise.
+"""The presets TruthCV ships with: professional (default), warm, concise, and
+practitioner narrative.
 
 Each references only fragment ids present in ``SEEDED_FRAGMENTS``. Slots are a
 display grouping only, so a preset may combine any number of fragments from
