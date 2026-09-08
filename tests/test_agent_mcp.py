@@ -752,6 +752,26 @@ def test_record_screening_downgrades_verdict_on_remote_model_contradiction(data_
     assert s["approval"] != "pending"
 
 
+def test_record_screening_downgrades_deferred_verdict_on_remote_model_contradiction(data_dir):
+    """A 'deferred' verdict — the verdict that DOES queue on its own, unlike
+    'passed' under mode='full' — is still downgraded to rejected on a remote
+    model contradiction, and never reaches the approval queue."""
+    _enable_profile(remote_model="remote")
+    s = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/deferred-on-site-contradiction",
+        role="Data Engineer",
+        company="ExampleCo",
+        verdict="deferred",
+        posting_text=_long_posting_text("Data Engineer", "ExampleCo"),
+        profile="default",
+        remote_arrangement="on_site",
+    )
+    assert s["verdict"] == "rejected"
+    assert s["failing_criterion"] == "remote_model"
+    assert s["reason"]
+    assert s["approval"] != "pending"
+
+
 def test_record_screening_downgrades_verdict_on_language_contradiction(data_dir):
     """A profile whose working_language is 'English' with a posting requiring
     'German' is downgraded to rejected with failing_criterion='working_language'."""

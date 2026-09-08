@@ -315,7 +315,8 @@ def _evaluate_profile_criteria(
     """
     cfg = _agentconfig_store.load()
     enabled = [p for p in cfg.profiles if p.enabled]
-    profile = next((p for p in enabled if p.name == profile_name), None)
+    needle = profile_name.strip().casefold()
+    profile = next((p for p in enabled if p.name.strip().casefold() == needle), None)
     if profile is None:
         names = ", ".join(p.name for p in enabled) or "(none enabled)"
         raise ValueError(

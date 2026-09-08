@@ -653,14 +653,18 @@ Fabricating `remote_arrangement` as `"remote"` when the posting doesn't say
 so, or leaving `language_requirement` empty when the posting names one, to
 get a posting past this gate, is the one failure mode this gate exists to
 catch. Doing it does not fool the tool into queuing the posting anyway — the
-mismatch is checked against the posting's own text, not against what you
-type — and it destroys the only record of why a posting was or wasn't a
+check compares the values YOU report against the profile, not the posting's
+own text against the profile, so the only way past it is to report the
+truth — and it destroys the only record of why a posting was or wasn't a
 match.
 
-Both fields are exempt from all of the above on a `verdict='rejected'` call,
-and on any call carrying a `screening_blocker` — a posting you're rejecting
-outright, or one you never got to screen, has no queueing decision for this
-gate to protect.
+Both fields are exempt from the mandatory-for-queueing REQUIREMENT above on a
+`verdict='rejected'` call, and on any call carrying a `screening_blocker` —
+a posting you're rejecting outright, or one you never got to screen, has no
+queueing decision for this gate to protect. That exemption is only from the
+requirement to pass them: any `remote_arrangement` or `language_requirement`
+you DO pass, on a rejected or blocked call, is still validated by the store,
+so an unknown arrangement value is still refused.
 
 ### A posting you could not read is not a verdict
 

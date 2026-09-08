@@ -150,7 +150,9 @@ def test_direct_boards_contains_only_direct_mode_boards(client, data_dir):
                 {"source": "custom-direct.example.com", "mode": "direct"},
                 {"source": "custom-dork.example.com", "mode": "dork"},
             ],
-            "profiles": [{"name": "p", "enabled": True, "keywords": ["backend"]}],
+            "profiles": [
+                {"name": "p", "enabled": True, "keywords": ["backend"], "remoteModel": "remote"}
+            ],
         },
     )
     assert r.status_code == 200
@@ -160,6 +162,24 @@ def test_direct_boards_contains_only_direct_mode_boards(client, data_dir):
     dork_sources = {q["source"] for q in got["searchQueries"]}
     assert "custom-dork.example.com" in dork_sources
     assert "custom-direct.example.com" not in dork_sources
+
+
+def test_direct_boards_profile_entry_carries_remote_model_on_the_wire(client, data_dir):
+    """Regression: DirectBoardProfileModel used to drop remote_model, so
+    compose_direct_boards's value never reached GET /api/agent/config."""
+    client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [{"source": "custom-direct.example.com", "mode": "direct"}],
+            "profiles": [
+                {"name": "p", "enabled": True, "keywords": ["backend"], "remoteModel": "remote"}
+            ],
+        },
+    )
+    got = client.get("/api/agent/config").json()
+    board = next(b for b in got["directBoards"] if b["url"] == "custom-direct.example.com")
+    profile_entry = next(p for p in board["profiles"] if p["profile"] == "p")
+    assert profile_entry["remoteModel"] == "remote"
 
 
 def test_old_shape_config_migrates_job_boards_on_first_get(client, data_dir):

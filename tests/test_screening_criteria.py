@@ -43,6 +43,15 @@ class TestValidateLanguageRequirement:
     def test_no_requirement_normalizes_to_empty(self, value):
         assert validate_language_requirement(value) == ""
 
+    @pytest.mark.parametrize(
+        "value", ["unstated", "UNSTATED", "not stated", "Not Stated", "n/a", "N/A", "any", "Any"]
+    )
+    def test_agent_no_language_synonyms_normalize_to_empty(self, value):
+        # An agent that mirrors the remote-arrangement vocabulary ("unstated")
+        # onto language must not thereby manufacture a language requirement
+        # that causes a false auto-rejection.
+        assert validate_language_requirement(value) == ""
+
     def test_normalizes_case_and_whitespace(self):
         assert validate_language_requirement("  German  ") == "german"
 
@@ -84,6 +93,18 @@ class TestRemoteCompatible:
     def test_unknown_profile_value_accepts_anything(self, arrangement):
         assert remote_compatible("flexible", arrangement) is True
 
+    @pytest.mark.parametrize("profile_value", ["Remote", " remote ", "REMOTE"])
+    def test_profile_value_is_normalized_before_lookup(self, profile_value):
+        # JobProfile.remote_model is a free-text field, not a validated enum -
+        # "Remote"/" remote "/"REMOTE" must all behave like the canonical
+        # "remote", not fall through to "accepts anything".
+        assert remote_compatible(profile_value, "hybrid") is False
+        assert remote_compatible(profile_value, "remote") is True
+
+    def test_profile_on_site_alias_is_normalized(self):
+        assert remote_compatible("On-Site", "remote") is True
+        assert remote_compatible("On-Site", "hybrid") is True
+
 
 class TestLanguageCompatible:
     def test_unset_working_language_accepts_anything(self):
@@ -104,6 +125,22 @@ class TestLanguageCompatible:
 
     def test_no_fuzzy_matching(self):
         assert language_compatible("german", "deutsch") is False
+
+    @pytest.mark.parametrize(
+        "working_language", ["English or German", "English/German", "English, German"]
+    )
+    def test_multi_valued_profile_matches_any_listed_language(self, working_language):
+        assert language_compatible(working_language, "german") is True
+        assert language_compatible(working_language, "english") is True
+
+    def test_multi_valued_profile_rejects_unlisted_language(self):
+        assert language_compatible("English or German", "french") is False
+
+    def test_agent_no_language_synonym_is_always_compatible(self):
+        # "unstated" mirrors the remote-arrangement vocabulary; it must
+        # normalize to "no requirement" rather than being compared literally.
+        assert language_compatible("german", "unstated") is True
+        assert language_compatible("german", "any") is True
 
 
 class TestEvaluate:
