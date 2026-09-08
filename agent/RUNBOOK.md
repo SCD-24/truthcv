@@ -369,10 +369,11 @@ never reached at all. Call it even for a board that turned up nothing —
    issue in the §9 report (the operator fix lives in browser/README.md's
    "Data Volume" section) and move on.
 3. **Never write a cover letter free-hand.** Call `generate_cover_letter` with
-   the posting text, a tone, and a length to get a per-role letter grounded in
+   the posting text and a length to get a per-role letter grounded in
    the operator's actual work — outside this tool, a letter has no guardrail
    behind it at all. PresetId: optional; selects a writing style preset from
-   the prompt store; if omitted, falls back to tone-based selection.
+   the prompt store; if omitted, the operator's default preset applies. There
+   is no `tone` argument.
    See §6 for what to do when it comes back blocked. Always
    pass `company` (the name as posted) to `generate_cover_letter` so the
    blocklist can refuse before any text is generated. A letter generated this way

@@ -365,6 +365,47 @@ def test_legacy_persisted_seeded_presets_are_ignored_but_default_survives():
     assert default_preset().id == "warm"
 
 
+def test_legacy_user_preset_default_survives_the_marker_migration():
+    """An operator whose default was a USER preset keeps it after upgrading.
+
+    Old versions recorded the default only as is_default on the persisted
+    records; the seeded "professional" record ships is_default=True, so a
+    migration that ignored user records would silently revert the choice.
+    """
+    (data_dir() / PRESETS_FILE).write_text(json.dumps([
+        {"id": "professional", "name": "Professional", "fragment_ids": ["voice-professional"],
+         "is_default": False, "seeded": True},
+        {"id": "mine", "name": "Mine", "fragment_ids": ["voice-warm", "structure-classic"],
+         "is_default": True, "seeded": False},
+    ]), encoding="utf-8")
+    assert default_preset().id == "mine"
+    assert [p.id for p in list_presets() if p.is_default] == ["mine"]
+
+
+def test_stale_marker_does_not_mask_the_legacy_default():
+    """A marker naming a preset that no longer exists falls through, not back."""
+    (data_dir() / PRESETS_FILE).write_text(json.dumps([
+        {"id": "mine", "name": "Mine", "fragment_ids": ["voice-warm"],
+         "is_default": True, "seeded": False},
+    ]), encoding="utf-8")
+    (data_dir() / "prompt_default.json").write_text(
+        json.dumps({"presetId": "deleted-preset"}), encoding="utf-8"
+    )
+    assert default_preset().id == "mine"
+
+
+def test_default_preset_fallback_is_a_copy_of_the_seeded_preset():
+    """Mutating the returned preset must not corrupt SEEDED_PRESETS process-wide."""
+    (data_dir() / PRESETS_FILE).write_text(json.dumps([
+        {"id": "professional", "name": "Professional", "fragment_ids": ["voice-professional"],
+         "is_default": False, "seeded": True},
+    ]), encoding="utf-8")
+    preset = default_preset()
+    assert preset.id == "professional"
+    preset.fragment_ids.append("intruder")
+    assert "intruder" not in next(p for p in SEEDED_PRESETS if p.id == "professional").fragment_ids
+
+
 def test_voice_override_emitted_once_for_multiple_voice_fragments():
     upsert_fragment(Fragment(id="voice-a", slot="voice", title="A", text="Voice A."))
     upsert_fragment(Fragment(id="voice-b", slot="voice", title="B", text="Voice B."))

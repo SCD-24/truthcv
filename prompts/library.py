@@ -119,17 +119,21 @@ def _load_preset_records() -> tuple[list[dict[str, Any]], str | None]:
 
     Older versions persisted every merged preset — seeded ones included — into
     ``prompt_presets.json``, which then permanently shadowed the code
-    definitions. Those records are dropped on read; if one of them carried the
-    default flag it is returned as the legacy default id so the operator's
-    choice survives the migration.
+    definitions. Those records are dropped on read.
+
+    The second element is the legacy default: the id of whichever persisted
+    record carried ``is_default`` before the marker file existed — a user
+    preset just as much as a dropped seeded one. Without it, an operator whose
+    default was a user preset would silently revert to the seeded default,
+    because the seeded "professional" record ships with ``is_default`` true.
     """
     seeded_ids = _seeded_preset_ids()
     kept: list[dict[str, Any]] = []
     legacy_default: str | None = None
     for record in _load_records(PRESETS_FILE):
+        if record.get("is_default") and record.get("id"):
+            legacy_default = record["id"]
         if record.get("id") in seeded_ids:
-            if record.get("is_default"):
-                legacy_default = record["id"]
             continue
         kept.append(record)
     return kept, legacy_default
@@ -147,10 +151,13 @@ def list_presets() -> list[Preset]:
             continue
         merged[preset.id] = preset
     presets = list(merged.values())
-    marked = _load_default_marker() or legacy_default
-    if marked is not None and any(p.id == marked for p in presets):
-        for preset in presets:
-            preset.is_default = preset.id == marked
+    # A marker naming a preset that no longer exists must not mask the legacy
+    # flag: fall through to the next candidate rather than silently reverting.
+    for candidate in (_load_default_marker(), legacy_default):
+        if candidate is not None and any(p.id == candidate for p in presets):
+            for preset in presets:
+                preset.is_default = preset.id == candidate
+            break
     return presets
 
 
@@ -162,10 +169,14 @@ def get_preset(id: str) -> Preset:
 
 
 def default_preset() -> Preset:
+    """The preset applied when a caller names none: the marked one, else seeded."""
     defaults = [p for p in list_presets() if p.is_default]
     if defaults:
         return defaults[0]
-    return next(p for p in SEEDED_PRESETS if p.id == "professional")
+    # A copy, never the shared module-level object, so no caller can mutate the
+    # shipped definition process-wide.
+    seeded = next(p for p in SEEDED_PRESETS if p.id == "professional")
+    return Preset.from_dict(seeded.to_dict())
 
 
 def _seeded_preset_ids() -> set[str]:
