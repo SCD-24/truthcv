@@ -91,6 +91,9 @@ function makeRecord(overrides: Partial<ScreeningRecord> = {}): ScreeningRecord {
     applyAttempts: 0,
     applyError: "",
     screeningBlocker: "",
+    profile: "",
+    remoteArrangement: "",
+    languageRequirement: "",
     claimedByRun: "",
     claimExpiresAt: "",
     createdAt: "2026-08-23T19:00:00Z",
@@ -147,6 +150,29 @@ describe("ApprovalsPage", () => {
     await renderPage([makeRecord()]);
     expect(await screen.findByText("Contoso Labs")).toBeTruthy();
     expect(screen.getByText(/German hiring entity unverified/)).toBeTruthy();
+  });
+
+  it("shows the profile and remote/language evidence when present", async () => {
+    await renderPage([
+      makeRecord({
+        profile: "Backend Contractor",
+        remoteArrangement: "hybrid",
+        languageRequirement: "German",
+      }),
+    ]);
+    // Scoped to the evidence line's own labels: the fixture's deferral reason
+    // also mentions German, so a bare /German/ matches two elements.
+    expect(await screen.findByText(/Profile: Backend Contractor/)).toBeTruthy();
+    expect(screen.getByText(/Remote: Hybrid/)).toBeTruthy();
+    expect(screen.getByText(/Language required: German/)).toBeTruthy();
+  });
+
+  it("renders no evidence line when profile/remote/language are all empty", async () => {
+    await renderPage([makeRecord()]);
+    expect(await screen.findByText("Contoso Labs")).toBeTruthy();
+    expect(screen.queryByText(/Profile:/)).toBeNull();
+    expect(screen.queryByText(/Remote:/)).toBeNull();
+    expect(screen.queryByText(/Language required:/)).toBeNull();
   });
 
   it("shows the empty state when nothing is waiting", async () => {

@@ -356,6 +356,39 @@ function PostingUrl({
   );
 }
 
+/** Human label for a remote-arrangement value; the union is the source of
+ * truth, this just spells it out for the operator. */
+function remoteArrangementLabel(value: "remote" | "hybrid" | "on_site" | "unstated"): string {
+  switch (value) {
+    case "remote":
+      return "Remote";
+    case "hybrid":
+      return "Hybrid";
+    case "on_site":
+      return "On-site";
+    case "unstated":
+      return "Unstated";
+  }
+}
+
+/** Which profile a posting was judged against, and the remote/language
+ * evidence behind the verdict. Omits itself entirely when the record carries
+ * none of the three (older records, or nothing to show) rather than
+ * rendering empty chips or placeholders. */
+function ScreeningEvidenceLine({ record }: { record: ScreeningRecord }) {
+  const parts = [
+    record.profile && `Profile: ${record.profile}`,
+    record.remoteArrangement && `Remote: ${remoteArrangementLabel(record.remoteArrangement)}`,
+    record.languageRequirement && `Language required: ${record.languageRequirement}`,
+  ].filter(Boolean);
+  if (parts.length === 0) return null;
+  return (
+    <Typography variant="body2" sx={{ color: "text.secondary" }}>
+      {parts.join(" · ")}
+    </Typography>
+  );
+}
+
 /** One posting waiting on the operator: what the agent found, why it stopped,
  * and the two decisions available. */
 function PendingCard({
@@ -391,6 +424,7 @@ function PendingCard({
           <Typography variant="body2" sx={{ color: "text.secondary" }}>
             {record.role}
           </Typography>
+          <ScreeningEvidenceLine record={record} />
           <PostingUrl
             url={record.url}
             busy={busy}

@@ -460,6 +460,16 @@ export interface ScreeningRecord {
    * verdict on its merits. "" means no blocker. A strict union (unlike
    * `verdict` above, which is loose) so a typo is caught at compile time. */
   screeningBlocker: "" | "login_required" | "unreadable" | "not_found" | "expired";
+  /** The job profile whose criteria this posting was screened against; ""
+   * on records written before enforcement existed. */
+  profile: string;
+  /** The remote/on-site arrangement the posting stated, as evidence for the
+   * verdict. A strict union (like `screeningBlocker` above) so a typo is
+   * caught at compile time. "" means unrecorded (older records). */
+  remoteArrangement: "" | "remote" | "hybrid" | "on_site" | "unstated";
+  /** A working language the posting explicitly requires; "" when it states
+   * none (or the record predates this evidence being captured). */
+  languageRequirement: string;
   /** Lease state granted by the agent's hand-out call, not agent-editable.
    * An empty or past claimExpiresAt means the item is unclaimed. */
   claimedByRun: string;
