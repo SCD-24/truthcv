@@ -56,6 +56,9 @@ _TOOL_REGISTRY = {
         "You must also pass posting_text — the posting exactly as you read it — because the operator will draft the cover letter from it days later, on a page the agent never sees. "
         "A 'passed' or 'deferred' verdict is REJECTED, storing nothing, when it has no usable posting text (a real posting body, not a login wall or a 404 page). "
         "A posting you could not read takes a screening_blocker instead. "
+        "For a passed or deferred verdict, also pass profile (the enabled JobProfile name you screened against), remote_arrangement (what the posting itself states — remote, hybrid, on_site, or unstated), "
+        "and language_requirement (any language the posting explicitly requires, or '' for none) — profile and remote_arrangement are required and the call is rejected without them. "
+        "Evidence that contradicts the named profile's remote model or working language is stored as an automatic rejection (verdict downgraded to rejected), not an error to retry. "
         "Pass your run_id (from start_run) on EVERY call, so this screening is attributed to your run and the run's coverage counters reflect the work you actually did.",
     ),
     "check_cooldown": (

@@ -153,6 +153,8 @@ Owns the unattended agent's configuration (agentconfig/): autonomy mode, schedul
 
 <!-- generated:start comp:screening-engine -->
 ## Screening Engine (`screening-engine`, BACKEND)
+
+Screens discovered postings against the active job profile's criteria and records the verdict. Owns the hard-criteria validators (screening/criteria.py): a posting's stated remote arrangement and any explicitly required working language are checked against the profile's remote_model / working_language, and the evidence is stored on the Screening record alongside the profile it was judged against.
 <!-- generated:end comp:screening-engine -->
 
 <!-- generated:start comp:onboarding-store -->

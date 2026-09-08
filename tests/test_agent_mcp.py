@@ -302,8 +302,30 @@ def _long_posting_text(role: str, company: str) -> str:
     )
 
 
+def _enable_profile(name: str = "default", remote_model=None, working_language=None) -> None:
+    """Save an agent config with one ENABLED JobProfile named ``name``.
+
+    Used by every queueing test: record_screening now refuses to queue a
+    verdict with no matching enabled profile, so tests exercising the
+    queueing path must first give it one to check evidence against.
+    """
+    from agentconfig import store as agent_config_store
+
+    cfg = agent_config_store.load()
+    cfg.profiles = [
+        agent_config_store.JobProfile(
+            name=name,
+            enabled=True,
+            remote_model=remote_model,
+            working_language=working_language,
+        )
+    ]
+    agent_config_store.save(cfg)
+
+
 def _approve_screening(company: str, role: str, url: str) -> str:
     """Create an approved screening and return its id."""
+    _enable_profile()
     s = tools_ledger.record_screening(
         company=company,
         role=role,
@@ -311,6 +333,8 @@ def _approve_screening(company: str, role: str, url: str) -> str:
         posting_text=_long_posting_text(role, company),
         verdict="deferred",
         source="agent",
+        profile="default",
+        remote_arrangement="remote",
     )
     from screening import store as screening_store
 
@@ -504,6 +528,7 @@ def test_record_screening_persists_verdict_and_company(data_dir):
     `screening.store.create` gates the approval queue on `verdict`, so a
     dropped verdict means nothing ever reaches the operator.
     """
+    _enable_profile()
     s = tools_ledger.record_screening(
         url="https://jobs.example.com/postings/deferred-1",
         role="Applied AI Engineer",
@@ -513,6 +538,8 @@ def test_record_screening_persists_verdict_and_company(data_dir):
         reason="Rating not published; operator to decide.",
         posting_text=_long_posting_text("Applied AI Engineer", "ExampleCo"),
         source="agent",
+        profile="default",
+        remote_arrangement="remote",
     )
     assert s["company"] == "ExampleCo"
     assert s["verdict"] == "deferred"
@@ -646,6 +673,180 @@ def test_record_screening_passed_with_login_wall_text_is_rejected(data_dir):
             posting_text="Sign in to view this job",
         )
     assert screening_store.load_all() == before
+
+
+def test_record_screening_queueing_verdict_without_profile_is_refused(data_dir):
+    """A queueing verdict with no profile is refused, and nothing is stored —
+    the operator could not otherwise tell which profile's criteria this
+    posting supposedly met."""
+    from screening import store as screening_store
+
+    _enable_profile()
+    before = screening_store.load_all()
+    with pytest.raises(ValueError):
+        tools_ledger.record_screening(
+            url="https://jobs.example.com/postings/no-profile",
+            role="Data Engineer",
+            company="ExampleCo",
+            verdict="deferred",
+            posting_text=_long_posting_text("Data Engineer", "ExampleCo"),
+            remote_arrangement="remote",
+        )
+    assert screening_store.load_all() == before
+
+
+def test_record_screening_queueing_verdict_without_remote_arrangement_is_refused(data_dir):
+    """A queueing verdict with no remote_arrangement is refused: an unchecked
+    arrangement is how non-remote postings reached the queue."""
+    from screening import store as screening_store
+
+    _enable_profile()
+    before = screening_store.load_all()
+    with pytest.raises(ValueError):
+        tools_ledger.record_screening(
+            url="https://jobs.example.com/postings/no-arrangement",
+            role="Data Engineer",
+            company="ExampleCo",
+            verdict="deferred",
+            posting_text=_long_posting_text("Data Engineer", "ExampleCo"),
+            profile="default",
+        )
+    assert screening_store.load_all() == before
+
+
+def test_record_screening_queueing_verdict_accepts_blank_language_requirement(data_dir):
+    """A blank language_requirement is accepted — it legitimately means the
+    posting stated no required language."""
+    _enable_profile()
+    s = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/blank-language",
+        role="Data Engineer",
+        company="ExampleCo",
+        verdict="deferred",
+        posting_text=_long_posting_text("Data Engineer", "ExampleCo"),
+        profile="default",
+        remote_arrangement="remote",
+        language_requirement="",
+    )
+    assert s["verdict"] == "deferred"
+    assert s["language_requirement"] == ""
+
+
+def test_record_screening_downgrades_verdict_on_remote_model_contradiction(data_dir):
+    """A profile requiring 'remote' with a posting stated 'on_site' is
+    downgraded to rejected with failing_criterion='remote_model', and never
+    reaches the approval queue."""
+    _enable_profile(remote_model="remote")
+    s = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/on-site-contradiction",
+        role="Data Engineer",
+        company="ExampleCo",
+        verdict="passed",
+        posting_text=_long_posting_text("Data Engineer", "ExampleCo"),
+        profile="default",
+        remote_arrangement="on_site",
+    )
+    assert s["verdict"] == "rejected"
+    assert s["failing_criterion"] == "remote_model"
+    assert s["approval"] != "pending"
+
+
+def test_record_screening_downgrades_deferred_verdict_on_remote_model_contradiction(data_dir):
+    """A 'deferred' verdict — the verdict that DOES queue on its own, unlike
+    'passed' under mode='full' — is still downgraded to rejected on a remote
+    model contradiction, and never reaches the approval queue."""
+    _enable_profile(remote_model="remote")
+    s = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/deferred-on-site-contradiction",
+        role="Data Engineer",
+        company="ExampleCo",
+        verdict="deferred",
+        posting_text=_long_posting_text("Data Engineer", "ExampleCo"),
+        profile="default",
+        remote_arrangement="on_site",
+    )
+    assert s["verdict"] == "rejected"
+    assert s["failing_criterion"] == "remote_model"
+    assert s["reason"]
+    assert s["approval"] != "pending"
+
+
+def test_record_screening_downgrades_verdict_on_language_contradiction(data_dir):
+    """A profile whose working_language is 'English' with a posting requiring
+    'German' is downgraded to rejected with failing_criterion='working_language'."""
+    _enable_profile(working_language="English")
+    s = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/german-required",
+        role="Data Engineer",
+        company="ExampleCo",
+        verdict="passed",
+        posting_text=_long_posting_text("Data Engineer", "ExampleCo"),
+        profile="default",
+        remote_arrangement="remote",
+        language_requirement="German",
+    )
+    assert s["verdict"] == "rejected"
+    assert s["failing_criterion"] == "working_language"
+    assert s["approval"] != "pending"
+
+
+def test_record_screening_passes_through_when_evidence_is_compatible(data_dir):
+    """A posting written in German with no stated language_requirement passes
+    through untouched — the requirement, not the posting's own language, is
+    what is checked."""
+    _enable_profile(working_language="German")
+    s = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/german-posting",
+        role="Data Engineer",
+        company="ExampleCo",
+        verdict="passed",
+        posting_text=_long_posting_text("Data Engineer", "ExampleCo"),
+        profile="default",
+        remote_arrangement="remote",
+        language_requirement="",
+    )
+    assert s["verdict"] == "passed"
+    assert s["failing_criterion"] == ""
+
+
+def test_record_screening_rejected_verdict_is_exempt_from_the_criteria_gate(data_dir):
+    """A 'rejected' verdict needs no profile/remote_arrangement at all."""
+    s = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/rejected-exempt",
+        role="Data Engineer",
+        company="ExampleCo",
+        verdict="rejected",
+    )
+    assert s["verdict"] == "rejected"
+
+
+def test_record_screening_blocker_call_is_exempt_from_the_criteria_gate(data_dir):
+    """A call carrying a screening_blocker needs no profile/remote_arrangement,
+    exactly as it needs no posting_text."""
+    s = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/blocker-exempt",
+        role="Data Engineer",
+        company="ExampleCo",
+        verdict="",
+        screening_blocker="unreadable",
+    )
+    assert s["screening_blocker"] == "unreadable"
+
+
+def test_record_screening_unknown_profile_is_refused(data_dir):
+    """A profile name matching no enabled profile is refused, naming the
+    enabled profiles that do exist."""
+    _enable_profile(name="default")
+    with pytest.raises(ValueError, match="default"):
+        tools_ledger.record_screening(
+            url="https://jobs.example.com/postings/unknown-profile",
+            role="Data Engineer",
+            company="ExampleCo",
+            verdict="deferred",
+            posting_text=_long_posting_text("Data Engineer", "ExampleCo"),
+            profile="nonexistent",
+            remote_arrangement="remote",
+        )
 
 
 def test_record_screening_rejected_verdict_needs_no_posting_text(data_dir):

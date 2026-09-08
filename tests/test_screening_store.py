@@ -31,6 +31,18 @@ def test_empty_when_no_file(data_dir):
     assert load_all() == []
 
 
+def test_create_normalizes_remote_arrangement(data_dir):
+    created = create(
+        {"company": "Acme", "role": "Engineer", "remote_arrangement": "On-Site"}
+    )
+    assert created.remote_arrangement == "on_site"
+
+
+def test_create_rejects_unknown_remote_arrangement(data_dir):
+    with pytest.raises(ValueError, match="Unknown remote arrangement"):
+        create({"company": "Acme", "role": "Engineer", "remote_arrangement": "moon-base"})
+
+
 def test_atomic_write_leaves_no_tmp(data_dir):
     create({"company": "Acme", "verdict": "passed"})
     tmp = screenings_path().with_suffix(".json.tmp")

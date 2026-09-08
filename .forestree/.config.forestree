@@ -1894,7 +1894,20 @@
     },
     {
       "canvas": {
-        "widgets": []
+        "widgets": [
+          {
+            "data": {
+              "text": "Screens discovered postings against the active job profile's criteria and records the verdict. Owns the hard-criteria validators (screening/criteria.py): a posting's stated remote arrangement and any explicitly required working language are checked against the profile's remote_model / working_language, and the evidence is stored on the Screening record alongside the profile it was judged against."
+            },
+            "h": 200,
+            "id": "widget-text-screening-engine",
+            "title": "Intent & Scope",
+            "type": "text",
+            "w": 350,
+            "x": 0,
+            "y": 0
+          }
+        ]
       },
       "id": "screening-engine",
       "name": "Screening Engine",

@@ -377,6 +377,7 @@ class DirectBoardProfileModel(_Camel):
     keywords: list[str] = Field(default_factory=list)
     locations: list[str] = Field(default_factory=list)
     rejected_role_types: list[str] = Field(default_factory=list)
+    remote_model: str | None = None
 
 
 class DirectBoardModel(_Camel):
@@ -942,6 +943,9 @@ class ScreeningModel(_Camel):
     source: str = ""
     posting_text: str = ""
     posted_date: str = ""
+    profile: str = ""
+    remote_arrangement: str = ""
+    language_requirement: str = ""
     approval: str = ""
     apply_attempts: int = 0
     apply_error: str = ""

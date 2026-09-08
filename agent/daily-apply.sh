@@ -299,7 +299,12 @@ write a cover letter for it. For a posting that passes every criterion, call
 record_screening passing \"passed\" in verdict, the employing entity's name
 in company, the posting's own job title (as posted, not a placeholder)
 in role, the posting's own URL in url, the full posting text in posting_text,
-and the employer's publication date in posted_date when the board states one.
+the employer's publication date in posted_date when the board states one,
+the enabled profile's name you screened against in profile, what the
+posting itself says about remote work — remote, hybrid, on_site, or
+unstated when it does not say — in remote_arrangement, and any language the
+posting EXPLICITLY requires (e.g. 'German') in language_requirement, or ''
+when it states none.
 company, verdict, role and url are each required.
 It enters the operator's approval queue; they draft the letter and decide.
 
@@ -308,7 +313,11 @@ role and url all carry usable values — this applies to every screening you
 record, rejections included, not only to passing ones. A \"passed\" verdict
 is also rejected, storing nothing, without usable posting_text — a real
 posting body, not a login wall or a 404 page; a posting you could not read
-takes a screening_blocker instead.
+takes a screening_blocker instead. A \"passed\" or \"deferred\" verdict is
+also rejected, storing nothing, without usable profile and remote_arrangement
+values. Evidence that contradicts the profile's remote model or working
+language is stored as an automatic rejection — not an error to retry, and
+never fabricate 'remote'/'' to get past it.
 
 Phase 0 is unchanged: postings the operator already approved ARE applied to,
 using the cover_letter text that arrives with each item, verbatim."
@@ -319,22 +328,34 @@ A posting that passes every criterion is applied to this run, as described in
 agent/RUNBOOK.md. On every record_screening call pass the employing entity's
 name in company, the verdict (rejected, passed or deferred) in verdict, the
 posting's own job title (as posted, not a placeholder) in role, the posting's
-own URL in url, the full posting text in posting_text, and the employer's
-publication date in posted_date when the board states one.
+own URL in url, the full posting text in posting_text, the employer's
+publication date in posted_date when the board states one, the enabled
+profile's name you screened against in profile, what the posting itself says
+about remote work — remote, hybrid, on_site, or unstated when it does not
+say — in remote_arrangement, and any language the posting EXPLICITLY
+requires (e.g. 'German') in language_requirement, or '' when it states none.
 
 record_screening REJECTS the call and stores nothing unless company, verdict,
 role and url all carry usable values. A \"passed\" or \"deferred\" verdict is
 also rejected, storing nothing, without usable posting_text — a real posting
 body, not a login wall or a 404 page; a posting you could not read takes a
-screening_blocker instead."
+screening_blocker instead. profile and remote_arrangement are also required
+for a passed/deferred verdict. Evidence that contradicts the profile's
+remote model or working language is stored as an automatic rejection — not
+an error to retry, and never fabricate 'remote'/'' to get past it."
 fi
 
-# jq program rendering one criteria block per configured profile: name,
-# employment country, remote model, salary band (in the profile's own
+# jq program rendering one criteria block per ENABLED configured profile:
+# name, employment country, remote model, salary band (in the profile's own
 # currency), Glassdoor minimum, EOR/entity-verification flags, working
 # language, and accepted/rejected role types. Missing fields render as
 # "not configured" rather than being silently dropped, so the agent never
 # mistakes an unset criterion for a waived one.
+# The `select(.enabled == true)` filter matches agentconfig/dorks.compose_queries:
+# a disabled profile's criteria must never render into the run prompt as if
+# active, since record_screening's `profile` argument only accepts an
+# enabled profile name — rendering a disabled one here would offer the agent
+# criteria it can never successfully screen against.
 # Field names are camelCase to match the wire format api/schemas.py's
 # AgentConfigModel/JobProfileModel produce (same convention as the
 # targetCompanies/companyBoards/cooldownDays fields already used above).
@@ -346,7 +367,7 @@ PROFILE_CRITERIA_JQ='
 def fmt_bool: if . == null then "not configured" elif . then "true" else "false" end;
 def fmt_list: if (. // []) | length > 0 then (. // [] | join(", ")) else "not configured" end;
 def fmt_band(min_v; max_v; cur): if (min_v != null and max_v != null and cur != null) then "\(min_v) - \(max_v) \(cur)" else "not configured" end;
-.profiles[] |
+.profiles[] | select(.enabled == true) |
 "### Profile: \(.name)\n" +
 "  - Employment country: \(.employmentCountry // "not configured")\n" +
 "  - Remote model: \(.remoteModel // "not configured")\n" +
@@ -356,7 +377,10 @@ def fmt_band(min_v; max_v; cur): if (min_v != null and max_v != null and cur != 
 "  - Entity verification required: \(.requireEntityVerification | fmt_bool)\n" +
 "  - Working language: \(.workingLanguage // "not configured")\n" +
 "  - Accepted role types: \(.acceptedRoleTypes | fmt_list)\n" +
-"  - Rejected role types: \(.rejectedRoleTypes | fmt_list)\n"
+"  - Rejected role types: \(.rejectedRoleTypes | fmt_list)\n" +
+"  - ENFORCED at record_screening time (not advisory): the remote model and\n" +
+"    working language above are checked against the posting'"'"'s stated evidence;\n" +
+"    a contradiction auto-downgrades the record to verdict=\"rejected\".\n"
 '
 
 # Job profiles: the run's search criteria. The agent has no built-in policy:

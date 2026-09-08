@@ -47,6 +47,21 @@ def _or_group(terms: list[str]) -> str:
     return "(" + " OR ".join(_quote_term(t) for t in terms) + ")"
 
 
+def _remote_group(remote_model: str | None) -> str:
+    """Build the OR-group of remote-work terms for a profile's remote_model.
+
+    ``None``, empty, or "on_site" yields "" (no term added — today's query
+    is unchanged). "remote" yields terms for remote/fully remote/work from
+    home; "hybrid" yields remote-or-hybrid. Any other value is treated like
+    "on_site" (no term), since it is not a recognised remote constraint.
+    """
+    if remote_model == "remote":
+        return _or_group(["remote", "fully remote", "work from home"])
+    if remote_model == "hybrid":
+        return _or_group(["remote", "hybrid"])
+    return ""
+
+
 def _resolve_sources(boards: list[JobBoard] | None) -> list[str]:
     """Resolve dork-mode boards to site domains, always including the default boards.
 
@@ -94,8 +109,9 @@ def compose_direct_boards(
     through resolve_domain — the agent navigates to it, so it needs the real
     address, not a bare host), its resolved sign-in URL, and the search
     criteria of every enabled, keyword-bearing profile — mirroring the
-    profile filter compose_queries applies — for the agent to use on the
-    board's own search page.
+    profile filter compose_queries applies, now including the profile's
+    remote_model so the board's own filter UI can honour the same remote
+    constraint — for the agent to use on the board's own search page.
     """
     profile_entries = [
         {
@@ -103,6 +119,7 @@ def compose_direct_boards(
             "keywords": profile.keywords,
             "locations": profile.locations,
             "rejected_role_types": profile.rejected_role_types,
+            "remote_model": profile.remote_model,
         }
         for profile in profiles
         if profile.enabled and profile.keywords
@@ -135,9 +152,10 @@ def compose_profile_queries(
     """
     keyword_group = _or_group(profile.keywords)
     location_group = _or_group(profile.locations)
+    remote_group = _remote_group(profile.remote_model)
     negatives = " ".join(f'-"{t}"' for t in profile.rejected_role_types)
 
-    parts_template = [keyword_group, location_group, negatives]
+    parts_template = [keyword_group, location_group, remote_group, negatives]
 
     recency = recency_param(max_posting_age_days)
     results = []
