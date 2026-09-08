@@ -86,6 +86,32 @@ def test_rejected_role_types_render_as_negatives():
     assert '-"unpaid internship"' in q
 
 
+def test_remote_model_remote_adds_or_group_to_query_and_url():
+    p = JobProfile(name="p", enabled=True, keywords=["backend"], remote_model="remote")
+    entry = dorks.compose_queries([p], None, ["ashby"])[0]
+    expected_query = 'site:jobs.ashbyhq.com backend (remote OR "fully remote" OR "work from home")'
+    assert entry["query"] == expected_query
+    assert unquote_plus(entry["url"].split("q=")[1].split("&tbs=")[0]) == expected_query
+
+
+def test_remote_model_hybrid_adds_remote_or_hybrid_group():
+    p = JobProfile(name="p", enabled=True, keywords=["backend"], remote_model="hybrid")
+    q = dorks.compose_queries([p], None, ["ashby"])[0]["query"]
+    assert q == "site:jobs.ashbyhq.com backend (remote OR hybrid)"
+
+
+def test_remote_model_on_site_leaves_query_unchanged():
+    p = JobProfile(name="p", enabled=True, keywords=["backend"], remote_model="on_site")
+    q = dorks.compose_queries([p], None, ["ashby"])[0]["query"]
+    assert q == "site:jobs.ashbyhq.com backend"
+
+
+def test_remote_model_none_leaves_query_unchanged():
+    p = JobProfile(name="p", enabled=True, keywords=["backend"], remote_model=None)
+    q = dorks.compose_queries([p], None, ["ashby"])[0]["query"]
+    assert q == "site:jobs.ashbyhq.com backend"
+
+
 def test_disabled_profile_produces_nothing():
     p = JobProfile(name="p", enabled=False, keywords=["backend"])
     assert dorks.compose_queries([p]) == []
@@ -218,6 +244,7 @@ def test_compose_direct_boards_shape():
         keywords=["backend"],
         locations=["Berlin"],
         rejected_role_types=["contract"],
+        remote_model="remote",
     )
     p2 = JobProfile(name="disabled", enabled=False, keywords=["frontend"])
     p3 = JobProfile(name="no-keywords", enabled=True, keywords=[])
@@ -241,8 +268,16 @@ def test_compose_direct_boards_shape():
             "keywords": ["backend"],
             "locations": ["Berlin"],
             "rejected_role_types": ["contract"],
+            "remote_model": "remote",
         }
     ]
+
+
+def test_compose_direct_boards_carries_none_remote_model_through():
+    p = JobProfile(name="p", enabled=True, keywords=["backend"])
+    direct_board = JobBoard(source="https://boards.acme.io/careers", mode="direct")
+    entries = dorks.compose_direct_boards([p], [direct_board])
+    assert entries[0]["profiles"][0]["remote_model"] is None
 
 
 def test_compose_direct_boards_empty_when_no_direct_boards():

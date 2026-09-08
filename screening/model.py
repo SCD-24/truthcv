@@ -88,6 +88,18 @@ class Screening:
     # Empty means unknown and is never inferred. `screened_date` is the date
     # this posting was found, which is a different thing.
     posted_date: str = ""
+    # The JobProfile name whose criteria this posting was screened against —
+    # the evidence trail for `failing_criterion`/`reason` when either names a
+    # criteria.py check, so the operator can see which profile produced them.
+    profile: str = ""
+    # The posting's own stated remote arrangement, as the agent read it. See
+    # screening.criteria.REMOTE_ARRANGEMENT_VALUES: "" means not supplied,
+    # "unstated" means the agent looked and the posting did not say.
+    remote_arrangement: str = ""
+    # A working language the posting EXPLICITLY requires, free text (e.g.
+    # "German"). "" means the posting states none — never inferred from
+    # e.g. the posting's own language.
+    language_requirement: str = ""
     # Approval state. Deliberately absent from EDITABLE: that tuple is what
     # store.create()/update() copy from caller-supplied fields, and the agent's
     # record_screening(**fields) reaches create() directly. Listing these there
@@ -142,6 +154,9 @@ class Screening:
         "source",
         "posting_text",
         "posted_date",
+        "profile",
+        "remote_arrangement",
+        "language_requirement",
         "screening_blocker",
         # Which run produced this record. Editable so record_screening's
         # create() call can persist it; only ever set, never cleared.
