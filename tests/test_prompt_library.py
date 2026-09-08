@@ -30,6 +30,7 @@ from prompts.fragments import (
     SLOTS,
     seeded_fragments,
 )
+from prompts.practitioner import PRACTITIONER_FRAGMENT_IDS
 from prompts.library import (
     Conflict,
     PresetConflictError,
@@ -417,3 +418,84 @@ def test_assembled_prompt_always_ends_with_guardrail():
     fragments = list_fragments()
     assembled = assemble_system_prompt(preset, "standard", fragments)
     assert assembled.endswith(GUARDRAIL_CONTRACT)
+
+
+# --- Practitioner narrative fragments and preset ---------------------------
+
+PRACTITIONER_EXCLUSIVE_IDS = {
+    "voice": "voice-practitioner",
+    "structure": "structure-narrative-arc",
+    "opener": "opener-problem-first",
+}
+
+def _practitioner_preset() -> Preset:
+    return next(p for p in SEEDED_PRESETS if p.id == "practitioner")
+
+def _assemble_practitioner() -> str:
+    return assemble_system_prompt(
+        _practitioner_preset(), "standard", seeded_fragments(DEFAULT_CONVENTIONS)
+    )
+
+def test_practitioner_fragments_are_seeded_and_not_recommended():
+    by_id = {f.id: f for f in SEEDED_FRAGMENTS}
+    for fragment_id in PRACTITIONER_FRAGMENT_IDS:
+        assert fragment_id in by_id, f"{fragment_id} missing from SEEDED_FRAGMENTS"
+        assert by_id[fragment_id].seeded is True
+        assert by_id[fragment_id].recommended is False
+
+def test_practitioner_fragment_slot_composition():
+    by_id = {f.id: f for f in SEEDED_FRAGMENTS}
+    slots = [by_id[fragment_id].slot for fragment_id in PRACTITIONER_FRAGMENT_IDS]
+    assert slots.count("voice") == 1
+    assert slots.count("structure") == 1
+    assert slots.count("opener") == 1
+    assert slots.count("rules") == len(PRACTITIONER_FRAGMENT_IDS) - 3
+    for slot, fragment_id in PRACTITIONER_EXCLUSIVE_IDS.items():
+        assert by_id[fragment_id].slot == slot
+
+def test_professional_preset_stays_first_and_default():
+    assert SEEDED_PRESETS[0].id == "professional"
+    assert SEEDED_PRESETS[0].is_default is True
+
+def test_practitioner_preset_is_seeded_and_not_default():
+    preset = _practitioner_preset()
+    assert preset.seeded is True
+    assert preset.is_default is False
+
+def test_practitioner_preset_selects_one_fragment_per_exclusive_slot():
+    by_id = {f.id: f for f in SEEDED_FRAGMENTS}
+    preset = _practitioner_preset()
+    for fragment_id in preset.fragment_ids:
+        assert fragment_id in by_id, f"{fragment_id} does not resolve"
+    for slot in EXCLUSIVE_SLOTS:
+        selected = [f for f in preset.fragment_ids if by_id[f].slot == slot]
+        assert len(selected) == 1, f"slot {slot} selected {selected}"
+
+def test_practitioner_preset_omits_conflicting_rules():
+    preset = _practitioner_preset()
+    assert "rules-career-services-standard" not in preset.fragment_ids
+    assert "rules-tailoring" not in preset.fragment_ids
+
+def test_practitioner_prompt_has_no_ai_tell_characters():
+    assembled = _assemble_practitioner()
+    for char in ("\u2014", "\u2013", "\u2018", "\u2019", "\u201c", "\u201d"):
+        assert char not in assembled, f"{char!r} must not appear in prompt prose"
+
+def test_practitioner_prompt_ends_with_guardrail_contract():
+    assert _assemble_practitioner().rstrip().endswith(
+        "Connective and interpretive sentences carry no claims, that is "
+        "where your voice lives, so use them freely."
+    )
+
+def test_practitioner_prompt_pins_posting_tailoring_rule():
+    assembled = _assemble_practitioner()
+    assert "Tailor every letter to this specific posting" in assembled
+    assert "pair it with the details in the candidate's truth file" in assembled
+
+def test_practitioner_voice_conflicts_with_career_services_standard():
+    conflicts = validate_preset(
+        ["voice-practitioner", "rules-career-services-standard"],
+        seeded_fragments(DEFAULT_CONVENTIONS),
+    )
+    conflicting_ids = {tuple(sorted(c.fragment_ids)) for c in conflicts}
+    assert ("rules-career-services-standard", "voice-practitioner") in conflicting_ids
