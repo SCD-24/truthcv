@@ -482,20 +482,40 @@ def test_practitioner_prompt_has_no_ai_tell_characters():
         assert char not in assembled, f"{char!r} must not appear in prompt prose"
 
 def test_practitioner_prompt_ends_with_guardrail_contract():
-    assert _assemble_practitioner().rstrip().endswith(
-        "Connective and interpretive sentences carry no claims, that is "
-        "where your voice lives, so use them freely."
-    )
+    assert _assemble_practitioner().endswith(GUARDRAIL_CONTRACT)
+
+def test_practitioner_prompt_forbids_name_and_sign_off_in_the_body():
+    """The renderer prints the name in the letterhead and appends the sign-off.
+
+    The practitioner preset omits rules-letter-style, which used to carry this
+    instruction, so the rule must survive in rules-letter-body-discipline or
+    letters generated with this preset render the name twice.
+    """
+    assembled = _assemble_practitioner()
+    assert "NEVER write the candidate's name in the letter text" in assembled
+    assert "do not end with a sign-off" in assembled
+
+def test_practitioner_prompt_bans_en_dashes_and_curly_quotes_in_output():
+    """The preset omits rules-career-services-standard, which carried the
+    output-side ban on en dashes and curly quotes; rules-no-em-dashes must
+    still forbid them or AI-tell characters ship in the letter.
+    """
+    assembled = _assemble_practitioner()
+    assert "Never use em dashes or en dashes" in assembled
+    assert "never curly quotes" in assembled
 
 def test_practitioner_prompt_pins_posting_tailoring_rule():
     assembled = _assemble_practitioner()
     assert "Tailor every letter to this specific posting" in assembled
     assert "pair it with the details in the candidate's truth file" in assembled
 
-def test_practitioner_voice_conflicts_with_career_services_standard():
+@pytest.mark.parametrize(
+    "rule_id", ["rules-career-services-standard", "rules-tailoring"]
+)
+def test_practitioner_voice_declares_its_conflicts(rule_id):
     conflicts = validate_preset(
-        ["voice-practitioner", "rules-career-services-standard"],
+        ["voice-practitioner", rule_id],
         seeded_fragments(DEFAULT_CONVENTIONS),
     )
     conflicting_ids = {tuple(sorted(c.fragment_ids)) for c in conflicts}
-    assert ("rules-career-services-standard", "voice-practitioner") in conflicting_ids
+    assert tuple(sorted([rule_id, "voice-practitioner"])) in conflicting_ids

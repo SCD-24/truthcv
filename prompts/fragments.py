@@ -398,12 +398,14 @@ def _practitioner_preset() -> Preset:
     omits ``rules-career-services-standard`` and ``rules-tailoring`` (declared
     conflicts of ``voice-practitioner``) and ``rules-letter-style``, whose
     one-page, 1-2 body paragraph structure contradicts the narrative arc's
-    eight-part order and 2,500 to 4,000 character target. Omitting
-    ``rules-letter-style`` also drops its mechanical instruction never to
-    write the candidate's name in the body, since the letterhead already
-    prints it; an operator who wants that rule back can add the fragment to a
-    copy of this preset. ``rules-anti-slop`` is style-only and contradicts
-    nothing here, so it is kept.
+    eight-part order and 2,500 to 4,000 character target. The two mechanical
+    instructions that omission would otherwise lose are carried by the
+    practitioner rules themselves, so the preset stays self-contained: the
+    never-write-the-candidate's-name-or-a-sign-off rule lives in
+    ``rules-letter-body-discipline`` (the renderer prints the name in the
+    letterhead and appends the sign-off), and the en-dash/curly-quote output
+    ban lives in ``rules-no-em-dashes``. ``rules-anti-slop`` is style-only and
+    contradicts nothing here, so it is kept.
     """
     fragment_ids = [*PRACTITIONER_FRAGMENT_IDS, "rules-anti-slop"]
     _assert_one_per_exclusive_slot(fragment_ids)

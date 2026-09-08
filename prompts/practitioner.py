@@ -1,8 +1,8 @@
 """Prompt text for the practitioner cover-letter fragments.
 
-This module holds prose only. It defines the twenty-one seeded fragments
+This module holds prose only. It defines the twenty-two seeded fragments
 distilled from the practitioner cover-letter prompt (one ``voice``, one
-``structure``, one ``opener``, and eighteen ``rules``) as module-level string
+``structure``, one ``opener``, and nineteen ``rules``) as module-level string
 constants, and exposes them as ``PRACTITIONER_SPECS`` so
 ``prompts/fragments.py`` can turn each entry into a ``Fragment`` without
 importing any prose of its own.
@@ -162,8 +162,9 @@ _RULES_TEXT: dict[str, str] = {
         "relevant material, write a shorter letter."
     ),
     "rules-no-em-dashes": (
-        "Never use em dashes. Use commas, parentheses, semicolons, or two "
-        "sentences."
+        "Never use em dashes or en dashes. Use commas, parentheses, "
+        "semicolons, or two sentences. Use straight quotes only, never curly "
+        "quotes."
     ),
     "rules-avoid-corporate-language": (
         "Avoid excessive buzzwords, adjectives, corporate and motivational "
@@ -192,7 +193,11 @@ _RULES_TEXT: dict[str, str] = {
         "The letter body must be finished, sendable prose: no analysis, no "
         "explanation of writing choices, no list of matched qualifications, "
         "no citations, source ids, or retrieval metadata, and no references "
-        "to the truth store as a system."
+        "to the truth store as a system. The candidate's own name is printed "
+        "in the letterhead above the body and a sign-off is appended after "
+        "it, so NEVER write the candidate's name in the letter text: do not "
+        "name the candidate in the opening, and do not end with a sign-off "
+        "or signature line."
     ),
 }
 
@@ -212,7 +217,7 @@ _RULES_TITLES: dict[str, str] = {
     "rules-company-specific-reasoning": "Company-specific reasoning",
     "rules-personal-details": "Personal details only when relevant",
     "rules-length-discipline": "Length discipline",
-    "rules-no-em-dashes": "No em dashes",
+    "rules-no-em-dashes": "No em dashes or curly quotes",
     "rules-avoid-corporate-language": "Avoid corporate language",
     "rules-final-self-review": "Final self-review",
     "rules-letter-body-discipline": "Letter body discipline",
@@ -239,7 +244,7 @@ _RULE_IDS: tuple[str, ...] = (
     "rules-final-self-review",
     "rules-letter-body-discipline",
 )
-"""The eighteen practitioner ``rules`` fragment ids, in assembly order."""
+"""The nineteen practitioner ``rules`` fragment ids, in assembly order."""
 
 
 def _rules_specs() -> list[dict[str, str]]:
@@ -276,8 +281,8 @@ PRACTITIONER_SPECS: list[dict[str, str]] = [
     },
     *_rules_specs(),
 ]
-"""The twenty-one practitioner fragment specs: one voice, one structure, one
-opener, and eighteen rules, each atomic and independently swappable."""
+"""The twenty-two practitioner fragment specs: one voice, one structure, one
+opener, and nineteen rules, each atomic and independently swappable."""
 
 PRACTITIONER_FRAGMENT_IDS: tuple[str, ...] = tuple(spec["id"] for spec in PRACTITIONER_SPECS)
 """Every practitioner fragment id, in the order the preset selects them."""
