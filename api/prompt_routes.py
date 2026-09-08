@@ -7,8 +7,6 @@ import re
 from fastapi import APIRouter, HTTPException, status
 
 from api.schemas import (
-    PresetValidateRequest,
-    PromptConflict,
     PromptFragmentIn,
     PromptFragmentOut,
     PromptPresetIn,
@@ -16,8 +14,6 @@ from api.schemas import (
 )
 from prompts.fragments import Fragment, Preset
 from prompts.library import (
-    PresetConflictError,
-    Conflict,
     delete_fragment,
     delete_preset,
     get_fragment,
@@ -27,7 +23,6 @@ from prompts.library import (
     set_default_preset,
     upsert_fragment,
     upsert_preset,
-    validate_preset,
 )
 
 prompt_router = APIRouter(prefix="/api")
@@ -35,15 +30,6 @@ prompt_router = APIRouter(prefix="/api")
 
 def _slugify(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
-
-
-def _conflict_out(conflict: Conflict) -> PromptConflict:
-    return PromptConflict(
-        kind=conflict.kind,
-        fragment_ids=conflict.fragment_ids,
-        slot=conflict.slot,
-        message=conflict.message,
-    )
 
 
 def _raise_seeded_or_bad_request(exc: ValueError) -> None:
@@ -64,7 +50,6 @@ def _save_fragment(body: PromptFragmentIn) -> PromptFragmentOut:
         slot=body.slot,
         title=body.title,
         text=body.text,
-        conflicts_with=body.conflicts_with,
     )
     try:
         upsert_fragment(fragment)
@@ -110,9 +95,6 @@ def _save_preset(body: PromptPresetIn) -> PromptPresetOut:
     )
     try:
         upsert_preset(preset)
-    except PresetConflictError as exc:
-        conflicts = [_conflict_out(c).model_dump(by_alias=True) for c in exc.conflicts]
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"conflicts": conflicts}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     return PromptPresetOut(**get_preset(preset.id).to_dict())
@@ -137,12 +119,6 @@ def remove_prompt_preset(id: str) -> None:
         _raise_seeded_or_bad_request(exc)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-
-@prompt_router.post("/prompt-presets/validate")
-def validate_prompt_preset(body: PresetValidateRequest) -> dict:
-    conflicts = validate_preset(body.fragment_ids)
-    return {"conflicts": [_conflict_out(c).model_dump(by_alias=True) for c in conflicts]}
 
 
 @prompt_router.put("/prompt-presets/{id}/default", response_model=PromptPresetOut)

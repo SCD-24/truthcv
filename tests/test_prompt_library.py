@@ -16,13 +16,15 @@ between tests or with the real ``./data`` directory.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from prompts.assemble import GUARDRAIL_CONTRACT, assemble_system_prompt
-from prompts.coverletter import cover_letter_system
+from prompts.coverletter import cover_letter_system_for_preset
+from prompts.conventions import CvConventions
 from prompts.fragments import (
     DEFAULT_CONVENTIONS,
-    EXCLUSIVE_SLOTS,
     Fragment,
     Preset,
     SEEDED_FRAGMENTS,
@@ -31,8 +33,7 @@ from prompts.fragments import (
     seeded_fragments,
 )
 from prompts.library import (
-    Conflict,
-    PresetConflictError,
+    PRESETS_FILE,
     default_preset,
     delete_fragment,
     delete_preset,
@@ -40,10 +41,11 @@ from prompts.library import (
     get_preset,
     list_fragments,
     list_presets,
+    set_default_preset,
     upsert_fragment,
     upsert_preset,
-    validate_preset,
 )
+from storage.paths import data_dir
 
 
 _FRAMING_STANDARD = (
@@ -215,13 +217,14 @@ def test_seeded_concise_equivalence():
 
 
 def test_cover_letter_system_matches_direct_assembly():
-    """Sanity check: cover_letter_system('professional', ...) takes the same
-    path as directly assembling SEEDED_PRESETS[0], so the two agree exactly.
+    """Sanity check: cover_letter_system_for_preset('professional', ...) takes
+    the same path as directly assembling SEEDED_PRESETS[0], so the two agree
+    exactly.
     """
     preset = SEEDED_PRESETS[0]
     fragments = seeded_fragments(DEFAULT_CONVENTIONS)
     direct = assemble_system_prompt(preset, "standard", fragments)
-    via_helper = cover_letter_system("professional", "standard")
+    via_helper = cover_letter_system_for_preset("professional", "standard")
     assert direct == via_helper
 
 
@@ -283,7 +286,6 @@ def test_recommended_defaults_to_false():
         "title": "No Rec",
         "text": "Text.",
         "seeded": False,
-        "conflicts_with": [],
     }
     frag = Fragment.from_dict(d)
     assert frag.recommended is False
@@ -298,52 +300,126 @@ def test_user_fragment_recommended_persists_false():
     assert persisted.recommended is False
 
 
-def test_validate_preset_exclusive_slot_conflict():
-    frag1 = Fragment(id="voice-a", slot="voice", title="A", text="Voice A.")
-    frag2 = Fragment(id="voice-b", slot="voice", title="B", text="Voice B.")
-    upsert_fragment(frag1)
-    upsert_fragment(frag2)
-    conflicts = validate_preset([
-        frag1.id,
-        frag2.id,
-        "structure-classic",
-        "opener-concrete-hook",
-        "rules-career-services-standard",
-    ])
-    exclusive = [c for c in conflicts if c.kind == "exclusive_slot"]
-    assert len(exclusive) == 1
-    conflict = exclusive[0]
-    assert conflict.slot == "voice"
-    assert frag1.id in conflict.message
-    assert frag2.id in conflict.message
+
+def test_preset_may_hold_two_fragments_in_one_slot():
+    """Slots are a display grouping: a preset may combine several voices."""
+    upsert_fragment(Fragment(id="voice-a", slot="voice", title="A", text="Voice A."))
+    upsert_fragment(Fragment(id="voice-b", slot="voice", title="B", text="Voice B."))
+    upsert_preset(Preset(
+        id="two-voices",
+        name="Two voices",
+        fragment_ids=["voice-a", "voice-b", "structure-classic", "opener-concrete-hook"],
+    ))
+    stored = get_preset("two-voices")
+    assert stored.fragment_ids[:2] == ["voice-a", "voice-b"]
 
 
-def test_validate_preset_declared_conflict():
-    frag1 = Fragment(
-        id="rules-x",
-        slot="rules",
-        title="X",
-        text="Rule X.",
-        conflicts_with=["rules-y"],
+def test_list_fragments_honours_conventions():
+    """list_fragments renders the seeded fragments for the given conventions."""
+    custom = CvConventions(letter_paragraphs_min=2, letter_paragraphs_max=9)
+    structure = next(f for f in list_fragments(custom) if f.id == "structure-classic")
+    assert "2 to 9" in structure.text
+    default_structure = next(f for f in list_fragments() if f.id == "structure-classic")
+    assert "3 to 5" in default_structure.text
+
+
+def test_set_default_preset_does_not_persist_seeded_presets():
+    set_default_preset("warm")
+    assert not (data_dir() / PRESETS_FILE).exists()
+    assert default_preset().id == "warm"
+    assert [p.is_default for p in list_presets() if p.id != "warm"] == [False, False]
+
+
+def test_set_default_preset_on_user_preset():
+    upsert_preset(Preset(
+        id="user-default",
+        name="User default",
+        fragment_ids=["voice-professional", "structure-classic"],
+    ))
+    set_default_preset("user-default")
+    assert default_preset().id == "user-default"
+    records = json.loads((data_dir() / PRESETS_FILE).read_text(encoding="utf-8"))
+    assert {r["id"] for r in records} == {"user-default"}
+
+
+def test_set_default_preset_rejects_unknown_id():
+    with pytest.raises(KeyError):
+        set_default_preset("nope")
+
+
+def test_legacy_persisted_seeded_presets_are_ignored_but_default_survives():
+    """A pre-existing record with a seeded id must not shadow the code definition."""
+    (data_dir() / PRESETS_FILE).write_text(json.dumps([
+        {
+            "id": "warm",
+            "name": "Stale warm",
+            "fragment_ids": ["voice-warm"],
+            "is_default": True,
+            "seeded": True,
+        }
+    ]), encoding="utf-8")
+    warm = get_preset("warm")
+    assert warm.name == "Warm"
+    assert len(warm.fragment_ids) > 1
+    assert warm.is_default is True
+    assert default_preset().id == "warm"
+
+
+def test_legacy_user_preset_default_survives_the_marker_migration():
+    """An operator whose default was a USER preset keeps it after upgrading.
+
+    Old versions recorded the default only as is_default on the persisted
+    records; the seeded "professional" record ships is_default=True, so a
+    migration that ignored user records would silently revert the choice.
+    """
+    (data_dir() / PRESETS_FILE).write_text(json.dumps([
+        {"id": "professional", "name": "Professional", "fragment_ids": ["voice-professional"],
+         "is_default": False, "seeded": True},
+        {"id": "mine", "name": "Mine", "fragment_ids": ["voice-warm", "structure-classic"],
+         "is_default": True, "seeded": False},
+    ]), encoding="utf-8")
+    assert default_preset().id == "mine"
+    assert [p.id for p in list_presets() if p.is_default] == ["mine"]
+
+
+def test_stale_marker_does_not_mask_the_legacy_default():
+    """A marker naming a preset that no longer exists falls through, not back."""
+    (data_dir() / PRESETS_FILE).write_text(json.dumps([
+        {"id": "mine", "name": "Mine", "fragment_ids": ["voice-warm"],
+         "is_default": True, "seeded": False},
+    ]), encoding="utf-8")
+    (data_dir() / "prompt_default.json").write_text(
+        json.dumps({"presetId": "deleted-preset"}), encoding="utf-8"
     )
-    frag2 = Fragment(id="rules-y", slot="rules", title="Y", text="Rule Y.")
-    upsert_fragment(frag1)
-    upsert_fragment(frag2)
-    conflicts = validate_preset([
-        "voice-professional",
-        "structure-classic",
-        "opener-concrete-hook",
-        frag1.id,
-        frag2.id,
-    ])
-    declared = [c for c in conflicts if c.kind == "declared"]
-    assert len(declared) >= 1
+    assert default_preset().id == "mine"
 
 
-def test_validate_preset_unknown_fragment():
-    conflicts = validate_preset(["unknown_id"])
-    assert len(conflicts) == 1
-    assert conflicts[0].kind == "unknown_fragment"
+def test_default_preset_fallback_is_a_copy_of_the_seeded_preset():
+    """Mutating the returned preset must not corrupt SEEDED_PRESETS process-wide."""
+    (data_dir() / PRESETS_FILE).write_text(json.dumps([
+        {"id": "professional", "name": "Professional", "fragment_ids": ["voice-professional"],
+         "is_default": False, "seeded": True},
+    ]), encoding="utf-8")
+    preset = default_preset()
+    assert preset.id == "professional"
+    preset.fragment_ids.append("intruder")
+    assert "intruder" not in next(p for p in SEEDED_PRESETS if p.id == "professional").fragment_ids
+
+
+def test_voice_override_emitted_once_for_multiple_voice_fragments():
+    upsert_fragment(Fragment(id="voice-a", slot="voice", title="A", text="Voice A."))
+    upsert_fragment(Fragment(id="voice-b", slot="voice", title="B", text="Voice B."))
+    preset = Preset(
+        id="two-voices",
+        name="Two voices",
+        fragment_ids=["voice-a", "voice-b", "structure-classic"],
+    )
+    assembled = assemble_system_prompt(
+        preset, "standard", list_fragments(), voice_override="brisk"
+    )
+    assert assembled.count(" Voice: brisk.") == 1
+    assert "Voice A." not in assembled
+    assert "Voice B." not in assembled
 
 
 def test_seeded_fragments_cannot_be_edited():

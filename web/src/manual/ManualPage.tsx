@@ -658,12 +658,7 @@ function LetterSection({
       const approvals = withApprovals
         ? approvalsFrom(coverLetter?.blockedClaims ?? [], decisions)
         : undefined;
-      const preset = presets.find((p) => p.id === selectedPresetId) ?? null;
-      // Backward compatible: send the preset id (or its name) as `tone` so the
-      // API can still resolve a style when it only knows tone-based selection.
-      const tone = (selectedPresetId ?? preset?.name ?? "").toLowerCase();
       const r = await generateCoverLetter(
-        tone,
         length.toLowerCase(),
         approvals,
         applicationId,

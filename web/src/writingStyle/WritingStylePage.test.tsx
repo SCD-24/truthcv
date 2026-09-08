@@ -2,13 +2,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import {
+  deletePromptFragment,
   listPromptFragments,
   listPromptPresets,
+  savePromptFragment,
   savePromptPreset,
   setDefaultPromptPreset,
-  validatePromptPreset,
 } from "../api/client";
-import type { PromptConflict, PromptFragment, PromptPreset } from "../api/client";
+import type { PromptFragment, PromptPreset } from "../api/client";
 import { WritingStylePage } from "./WritingStylePage";
 
 vi.mock("../api/client", () => ({
@@ -18,15 +19,15 @@ vi.mock("../api/client", () => ({
   listPromptPresets: vi.fn(),
   savePromptPreset: vi.fn(),
   deletePromptPreset: vi.fn(),
-  validatePromptPreset: vi.fn(),
   setDefaultPromptPreset: vi.fn(),
 }));
 
 const FRAGMENTS: PromptFragment[] = [
-  { id: "voice-1", slot: "voice", title: "Warm voice", text: "Be warm.", seeded: true, recommended: false, conflictsWith: [] },
-  { id: "voice-2", slot: "voice", title: "Direct voice", text: "Be direct.", seeded: true, recommended: false, conflictsWith: [] },
-  { id: "structure-1", slot: "structure", title: "Three paragraphs", text: "Use 3 paragraphs.", seeded: true, recommended: false, conflictsWith: [] },
-  { id: "rules-1", slot: "rules", title: "Letter style", text: "Keep to one page.", seeded: true, recommended: true, conflictsWith: [] },
+  { id: "voice-1", slot: "voice", title: "Warm voice", text: "Be warm.", seeded: true, recommended: false },
+  { id: "voice-2", slot: "voice", title: "Direct voice", text: "Be direct.", seeded: true, recommended: false },
+  { id: "structure-1", slot: "structure", title: "Three paragraphs", text: "Use 3 paragraphs.", seeded: true, recommended: false },
+  { id: "rules-1", slot: "rules", title: "Letter style", text: "Keep to one page.", seeded: true, recommended: true },
+  { id: "voice-user", slot: "voice", title: "My voice", text: "Mine.", seeded: false, recommended: false },
 ];
 
 const PRESETS: PromptPreset[] = [
@@ -35,21 +36,13 @@ const PRESETS: PromptPreset[] = [
   { id: "concise", name: "Concise", fragmentIds: ["voice-2"], isDefault: false, seeded: true },
 ];
 
-const EXCLUSIVE_CONFLICT: PromptConflict[] = [
-  {
-    kind: "exclusive_slot",
-    fragmentIds: ["voice-1", "voice-2"],
-    slot: "voice",
-    message: "Only one voice fragment may be selected at a time.",
-  },
-];
-
 beforeEach(() => {
   vi.mocked(listPromptFragments).mockResolvedValue(FRAGMENTS);
   vi.mocked(listPromptPresets).mockResolvedValue(PRESETS);
-  vi.mocked(validatePromptPreset).mockResolvedValue([]);
   vi.mocked(savePromptPreset).mockResolvedValue(PRESETS[0]);
   vi.mocked(setDefaultPromptPreset).mockResolvedValue(PRESETS[0]);
+  vi.mocked(savePromptFragment).mockResolvedValue(FRAGMENTS[4]);
+  vi.mocked(deletePromptFragment).mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -62,6 +55,15 @@ afterEach(() => {
  * ambiguous by design. */
 async function findLibrary() {
   return within(await screen.findByRole("region", { name: "Prompt fragments" }));
+}
+
+/** Picks a preset in the builder's MUI select, which renders a listbox on
+ * mousedown rather than a native <select> a change event could target. */
+async function selectPreset(name: string) {
+  const presetBuilder = within(screen.getByRole("region", { name: "Preset builder" }));
+  fireEvent.mouseDown(presetBuilder.getByRole("combobox"));
+  const listbox = within(await screen.findByRole("listbox"));
+  fireEvent.click(listbox.getByRole("option", { name }));
 }
 
 describe("WritingStylePage", () => {
@@ -77,20 +79,46 @@ describe("WritingStylePage", () => {
     expect(screen.getByRole("heading", { name: "structure" })).toBeTruthy();
   });
 
-  it("shows a conflict and disables Save when two voice fragments are both selected", async () => {
+  it("renders the cover-letter-writing-style heading", async () => {
+    render(<WritingStylePage />);
+    await (await findLibrary()).findByText("Warm voice");
+
+    expect(screen.getByRole("heading", { name: "Cover letter writing style", level: 1 })).toBeTruthy();
+  });
+
+  it("warns that fragments are combined as written with nothing checking them against one another", async () => {
+    render(<WritingStylePage />);
+    await (await findLibrary()).findByText("Warm voice");
+
+    expect(
+      screen.getByText(/fragments are combined exactly as written and nothing checks them/i),
+    ).toBeTruthy();
+  });
+
+  it("leaves Save enabled when both voice fragments are selected", async () => {
     render(<WritingStylePage />);
     await (await findLibrary()).findByText("Warm voice");
 
     const presetBuilder = within(screen.getByRole("region", { name: "Preset builder" }));
+    fireEvent.change(presetBuilder.getByLabelText("Preset name"), {
+      target: { value: "Both voices" },
+    });
     fireEvent.click(presetBuilder.getByRole("checkbox", { name: "Warm voice" }));
-    vi.mocked(validatePromptPreset).mockResolvedValue(EXCLUSIVE_CONFLICT);
     fireEvent.click(presetBuilder.getByRole("checkbox", { name: "Direct voice" }));
 
-    // The message shows in the status box when conflicts are present.
-    const statusBox = await screen.findByRole("status");
-    expect(statusBox.textContent).toMatch(/only one voice fragment/i);
     const saveButton = screen.getByRole("button", { name: "Save preset" }) as HTMLButtonElement;
-    await waitFor(() => expect(saveButton.disabled).toBe(true));
+    expect(saveButton.disabled).toBe(false);
+
+    fireEvent.click(saveButton);
+
+    await waitFor(() =>
+      expect(savePromptPreset).toHaveBeenCalledWith({
+        id: "",
+        name: "Both voices",
+        fragmentIds: ["voice-1", "voice-2"],
+        isDefault: false,
+      }),
+    );
   });
 
   it("calls savePromptPreset with the selected fragments when Save is clicked", async () => {
@@ -102,8 +130,6 @@ describe("WritingStylePage", () => {
       target: { value: "My preset" },
     });
     fireEvent.click(presetBuilder.getByRole("checkbox", { name: "Warm voice" }));
-
-    await waitFor(() => expect(validatePromptPreset).toHaveBeenCalledWith(["voice-1"]));
 
     const saveButton = screen.getByRole("button", { name: "Save preset" }) as HTMLButtonElement;
     await waitFor(() => expect(saveButton.disabled).toBe(false));
@@ -117,6 +143,17 @@ describe("WritingStylePage", () => {
         isDefault: false,
       }),
     );
+  });
+
+  it("disables Save when a seeded preset is selected", async () => {
+    render(<WritingStylePage />);
+    await (await findLibrary()).findByText("Warm voice");
+
+    await selectPreset("Professional (default)");
+
+    const saveButton = screen.getByRole("button", { name: "Save preset" }) as HTMLButtonElement;
+    await waitFor(() => expect(saveButton.disabled).toBe(true));
+    expect(screen.getByText(/shipped presets can't be edited/i)).toBeTruthy();
   });
 
   it("expands fragment text when the expand button is clicked", async () => {
@@ -168,5 +205,60 @@ describe("WritingStylePage", () => {
       const statusBox = screen.getByRole("status");
       expect(statusBox.textContent).not.toMatch(/recommended fragments not selected/i);
     });
+  });
+
+  it("shows the server error when saving a fragment fails", async () => {
+    vi.mocked(savePromptFragment).mockRejectedValue(new Error("Title is required."));
+    render(<WritingStylePage />);
+    const library = await findLibrary();
+    await library.findByText("My voice");
+
+    fireEvent.click(library.getByRole("button", { name: "Edit My voice" }));
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: "Save" }));
+
+    // Queried by text, not role: the open dialog aria-hides the page behind it,
+    // and MUI's informational alerts also carry role="alert".
+    expect(await screen.findByText(/title is required/i)).toBeTruthy();
+  });
+
+  it("shows the server error when deleting a fragment fails", async () => {
+    vi.mocked(deletePromptFragment).mockRejectedValue(new Error("Fragment is in use."));
+    render(<WritingStylePage />);
+    const library = await findLibrary();
+    await library.findByText("My voice");
+
+    fireEvent.click(library.getByRole("button", { name: "Delete My voice" }));
+
+    expect(await screen.findByText(/fragment is in use/i)).toBeTruthy();
+  });
+
+  it("shows the server error when saving a preset fails", async () => {
+    vi.mocked(savePromptPreset).mockRejectedValue(new Error("Name already taken."));
+    render(<WritingStylePage />);
+    await (await findLibrary()).findByText("Warm voice");
+
+    const presetBuilder = within(screen.getByRole("region", { name: "Preset builder" }));
+    fireEvent.change(presetBuilder.getByLabelText("Preset name"), {
+      target: { value: "My preset" },
+    });
+    fireEvent.click(presetBuilder.getByRole("checkbox", { name: "Warm voice" }));
+
+    const saveButton = screen.getByRole("button", { name: "Save preset" }) as HTMLButtonElement;
+    await waitFor(() => expect(saveButton.disabled).toBe(false));
+    fireEvent.click(saveButton);
+
+    expect(await screen.findByText(/name already taken/i)).toBeTruthy();
+  });
+
+  it("shows the server error when setting the default preset fails", async () => {
+    vi.mocked(setDefaultPromptPreset).mockRejectedValue(new Error("Only saved presets can be default."));
+    render(<WritingStylePage />);
+    await (await findLibrary()).findByText("Warm voice");
+
+    await selectPreset("Warm");
+    fireEvent.click(screen.getByRole("button", { name: "Set as default" }));
+
+    expect(await screen.findByText(/only saved presets can be default/i)).toBeTruthy();
   });
 });

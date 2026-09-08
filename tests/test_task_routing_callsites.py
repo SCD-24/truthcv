@@ -109,6 +109,6 @@ def test_routes_pass_task_names(data_dir, monkeypatch):
     from api.main import app
 
     client = TestClient(app)
-    r = client.post("/api/cover-letter", json={"tone": "Professional", "length": "Short"})
+    r = client.post("/api/cover-letter", json={"length": "Short"})
     assert r.status_code in (200, 500), r.text
     assert "cover_letter" in asked

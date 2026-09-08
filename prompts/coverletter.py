@@ -4,6 +4,9 @@ The system prompt makes the model tag every factual sentence's claims so the
 guardrail can validate ONLY those claims against the truth store; connective
 narrative is free. The facts block renders the candidate's whole career as plain
 text (a cover letter weaves the full history, unlike the id-referenced CV).
+
+Writing style is chosen only by prompt preset: a caller either names a preset
+or gets the operator's default one. There is no free-form tone selection.
 """
 
 from __future__ import annotations
@@ -12,52 +15,32 @@ from truth.answers import Answers
 from truth.model import Truth
 
 from .conventions import CvConventions, DEFAULT_CONVENTIONS
-from .style import letter_style, letter_anti_slop
 
-from prompts.assemble import assemble_system_prompt, GUARDRAIL_CONTRACT, framing
-from prompts.fragments import Preset, SEEDED_PRESETS, seeded_fragments
-from prompts.library import get_preset, list_fragments
-
-
-def cover_letter_system(
-    tone: str,
-    length: str,
-    conventions: CvConventions = DEFAULT_CONVENTIONS,
-) -> str:
-    """System prompt: write an engaging, guardrail-truthful cover letter to elite
-    career-services standards in the requested voice, tagging every factual claim
-    verbatim so it can be validated.
-
-    The paragraph budget and page target come from ``conventions`` — the
-    caller's ``length`` argument shapes the rendered guidance rather than
-    being overridden by a hardcoded paragraph count.
-    """
-    preset = next((p for p in SEEDED_PRESETS if p.id == tone.lower()), None)
-    if preset is not None:
-        voice_override = None
-    else:
-        preset = next(p for p in SEEDED_PRESETS if p.is_default)
-        voice_override = tone.strip()
-    fragments = seeded_fragments(conventions)
-    return assemble_system_prompt(preset, length, fragments, voice_override=voice_override)
+from prompts.assemble import assemble_system_prompt
+from prompts.library import default_preset, get_preset, list_fragments
 
 
 def cover_letter_system_for_preset(
     preset_id: str | None,
-    tone: str,
     length: str,
     conventions: CvConventions = DEFAULT_CONVENTIONS,
 ) -> str:
-    """Use a named preset for the system prompt, falling back to
-    cover_letter_system for tone-based selection. tone is passed to
-    cover_letter_system only when preset_id is None.
+    """System prompt for a cover letter, assembled from a writing-style preset.
+
+    ``preset_id`` names the preset to use; when it is ``None`` the operator's
+    default preset applies. The paragraph budget and page target come from
+    ``conventions``, and ``length`` shapes the rendered guidance.
+
+    Raises ``ValueError`` if ``preset_id`` names no known preset — an unknown
+    preset is a caller error, never a silent fallback.
     """
     if preset_id is None:
-        return cover_letter_system(tone, length, conventions)
-    try:
-        preset = get_preset(preset_id)
-    except KeyError:
-        raise ValueError(f"unknown preset {preset_id}")
+        preset = default_preset()
+    else:
+        try:
+            preset = get_preset(preset_id)
+        except KeyError:
+            raise ValueError(f"unknown preset {preset_id}")
     fragments = list_fragments(conventions)
     return assemble_system_prompt(preset, length, fragments, voice_override=None)
 

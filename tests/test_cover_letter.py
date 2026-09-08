@@ -49,14 +49,14 @@ def _router_lie(system, messages, schema):
 
 
 def test_truthful_letter_passes(data_dir):
-    out = build_letter("A Python role", "Professional", "Short", _truth(), FakeProvider(router=_router_ok))
+    out = build_letter("A Python role", "Short", _truth(), FakeProvider(router=_router_ok))
     assert out["blocked"] is False
     assert "Acme Corp" in out["text"]
     assert "excited to apply" in out["text"]
 
 
 def test_fabricated_claim_blocks(data_dir):
-    out = build_letter("A role", "Professional", "Short", _truth(), FakeProvider(router=_router_lie))
+    out = build_letter("A role", "Short", _truth(), FakeProvider(router=_router_lie))
     assert out["blocked"] is True
     assert out["text"] == ""
     assert any(tok in out["unverifiable"] for tok in ("200", "globex"))
@@ -65,7 +65,7 @@ def test_fabricated_claim_blocks(data_dir):
 def test_blocked_letter_groups_claims_by_source_text(data_dir):
     """A block now surfaces whole-claim sentences, not just loose tokens, so the
     UI can offer per-claim approve/decline."""
-    out = build_letter("A role", "Professional", "Short", _truth(), FakeProvider(router=_router_lie))
+    out = build_letter("A role", "Short", _truth(), FakeProvider(router=_router_lie))
     assert out["blocked"] is True
     claims = out["blocked_claims"]
     assert len(claims) == 1
@@ -79,11 +79,11 @@ def test_approving_blocked_claim_unblocks_without_truth_write(data_dir):
     (added to allowed), and it is never persisted to the truth file."""
     from truth import load
 
-    blocked = build_letter("A role", "Professional", "Short", _truth(), FakeProvider(router=_router_lie))
+    blocked = build_letter("A role", "Short", _truth(), FakeProvider(router=_router_lie))
     approved = {c.text for c in blocked["blocked_claims"]}
 
     out = build_letter(
-        "A role", "Professional", "Short", _truth(), FakeProvider(router=_router_lie),
+        "A role", "Short", _truth(), FakeProvider(router=_router_lie),
         approved_texts=approved,
     )
     assert out["blocked"] is False
@@ -98,7 +98,7 @@ def test_denied_claim_is_dropped_from_letter(data_dir):
     guardrail, and the denied claim's text is entirely absent from the
     rendered letter."""
     out = build_letter(
-        "A role", "Professional", "Short", _truth(), FakeProvider(router=_router_lie),
+        "A role", "Short", _truth(), FakeProvider(router=_router_lie),
         denied_texts={"Led a team of 200 at Globex"},
     )
     assert out["blocked"] is False
@@ -111,7 +111,7 @@ def test_denied_claim_empties_letter_when_it_is_the_only_paragraph(data_dir):
     denied, excising that paragraph leaves nothing behind: the letter text is
     empty even though the guardrail itself did not block."""
     out = build_letter(
-        "A role", "Professional", "Short", _truth(), FakeProvider(router=_router_lie),
+        "A role", "Short", _truth(), FakeProvider(router=_router_lie),
         denied_texts={"Led a team of 200 at Globex"},
     )
     assert out["blocked"] is False
@@ -136,7 +136,7 @@ def test_hobby_value_passes_guardrail(data_dir):
         skills=[],
         hobbies=[Hobby(id="h-chess", value="Chess", source="user-confirmed")],
     )
-    out = build_letter("A role", "Professional", "Short", truth, FakeProvider(router=_router_hobby_claim))
+    out = build_letter("A role", "Short", truth, FakeProvider(router=_router_hobby_claim))
     assert out["blocked"] is False
     assert "Chess" in out["text"]
 
@@ -166,7 +166,7 @@ def test_profile_header_is_allowed_claim_source(data_dir):
             ]
         }
 
-    out = build_letter("A role", "Professional", "Short", truth, FakeProvider(router=router_profile_claim))
+    out = build_letter("A role", "Short", truth, FakeProvider(router=router_profile_claim))
     assert out["blocked"] is False
     assert "experienced software engineer" in out["text"]
 
@@ -189,13 +189,13 @@ def test_answers_block_without_parameter_unblock_with_parameter(data_dir):
 
     # Without answers: blocked
     out_no_answers = build_letter(
-        "A role", "Professional", "Short", truth, FakeProvider(router=router_answer_claim)
+        "A role", "Short", truth, FakeProvider(router=router_answer_claim)
     )
     assert out_no_answers["blocked"] is True
 
     # With answers: unblocked
     out_with_answers = build_letter(
-        "A role", "Professional", "Short", truth, FakeProvider(router=router_answer_claim),
+        "A role", "Short", truth, FakeProvider(router=router_answer_claim),
         answers=answers
     )
     assert out_with_answers["blocked"] is False
@@ -219,7 +219,7 @@ def test_canonical_cv_asset_id_never_allowed(data_dir):
         }
 
     out = build_letter(
-        "A role", "Professional", "Short", truth, FakeProvider(router=router_asset_claim),
+        "A role", "Short", truth, FakeProvider(router=router_asset_claim),
         answers=answers
     )
     assert out["blocked"] is True

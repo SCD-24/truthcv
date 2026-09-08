@@ -639,7 +639,6 @@ def generate_screening_letter(
     approved_texts, denied_texts = _screening_letter_approvals(body.approvals, body.paragraphs)
     result = _generate_letter_for_operator(
         posting=screening.posting_text,
-        tone=body.tone,
         preset_id=body.preset_id,
         length=body.length,
         approved_texts=approved_texts,
@@ -1789,7 +1788,6 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
         outcome = generate_cover_letter(
             application_id=app_id,
             posting=body.posting,
-            tone=body.tone,
             preset_id=body.preset_id,
             length=body.length,
             provider=get_provider("cover_letter"),

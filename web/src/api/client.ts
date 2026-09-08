@@ -56,7 +56,6 @@ export interface PromptFragment {
   text: string;
   seeded: boolean;
   recommended: boolean;
-  conflictsWith: string[];
 }
 
 /** A named, ordered set of prompt fragments; one preset can be the default. */
@@ -66,16 +65,6 @@ export interface PromptPreset {
   fragmentIds: string[];
   isDefault: boolean;
   seeded: boolean;
-}
-
-/** A conflict found among a preset's fragments — two fragments claiming the
- * same exclusive slot, a fragment declaring a conflict with another, or a
- * fragment id that doesn't exist. */
-export interface PromptConflict {
-  kind: "exclusive_slot" | "declared" | "unknown_fragment";
-  fragmentIds: string[];
-  slot: string | null;
-  message: string;
 }
 
 /**
@@ -290,7 +279,6 @@ export function testConnection(body: SettingsUpdate): Promise<TestResult> {
  * Pass generation-scoped approvals to approve/deny individually blocked claims;
  * approvals apply to this generation only and never touch the truth file. */
 export function generateCoverLetter(
-  tone: string,
   length: string,
   approvals?: CoverLetterApprovals,
   applicationId?: string,
@@ -300,7 +288,7 @@ export function generateCoverLetter(
   return request("/api/cover-letter", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tone, length, approvals, applicationId, posting, presetId }),
+    body: JSON.stringify({ length, approvals, applicationId, posting, presetId }),
   });
 }
 
@@ -902,16 +890,6 @@ export function savePromptPreset(preset: Omit<PromptPreset, "seeded">): Promise<
 /** Delete a prompt preset from the library. */
 export function deletePromptPreset(id: string): Promise<void> {
   return request(`/api/prompt-presets/${id}`, { method: "DELETE" });
-}
-
-/** Check a candidate set of fragment ids for slot/declared conflicts before
- * saving a preset. */
-export function validatePromptPreset(fragmentIds: string[]): Promise<PromptConflict[]> {
-  return request<{ conflicts: PromptConflict[] }>("/api/prompt-presets/validate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fragmentIds }),
-  }).then((result) => result.conflicts);
 }
 
 /** Mark a preset as the default used when no presetId is passed to generation. */

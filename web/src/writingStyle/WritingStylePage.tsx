@@ -49,11 +49,16 @@ export function WritingStylePage() {
         <Typography variant="overline" className="eyebrow">
           Writing Style
         </Typography>
-        <h1 className="stage__title">Fragments &amp; presets</h1>
+        <h1 className="stage__title">Cover letter writing style</h1>
         <p className="stage__lede">
           Build the reusable text blocks the model draws on, then combine them
           into named presets for generation.
         </p>
+        <Typography variant="body2" color="text.secondary">
+          Fragments are combined exactly as written and nothing checks them
+          against one another, so avoid selecting fragments whose instructions
+          or styles contradict each other.
+        </Typography>
       </div>
 
       {error && (
@@ -78,11 +83,16 @@ export function WritingStylePage() {
             alignItems: "start",
           }}
         >
-          <FragmentList fragments={fragments} onChange={loadFragments} />
+          <FragmentList
+            fragments={fragments}
+            onChange={loadFragments}
+            onError={setError}
+          />
           <PresetBuilder
             fragments={fragments}
             presets={presets}
             onPresetsChange={loadPresets}
+            onError={setError}
           />
         </Box>
       )}

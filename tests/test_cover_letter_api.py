@@ -50,12 +50,12 @@ def client(data_dir, monkeypatch):
 def test_cover_letter_requires_posting(data_dir, monkeypatch):
     monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider())
     c = TestClient(app)
-    r = c.post("/api/cover-letter", json={"tone": "Professional", "length": "Short"})
+    r = c.post("/api/cover-letter", json={"length": "Short"})
     assert r.status_code == 400
 
 
 def test_cover_letter_route(client):
-    r = client.post("/api/cover-letter", json={"tone": "Professional", "length": "Short"})
+    r = client.post("/api/cover-letter", json={"length": "Short"})
     assert r.status_code in (200, 500), r.text
     if r.status_code == 200:
         b = r.json()
@@ -73,7 +73,7 @@ def test_cover_letter_blocks_fabrication(data_dir, monkeypatch):
 
     (dd() / "posting.txt").write_text("a role")
     c = TestClient(app)
-    r = c.post("/api/cover-letter", json={"tone": "Warm", "length": "Standard"})
+    r = c.post("/api/cover-letter", json={"length": "Standard"})
     assert r.status_code == 200
     b = r.json()
     assert b["blocked"] is True
@@ -96,7 +96,7 @@ def _fabricating_client(data_dir, monkeypatch):
 def test_cover_letter_blocked_returns_grouped_claims(data_dir, monkeypatch):
     """The block surfaces whole flagged claims with stable ids, not just tokens."""
     c = _fabricating_client(data_dir, monkeypatch)
-    b = c.post("/api/cover-letter", json={"tone": "Warm", "length": "Short"}).json()
+    b = c.post("/api/cover-letter", json={"length": "Short"}).json()
     assert b["blocked"] is True
     claims = b["blockedClaims"]
     assert len(claims) == 1
@@ -111,13 +111,12 @@ def test_cover_letter_approve_claim_unblocks(data_dir, monkeypatch):
     from truth import load
 
     c = _fabricating_client(data_dir, monkeypatch)
-    blocked = c.post("/api/cover-letter", json={"tone": "Warm", "length": "Short"}).json()
+    blocked = c.post("/api/cover-letter", json={"length": "Short"}).json()
     claim_id = blocked["blockedClaims"][0]["claimId"]
 
     r = c.post(
         "/api/cover-letter",
         json={
-            "tone": "Warm",
             "length": "Short",
             "approvals": {"approvedClaimIds": [claim_id], "deniedClaimIds": []},
         },
@@ -133,13 +132,12 @@ def test_cover_letter_deny_claim_drops_it(data_dir, monkeypatch):
     """Denying the only flagged claim drops it, so the letter passes with nothing
     left to trip the guardrail."""
     c = _fabricating_client(data_dir, monkeypatch)
-    blocked = c.post("/api/cover-letter", json={"tone": "Warm", "length": "Short"}).json()
+    blocked = c.post("/api/cover-letter", json={"length": "Short"}).json()
     claim_id = blocked["blockedClaims"][0]["claimId"]
 
     r = c.post(
         "/api/cover-letter",
         json={
-            "tone": "Warm",
             "length": "Short",
             "approvals": {"approvedClaimIds": [], "deniedClaimIds": [claim_id]},
         },
@@ -176,7 +174,7 @@ def test_route_threads_stored_answers_to_guardrail(data_dir, monkeypatch):
     assert load_answers().current_role == "Staff Engineer"
 
     c = _answer_claiming_client(data_dir, monkeypatch)
-    r = c.post("/api/cover-letter", json={"tone": "Professional", "length": "Short"})
+    r = c.post("/api/cover-letter", json={"length": "Short"})
     # The route returns 200 for both pass and block; a 500 here can only be
     # the (environment-dependent) PDF backend failing AFTER the guardrail
     # passed, never a block.
@@ -195,7 +193,7 @@ def test_route_without_stored_answers_still_blocks_answer_claims(data_dir, monke
     assert load_answers().current_role == ""  # no answers.yaml written
 
     c = _answer_claiming_client(data_dir, monkeypatch)
-    r = c.post("/api/cover-letter", json={"tone": "Professional", "length": "Short"})
+    r = c.post("/api/cover-letter", json={"length": "Short"})
     assert r.status_code == 200
     b = r.json()
     assert b["blocked"] is True
@@ -226,7 +224,6 @@ def test_cover_letter_uses_body_posting_over_stale_file(data_dir, monkeypatch):
     r = c.post(
         "/api/cover-letter",
         json={
-            "tone": "Professional",
             "length": "Short",
             "posting": "FRESH new posting about a software job",
         },
@@ -249,7 +246,7 @@ def test_cover_letter_body_posting_works_without_file(data_dir, monkeypatch):
     c = TestClient(app)
     r = c.post(
         "/api/cover-letter",
-        json={"tone": "Professional", "length": "Short", "posting": "A fresh role"},
+        json={"length": "Short", "posting": "A fresh role"},
     )
     assert r.status_code == 200, r.text
     assert r.json()["blocked"] is False

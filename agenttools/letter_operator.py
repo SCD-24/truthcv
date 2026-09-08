@@ -23,7 +23,6 @@ from truth.store import load as load_truth
 
 def generate_cover_letter_for_operator(
     posting: str,
-    tone: str,
     length: str,
     approved_texts: list[str] | None = None,
     denied_texts: list[str] | None = None,
@@ -44,8 +43,8 @@ def generate_cover_letter_for_operator(
     ``company``, when given, is refused outright if blocklisted in the agent
     config.
 
-    ``preset_id`` (optional) selects a writing style preset; when omitted,
-    tone-based selection applies.
+    ``preset_id`` (optional) selects a writing style preset; when omitted, the
+    operator's default preset applies.
     """
     if company is not None and is_blocked(load_agent_config(), company):
         return {
@@ -63,12 +62,11 @@ def generate_cover_letter_for_operator(
         paragraphs
         if paragraphs is not None
         else _generate_paragraphs(
-            posting, tone, length, truth, provider, preset_id=preset_id
+            posting, length, truth, provider, preset_id=preset_id
         )
     )
     result = build_letter(
         posting,
-        tone,
         length,
         truth,
         provider,
