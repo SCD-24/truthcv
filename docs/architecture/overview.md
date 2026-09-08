@@ -100,7 +100,7 @@ Guardrailed cover-letter generation (coverletter/). build_letter() asks the LLM 
 <!-- generated:start comp:prompt-store -->
 ## Prompt Store (`prompt-store`, BACKEND)
 
-The single home for every LLM prompt in TruthCV (prompts/). A shared, fact-free prompt-template library: style-only fragments (CV_STYLE, LETTER_STYLE), the truth-extraction prompt, tailoring prompts (keyword extraction, missing-qualification inference, CV selection) with truth-block renderers, and cover-letter prompts. A pure leaf that depends downward only on truth.model; imported by truth-store, tailor-engine and cover-letter-engine.
+Stores operator-editable prompt fragments and presets as JSON on the truth data volume, layered over seeded records defined in code. Fragments are atomic style blocks grouped into four display slots (voice, structure, opener, rules); any number may be combined in a preset. The default preset marker is stored separately so seeded records are never materialised on disk.
 
 **Tech:** Python
 <!-- generated:end comp:prompt-store -->
