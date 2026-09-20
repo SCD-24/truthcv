@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -288,8 +289,8 @@ def test_a_slow_feed_stops_at_the_budget_and_keeps_what_it_got(mock_http, monkey
     mock_http(handler)
     result = rr.fetch_postings([_profile(name=f"p{i}") for i in range(8)], "k", now=NOW)
 
-    assert len(calls) == 3  # 0s, 5s, 10s — the 4th starts past the 12s budget
-    assert len(result.postings) == 3  # what was collected is kept, not discarded
+    assert len(calls) == 4  # 0s, 5s, 10s, 15s — the 5th would start at the 20s budget
+    assert len(result.postings) == 4  # what was collected is kept, not discarded
     assert "too slow" in result.error
 
 
@@ -300,14 +301,14 @@ def test_a_request_never_outlives_the_remaining_budget(mock_http, monkeypatch):
 
     def handler(request):
         timeouts.append(request.extensions["timeout"]["read"])
-        clock["t"] += 7.0
+        clock["t"] += 16.0
         return httpx.Response(200, json={"jobOpenings": []})
 
     mock_http(handler)
     rr.fetch_postings([_profile(name="a"), _profile(name="b")], "k", now=NOW)
     assert timeouts[0] == rr.TIMEOUT_SECONDS
-    # 7s spent, 5s of budget left — the second request must not be allowed 8s.
-    assert timeouts[1] == pytest.approx(5.0)
+    # 16s spent, 4s of budget left — the second request must not be allowed 8s.
+    assert timeouts[1] == pytest.approx(4.0)
 
 
 def test_the_budget_is_below_the_agents_config_fetch_timeout():
@@ -316,6 +317,24 @@ def test_the_budget_is_below_the_agents_config_fetch_timeout():
     config route on top of it."""
     assert rr.BUDGET_SECONDS < 30
     assert rr.TIMEOUT_SECONDS <= rr.BUDGET_SECONDS
+
+
+def test_an_explicit_deadline_overrides_the_default_budget(mock_http, monkeypatch):
+    """A caller fanning this fetch out alongside another source (see
+    api/routes.py's _fetch_feed_postings) passes its own shared deadline; it
+    must be honored instead of a fresh BUDGET_SECONDS window."""
+    monkeypatch.setattr(rr.time, "monotonic", lambda: 0.0)
+    timeouts = []
+
+    def handler(request):
+        timeouts.append(request.extensions["timeout"]["read"])
+        return httpx.Response(200, json={"jobOpenings": []})
+
+    mock_http(handler)
+    # A deadline 3s out — far tighter than the module's own 20s BUDGET_SECONDS
+    # — must be what actually governs the request's timeout.
+    rr.fetch_postings([_profile(name="a")], "k", now=NOW, deadline=3.0)
+    assert timeouts[0] == pytest.approx(3.0)
 
 
 @pytest.mark.parametrize(
@@ -372,6 +391,255 @@ def test_a_failing_profile_does_not_discard_a_succeeding_one(mock_http):
     result = rr.fetch_postings([_profile(name="a"), _profile(name="b")], "k", now=NOW)
     assert len(result.postings) == 1
     assert result.error == "Unable to fetch jobs"
+
+
+def test_pagination_accumulates_postings_beyond_one_page(mock_http):
+    """Regression: the old code issued exactly one page-1 request per profile
+    and could never return more than ITEMS_PER_PAGE postings from one profile.
+    A board holding more matching postings than a single page must still all
+    come back from one fetch_postings call."""
+    first_page = [_opening(url=f"https://acme.example/jobs/{i}") for i in range(rr.ITEMS_PER_PAGE)]
+    second_page = [
+        _opening(url=f"https://acme.example/jobs/{i}")
+        for i in range(rr.ITEMS_PER_PAGE, rr.ITEMS_PER_PAGE + 5)
+    ]
+
+    def handler(request):
+        page = json.loads(request.content)["filters"]["page"]
+        return httpx.Response(200, json={"jobOpenings": first_page if page == 1 else second_page})
+
+    mock_http(handler)
+    result = rr.fetch_postings([_profile()], "k", now=NOW)
+
+    assert len(result.postings) == rr.ITEMS_PER_PAGE + 5
+    assert len(result.postings) > rr.ITEMS_PER_PAGE
+
+
+def test_a_short_page_stops_the_pagination_loop(mock_http):
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(200, json={"jobOpenings": [_opening()]})  # 1 < ITEMS_PER_PAGE
+
+    mock_http(handler)
+    rr.fetch_postings([_profile()], "k", now=NOW)
+    assert len(calls) == 1
+
+
+def test_max_postings_stops_the_loop_mid_page(mock_http, monkeypatch):
+    """MAX_POSTINGS can be reached inside a single page, before that page's own
+    last item — pagination must stop right there instead of finishing the page
+    or requesting a next one."""
+    monkeypatch.setattr(rr, "MAX_POSTINGS", 30)
+    calls = []
+    openings = [_opening(url=f"https://acme.example/jobs/{i}") for i in range(rr.ITEMS_PER_PAGE)]
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(200, json={"jobOpenings": openings})
+
+    mock_http(handler)
+    result = rr.fetch_postings([_profile()], "k", now=NOW)
+    assert len(result.postings) == 30
+    assert len(calls) == 1
+
+
+def test_max_requests_stops_pagination_regardless_of_budget_or_postings(mock_http, monkeypatch):
+    """MAX_REQUESTS must cut pagination off on its own: a board with unlimited
+    unique postings and a generous MAX_POSTINGS would otherwise paginate until
+    the time budget happened to catch it, which is not a bound at all against
+    a fast board."""
+    monkeypatch.setattr(rr, "MAX_POSTINGS", 10_000)
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        openings = [
+            _opening(url=f"https://acme.example/jobs/{len(calls)}-{i}") for i in range(rr.ITEMS_PER_PAGE)
+        ]
+        return httpx.Response(200, json={"jobOpenings": openings})
+
+    mock_http(handler)
+    result = rr.fetch_postings([_profile()], "k", now=NOW)
+    assert len(calls) == rr.MAX_REQUESTS
+    assert len(result.postings) == rr.MAX_REQUESTS * rr.ITEMS_PER_PAGE
+
+
+def test_budget_exhaustion_can_stop_mid_pagination_for_one_profile(mock_http, monkeypatch):
+    """Regression: the old one-request-per-profile code had no inner page loop
+    for the budget to interrupt. The budget must be able to cut pagination off
+    inside a single profile's own pages, not just between profiles."""
+    monkeypatch.setattr(rr, "MAX_POSTINGS", 1000)
+    clock = {"t": 0.0}
+    monkeypatch.setattr(rr.time, "monotonic", lambda: clock["t"])
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        clock["t"] += 11.0
+        openings = [
+            _opening(url=f"https://acme.example/jobs/{len(calls)}-{i}") for i in range(rr.ITEMS_PER_PAGE)
+        ]
+        return httpx.Response(200, json={"jobOpenings": openings})
+
+    mock_http(handler)
+    result = rr.fetch_postings([_profile()], "k", now=NOW)
+
+    assert len(calls) == 2  # 0s, 11s — the 3rd would start at 22s, past the 20s budget
+    assert len(result.postings) == 2 * rr.ITEMS_PER_PAGE
+    # Only one profile ran, so nothing was "skipped" — its OWN later pages
+    # were cut off, and the message must say that rather than the multi-
+    # profile wording.
+    assert result.error == "Remote Rocketship was too slow; later postings were not fetched."
+
+
+def test_last_profile_reclaims_budget_earlier_empty_profiles_did_not_spend(mock_http):
+    """Regression: without reclaiming, _profile_budget_shares(4) caps every
+    profile — including the last — at MAX_POSTINGS // 4 (15), even when a/b/c
+    matched nothing and left their whole share of the budget unspent. The
+    fix recomputes each profile's share from what remains, so profile d can
+    still reach the fetch-wide MAX_POSTINGS ceiling."""
+
+    def handler(request):
+        filters = json.loads(request.content)["filters"]
+        keyword, page = filters["keywordFilters"][0], filters["page"]
+        if keyword != "kw-d":
+            return httpx.Response(200, json={"jobOpenings": []})
+        openings = [_opening(url=f"https://acme.example/d/{page}-{i}") for i in range(rr.ITEMS_PER_PAGE)]
+        return httpx.Response(200, json={"jobOpenings": openings})
+
+    mock_http(handler)
+    profiles = [
+        _profile(name="a", keywords=["kw-a"]),
+        _profile(name="b", keywords=["kw-b"]),
+        _profile(name="c", keywords=["kw-c"]),
+        _profile(name="d", keywords=["kw-d"]),
+    ]
+    result = rr.fetch_postings(profiles, "k", now=NOW)
+
+    d_postings = [p for p in result.postings if p.profile == "d"]
+    assert len(d_postings) == rr.MAX_POSTINGS
+
+
+def test_budget_exhaustion_with_more_profiles_remaining_reports_profiles_skipped(mock_http, monkeypatch):
+    """Regression for defect #4: _BUDGET_MESSAGE_PROFILES_SKIPPED is asserted
+    by no other test, so the more_profiles_remain ternary in
+    _fetch_profile_pages could have its two branches silently swapped. Three
+    profiles: a completes (one short request), then the budget is exhausted
+    right as b's own fetch begins — with c still to come, that must report
+    the multi-profile "some profiles were skipped" wording, not the
+    single-profile "pagination cut short" one."""
+    clock = {"t": 0.0}
+    monkeypatch.setattr(rr.time, "monotonic", lambda: clock["t"])
+
+    def handler(request):
+        clock["t"] += 25.0  # exhausts the 20s budget right after profile a's one request
+        return httpx.Response(200, json={"jobOpenings": [_opening()]})
+
+    mock_http(handler)
+    result = rr.fetch_postings(
+        [_profile(name="a"), _profile(name="b"), _profile(name="c")], "k", now=NOW
+    )
+
+    assert result.error == rr._BUDGET_MESSAGE_PROFILES_SKIPPED
+    assert len(result.postings) == 1  # profile a's own posting is kept
+
+
+def test_second_profile_is_still_requested_when_first_could_fill_the_budget_alone(mock_http):
+    """Regression: before per-profile budget shares, one profile whose board
+    held more than MAX_POSTINGS fresh matches would page until MAX_POSTINGS
+    (or MAX_REQUESTS) was hit, and the fetch-wide check in the outer loop
+    would then skip every later profile entirely — it would never even be
+    requested once."""
+    calls_by_keyword = {"kw-a": 0, "kw-b": 0}
+
+    def handler(request):
+        filters = json.loads(request.content)["filters"]
+        keyword = filters["keywordFilters"][0]
+        calls_by_keyword[keyword] += 1
+        page = filters["page"]
+        # An inexhaustible board: every page, for every profile, comes back
+        # full and with URLs nobody has seen yet.
+        openings = [
+            _opening(url=f"https://acme.example/{keyword}/{page}-{i}") for i in range(rr.ITEMS_PER_PAGE)
+        ]
+        return httpx.Response(200, json={"jobOpenings": openings})
+
+    mock_http(handler)
+    result = rr.fetch_postings(
+        [_profile(name="a", keywords=["kw-a"]), _profile(name="b", keywords=["kw-b"])], "k", now=NOW
+    )
+
+    assert calls_by_keyword["kw-b"] > 0
+    assert any(p.profile == "b" for p in result.postings)
+
+
+def test_stall_check_is_scoped_to_the_current_profiles_own_pages(mock_http, monkeypatch):
+    """Regression: _page_is_stalled used to compare a page against the
+    fetch-wide seen_urls, so a profile whose page 1 exactly matched an
+    EARLIER profile's results looked "stalled" and never reached its own
+    later, genuinely new pages."""
+    monkeypatch.setattr(rr, "ITEMS_PER_PAGE", 2)
+    monkeypatch.setattr(rr, "MAX_POSTINGS", 1000)
+    monkeypatch.setattr(rr, "MAX_REQUESTS", 1000)
+
+    shared = [_opening(url="https://acme.example/shared/0"), _opening(url="https://acme.example/shared/1")]
+    profile_b_page2 = [_opening(url="https://acme.example/b/only")]
+
+    def handler(request):
+        filters = json.loads(request.content)["filters"]
+        keyword, page = filters["keywordFilters"][0], filters["page"]
+        if keyword == "kw-a":
+            return httpx.Response(200, json={"jobOpenings": shared if page == 1 else []})
+        # profile b's page 1 exactly duplicates profile a's page 1; its page 2
+        # holds a posting nothing else has returned.
+        return httpx.Response(200, json={"jobOpenings": shared if page == 1 else profile_b_page2})
+
+    mock_http(handler)
+    result = rr.fetch_postings(
+        [_profile(name="a", keywords=["kw-a"]), _profile(name="b", keywords=["kw-b"])], "k", now=NOW
+    )
+
+    assert any(p.url == "https://acme.example/b/only" for p in result.postings)
+
+
+def test_a_board_that_ignores_the_page_param_terminates_instead_of_looping(mock_http):
+    """Defensive: if the board's page filter has no effect, page 2 (and every
+    page after) returns exactly what page 1 did, and dedupe-by-URL finds
+    nothing new. The fetch must stop there rather than loop until a budget or
+    request cap happens to intervene."""
+    same_page = [_opening(url=f"https://acme.example/jobs/{i}") for i in range(rr.ITEMS_PER_PAGE)]
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(200, json={"jobOpenings": same_page})
+
+    mock_http(handler)
+    result = rr.fetch_postings([_profile()], "k", now=NOW)
+
+    assert len(calls) == 2  # page 1, then one repeat that is detected as stalled
+    assert len(result.postings) == rr.ITEMS_PER_PAGE
+
+
+def test_dedupe_by_url_holds_across_pages(mock_http):
+    """A URL repeated on a later page (e.g. a board padding page 2 with some of
+    page 1's results) must not be counted twice, while genuinely new URLs on
+    that same page still are."""
+    page1 = [_opening(url=f"https://acme.example/jobs/{i}") for i in range(rr.ITEMS_PER_PAGE)]
+    page2 = [_opening(url="https://acme.example/jobs/0")] + [
+        _opening(url=f"https://acme.example/jobs/{i}")
+        for i in range(rr.ITEMS_PER_PAGE, rr.ITEMS_PER_PAGE + 3)
+    ]
+
+    def handler(request):
+        page = json.loads(request.content)["filters"]["page"]
+        return httpx.Response(200, json={"jobOpenings": page1 if page == 1 else page2})
+
+    mock_http(handler)
+    result = rr.fetch_postings([_profile()], "k", now=NOW)
+    assert len(result.postings) == rr.ITEMS_PER_PAGE + 3
 
 
 def test_the_api_key_never_appears_in_the_result(mock_http):

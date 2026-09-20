@@ -302,6 +302,7 @@ def test_discovery_coverage_written_via_the_tool_survives_the_wire(client):
             "status": "searched",
             "postingsFound": 5,
             "reason": "",
+            "tier": "",
         }
     ]
 

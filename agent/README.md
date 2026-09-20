@@ -163,6 +163,13 @@ flag that takes precedence; `daily-apply.sh` passes the flags explicitly):
 | `AGENT_MAX_TURNS` | Runaway backstop on the agent loop's turns. Defaults to `400`. Not the operational bound on how much a run does — that is `maxApplicationsPerRun` on the Agents page. Driving one application form through the browser costs 15-25 turns. The last turns are reserved for the model to wind up in. |
 | `AGENT_MAX_TOOL_RESULT_CHARS` | Caps a single MCP tool result's character length at the moment it is inserted into the conversation. Defaults to `24000`. An over-long result — a full-page browser snapshot, a long file read — is truncated with an explicit marker naming how many characters were cut and instructing the model to re-request a narrower view, so it never receives silently partial data. Must be a positive integer. |
 | `AGENT_PROMPT_CACHE` | Toggles Anthropic prompt-cache `cache_control` breakpoints (the tools block plus the first and last message) on the **Anthropic wire only**. Defaults to `true`. Set to `false` to disable caching entirely if runs are spaced further apart than the cache's 5-minute TTL, where the cache-write cost (1.25x) could exceed the savings. Has no effect on the OpenAI-compatible wire, which relies on automatic prefix caching instead. |
+| `AGENT_MAX_TOOL_CONCURRENCY` | Max non-browser tool calls one turn dispatches concurrently against the shared truthcv MCP server. Defaults to `4`. Browser tool calls always run one at a time regardless of this value, because the browser server drives a single Chromium profile with one holder. Must be a positive integer. |
+| `AGENT_SCREENING_MODEL` | Model identifier for the `screen_posting` built-in tool's own, separate provider adapter — an isolated, typically-cheaper subagent call that screens one discovered posting against a job profile's criteria instead of reasoning through every hard filter in the main loop's own context (see `RUNBOOK.md` §5). **Defaults to `AGENT_LLM_MODEL`** (the main model) when unset, so an operator who configures nothing keeps today's behaviour exactly: one model doing both jobs. |
+| `AGENT_SCREENING_PROVIDER` | Logical provider for the screening adapter: `claude`, `codex`, `openrouter`, or `ollama`. Defaults to `AGENT_LLM_PROVIDER` when unset. |
+| `AGENT_SCREENING_WIRE` | Wire protocol for the screening adapter. Defaults to `AGENT_LLM_WIRE` when unset. |
+| `AGENT_SCREENING_API_KEY` | Credential token for the screening adapter. Defaults to `AGENT_LLM_API_KEY` when unset. Never echoed — redacted from all output like `AGENT_LLM_API_KEY`. |
+| `AGENT_SCREENING_BASE_URL` | Base URL for the screening adapter. Defaults to `AGENT_LLM_BASE_URL` when unset. |
+| `AGENT_SCREENING_AUTH_TYPE` | How to present the screening token: `oauth`, `api_key`, or `url`. Defaults to `AGENT_LLM_AUTH_TYPE` when unset. |
 
 **Harness binary.** `HARNESS_CLI` overrides the path to the compiled entry
 point; it defaults to `/app/agent/dist/harness/cli.js`.
@@ -244,10 +251,22 @@ radius of a new server-side tool at zero until it is granted on purpose — plus
 an enumerated allow-list of `browser` MCP server tools (`BROWSER_ALLOWED_TOOL_NAMES`
 in `agent/harness/tools.ts`, mirrored in `agent/mcp.json`'s `browser.allowedTools`):
 only the tool names this RUNBOOK actually calls are granted, not the whole
-upstream `@playwright/mcp` server. The harness fails loudly at startup, before
-any run turn, if one of those allowlisted names is missing from what the
-`browser` server actually advertises — an upstream rename must never silently
-disable a tool mid-run. The harness has no MCP-backed built-in tools of its
+upstream `@playwright/mcp` server. That browser allow-list is itself split
+into a REQUIRED set (the ten tools the RUNBOOK's step-by-step browser
+instructions call directly) and an OPTIONAL set (the four `browser_tab_*`
+tools the `harvest_postings` built-in uses to harvest several boards
+concurrently, each in its own tab). The harness fails loudly at startup,
+before any run turn, if a REQUIRED name is missing from what the `browser`
+server actually advertises — an upstream rename must never silently disable a
+tool mid-run. A missing OPTIONAL tab tool does **not** fail startup: those
+names are this workspace's best guess at what the pinned `@playwright/mcp`
+calls its tab tools — the package is installed into the `browser` image at
+build time and is not vendored here, so the names could not be verified
+against it. When the `browser` server does not advertise them,
+`harvest_postings` degrades to harvesting boards serially, one at a time, in
+the single shared tab, instead of concurrently — same per-board result shape
+and outcome classification, just no concurrency; which mode ran is logged
+(never page content). The harness has no MCP-backed built-in tools of its
 own beyond one narrow exception: `read_runbook_section`, which returns a named
 section of `RUNBOOK.md` from the image and takes no path argument, so it opens
 no general filesystem read. It has no tool for approving an inference: the approve/deny gate

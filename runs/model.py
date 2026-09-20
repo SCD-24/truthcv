@@ -66,10 +66,16 @@ class RunRecord:
     # Per-source discovery coverage: what the agent actually searched this run,
     # not just what it found. Each entry is a dict shaped like:
     #   {"channel": "feed"|"direct"|"dork", "board": str,
-    #    "status": "searched"|"empty"|"login_walled"|"skipped",
-    #    "postings_found": int, "reason": str}
+    #    "status": "searched"|"empty"|"login_walled"|"blocked"|"skipped",
+    #    "postings_found": int, "reason": str, "tier": "api"|"harvest"|"llm"|""}
     # so a run that skipped or was blocked from a source leaves that fact
-    # behind instead of just an absence of postings from it.
+    # behind instead of just an absence of postings from it. "empty" means the
+    # search ran and genuinely matched nothing; "blocked" means the board or
+    # query was reachable but the results could not be read (CAPTCHA, consent
+    # interstitial, bot wall) — the two must never be conflated. "tier" records
+    # which extraction tier produced the postings and is "" when not
+    # applicable; a record stored before "tier" existed loads with it absent
+    # from the dict, which callers must treat the same as "".
     discovery_coverage: list[dict] = field(default_factory=list)
 
     @classmethod

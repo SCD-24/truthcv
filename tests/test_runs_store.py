@@ -221,6 +221,68 @@ def test_add_discovery_coverage_is_a_no_op_for_an_unknown_run(data_dir):
     assert store.add_discovery_coverage("never-started", {"channel": "feed"}) is None
 
 
+def test_record_discovery_coverage_accepts_blocked_status_and_tier(data_dir):
+    """"blocked" (reachable but unreadable — CAPTCHA, consent wall, bot check)
+    is distinct from "empty" (ran and genuinely matched nothing), and the tier
+    that produced the postings is stored alongside it."""
+    tools_runs.start_run(run_id="run-blocked", trigger="scheduled")
+
+    result = tools_runs.record_discovery_coverage(
+        run_id="run-blocked",
+        channel="dork",
+        board="glassdoor",
+        status="blocked",
+        postings_found=0,
+        reason="consent interstitial",
+        tier="harvest",
+    )
+
+    assert result["recorded"] is True
+    entry = store.get("run-blocked").discovery_coverage[0]
+    assert entry["status"] == "blocked"
+    assert entry["tier"] == "harvest"
+
+
+def test_record_discovery_coverage_rejects_an_unknown_tier(data_dir):
+    tools_runs.start_run(run_id="run-bad-tier", trigger="scheduled")
+
+    result = tools_runs.record_discovery_coverage(
+        run_id="run-bad-tier",
+        channel="dork",
+        board="glassdoor",
+        status="searched",
+        tier="scrape",
+    )
+
+    assert result == {"recorded": False}
+    assert store.get("run-bad-tier").discovery_coverage == []
+
+
+def test_legacy_discovery_coverage_entry_without_tier_still_loads(data_dir):
+    """A discovery_coverage entry written before "tier" existed has no such
+    key; loading the record must not choke on its absence."""
+    store.runs_path().parent.mkdir(parents=True, exist_ok=True)
+    legacy = {
+        "id": "legacy-entry-run",
+        "started_at": "2024-01-01T00:00:00+00:00",
+        "status": "running",
+        "discovery_coverage": [
+            {
+                "channel": "feed",
+                "board": "indeed",
+                "status": "searched",
+                "postings_found": 3,
+                "reason": "",
+            }
+        ],
+    }
+    store.runs_path().write_text(json.dumps([legacy]), encoding="utf-8")
+
+    record = store.get("legacy-entry-run")
+    assert record is not None
+    assert "tier" not in record.discovery_coverage[0]
+
+
 def test_legacy_record_without_discovery_coverage_loads_with_empty_list(data_dir):
     store.runs_path().parent.mkdir(parents=True, exist_ok=True)
     legacy = {

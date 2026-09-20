@@ -329,33 +329,132 @@ Google dorking is not the only discovery path, and it is not the first one
 either. Some configured boards are **direct** boards — searched on the
 board's own site instead of via a `site:` dork, because the board has no
 useful dork surface. Your run prompt carries a Direct-search boards block for
-these, with the board's URL, its sign-in URL (if any), and each enabled
-profile's keywords/locations to search with. Work this channel before the
-dork queries. For each one:
+these, with the board's URL and its sign-in URL (if any), plus a separate
+per-profile criteria line naming that profile's `keywords` and `locations`.
+`harvest_postings` (below) takes only a single `keywords` string — it has no
+separate location argument — so **fold a profile's `locations` into the
+`keywords` text you pass it** (e.g. `"backend engineer Berlin"`) rather than
+dropping them. Work this channel before the dork queries.
 
-1. `browser_navigate` to the board's URL.
-2. `browser_snapshot` to read the page and locate its search box.
-3. `browser_type` the profile's keywords into it (and set a location filter
-   if the board offers one) and submit the search.
-4. `browser_snapshot` the results and harvest posting URLs from them, then
-   continue into the normal Applying flow below for each one, exactly as for
-   a dorked result.
+Harvest each direct board with the `harvest_postings` built-in tool instead of
+driving the browser step by step yourself. Pass it one or more `boards`, each
+with the board's `board` name, its search `url`, and optional `keywords` to
+type into the board's own search box — ONE call replaces the whole
+navigate/snapshot/type/snapshot sequence this section used to prescribe. It
+drives the allow-listed browser tools internally and extracts posting URLs by
+matching each known ATS's stable URL shape (Ashby, Greenhouse, Lever,
+Personio) against the accessibility tree `browser_snapshot` returns — never a
+hand-written CSS selector, since boards restyle. It reports, per board, an
+`outcome`: `"searched"` (postings found — this value matches
+`record_discovery_coverage`'s own status vocabulary on purpose, so pass it
+straight through as `status`) plus `tier: "harvest"`; `"empty"` (the search
+ran and genuinely matched nothing); or `"blocked"` (the board was reachable
+but unreadable), which USUALLY also carries a `blockKind`:
 
-If the board puts up a login wall before you can search or apply, do **not**
-wait for a sign-in — a run and a manual sign-in cannot overlap because the
-browser's Chromium profile has a single holder. Call `report_apply_failure`
-with `blocker="login_required"` and the board's sign-in URL, exactly as for a
-login wall hit mid-application (see item 4 under Applying, below) — queuing
-it for the operator to sign in to before the next run — and move on to the
-next board or query.
+- `blockKind: "login"` — a sign-in wall, OR a board whose `url` was itself an
+  obvious sign-in/login/auth page, which `harvest_postings` refuses to
+  navigate at all. Treat this exactly like hitting a login wall yourself (see
+  the next paragraph): call `report_apply_failure` with
+  `blocker="login_required"`, then record this board's coverage with
+  `status="login_walled"` — never `"blocked"`.
+- `blockKind: "wall"` — a CAPTCHA/consent/bot-check interstitial, reported
+  ONLY when the page shows no substantive content of its own; the same
+  wording seen on a page that also shows real content never blocks it — see
+  the raw-snapshot paragraph below.
+- `blockKind: "unreachable"` — a CONFIRMED DNS/connection-level failure (the
+  name did not resolve, the connection was refused), never a merely SLOW
+  page. A board whose navigation failed without one of those confirmed
+  network errors is reported `blocked` with NO `blockKind` at all instead —
+  see the next bullet — so a slow-but-reachable board is never misreported
+  to you as a dead link.
+- No `blockKind` at all — an internal tool failure (a lost browser
+  connection, a `browser_snapshot` call that itself errored, or a navigation
+  failure too generic to confirm as a dead URL), rather than any signal read
+  from the page. Read `note` for what happened; still record this the same
+  as `status="blocked"`.
+
+`blockKind: "wall"` or `"unreachable"` both map to
+`record_discovery_coverage`'s `status="blocked"` as-is; name which one it
+was (or that none was given) in your run report so a dead board URL is never
+confused with a bot wall.
+
+When a board's page plainly had content but the URL-shape extraction matched
+nothing — including a consent/cookie-banner or bot-check phrase seen
+alongside real content, which never on its own discards that content — the
+result also carries the raw snapshot text — read that yourself as the
+LAST-RESORT fallback (an LLM-extraction tier 3 step) only in that one
+ambiguous case; do not fall back to a manual `browser_navigate`/
+`browser_snapshot` pass otherwise, and never for a board `harvest_postings`
+already reported `blocked` — a blocked result never carries a raw snapshot.
+Several boards may be harvested in the same call: when the browser server's
+tab listing can actually be parsed, `harvest_postings` opens each board in
+its own browser tab, sharing the one Chromium profile, and works them
+concurrently, bounded conservatively; when it cannot, every board is instead
+harvested serially, one at a time, in the single shared tab — same per-board
+result shape either way, and the result names when it degraded to serial so
+you can see why. Either way its own execution is serialized against every
+other browser-driving tool call so it never interleaves with one you issue
+yourself. It never drives a sign-in flow through a tab, and an attended
+session the operator opens still takes the browser back from the whole set,
+exactly as it does from a single run (see browser/session-server.js).
+
+If the board puts up a login wall before you can search or apply — including
+a direct board `harvest_postings` reported `blocked` with `blockKind:
+"login"` — do **not** wait for a sign-in — a run and a manual sign-in cannot
+overlap because the browser's Chromium profile has a single holder. Call
+`report_apply_failure` with `blocker="login_required"` and the board's
+sign-in URL, exactly as for a login wall hit mid-application (see item 4
+under Applying, below) — queuing it for the operator to sign in to before the
+next run — and move on to the next board or query.
 
 After every board or query in every channel — feed, direct boards, and dork
 queries alike — call `record_discovery_coverage` with the channel, the board
-(or query), a status (`searched`, `empty`, `login_walled`, or `skipped`), and
-`postings_found`. This is what makes the §9 coverage report possible: a board
-worked but never recorded is indistinguishable, at report time, from one
-never reached at all. Call it even for a board that turned up nothing —
-`empty` is a real, useful status, and skipping the call is never acceptable.
+(or query), a status (`searched`, `empty`, `login_walled`, `blocked`, or
+`skipped`), and `postings_found`. This is what makes the §9 coverage report
+possible: a board worked but never recorded is indistinguishable, at report
+time, from one never reached at all. Call it even for a board that turned up
+nothing — `empty` is a real, useful status, and skipping the call is never
+acceptable.
+
+`empty` and `blocked` mean different things and must not be conflated:
+`empty` means the search actually ran and genuinely matched no postings;
+`blocked` means the board or query was reachable but its results could not be
+read at all — a CAPTCHA, a consent interstitial, a bot check. Reporting a
+blocked board as `empty` hides a broken channel behind a number that looks
+like a clean, searched result. When you found postings, also pass `tier` —
+`api` for a feed-channel posting pulled from a board's own API, `harvest` for
+one collected by working the page directly, or `llm` for one an LLM step
+extracted from otherwise-unstructured results — so the coverage record shows
+which extraction tier actually produced them; leave it `""` when no postings
+were found or a tier does not apply.
+
+### Screening a discovered posting
+
+Once you have a posting's URL, role, company, and full text, screen it with
+the `screen_posting` built-in tool instead of reasoning through every hard
+filter yourself in this conversation. Pass it the posting's `url`, `role`,
+`company`, `postingText`, the matched enabled profile's `profile` name, and
+its `criteria` (the hard filters from §2, rendered as text). It runs the
+screening in an isolated subagent conversation, backed by its own (often
+cheaper) model, and returns a compact verdict, using `record_screening`'s own
+argument names so it can be passed straight through — `verdict` (or a
+`screening_blocker` when the posting could not be read at all),
+`failing_criterion`, `reason`, `remote_arrangement`, and `language_requirement`,
+the last two being the posting's OWN stated values, never the profile's.
+Continue into the Applying steps below only for a posting `screen_posting`
+reports as `passed`.
+
+**`screen_posting` does not replace `record_screening`.** It has no access to
+the screening ledger and writes nothing. You must still call `record_screening`
+yourself for every posting it screens — `rejected`, `deferred`, `passed`, or a
+blocker — exactly as this section and §9 already require, passing the
+verdict `screen_posting` returned straight through: its JSON keys already
+match `record_screening`'s own argument names, so no reshaping is needed. The
+approve/deny gate enforced in `screening/store.py` is unaffected either way:
+it still runs on every `record_screening` call, regardless of which
+conversation reached the verdict.
+
+### Applying to a passed posting
 
 1. Find the role on the **employer's own site** (Ashby / Greenhouse / Personio /
    Lever). Apply there, not through an aggregator.

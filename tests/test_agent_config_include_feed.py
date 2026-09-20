@@ -40,7 +40,7 @@ CONFIG = {
     "companyBoards": [],
     "searchQueries": [],
     "feedPostings": [
-        {"profile": "p", "source": "remoterocketship", "title": "T", "url": "https://x.example/1"}
+        {"profile": "p", "source": "remoterocketship", "title": "T", "url": "https://x.example/1", "tier": "api"}
     ],
     "feedError": "boom",
 }
@@ -137,6 +137,7 @@ def test_job_config_passes_the_feed_through_to_the_shell(server):
     base, _ = server
     payload = json.loads(_run(base, "job_config").stdout)
     assert payload["feedPostings"][0]["url"] == "https://x.example/1"
+    assert payload["feedPostings"][0]["tier"] == "api"
     assert payload["feedError"] == "boom"
 
 
@@ -151,7 +152,7 @@ def test_a_server_that_omits_the_feed_fields_still_yields_valid_job_config(serve
         payload = json.loads(_run(base, "job_config").stdout)
     finally:
         CONFIG["feedPostings"] = [
-            {"profile": "p", "source": "remoterocketship", "title": "T", "url": "https://x.example/1"}
+            {"profile": "p", "source": "remoterocketship", "title": "T", "url": "https://x.example/1", "tier": "api"}
         ]
         CONFIG["feedError"] = "boom"
     assert payload["feedPostings"] == []

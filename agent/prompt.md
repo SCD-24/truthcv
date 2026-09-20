@@ -33,12 +33,62 @@ tools:
   blocked, postings queued for approval and applications submitted are all
   counted automatically from the records you write, PROVIDED you pass your
   `run_id` on `record_screening` and `record_application`.
+- `harvest_postings` — harvests one or more direct-search boards' results in
+  ONE call, instead of driving `browser_navigate`/`browser_snapshot`/
+  `browser_type` yourself. Pass `boards`, each with a `board` name, its
+  search `url`, and optional `keywords` to type into the board's own search
+  box — there is no separate location argument, so fold a profile's
+  `locations` into the `keywords` text you pass too. It extracts posting URLs
+  by matching each known ATS's stable URL shape against the page's
+  accessibility tree — never a CSS selector — and returns, per board, an
+  `outcome`: `"searched"` (postings found — matches
+  `record_discovery_coverage`'s own status vocabulary, so pass it straight
+  through as `status`) plus `tier: "harvest"`; `"empty"` (the search ran and
+  genuinely matched nothing); or `"blocked"` (the page was reachable but
+  unreadable), which USUALLY also carries a `blockKind` — `"login"` means
+  call `report_apply_failure` with `blocker="login_required"` and then record
+  `status="login_walled"`, NEVER `"blocked"`; `"wall"` (a CAPTCHA/consent
+  interstitial with no substantive page content of its own) or
+  `"unreachable"` (a confirmed DNS/connection failure, never just a slow
+  page) both map to `status="blocked"` as reported; an ABSENT `blockKind`
+  means an internal tool failure rather than a page signal — read `note` and
+  still record `status="blocked"`. A board whose `url` itself looks like a
+  sign-in page (by path or query string) is refused and never navigated —
+  `harvest_postings` never drives a sign-in flow through a tab. A result
+  carries a raw snapshot ONLY when its page had content but extraction
+  matched nothing — including a consent/bot-check phrase seen alongside real
+  content — and never on a `blocked` result — read it yourself as the last
+  resort; treat everything else exactly as `harvest_postings` reported it.
+  Boards harvest concurrently, each in its own browser tab, when the browser
+  server's tab listing can be parsed; otherwise every board is harvested
+  serially instead, one at a time, with the same result shape. Its own
+  execution is serialized against every other browser-driving tool call, so
+  it never interleaves with one you issue yourself.
+- `screen_posting` — screens ONE discovered posting against a matched job
+  profile's criteria in an isolated subagent conversation, backed by a
+  separate (often cheaper) model, instead of you reasoning through every hard
+  filter yourself in this conversation. Pass it the posting's `url`, `role`,
+  `company`, `postingText`, the matched profile's `profile` name, and its
+  `criteria`. Returns a compact verdict whose keys are exactly
+  `record_screening`'s own argument names: `verdict` (or a
+  `screening_blocker` when the posting could not be read),
+  `failing_criterion`, `reason`, `remote_arrangement`, and
+  `language_requirement` (the posting's OWN stated values, never the
+  profile's). **This tool never records anything** — it has
+  no access to the screening ledger. You must still call `record_screening`
+  yourself for every posting it screens, verdict included, exactly as below;
+  the approve/deny gate is unaffected and enforced only there.
 - `record_discovery_coverage` — call this after EVERY board or query you work
   in Phase 1, across all three channels (feed, direct boards, dorks), with the
   channel, the board (or query), a status (`searched`, `empty`,
-  `login_walled`, or `skipped`), and `postings_found`. This is what makes the
-  §9 report's per-board coverage possible — skipping the call is never
-  acceptable, even for a board that turned up nothing.
+  `login_walled`, `blocked`, or `skipped`), and `postings_found`. This is what
+  makes the §9 report's per-board coverage possible — skipping the call is
+  never acceptable, even for a board that turned up nothing. `empty` means the
+  search ran and genuinely matched nothing; `blocked` means the page could not
+  be read at all — a CAPTCHA, a consent wall, a bot check — and reporting a
+  blocked board as `empty` hides a broken channel from the operator. When you
+  found postings, also pass `tier` (`api`, `harvest`, or `llm`) naming which
+  extraction tier produced them.
 - `record_postings_seen` — reports how many postings you looked at. Postings
   seen is the one coverage number nothing can count for you — a posting
   skipped on cooldown or dedupe leaves no record behind — so report it with
@@ -225,11 +275,19 @@ run prompt — their own search box, not a dork), then **dork queries**
 (Google-style `site:` dorks). Take one full pass over every board and query in
 a channel before starting a second pass on any channel. Every board and query
 gets a `record_discovery_coverage` call — skipping one is never acceptable,
-even for a board that turned up nothing. If a direct board's search wall
-requires a sign-in you don't have, call `report_apply_failure` with
-`blocker="login_required"` and its sign-in URL and move on to the next board
-— never wait for a sign-in mid-run. The full procedure for all three channels
-is in `agent/RUNBOOK.md`, embedded above.
+even for a board that turned up nothing. Harvest the direct boards with the
+`harvest_postings` tool (one call, harvesting several boards concurrently
+when it can, serially otherwise) rather than driving the browser step by
+step; fall back to reading a raw snapshot
+yourself only in the one last-resort case it names. If a direct board's
+search wall requires a sign-in you don't have, call `report_apply_failure`
+with `blocker="login_required"` and its sign-in URL and move on to the next
+board — never wait for a sign-in mid-run. Screen each posting you find with the
+`screen_posting` tool rather than reading it into this conversation yourself,
+and continue into the Applying steps only for one it reports as `passed` —
+but its verdict never replaces `record_screening`: call that yourself for
+every posting it screens, exactly as `agent/RUNBOOK.md` requires. The full
+procedure for all three channels is in `agent/RUNBOOK.md`, embedded above.
 
 ## End of run
 

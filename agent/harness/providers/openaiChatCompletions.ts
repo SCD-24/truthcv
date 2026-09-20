@@ -74,7 +74,12 @@ function buildBody(request: ModelRequest, opts: OpenAiChatCompletionsOptions): u
     { role: 'system', content: request.systemPrompt },
     ...request.messages.flatMap(toOpenAiMessages),
   ];
-  const body: Record<string, unknown> = { model: opts.model, messages, tools: toOpenAiTools(request.tools) };
+  const body: Record<string, unknown> = { model: opts.model, messages };
+  // Omitted entirely when there are no tools, rather than sent as `[]`: the
+  // OpenRouter/Ollama backends behind this wire reject an empty `tools` array
+  // with HTTP 400, which would fail EVERY screen_posting call (its isolated
+  // conversation carries no tool definitions at all).
+  if (request.tools.length > 0) body['tools'] = toOpenAiTools(request.tools);
   if (request.maxTokens !== undefined) body['max_tokens'] = request.maxTokens;
   if (opts.contextWindow !== undefined) body['options'] = { num_ctx: opts.contextWindow };
   return body;

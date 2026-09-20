@@ -154,11 +154,16 @@ _TOOL_REGISTRY = {
     "record_discovery_coverage": (
         _record_discovery_coverage,
         "Records one board or query's discovery coverage for this run: which channel (feed, "
-        "direct or dork), which board, and its status (searched, empty, login_walled or "
-        "skipped), plus how many postings it found. Call ONE TIME per board or query you "
+        "direct or dork), which board, and its status (searched, empty, login_walled, blocked "
+        "or skipped), plus how many postings it found. Call ONE TIME per board or query you "
         "searched. A board you never call this for is read by the operator as 'not reached', "
         "not as searched-and-empty — so an entry left uncalled is itself an honest coverage "
-        "gap, and a board you never reached must NOT be reported as empty.",
+        "gap, and a board you never reached must NOT be reported as empty. 'empty' means the "
+        "search ran and genuinely matched nothing; 'blocked' means the board or query was "
+        "reachable but the results could not be read (CAPTCHA, consent interstitial, bot wall) "
+        "— reporting a blocked board as empty hides a broken channel. Pass tier (api, harvest "
+        "or llm, or '' when not applicable) to record which extraction tier produced the "
+        "postings.",
     ),
     "record_postings_seen": (
         _record_postings_seen,

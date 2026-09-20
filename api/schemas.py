@@ -399,6 +399,7 @@ class FeedPostingModel(_Camel):
     employment_type: str = ""
     salary_range: str = ""
     posted_at: str = ""
+    tier: str = "api"
 
 
 class JobBoardKeyStatus(_Camel):
@@ -1269,6 +1270,9 @@ class DiscoveryCoverageModel(_Camel):
     status: str = ""
     postings_found: int = 0
     reason: str = ""
+    # Which extraction tier produced the postings: "api", "harvest", "llm",
+    # or "" when not applicable / not recorded.
+    tier: str = ""
 
 
 class BoardBreakdownModel(_Camel):

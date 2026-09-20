@@ -11,6 +11,17 @@
 // /browser-profile at a time, so this server refuses to open a session while a
 // run is in progress, and daily-apply.sh evicts an open session before a run
 // starts. Both halves are required: either alone leaves a race.
+//
+// The agent's harvest_postings built-in (agent/harness/builtins/harvestPostings.ts)
+// opens SEVERAL browser tabs concurrently during a run, but they are all tabs
+// of that ONE @playwright/mcp Chromium process, not additional processes — the
+// checks below (supervisorIdle via agent:9099/status, profileInUse via `ps`)
+// operate at the PROCESS/run level and already know nothing about how many
+// tabs that process has open. So an attended session request is refused (or,
+// on the other side, evicted by daily-apply.sh) for the run as a whole,
+// exactly as before harvest_postings existed — it reclaims the browser from
+// every concurrent harvest tab at once, never from just one, because closing
+// the process closes all of them together.
 
 const http = require("http");
 const fs = require("fs");
