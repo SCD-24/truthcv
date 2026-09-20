@@ -1,19 +1,14 @@
 import { useEffect, useState } from "react";
-import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Button from "@mui/material/Button";
 import Alert from "@mui/material/Alert";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
-import InputAdornment from "@mui/material/InputAdornment";
 import { listConnectionModels, testConnectionProvider } from "../api/client";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { SettingsSection } from "./SettingsModal";
+import { ModelSelect } from "./ModelSelect";
 import type { ConnectionStatus, ModelInfo, RouteChoice } from "../api/types";
-
-/** Sentinel select value that reveals the free-text model field. Mirrors the
- * pattern the old provider panel used for its model field. */
-const CUSTOM_MODEL = "__custom__";
 
 type TestState =
   | { kind: "idle" }
@@ -215,70 +210,32 @@ export function ModelRoutePicker({
         ))}
       </TextField>
 
-      <Box>
-        <TextField
-          select
-          fullWidth
-          label="Model"
-          value={customModel ? CUSTOM_MODEL : model}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === CUSTOM_MODEL) {
-              setCustomModel(true);
-              setModel("");
-              setEffort("");
-            } else {
-              setCustomModel(false);
-              setModel(v);
-              // Reset effort when switching to a model whose capability set differs.
-              const newLevels = models.find((m) => m.id === v)?.effortLevels ?? [];
-              if (effort && !newLevels.includes(effort)) setEffort("");
-            }
-          }}
-          slotProps={{
-            input: {
-              endAdornment: (
-                <InputAdornment position="end" sx={{ mr: 2 }}>
-                  <Button
-                    size="small"
-                    onClick={() => loadModels(connection)}
-                    disabled={modelsLoading || !connection}
-                  >
-                    {modelsLoading && <ButtonSpinner size={12} />}
-                    {modelsLoading ? "Loading…" : "Reload"}
-                  </Button>
-                </InputAdornment>
-              ),
-            },
-          }}
-          helperText={
-            modelsError
-              ? `${modelsError} You can still pick Custom or reload.`
-              : "Pulled live from the connection. Blank uses its default; choose Custom for an id not listed."
+      <ModelSelect
+        models={models}
+        model={model}
+        customModel={customModel}
+        onChange={({ model: v, customModel: isCustom }) => {
+          if (isCustom && !customModel) {
+            // Picking "Custom…" from the list.
+            setCustomModel(true);
+            setModel("");
+            setEffort("");
+          } else if (isCustom) {
+            // Typing in the free-text field.
+            setModel(v);
+          } else {
+            setCustomModel(false);
+            setModel(v);
+            // Reset effort when switching to a model whose capability set differs.
+            const newLevels = models.find((m) => m.id === v)?.effortLevels ?? [];
+            if (effort && !newLevels.includes(effort)) setEffort("");
           }
-        >
-          <MenuItem value="">Provider default</MenuItem>
-          {models.map((m) => (
-            <MenuItem key={m.id} value={m.id}>
-              {m.label}
-            </MenuItem>
-          ))}
-          <MenuItem value={CUSTOM_MODEL}>Custom…</MenuItem>
-        </TextField>
-        {customModel && (
-          <TextField
-            fullWidth
-            type="text"
-            value={model}
-            // eslint-disable-next-line jsx-a11y/no-autofocus
-            autoFocus
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="Exact model id"
-            aria-label="Custom model id"
-            sx={{ mt: 1.5 }}
-          />
-        )}
-      </Box>
+        }}
+        onReload={() => loadModels(connection)}
+        modelsLoading={modelsLoading}
+        modelsError={modelsError}
+        connection={connection}
+      />
 
       {activeEffortLevels.length > 0 && (
         <TextField

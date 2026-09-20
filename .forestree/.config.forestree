@@ -2446,6 +2446,7 @@
       "term": "Application"
     }
   ],
+  "forestreeFormatVersion": false,
   "globalRules": {
     "custom": {
       "accessibility": "",
