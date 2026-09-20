@@ -120,6 +120,91 @@ describe('runLoop', () => {
     expect(toolMessage?.toolResults?.[0]?.content).toContain('truncated');
   });
 
+  it('threads the screening adapter through to a screen_posting tool call', async () => {
+    // The screening adapter is threaded explicitly through RunLoopOptions ->
+    // executeTurnToolCalls -> executeToolCall, never read from any
+    // module-level state, so this proves the wiring actually reaches the
+    // screen_posting branch rather than just documenting the intent.
+    const screenCall: ToolCall = {
+      id: 'sc1',
+      name: 'screen_posting',
+      arguments: {
+        url: 'https://example.com/jobs/1',
+        role: 'Engineer',
+        company: 'Acme',
+        postingText: 'Fully remote.',
+        profile: 'Backend',
+        criteria: 'remote_model: remote',
+      },
+    };
+    const verdictJson = JSON.stringify({
+      verdict: 'passed',
+      screeningBlocker: '',
+      failingCriterion: '',
+      reason: 'ok',
+      remoteArrangement: 'remote',
+      languageRequirement: '',
+    });
+    const screeningAdapter: ProviderAdapter = {
+      async *sendMessage() {
+        yield { type: 'done', stopReason: 'end', message: { role: 'assistant', content: verdictJson } };
+      },
+    };
+    const { adapter } = scriptedAdapter([
+      [
+        { type: 'toolCall', toolCall: screenCall },
+        { type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [screenCall] } },
+      ],
+      [doneEnd],
+    ]);
+    const { pool } = fakePool();
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: [{ role: 'user', content: 'go' }],
+      config: { maxTurns: 5 },
+      sleep: noSleep,
+      screeningAdapter,
+    });
+
+    const toolMessage = result.messages.find((m) => m.role === 'tool');
+    const screenResult = toolMessage?.toolResults?.find((r) => r.toolCallId === 'sc1');
+    expect(screenResult?.isError).toBe(false);
+    expect(JSON.parse(screenResult?.content ?? '{}').verdict).toBe('passed');
+  });
+
+  it('reports screen_posting as unconfigured when no screening adapter is given', async () => {
+    const screenCall: ToolCall = {
+      id: 'sc1',
+      name: 'screen_posting',
+      arguments: {
+        url: 'https://example.com/jobs/1',
+        role: 'Engineer',
+        company: 'Acme',
+        postingText: 'Fully remote.',
+        profile: 'Backend',
+        criteria: 'remote_model: remote',
+      },
+    };
+    const { adapter } = scriptedAdapter([
+      [
+        { type: 'toolCall', toolCall: screenCall },
+        { type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [screenCall] } },
+      ],
+      [doneEnd],
+    ]);
+    const { pool } = fakePool();
+
+    const result = await run(adapter, pool, { maxTurns: 5 });
+
+    const toolMessage = result.messages.find((m) => m.role === 'tool');
+    const screenResult = toolMessage?.toolResults?.find((r) => r.toolCallId === 'sc1');
+    expect(screenResult?.isError).toBe(true);
+    expect(screenResult?.content).toContain('not configured');
+  });
+
   it('retries the same turn on a retryable error and then succeeds', async () => {
     const { adapter, calls } = scriptedAdapter([[retryableError], [doneEnd]]);
     const { pool } = fakePool();
@@ -611,5 +696,226 @@ describe('compaction the provider asks for', () => {
     });
 
     expect(result.stopReason).toBe('end');
+  });
+});
+
+describe('executeTurnToolCalls concurrency (via runLoop)', () => {
+  /** A pending call's resolver, released explicitly by the test. */
+  type Releaser = (result: { content: string; isError?: boolean }) => void;
+
+  /**
+   * A controllable MCP pool: every `callTool` call is deferred until the test
+   * releases it by namespaced name, and per-server in-flight counts are
+   * tracked so a peak above 1 is direct, deterministic evidence of overlap
+   * (no real timers or sleeps involved anywhere).
+   */
+  function controllablePool(tools: NamespacedTool[]) {
+    const active = new Map<string, number>();
+    const peak = new Map<string, number>();
+    const releasers = new Map<string, Releaser>();
+    const callTool = vi.fn((namespacedName: string) => {
+      const server = namespacedName.split('__')[0];
+      const count = (active.get(server) ?? 0) + 1;
+      active.set(server, count);
+      peak.set(server, Math.max(peak.get(server) ?? 0, count));
+      return new Promise((resolve) => {
+        releasers.set(namespacedName, (result) => {
+          active.set(server, (active.get(server) ?? 1) - 1);
+          resolve(result);
+        });
+      });
+    });
+    const release = (name: string, result: { content: string; isError?: boolean } = { content: 'ok', isError: false }) =>
+      releasers.get(name)?.(result);
+    const refreshTools = vi.fn(async () => {});
+    const listTools = () => tools;
+    const pool = { callTool, refreshTools, listTools } as unknown as McpClientPool;
+    return { pool, callTool, release, peak };
+  }
+
+  /** Spin on microtasks (no real timer) until `mock` has been called `count` times. */
+  async function waitUntilCalled(mock: { mock: { calls: unknown[] } }, count: number): Promise<void> {
+    for (let i = 0; i < 10_000 && mock.mock.calls.length < count; i += 1) await Promise.resolve();
+  }
+
+  /** Build a namespaced tool + matching ToolCall for one server/tool pair. */
+  function toolAndCall(serverName: string, toolName: string, id: string): { tool: NamespacedTool; call: ToolCall } {
+    const namespacedName = `${serverName}__${toolName}`;
+    return {
+      tool: { namespacedName, serverName, toolName, description: '', inputSchema: { type: 'object' } },
+      call: { id, name: namespacedName, arguments: {} },
+    };
+  }
+
+  /** A one-turn `toolCalls` script followed by a closing `end` turn. */
+  function turnRequesting(calls: ToolCall[]): HarnessEvent[][] {
+    return [[{ type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: calls } }], [doneEnd]];
+  }
+
+  it('runs several truthcv tool calls concurrently within one turn', async () => {
+    const pairs = ['check_cooldown', 'get_job_profiles', 'get_company_findings'].map((n, i) =>
+      toolAndCall('truthcv', n, `c${i}`),
+    );
+    const { pool, callTool, release, peak } = controllablePool(pairs.map((p) => p.tool));
+    const { adapter } = scriptedAdapter(turnRequesting(pairs.map((p) => p.call)));
+
+    const resultPromise = run(adapter, pool, { maxTurns: 5 });
+    await waitUntilCalled(callTool, pairs.length);
+    expect(peak.get('truthcv')).toBeGreaterThan(1);
+    for (const { call } of pairs) release(call.name);
+
+    await resultPromise;
+  });
+
+  it('returns tool results in request order even when they complete out of order', async () => {
+    const pairs = ['check_cooldown', 'get_job_profiles', 'get_company_findings'].map((n, i) =>
+      toolAndCall('truthcv', n, `c${i}`),
+    );
+    const { pool, callTool, release } = controllablePool(pairs.map((p) => p.tool));
+    const { adapter } = scriptedAdapter(turnRequesting(pairs.map((p) => p.call)));
+
+    const resultPromise = run(adapter, pool, { maxTurns: 5 });
+    await waitUntilCalled(callTool, pairs.length);
+    // Resolve out of request order: third, first, second.
+    release(pairs[2].call.name, { content: 'third', isError: false });
+    release(pairs[0].call.name, { content: 'first', isError: false });
+    release(pairs[1].call.name, { content: 'second', isError: false });
+
+    const result = await resultPromise;
+    const toolMessage = result.messages.find((m) => m.role === 'tool');
+    expect(toolMessage?.toolResults?.map((r) => r.toolCallId)).toEqual(['c0', 'c1', 'c2']);
+    expect(toolMessage?.toolResults?.map((r) => r.content)).toEqual(['first', 'second', 'third']);
+  });
+
+  it('still runs tool calls when maxToolConcurrency is 0, clamped to at least 1', async () => {
+    // A non-positive concurrency must never starve the pool down to zero
+    // workers: that would resolve immediately, leave every call unexecuted,
+    // and ship a sparse tool-results array that a provider adapter
+    // dereferences as a TypeError (see loop.ts's runPool).
+    const pairs = ['check_cooldown', 'get_job_profiles'].map((n, i) => toolAndCall('truthcv', n, `c${i}`));
+    const { pool, callTool, release } = controllablePool(pairs.map((p) => p.tool));
+    const { adapter } = scriptedAdapter(turnRequesting(pairs.map((p) => p.call)));
+
+    const resultPromise = run(adapter, pool, { maxTurns: 5, maxToolConcurrency: 0 });
+    // Clamped to exactly one worker, so the calls run serially: release each
+    // in turn rather than waiting for both to start at once.
+    await waitUntilCalled(callTool, 1);
+    release(pairs[0].call.name);
+    await waitUntilCalled(callTool, 2);
+    release(pairs[1].call.name);
+
+    const result = await resultPromise;
+    const toolMessage = result.messages.find((m) => m.role === 'tool');
+    expect(toolMessage?.toolResults?.map((r) => r.toolCallId)).toEqual(['c0', 'c1']);
+    // Array.prototype.every SKIPS holes, so it would pass on a sparse array;
+    // check length and each index explicitly instead, which does not.
+    const results = toolMessage?.toolResults ?? [];
+    expect(results).toHaveLength(2);
+    for (let i = 0; i < results.length; i += 1) {
+      expect(results[i]).toBeDefined();
+    }
+  });
+
+  it('never overlaps two browser tool calls', async () => {
+    const pairs = ['browser_navigate', 'browser_click'].map((n, i) => toolAndCall('browser', n, `c${i}`));
+    const { pool, callTool, release, peak } = controllablePool(pairs.map((p) => p.tool));
+    const { adapter } = scriptedAdapter(turnRequesting(pairs.map((p) => p.call)));
+
+    const resultPromise = run(adapter, pool, { maxTurns: 5 });
+    await waitUntilCalled(callTool, 1);
+    expect(callTool.mock.calls.length).toBe(1); // the second must not have started yet
+    release(pairs[0].call.name);
+    await waitUntilCalled(callTool, 2);
+    expect(peak.get('browser')).toBe(1);
+    release(pairs[1].call.name);
+
+    await resultPromise;
+  });
+
+  it('never overlaps harvest_postings\' internal browser calls with a model-issued browser call in the same turn', async () => {
+    // harvest_postings is a `builtin`-server tool, not `browser`, but its
+    // execution drives the browser internally via pool.callTool. Before the
+    // fix it was dispatched through the unbounded "other" pool, so its
+    // internal browser__* calls could interleave with a model-issued
+    // browser__browser_click in the same turn — this reproduces exactly that
+    // turn and proves the two now never overlap.
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const browserClick = toolAndCall('browser', 'browser_click', 'c0');
+    const harvestCall: ToolCall = {
+      id: 'c1',
+      name: 'harvest_postings',
+      arguments: { boards: [{ board: 'Acme', url: 'https://acme.example/jobs' }] },
+    };
+    // No tab-management tools advertised, so harvest_postings takes the
+    // degraded serial path: exactly one browser_navigate then one
+    // browser_snapshot call, both internal.
+    const browserTools = [
+      'browser_navigate',
+      'browser_click',
+      'browser_type',
+      'browser_file_upload',
+      'browser_snapshot',
+      'browser_take_screenshot',
+      'browser_wait_for',
+      'browser_press_key',
+      'browser_select_option',
+      'browser_handle_dialog',
+    ].map((toolName) => toolAndCall('browser', toolName, toolName).tool);
+    const { pool, callTool, release, peak } = controllablePool(browserTools);
+    const { adapter } = scriptedAdapter(turnRequesting([browserClick.call, harvestCall]));
+
+    const resultPromise = run(adapter, pool, { maxTurns: 5 });
+    await waitUntilCalled(callTool, 1);
+    expect(callTool.mock.calls[0][0]).toBe('browser__browser_click');
+    release(browserClick.call.name);
+    await waitUntilCalled(callTool, 2);
+    expect(peak.get('browser')).toBe(1); // never more than one browser call in flight
+    expect(callTool.mock.calls[1][0]).toBe('browser__browser_navigate');
+    release('browser__browser_navigate', { content: 'ok', isError: false });
+    await waitUntilCalled(callTool, 3);
+    expect(peak.get('browser')).toBe(1);
+    expect(callTool.mock.calls[2][0]).toBe('browser__browser_snapshot');
+    release('browser__browser_snapshot', { content: 'no jobs found', isError: false });
+
+    await resultPromise;
+    expect(peak.get('browser')).toBe(1);
+    stderrSpy.mockRestore();
+  });
+
+  it('still returns results for the other calls when one call rejects', async () => {
+    const pairs = ['check_cooldown', 'get_job_profiles'].map((n, i) => toolAndCall('truthcv', n, `c${i}`));
+    const callTool = vi.fn((namespacedName: string) =>
+      namespacedName === pairs[0].tool.namespacedName
+        ? Promise.reject(new Error('boom'))
+        : Promise.resolve({ content: 'ok', isError: false }),
+    );
+    const pool = {
+      callTool,
+      refreshTools: vi.fn(async () => {}),
+      listTools: () => pairs.map((p) => p.tool),
+    } as unknown as McpClientPool;
+    const { adapter } = scriptedAdapter(turnRequesting(pairs.map((p) => p.call)));
+
+    const result = await run(adapter, pool, { maxTurns: 5 });
+    const toolMessage = result.messages.find((m) => m.role === 'tool');
+    expect(toolMessage?.toolResults?.[0]).toMatchObject({ toolCallId: 'c0', isError: true });
+    expect(toolMessage?.toolResults?.[0]?.content).toContain('boom');
+    expect(toolMessage?.toolResults?.[1]).toMatchObject({ toolCallId: 'c1', isError: false });
+  });
+
+  it('still latches finish_run when its result arrives after another call completes', async () => {
+    const other = toolAndCall('truthcv', 'check_cooldown', 'c0');
+    const finish = toolAndCall('truthcv', 'finish_run', 'c1');
+    const { pool, callTool, release } = controllablePool([other.tool, finish.tool]);
+    const { adapter } = scriptedAdapter(turnRequesting([other.call, finish.call]));
+
+    const resultPromise = run(adapter, pool, { maxTurns: 5 });
+    await waitUntilCalled(callTool, 2);
+    // The finish_run result arrives LAST, after the other call's result.
+    release(other.call.name, { content: 'ok', isError: false });
+    release(finish.call.name, { content: 'closed', isError: false });
+
+    const result = await resultPromise;
+    expect(result.finishRunExecuted).toBe(true);
   });
 });

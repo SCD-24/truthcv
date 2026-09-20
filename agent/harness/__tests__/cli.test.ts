@@ -369,6 +369,41 @@ describe('runCli token redaction', () => {
     expect(all).not.toContain(token);
     expect(all).toContain('<redacted>');
   });
+
+  // A DIFFERENT --screening-token from --token: a screening-provider error
+  // body echoing it must be redacted from the screen_posting tool result too,
+  // not just from a main-loop provider error (see cli.ts's `redactAll`).
+  it('never echoes a screening token that differs from the main token', async () => {
+    const screeningToken = 'SCREENING-SECRET-456';
+    const screenCall: ToolCall = {
+      id: 'sc1',
+      name: 'screen_posting',
+      arguments: {
+        url: 'https://example.com/jobs/1',
+        role: 'Engineer',
+        company: 'Acme',
+        postingText: 'Fully remote.',
+        profile: 'Backend',
+        criteria: 'remote_model: remote',
+      },
+    };
+    const adapter = scriptedAdapter([
+      [
+        { type: 'toolCall', toolCall: screenCall },
+        { type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [screenCall] } },
+      ],
+      [{ type: 'error', message: `screening provider 401: key=${screeningToken}`, retryable: false }],
+      finishRunTurn,
+      [doneEnd],
+    ]);
+    const { deps, stdout, stderr } = harness(adapter, fakePool());
+
+    await runCli([...BASE_ARGS, '--screening-token', screeningToken, 'go'], {}, deps);
+
+    const all = [...stdout, ...stderr].join('\n');
+    expect(all).not.toContain(screeningToken);
+    expect(all).toContain('<redacted>');
+  });
 });
 
 describe('the context window reaches the loop and the adapter', () => {
@@ -470,6 +505,49 @@ describe('the tool-result cap reaches the loop config', () => {
 
     expect(code).toBe(ExitCode.BadConfig);
     expect(stderr.join('\n')).toContain('--max-tool-result-chars');
+  });
+});
+
+describe('the tool-concurrency cap reaches the loop config', () => {
+  it('accepts a valid --max-tool-concurrency value', async () => {
+    const adapter = scriptedAdapter([finishRunTurn, [doneEnd]]);
+    const { deps } = harness(adapter, fakePool());
+
+    const code = await runCli([...BASE_ARGS, '--max-tool-concurrency', '2', 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.Success);
+  });
+
+  it('accepts AGENT_MAX_TOOL_CONCURRENCY from the environment', async () => {
+    const adapter = scriptedAdapter([finishRunTurn, [doneEnd]]);
+    const { deps } = harness(adapter, fakePool());
+
+    const code = await runCli([...BASE_ARGS, 'go'], { AGENT_MAX_TOOL_CONCURRENCY: '2' }, deps);
+
+    expect(code).toBe(ExitCode.Success);
+  });
+
+  it.each(['0', '-1', 'abc', '1.5'])(
+    'refuses %s as a tool-concurrency cap with a BadConfig exit',
+    async (raw) => {
+      const adapter = scriptedAdapter([[doneEnd]]);
+      const { deps, stderr } = harness(adapter, fakePool());
+
+      const code = await runCli([...BASE_ARGS, '--max-tool-concurrency', raw, 'go'], {}, deps);
+
+      expect(code).toBe(ExitCode.BadConfig);
+      expect(stderr.join('\n')).toContain('--max-tool-concurrency');
+    },
+  );
+
+  it('refuses a bad AGENT_MAX_TOOL_CONCURRENCY with a BadConfig exit', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, stderr } = harness(adapter, fakePool());
+
+    const code = await runCli([...BASE_ARGS, 'go'], { AGENT_MAX_TOOL_CONCURRENCY: '0' }, deps);
+
+    expect(code).toBe(ExitCode.BadConfig);
+    expect(stderr.join('\n')).toContain('--max-tool-concurrency');
   });
 });
 

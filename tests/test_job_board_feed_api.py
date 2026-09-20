@@ -230,3 +230,131 @@ def test_a_feed_failure_does_not_break_the_config_response(client, data_dir, moc
     assert got["feedError"] == "Unable to fetch jobs"
     assert got["profiles"][0]["name"] == "p"
     assert got["searchQueries"] != []
+
+
+# --- ATS fan-out -------------------------------------------------------
+
+
+def test_the_feed_fans_out_across_remote_rocketship_and_watchlist_ats_boards(client, data_dir, mock_http, monkeypatch):
+    """Two independent sources, merged: Remote Rocketship (key-gated) and each
+    watchlist company's own ATS API (gated only on a recognised ats, no key)."""
+    from companyboards import store as board_store
+
+    _configure(client, monkeypatch)
+    client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
+    board_store.record("Acme", "https://boards.greenhouse.io/acme", "greenhouse")
+
+    def handler(request):
+        if "greenhouse" in request.url.host:
+            return httpx.Response(
+                200, json={"jobs": [{"title": "GH Role", "absolute_url": "https://acme.example/gh/1"}]}
+            )
+        return httpx.Response(
+            200, json={"jobOpenings": [{"roleTitle": "RR Role", "url": "https://acme.example/rr/1"}]}
+        )
+
+    mock_http(handler)
+    got = client.get("/api/agent/config?include_feed=true").json()
+    urls = {p["url"] for p in got["feedPostings"]}
+    assert urls == {"https://acme.example/gh/1", "https://acme.example/rr/1"}
+    assert got["feedError"] == ""
+    assert all(p["tier"] == "api" for p in got["feedPostings"])
+
+
+def test_the_feed_dedupes_across_sources_by_url(client, data_dir, mock_http, monkeypatch):
+    """The same URL surfaced by both sources appears once in the merged feed."""
+    from companyboards import store as board_store
+
+    _configure(client, monkeypatch)
+    client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
+    board_store.record("Acme", "https://boards.greenhouse.io/acme", "greenhouse")
+    shared_url = "https://acme.example/shared/1"
+
+    def handler(request):
+        if "greenhouse" in request.url.host:
+            return httpx.Response(200, json={"jobs": [{"title": "GH Role", "absolute_url": shared_url}]})
+        return httpx.Response(200, json={"jobOpenings": [{"roleTitle": "RR Role", "url": shared_url}]})
+
+    mock_http(handler)
+    got = client.get("/api/agent/config?include_feed=true").json()
+    assert [p["url"] for p in got["feedPostings"]] == [shared_url]
+
+
+def test_one_sources_failure_does_not_drop_the_others_postings(client, data_dir, mock_http, monkeypatch):
+    """Remote Rocketship failing must not empty out a working ATS fetch, and the
+    failure is still surfaced in feed_error."""
+    from companyboards import store as board_store
+
+    _configure(client, monkeypatch)
+    client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
+    board_store.record("Acme", "https://boards.greenhouse.io/acme", "greenhouse")
+
+    def handler(request):
+        if "greenhouse" in request.url.host:
+            return httpx.Response(
+                200, json={"jobs": [{"title": "GH Role", "absolute_url": "https://acme.example/gh/1"}]}
+            )
+        return httpx.Response(500, json={"message": "Unable to fetch jobs"})
+
+    mock_http(handler)
+    got = client.get("/api/agent/config?include_feed=true").json()
+    assert [p["url"] for p in got["feedPostings"]] == ["https://acme.example/gh/1"]
+    assert "Unable to fetch jobs" in got["feedError"]
+
+
+def test_an_ats_board_reaches_the_feed_with_no_key_configured(client, data_dir, mock_http, monkeypatch):
+    """The ATS path needs no key at all — only a recognised company board."""
+    from companyboards import store as board_store
+
+    monkeypatch.delenv("REMOTE_ROCKETSHIP_API_KEY", raising=False)
+    client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
+    board_store.record("Acme", "https://boards.greenhouse.io/acme", "greenhouse")
+
+    mock_http(
+        lambda r: httpx.Response(
+            200, json={"jobs": [{"title": "GH Role", "absolute_url": "https://acme.example/gh/1"}]}
+        )
+    )
+    got = client.get("/api/agent/config?include_feed=true").json()
+    assert [p["url"] for p in got["feedPostings"]] == ["https://acme.example/gh/1"]
+
+
+def test_the_combined_fetch_stays_under_one_shared_wall_clock_ceiling(client, data_dir, mock_http, monkeypatch):
+    """BLOCKING 1: Remote Rocketship and the ATS fetch used to each get their
+    OWN independent 20s budget, so together they could approach 40s against
+    agent-config.js's fixed 30s socket timeout for job_config — the exact
+    abort the feed's never-raise design exists to prevent. They must instead
+    share ONE combined deadline: whatever Remote Rocketship spends comes out
+    of what the ATS fetch is given, not a fresh budget of its own. Proven here
+    by pinning the clock (no real time, no real network) and checking the
+    per-request timeout the ATS fetch is actually given after Remote
+    Rocketship has consumed almost the whole combined ceiling."""
+    from api import routes
+    from companyboards import store as board_store
+    from jobfeeds import ats as ats_module
+
+    _configure(client, monkeypatch)
+    client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
+    board_store.record("Acme", "https://boards.greenhouse.io/acme", "greenhouse")
+
+    clock = {"t": 0.0}
+    monkeypatch.setattr(ats_module.time, "monotonic", lambda: clock["t"])
+    ats_timeouts = []
+
+    def handler(request):
+        if "greenhouse" in request.url.host:
+            ats_timeouts.append(request.extensions["timeout"]["read"])
+            return httpx.Response(200, json={"jobs": []})
+        # Remote Rocketship consumes almost the whole combined ceiling before
+        # the ATS fetch ever gets to run.
+        clock["t"] += routes.FEED_FETCH_BUDGET_SECONDS - 1.0
+        return httpx.Response(200, json={"jobOpenings": []})
+
+    mock_http(handler)
+    client.get("/api/agent/config?include_feed=true")
+
+    assert ats_timeouts, "the ATS fetch never ran"
+    # Only ~1s of the shared ceiling was left — a fresh 20s BUDGET_SECONDS (or
+    # even the 8s per-request TIMEOUT_SECONDS) would mean the ceiling was not
+    # actually shared.
+    assert ats_timeouts[0] == pytest.approx(1.0)

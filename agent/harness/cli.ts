@@ -46,9 +46,11 @@
  * (and `reasoning`/`loopEvent`) events verbatim, a `toolResult` per executed
  * tool, and a final `done` carrying the outcome and exit code.
  *
- * SECURITY: the credential token is NEVER echoed. Every stdout and stderr write
- * passes through {@link redact}, which strips the raw token from the text as a
- * defense-in-depth guard even if an upstream error message happened to embed it.
+ * SECURITY: no configured credential — the main model's token or the
+ * screening model's — is ever echoed. Every stdout and stderr write passes
+ * through {@link redactAll}, which strips every configured credential from
+ * the text as a defense-in-depth guard even if an upstream error message
+ * happened to embed one.
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
@@ -62,7 +64,14 @@ import {
   type Wire,
 } from './providers/registry.js';
 import type { ConversationMessage, HarnessEvent, ProviderAdapter } from './providers/types.js';
-import { EMPTY_TURN_STOP_DETAIL, runLoop, type LoopEvent, type LoopOutcome, type LoopResult } from './loop.js';
+import {
+  EMPTY_TURN_STOP_DETAIL,
+  runLoop,
+  DEFAULT_TOOL_CONCURRENCY,
+  type LoopEvent,
+  type LoopOutcome,
+  type LoopResult,
+} from './loop.js';
 import { checkAdvertisedBrowserTools } from './tools.js';
 
 /** The CLI's process exit codes; see the module comment for the full contract. */
@@ -145,6 +154,13 @@ export interface CliConfig {
    */
   maxToolResultChars: number;
   /**
+   * Max non-browser tool calls one turn dispatches concurrently. Browser
+   * calls always run one at a time regardless of this value (see loop.ts's
+   * `BROWSER_SERVER_NAME`). Defaults to loop.ts's `DEFAULT_TOOL_CONCURRENCY`
+   * when unset.
+   */
+  maxToolConcurrency: number;
+  /**
    * Whether Anthropic prompt-cache `cache_control` breakpoints are placed on
    * the wire. An escape hatch: false fully disables caching (Anthropic wire
    * only; no effect on the OpenAI-compatible wire).
@@ -154,6 +170,30 @@ export interface CliConfig {
   outputFile?: string;
   /** Where to write the failure detail on a non-zero exit; omitted to write nothing. */
   reasonFile?: string;
+  /**
+   * Model identifier for the `screen_posting` built-in's own provider adapter
+   * (see `agent/harness/builtins/screenPosting.ts`). Defaults to {@link
+   * CliConfig.model} — the main model — when unset, so an operator who
+   * configures nothing keeps today's behaviour exactly: one model doing both
+   * jobs. Set it to a cheaper model to screen postings in isolated,
+   * lower-cost subagent calls instead.
+   */
+  screeningModel: string;
+  /** Logical provider for the screening adapter. Defaults to {@link
+   * CliConfig.provider} when unset. */
+  screeningProvider: Provider;
+  /** Wire protocol for the screening adapter. Defaults to {@link
+   * CliConfig.wire} when unset. */
+  screeningWire: Wire;
+  /** Credential token for the screening adapter. Defaults to {@link
+   * CliConfig.token} when unset. */
+  screeningToken: string;
+  /** Base URL for the screening adapter. Defaults to {@link
+   * CliConfig.baseUrl} when unset. */
+  screeningBaseUrl: string;
+  /** Auth routing for the screening adapter. Defaults to {@link
+   * CliConfig.authType} when unset. */
+  screeningAuthType?: 'oauth' | 'api_key' | 'url';
 }
 
 /**
@@ -298,6 +338,20 @@ function resolveMaxToolResultChars(flag: string | undefined, envVal: string | un
 }
 
 /**
+ * Parse `--max-tool-concurrency`/`AGENT_MAX_TOOL_CONCURRENCY`, defaulting to
+ * loop.ts's `DEFAULT_TOOL_CONCURRENCY` when unset; NaN if invalid. Same shape
+ * as resolveMaxToolResultChars, so an operator-supplied 0 or negative value is
+ * caught here by validateConfig rather than reaching runPool, which only
+ * clamps a value it receives — it cannot tell a deliberate 0 from a bug.
+ */
+function resolveMaxToolConcurrency(flag: string | undefined, envVal: string | undefined): number {
+  const raw = (flag || envVal || '').trim();
+  if (!raw) return DEFAULT_TOOL_CONCURRENCY;
+  if (!/^\d+$/.test(raw)) return Number.NaN;
+  return Number.parseInt(raw, 10);
+}
+
+/**
  * Parse `--prompt-cache`/`AGENT_PROMPT_CACHE` as a default-true escape hatch:
  * any value other than the literal string `'false'` leaves caching on. CLI flag
  * wins over env var wins over the default (on), matching resolveMaxTurns.
@@ -306,6 +360,34 @@ function resolvePromptCache(flag: string | undefined, envVal: string | undefined
   const raw = flag ?? envVal;
   if (raw === undefined || raw === '') return true;
   return raw !== 'false';
+}
+
+/**
+ * Resolve the screening adapter's fields, defaulting every one to the
+ * already-resolved main-model equivalent when unset — the default that keeps
+ * an operator who configures nothing on today's exact behaviour.
+ *
+ * @param f Parsed CLI flags.
+ * @param env The environment providing fallbacks.
+ * @param main The already-resolved main-model fields to fall back to.
+ * @returns The screening-adapter slice of a {@link CliConfig}.
+ */
+function resolveScreeningConfig(
+  f: Record<string, string>,
+  env: NodeJS.ProcessEnv,
+  main: { model: string; provider: Provider; wire: Wire; token: string; baseUrl: string; authType?: CliConfig['authType'] },
+): Pick<
+  CliConfig,
+  'screeningModel' | 'screeningProvider' | 'screeningWire' | 'screeningToken' | 'screeningBaseUrl' | 'screeningAuthType'
+> {
+  return {
+    screeningModel: f['screening-model'] ?? env.AGENT_SCREENING_MODEL ?? main.model,
+    screeningProvider: (f['screening-provider'] ?? env.AGENT_SCREENING_PROVIDER ?? main.provider) as Provider,
+    screeningWire: (f['screening-wire'] ?? env.AGENT_SCREENING_WIRE ?? main.wire) as Wire,
+    screeningToken: f['screening-token'] ?? env.AGENT_SCREENING_API_KEY ?? main.token,
+    screeningBaseUrl: f['screening-base-url'] ?? env.AGENT_SCREENING_BASE_URL ?? main.baseUrl,
+    screeningAuthType: (f['screening-auth-type'] ?? env.AGENT_SCREENING_AUTH_TYPE ?? main.authType) as CliConfig['authType'],
+  };
 }
 
 /**
@@ -324,18 +406,26 @@ export async function resolveConfig(
 ): Promise<CliConfig> {
   const f = parsed.flags;
   const prompt = await resolvePrompt(parsed, io);
+  const model = f.model ?? env.AGENT_LLM_MODEL ?? '';
+  const provider = (f.provider ?? env.AGENT_LLM_PROVIDER ?? '') as Provider;
+  const wire = (f.wire ?? env.AGENT_LLM_WIRE ?? '') as Wire;
+  const token = tokenFrom(f, env);
+  const baseUrl = f['base-url'] ?? env.AGENT_LLM_BASE_URL ?? '';
+  const authType = (f['auth-type'] ?? env.AGENT_LLM_AUTH_TYPE ?? undefined) as CliConfig['authType'];
   return {
     prompt,
-    model: f.model ?? env.AGENT_LLM_MODEL ?? '',
-    provider: (f.provider ?? env.AGENT_LLM_PROVIDER ?? '') as Provider,
-    wire: (f.wire ?? env.AGENT_LLM_WIRE ?? '') as Wire,
-    token: tokenFrom(f, env),
-    baseUrl: f['base-url'] ?? env.AGENT_LLM_BASE_URL ?? '',
-    authType: (f['auth-type'] ?? env.AGENT_LLM_AUTH_TYPE ?? undefined) as CliConfig['authType'],
+    model,
+    provider,
+    wire,
+    token,
+    baseUrl,
+    authType,
+    ...resolveScreeningConfig(f, env, { model, provider, wire, token, baseUrl, authType }),
     mcpConfigPath: f['mcp-config'] ?? env.MCP_CONFIG_PATH ?? 'mcp.json',
     maxTurns: resolveMaxTurns(f['max-turns'], env.AGENT_MAX_TURNS),
     contextWindow: resolveContextWindow(f['context-window'], env.AGENT_CONTEXT_WINDOW),
     maxToolResultChars: resolveMaxToolResultChars(f['max-tool-result-chars'], env.AGENT_MAX_TOOL_RESULT_CHARS),
+    maxToolConcurrency: resolveMaxToolConcurrency(f['max-tool-concurrency'], env.AGENT_MAX_TOOL_CONCURRENCY),
     promptCache: resolvePromptCache(f['prompt-cache'], env.AGENT_PROMPT_CACHE),
     outputFile: f['output-file'] || undefined,
     reasonFile: f['reason-file'] || undefined,
@@ -359,6 +449,19 @@ function validateAuth(config: CliConfig): string[] {
   return config.token ? [] : ['a non-empty --token (or AGENT_LLM_API_KEY) is required for this provider'];
 }
 
+/** Whether the screening adapter's own auth rule is satisfied, mirroring
+ * {@link validateAuth} for the `screen_posting` built-in's provider fields. */
+function validateScreeningAuth(config: CliConfig): string[] {
+  if (config.screeningProvider === 'ollama') {
+    return config.screeningBaseUrl
+      ? []
+      : ['ollama requires a --screening-base-url (or AGENT_SCREENING_BASE_URL) when the screening provider is ollama'];
+  }
+  return config.screeningToken
+    ? []
+    : ['a non-empty --screening-token (or AGENT_SCREENING_API_KEY) is required for this screening provider'];
+}
+
 /**
  * Validate a resolved configuration, returning a list of human-readable
  * problems (empty when the config is usable). Messages NEVER include the token
@@ -376,11 +479,18 @@ export function validateConfig(config: CliConfig): string[] {
   if (!Number.isInteger(config.maxTurns) || config.maxTurns <= 0) errors.push('--max-turns must be a positive integer');
   if (!Number.isInteger(config.maxToolResultChars) || config.maxToolResultChars <= 0)
     errors.push('--max-tool-result-chars must be a positive integer');
+  if (!Number.isInteger(config.maxToolConcurrency) || config.maxToolConcurrency <= 0)
+    errors.push('--max-tool-concurrency must be a positive integer');
   if (!Number.isInteger(config.contextWindow) || config.contextWindow < 0)
     errors.push('--context-window must be a whole number of tokens, digits only (0 or unset means unknown)');
   else if (config.contextWindow > 0 && config.contextWindow < MIN_CONTEXT_WINDOW)
     errors.push(`--context-window must be at least ${MIN_CONTEXT_WINDOW} tokens, or 0/unset for unknown`);
   errors.push(...validateAuth(config));
+  if (!PROVIDERS.includes(config.screeningProvider))
+    errors.push('a valid --screening-provider (claude|codex|openrouter|ollama) is required');
+  if (!WIRES.includes(config.screeningWire))
+    errors.push('a valid --screening-wire (anthropic-messages|openai-chat-completions|openai-responses) is required');
+  errors.push(...validateScreeningAuth(config));
   return errors;
 }
 
@@ -396,6 +506,41 @@ export function validateConfig(config: CliConfig): string[] {
 export function redact(text: string, token: string): string {
   if (!token) return text;
   return text.split(token).join('<redacted>');
+}
+
+/**
+ * Redact every credential in `tokens` out of `text`, in order.
+ *
+ * A run configures more than one credential — the main model's token and,
+ * when the `screen_posting` built-in uses a different provider, the
+ * screening model's own token (`config.screeningToken`) — and BOTH must be
+ * stripped from every line this process writes, not just the one that
+ * happens to authenticate the main loop. A screening provider's error body
+ * can echo the screening token verbatim (e.g. a 401 response), and that
+ * token never otherwise passes through {@link redact} unless it is included
+ * here.
+ *
+ * @param text The text about to be written.
+ * @param tokens Every credential to strip; empty entries are no-ops.
+ * @returns The text with every credential redacted.
+ */
+export function redactAll(text: string, tokens: readonly string[]): string {
+  return tokens.reduce((acc, token) => redact(acc, token), text);
+}
+
+/**
+ * Build the redacting stdout (JSON) and stderr (text) writers for a run,
+ * stripping every credential in `tokens` from everything written.
+ *
+ * @param d The resolved dependencies (supplies `stdout`/`stderr`).
+ * @param tokens Every credential to redact from this run's output.
+ * @returns The redacting {@link Emitter}.
+ */
+function buildEmitter(d: ResolvedDeps, tokens: readonly string[]): Emitter {
+  return {
+    json: (obj) => d.stdout(redactAll(JSON.stringify(obj), tokens)),
+    err: (text) => d.stderr(redactAll(text, tokens)),
+  };
 }
 
 /**
@@ -452,23 +597,25 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv, deps: CliDe
   const d = withDefaults(deps);
   const parsed = parseArgs(argv);
   const token = tokenFrom(parsed.flags, env);
-  const emit: Emitter = {
-    json: (obj) => d.stdout(redact(JSON.stringify(obj), token)),
-    err: (text) => d.stderr(redact(text, token)),
-  };
+  // Only the main token is known this early — config (and its screeningToken)
+  // has not resolved yet, and neither can appear in a config-resolution error.
+  const earlyEmit = buildEmitter(d, [token]);
   let config: CliConfig;
   try {
     config = await resolveConfig(parsed, env, d);
   } catch (err) {
-    emit.err(`configuration error: ${errorMessage(err)}`);
+    earlyEmit.err(`configuration error: ${errorMessage(err)}`);
     return ExitCode.BadConfig;
   }
   const errors = validateConfig(config);
   if (errors.length > 0) {
-    emit.err(`configuration error: ${errors.join('; ')}`);
+    earlyEmit.err(`configuration error: ${errors.join('; ')}`);
     return ExitCode.BadConfig;
   }
-  return runOnce(config, env, d, emit, token);
+  // From here on both credentials are known, so every write is redacted
+  // against the main AND the screening token — see {@link redactAll}.
+  const tokens = [token, config.screeningToken];
+  return runOnce(config, env, d, buildEmitter(d, tokens), tokens);
 }
 
 /**
@@ -478,7 +625,7 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv, deps: CliDe
  * @param env The environment providing fallbacks.
  * @param d The resolved dependencies.
  * @param emit The redacting stdout/stderr writers.
- * @param token The credential token, threaded through for reason-file redaction.
+ * @param tokens Every configured credential, threaded through for reason-file redaction.
  * @returns The process exit code.
  */
 async function runOnce(
@@ -486,14 +633,22 @@ async function runOnce(
   env: NodeJS.ProcessEnv,
   d: ResolvedDeps,
   emit: Emitter,
-  token: string,
+  tokens: readonly string[],
 ): Promise<number> {
   const pool = await tryBuildPool(config, env, d, emit);
   if (typeof pool === 'number') return pool;
   const adapter = d.createAdapter(adapterOptions(config));
-  const outcome = await runAgent(adapter, pool, config, d, emit, token);
+  // Built via the SAME plain factory as the main adapter, from a separate
+  // options object (a separate, cheaper model by default) — createProviderAdapter
+  // holds no shared mutable state, so this instance never disturbs the main
+  // loop's. Threaded explicitly through runAgent -> runLoop -> executeToolCall's
+  // screen_posting branch (never a module-level setter), so which adapter a
+  // call dispatches to never depends on load order or leaks into a later run
+  // in the same process.
+  const screeningAdapter = d.createAdapter(screeningAdapterOptions(config));
+  const outcome = await runAgent(adapter, screeningAdapter, pool, config, d, emit, tokens);
   if (typeof outcome === 'number') return outcome;
-  return report(outcome.result, config, d, emit, token, outcome.getFailureDetail);
+  return report(outcome.result, config, d, emit, tokens, outcome.getFailureDetail);
 }
 
 /** Build and connect the MCP pool, or return an exit code on total failure. */
@@ -527,20 +682,25 @@ async function tryBuildPool(
  * getter on success, or an error exit code.
  *
  * @param adapter The provider adapter.
+ * @param screeningAdapter The `screen_posting` built-in's own provider
+ *   adapter, threaded through to `runLoop` and on into `executeToolCall`'s
+ *   screen_posting branch — never a module-level setter (see `runOnce`'s own
+ *   comment).
  * @param pool The connected MCP pool.
  * @param config The resolved configuration.
  * @param d The resolved dependencies (supplies `writeOutput` for the reason file).
  * @param emit The redacting stdout/stderr writers.
- * @param token The credential token, threaded through for reason-file redaction.
+ * @param tokens Every configured credential, threaded through for reason-file redaction.
  * @returns The loop result and its failure-detail getter, or an error exit code.
  */
 async function runAgent(
   adapter: ProviderAdapter,
+  screeningAdapter: ProviderAdapter,
   pool: McpClientPool,
   config: CliConfig,
   d: ResolvedDeps,
   emit: Emitter,
-  token: string,
+  tokens: readonly string[],
 ): Promise<{ result: LoopResult; getFailureDetail: () => string | undefined } | number> {
   const stream = createEventStream(emit.json);
   try {
@@ -549,16 +709,21 @@ async function runAgent(
       pool,
       systemPrompt: SYSTEM_PROMPT,
       initialMessages: [{ role: 'user', content: config.prompt }],
-      config: { maxTurns: config.maxTurns, maxToolResultChars: config.maxToolResultChars },
+      config: {
+        maxTurns: config.maxTurns,
+        maxToolResultChars: config.maxToolResultChars,
+        maxToolConcurrency: config.maxToolConcurrency,
+      },
       // Omitted entirely when unstated, so the loop's own "no window, no
       // proactive compaction" guard is the single place that decision lives.
       ...(config.contextWindow ? { compactionConfig: { contextWindow: config.contextWindow } } : {}),
+      screeningAdapter,
       onEvent: stream.onEvent,
     });
     return { result, getFailureDetail: stream.getFailureDetail };
   } catch (err) {
     emit.err(`provider error: ${errorMessage(err)}`);
-    await writeReason(config, d, token, `provider error: ${errorMessage(err)}`);
+    await writeReason(config, d, tokens, `provider error: ${errorMessage(err)}`);
     return ExitCode.ProviderError;
   }
 }
@@ -570,7 +735,7 @@ async function runAgent(
  * @param config The resolved configuration.
  * @param d The resolved dependencies (supplies `writeOutput`).
  * @param emit The redacting stdout/stderr writers.
- * @param token The credential token, used to redact the reason-file write.
+ * @param tokens Every configured credential, used to redact the reason-file write.
  * @param getFailureDetail Returns the run's captured failure detail, if any.
  * @returns The process exit code.
  */
@@ -579,7 +744,7 @@ async function report(
   config: CliConfig,
   d: ResolvedDeps,
   emit: Emitter,
-  token: string,
+  tokens: readonly string[],
   getFailureDetail: () => string | undefined,
 ): Promise<number> {
   // A clean end is only a success if the agent actually reported an outcome:
@@ -593,9 +758,9 @@ async function report(
   emit.json({ type: 'done', stopReason: result.stopReason, turns: result.turns, exitCode });
   if (config.outputFile) await d.writeOutput(config.outputFile, finalAssistantText(result.messages));
   if (abandoned) {
-    await writeReason(config, d, token, abandonedReason(getFailureDetail()));
+    await writeReason(config, d, tokens, abandonedReason(getFailureDetail()));
   } else if (exitCode !== ExitCode.Success) {
-    await writeReason(config, d, token, getFailureDetail() ?? `stopped: ${result.stopReason}`);
+    await writeReason(config, d, tokens, getFailureDetail() ?? `stopped: ${result.stopReason}`);
   }
   return exitCode;
 }
@@ -624,15 +789,15 @@ function abandonedReason(detail: string | undefined): string {
  *
  * @param config The resolved configuration (supplies `reasonFile`).
  * @param d The resolved dependencies (supplies `writeOutput`).
- * @param token The credential token, redacted out of the detail before writing.
+ * @param tokens Every configured credential, redacted out of the detail before writing.
  * @param detail The human-readable failure detail to record.
  */
-async function writeReason(config: CliConfig, d: ResolvedDeps, token: string, detail: string): Promise<void> {
+async function writeReason(config: CliConfig, d: ResolvedDeps, tokens: readonly string[], detail: string): Promise<void> {
   if (!config.reasonFile) return;
   try {
     // Redact BEFORE truncating: a 401 body can echo the submitted key, and
     // truncating first could leave a partial key that redaction no longer matches.
-    await d.writeOutput(config.reasonFile, truncateReason(redact(detail, token)));
+    await d.writeOutput(config.reasonFile, truncateReason(redactAll(detail, tokens)));
   } catch {
     // best-effort
   }
@@ -887,6 +1052,25 @@ function adapterOptions(config: CliConfig): ProviderAdapterOptions {
   };
 }
 
+/**
+ * Project a {@link CliConfig} onto the SCREENING adapter's option shape — the
+ * same projection as {@link adapterOptions}, but reading the `screening*`
+ * fields instead. Built via the same {@link createProviderAdapter} plain
+ * factory, so this never disturbs the main adapter built alongside it.
+ */
+function screeningAdapterOptions(config: CliConfig): ProviderAdapterOptions {
+  return {
+    provider: config.screeningProvider,
+    wire: config.screeningWire,
+    model: config.screeningModel,
+    token: config.screeningToken,
+    baseUrl: config.screeningBaseUrl,
+    authType: config.screeningAuthType,
+    ...(config.contextWindow ? { contextWindow: config.contextWindow } : {}),
+    promptCache: config.promptCache,
+  };
+}
+
 /** Resolve the token from `--token`/`AGENT_LLM_API_KEY` (used for redaction too). */
 function tokenFrom(flags: Record<string, string>, env: NodeJS.ProcessEnv): string {
   return flags.token ?? env.AGENT_LLM_API_KEY ?? '';
@@ -939,7 +1123,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     .then((code) => process.exit(code))
     .catch((err) => {
       const raw = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`fatal: ${redact(raw, process.env.AGENT_LLM_API_KEY ?? '')}\n`);
+      const secrets = [process.env.AGENT_LLM_API_KEY ?? '', process.env.AGENT_SCREENING_API_KEY ?? ''];
+      process.stderr.write(`fatal: ${redactAll(raw, secrets)}\n`);
       process.exit(1);
     });
 }

@@ -468,6 +468,43 @@ describe('anthropic prompt caching', () => {
   });
 });
 
+describe('an empty tools list is omitted from the wire, not sent as []', () => {
+  // OpenRouter/Ollama (behind the OpenAI Chat Completions wire) reject a bare
+  // `"tools": []` with HTTP 400 — which would fail EVERY screen_posting call,
+  // since its isolated conversation carries no tool definitions at all.
+  it('Anthropic: omits `tools` for an empty list, keeps it for a non-empty one', async () => {
+    stubFetch(200, { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' });
+    const adapter = createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' });
+    for await (const _ of adapter.sendMessage({ ...request, tools: [] })) void _;
+    const emptyCall = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const emptyBody = JSON.parse((emptyCall[1] as { body: string }).body);
+    expect(emptyBody).not.toHaveProperty('tools');
+
+    stubFetch(200, { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' });
+    await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    const fullCall = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const fullBody = JSON.parse((fullCall[1] as { body: string }).body);
+    expect(fullBody.tools).toBeDefined();
+    expect(fullBody.tools.length).toBeGreaterThan(0);
+  });
+
+  it('OpenAI Chat Completions: omits `tools` for an empty list, keeps it for a non-empty one', async () => {
+    stubFetch(200, { choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }] });
+    const adapter = createOpenAiChatCompletionsAdapter({ apiKey: 'k', baseUrl: 'http://x', model: 'gpt' });
+    for await (const _ of adapter.sendMessage({ ...request, tools: [] })) void _;
+    const emptyCall = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const emptyBody = JSON.parse((emptyCall[1] as { body: string }).body);
+    expect(emptyBody).not.toHaveProperty('tools');
+
+    stubFetch(200, { choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }] });
+    await collect(createOpenAiChatCompletionsAdapter({ apiKey: 'k', baseUrl: 'http://x', model: 'gpt' }));
+    const fullCall = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const fullBody = JSON.parse((fullCall[1] as { body: string }).body);
+    expect(fullBody.tools).toBeDefined();
+    expect(fullBody.tools.length).toBeGreaterThan(0);
+  });
+});
+
 describe('a 200 response that carries no completion', () => {
   // A run died on turn 5 with `stop reason: error` and nothing else in the log.
   // OpenRouter had answered HTTP 200 with an `{"error": ...}` body, so the

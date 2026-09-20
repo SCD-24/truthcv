@@ -69,6 +69,15 @@ interface ServerEntry {
   client?: ConnectedClient;
   rawTools: RawTool[];
   lastError?: string;
+  /**
+   * Bumped by {@link McpClientPool.connectOne} each time it starts a new
+   * connection attempt. A failure captured (via `markErrored`) against an
+   * OLDER generation than the entry's current one has been superseded by a
+   * newer, possibly-healthy reconnect and must not clobber it — that is what
+   * keeps a stale in-flight call's failure from tearing down a client other
+   * in-flight calls still hold.
+   */
+  generation: number;
 }
 
 /**
@@ -83,6 +92,10 @@ export class McpClientPool {
   private readonly servers = new Map<string, ServerEntry>();
   private readonly connect: ClientConnector;
   private toolIndex = new Map<string, NamespacedTool>();
+  /** One shared in-flight connect attempt per server name, so two concurrent
+   * {@link reconnect} calls for the same server coalesce onto one attempt
+   * instead of racing independently. */
+  private readonly connecting = new Map<string, Promise<void>>();
 
   /**
    * @param servers The servers to manage.
@@ -91,13 +104,13 @@ export class McpClientPool {
   constructor(servers: McpServerConfig[], connector: ClientConnector = defaultConnector) {
     this.connect = connector;
     for (const s of servers) {
-      this.servers.set(s.name, { name: s.name, url: s.url, status: 'errored', rawTools: [] });
+      this.servers.set(s.name, { name: s.name, url: s.url, status: 'errored', rawTools: [], generation: 0 });
     }
   }
 
   /** Connect to every server independently, then build the tool index. */
   async connectAll(): Promise<void> {
-    await Promise.all([...this.servers.values()].map((e) => this.connectOne(e)));
+    await Promise.all([...this.servers.values()].map((e) => this.connectShared(e)));
     this.rebuildIndex();
   }
 
@@ -125,7 +138,7 @@ export class McpClientPool {
   async reconnect(name: string): Promise<void> {
     const entry = this.servers.get(name);
     if (!entry) throw new Error(`Unknown MCP server: ${name}`);
-    await this.connectOne(entry);
+    await this.connectShared(entry);
     this.rebuildIndex();
   }
 
@@ -141,7 +154,21 @@ export class McpClientPool {
     return entry ? { name: entry.name, status: entry.status, lastError: entry.lastError } : undefined;
   }
 
+  /**
+   * Run {@link connectOne} for `entry`, sharing one in-flight attempt across
+   * concurrent callers (e.g. two racing {@link reconnect} calls) instead of
+   * letting them start independent attempts that could clobber each other.
+   */
+  private connectShared(entry: ServerEntry): Promise<void> {
+    const inFlight = this.connecting.get(entry.name);
+    if (inFlight) return inFlight;
+    const attempt = this.connectOne(entry).finally(() => this.connecting.delete(entry.name));
+    this.connecting.set(entry.name, attempt);
+    return attempt;
+  }
+
   private async connectOne(entry: ServerEntry): Promise<void> {
+    const generation = ++entry.generation;
     try {
       const client = await this.connect({ name: entry.name, url: entry.url });
       entry.client = client;
@@ -149,29 +176,40 @@ export class McpClientPool {
       entry.lastError = undefined;
       entry.rawTools = (await client.listTools()).tools;
     } catch (err) {
-      this.markErrored(entry, err);
+      this.markErrored(entry, err, generation);
     }
   }
 
   private async relistTools(entry: ServerEntry): Promise<void> {
+    const client = entry.client!;
+    const generation = entry.generation;
     try {
-      entry.rawTools = (await entry.client!.listTools()).tools;
+      entry.rawTools = (await client.listTools()).tools;
     } catch (err) {
-      this.markErrored(entry, err);
+      this.markErrored(entry, err, generation);
     }
   }
 
   private async dispatch(entry: ServerEntry, toolName: string, args: Record<string, unknown>): Promise<ToolCallResult> {
+    const client = entry.client!;
+    const generation = entry.generation;
     try {
-      const res = await entry.client!.callTool({ name: toolName, arguments: args });
+      const res = await client.callTool({ name: toolName, arguments: args });
       return { content: stringifyContent(res.content), isError: res.isError };
     } catch (err) {
-      this.markErrored(entry, err);
+      this.markErrored(entry, err, generation);
       return { content: errorMessage(err), isError: true };
     }
   }
 
-  private markErrored(entry: ServerEntry, err: unknown): void {
+  /**
+   * Tear an entry down after a failure, UNLESS a newer connection attempt has
+   * already superseded the one `expectedGeneration` names — that failure is
+   * stale (from a call still in flight against a client that has since been
+   * replaced by a fresh, possibly-healthy reconnect) and must not clobber it.
+   */
+  private markErrored(entry: ServerEntry, err: unknown, expectedGeneration: number): void {
+    if (entry.generation !== expectedGeneration) return;
     entry.status = 'errored';
     entry.lastError = errorMessage(err);
     entry.client = undefined;

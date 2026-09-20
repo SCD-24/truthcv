@@ -21,7 +21,14 @@ import type {
   ToolResult,
 } from './providers/types.js';
 import type { McpClientPool } from './mcp/client.js';
-import { buildToolRegistry, executeToolCall, DEFAULT_MAX_TOOL_RESULT_CHARS, type RegisteredTool } from './tools.js';
+import {
+  buildToolRegistry,
+  executeToolCall,
+  DEFAULT_MAX_TOOL_RESULT_CHARS,
+  BROWSER_SERVER_NAME,
+  HARVEST_POSTINGS_TOOL_NAME,
+  type RegisteredTool,
+} from './tools.js';
 import { compact, shouldCompact, type CompactionConfig, type TokenUsage } from './compaction.js';
 
 /** An error event narrowed out of the {@link HarnessEvent} union. */
@@ -62,6 +69,13 @@ const DEFAULT_MAX_OVERFLOW_COMPACTIONS = 3;
  * producing usable output.
  */
 const DEFAULT_MAX_EMPTY_TURNS = 3;
+
+/**
+ * Default cap on how many non-browser tool calls one turn dispatches at once.
+ * Conservative on purpose: the truthcv MCP server and its backing state are
+ * shared, so this is concurrency headroom, not a target to max out.
+ */
+export const DEFAULT_TOOL_CONCURRENCY = 4;
 
 /** Base unit for exponential backoff and its jitter, in milliseconds. */
 const BASE_RETRY_DELAY_MS = 1_000;
@@ -144,6 +158,12 @@ export interface LoopConfig {
    * `DEFAULT_MAX_TOOL_RESULT_CHARS` (see tools.ts).
    */
   maxToolResultChars?: number;
+  /**
+   * Max non-browser tool calls one turn dispatches concurrently. Browser
+   * calls always run one at a time regardless of this value — see
+   * {@link BROWSER_SERVER_NAME}. Defaults to `DEFAULT_TOOL_CONCURRENCY` (4).
+   */
+  maxToolConcurrency?: number;
 }
 
 /**
@@ -193,6 +213,13 @@ export interface RunLoopOptions {
   config: LoopConfig;
   /** Optional compaction tuning; compaction runs only with a real contextWindow. */
   compactionConfig?: CompactionConfig;
+  /**
+   * The `screen_posting` built-in's own provider adapter, threaded explicitly
+   * down to {@link executeToolCall}'s screen_posting branch — never read from
+   * any module-level state. Undefined means "not configured": screen_posting
+   * then returns an isError result rather than throwing.
+   */
+  screeningAdapter?: ProviderAdapter;
   /** Optional per-event hook so a CLI can stream progress. Never required. */
   onEvent?: (event: HarnessEvent | LoopEvent) => void;
   /** Injectable sleep so tests need not wait on real timers. Defaults to setTimeout. */
@@ -266,6 +293,9 @@ interface LoopContext {
   /** Present only when the operator stated a context window; the reactive
    * overflow path works without it, since compact() needs no window. */
   compactionConfig?: CompactionConfig;
+  /** The `screen_posting` built-in's own provider adapter; see
+   * {@link RunLoopOptions.screeningAdapter}. */
+  screeningAdapter?: ProviderAdapter;
   onEvent?: (event: HarnessEvent | LoopEvent) => void;
   sleep: (ms: number) => Promise<void>;
 }
@@ -351,7 +381,7 @@ export function backoffDelay(attempt: number, maxRetryDelayMs: number): number {
  * a bound.
  */
 export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
-  const { adapter, pool, systemPrompt, initialMessages, config, compactionConfig, onEvent } = opts;
+  const { adapter, pool, systemPrompt, initialMessages, config, compactionConfig, onEvent, screeningAdapter } = opts;
   const sleep = opts.sleep ?? defaultSleep;
   const state: LoopState = {
     messages: [...initialMessages],
@@ -382,6 +412,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
       registry,
       config,
       compactionConfig,
+      screeningAdapter,
       onEvent,
       sleep,
     });
@@ -643,6 +674,8 @@ async function continueWithTools(done: DoneEvent, state: LoopState, ctx: LoopCon
     calls,
     ctx.registry,
     ctx.config.maxToolResultChars ?? DEFAULT_MAX_TOOL_RESULT_CHARS,
+    ctx.config.maxToolConcurrency ?? DEFAULT_TOOL_CONCURRENCY,
+    ctx.screeningAdapter,
   );
   state.messages.push(toolResultsMessage(results));
   // Latch the run's outcome-reporting call here, at the only place a tool is
@@ -710,16 +743,97 @@ function maybeWarnWrapUp(state: LoopState, ctx: LoopContext): void {
   );
 }
 
-/** Execute each allowed tool call in order through the choke point. */
+/**
+ * Execute this turn's tool calls with bounded concurrency, every one through
+ * the single choke point {@link executeToolCall}. Calls are partitioned by
+ * server: browser-owned calls (and `harvest_postings`, which drives the
+ * browser internally — see {@link partitionByServer}) run strictly one at a
+ * time (one Chromium profile, one holder), while every other call may
+ * overlap up to `concurrency` at once. Results land at each call's own
+ * original index, so
+ * the returned array matches REQUEST order regardless of completion order —
+ * that is what keeps {@link executedFinishRun} and the tool-results message
+ * sent back to the provider correct even when calls finish out of order.
+ */
 async function executeTurnToolCalls(
   pool: McpClientPool,
   calls: ToolCall[],
   registry: RegisteredTool[],
   maxContentChars: number,
+  concurrency: number = DEFAULT_TOOL_CONCURRENCY,
+  screeningAdapter?: ProviderAdapter,
 ): Promise<ToolResult[]> {
-  const results: ToolResult[] = [];
-  for (const call of calls) results.push(await executeToolCall(pool, call, registry, maxContentChars));
+  const results: ToolResult[] = new Array(calls.length);
+  const { browser, other } = partitionByServer(calls, registry);
+  const runOne = (i: number): Promise<void> =>
+    runToolCall(pool, calls, registry, maxContentChars, results, i, screeningAdapter);
+  await Promise.all([runPool(browser, 1, runOne), runPool(other, concurrency, runOne)]);
   return results;
+}
+
+/**
+ * Execute one call by index into `results`. executeToolCall should never
+ * reject (every failure path it has returns an `isError` ToolResult), but this
+ * defensive catch stops an unexpected throw from taking the whole turn's
+ * Promise.all — and every other call's result — down with it.
+ */
+async function runToolCall(
+  pool: McpClientPool,
+  calls: ToolCall[],
+  registry: RegisteredTool[],
+  maxContentChars: number,
+  results: ToolResult[],
+  i: number,
+  screeningAdapter?: ProviderAdapter,
+): Promise<void> {
+  try {
+    results[i] = await executeToolCall(pool, calls[i], registry, maxContentChars, undefined, screeningAdapter);
+  } catch (err) {
+    results[i] = { toolCallId: calls[i].id, content: err instanceof Error ? err.message : String(err), isError: true };
+  }
+}
+
+/** Split call indices into the browser-server group (must stay serial) and
+ * every other group (may overlap). An unregistered call's name resolves to no
+ * server and falls into the concurrent group — executeToolCall reports
+ * "unknown tool" for it regardless of grouping. `harvest_postings` is routed
+ * into the SAME serial group as `browser__*` calls even though it is a
+ * `builtin`-server tool: its execution drives the browser internally over the
+ * one shared MCP connection, so it must never overlap a model-issued browser
+ * call or another harvest_postings call in the same turn — see tools.ts's
+ * `HARVEST_POSTINGS_TOOL_NAME` doc. */
+function partitionByServer(calls: ToolCall[], registry: RegisteredTool[]): { browser: number[]; other: number[] } {
+  const browser: number[] = [];
+  const other: number[] = [];
+  calls.forEach((call, i) => {
+    const tool = registry.find((t) => t.namespacedName === call.name);
+    const sharesBrowserSerialisation = tool?.serverName === BROWSER_SERVER_NAME || tool?.toolName === HARVEST_POSTINGS_TOOL_NAME;
+    (sharesBrowserSerialisation ? browser : other).push(i);
+  });
+  return { browser, other };
+}
+
+/**
+ * Run `task` over `indices` with at most `limit` concurrently in flight.
+ * Indices are pulled from a shared cursor, so one worker's task failing only
+ * drops that worker — the remaining indices are still picked up by the others.
+ */
+async function runPool(indices: number[], limit: number, task: (i: number) => Promise<void>): Promise<void> {
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < indices.length) {
+      const i = indices[cursor++];
+      await task(i);
+    }
+  };
+  // Clamp to at least 1: a non-positive `limit` (an operator-supplied 0, or a
+  // stray negative) must never starve the pool down to zero workers, which
+  // would resolve immediately while leaving every index in `indices`
+  // untouched — the caller's `results` array keeps holes that later blow up
+  // as a TypeError on the wire (see providers/anthropicMessages.ts).
+  const effectiveLimit = Math.max(1, limit);
+  const workerCount = Math.min(effectiveLimit, indices.length);
+  await Promise.all(Array.from({ length: workerCount }, worker));
 }
 
 /**

@@ -1665,6 +1665,21 @@
                   "desc": "Enables Anthropic ephemeral prompt-cache breakpoints on the tool block, the pinned first message and a rolling tail breakpoint. Escape hatch: set to 0 for runs whose turn cadence exceeds the cache TTL.",
                   "example": "1",
                   "key": "AGENT_PROMPT_CACHE"
+                },
+                {
+                  "desc": "Model used by the per-posting screening subagent; falls back to the main model when unset.",
+                  "example": "claude-3-5-haiku-latest",
+                  "key": "AGENT_SCREENING_MODEL"
+                },
+                {
+                  "desc": "Provider for the screening subagent's adapter; falls back to the main provider when unset.",
+                  "example": "claude",
+                  "key": "AGENT_SCREENING_PROVIDER"
+                },
+                {
+                  "desc": "Bound on concurrent tool calls dispatched within one turn. Browser calls remain serialised except in harvest.",
+                  "example": "4",
+                  "key": "AGENT_MAX_PARALLEL_TOOLS"
                 }
               ]
             },
@@ -1940,6 +1955,18 @@
                   "name": "boardBreakdown",
                   "notes": "Per job board (from screening URL host): postingsSeen, forReview, rejected",
                   "type": "BoardBreakdown[]"
+                },
+                {
+                  "flags": "",
+                  "name": "discovery_coverage[].tier",
+                  "notes": "Which extraction tier produced the postings: api, harvest, llm, or empty when not applicable.",
+                  "type": "string"
+                },
+                {
+                  "flags": "",
+                  "name": "discovery_coverage[].status",
+                  "notes": "searched | empty | blocked | login_walled | skipped. 'blocked' means the page was unreadable (CAPTCHA/consent/bot wall), distinct from 'empty'.",
+                  "type": "string"
                 }
               ]
             },
@@ -1987,6 +2014,14 @@
       },
       "id": "services-layer",
       "name": "Services Layer",
+      "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "id": "job-feeds",
+      "name": "Job Feeds",
       "type": "backend"
     }
   ],
@@ -2430,6 +2465,21 @@
       "from": "api",
       "protocol": "HTTP/REST",
       "to": "application-agent"
+    },
+    {
+      "from": "job-feeds",
+      "protocol": "in-process",
+      "to": "secret-store"
+    },
+    {
+      "from": "job-feeds",
+      "protocol": "in-process",
+      "to": "company-research"
+    },
+    {
+      "from": "api",
+      "protocol": "in-process",
+      "to": "job-feeds"
     }
   ],
   "definitions": [
@@ -2719,7 +2769,8 @@
         "run-store",
         "keyword-vocabulary",
         "storage-leaf",
-        "services-layer"
+        "services-layer",
+        "job-feeds"
       ],
       "name": "TruthCV Container (single Docker image)",
       "w": 1861.8301559792023,
@@ -5227,6 +5278,10 @@
     "guardrail-validator": {
       "x": 762,
       "y": 532
+    },
+    "job-feeds": {
+      "x": 200,
+      "y": 200
     },
     "keyword-vocabulary": {
       "x": 816,

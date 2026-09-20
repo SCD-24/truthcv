@@ -22,7 +22,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { NamespacedTool, McpClientPool } from './mcp/client.js';
 import type { ToolCall, ToolDefinition, ToolResult } from './providers/types.js';
+import type { ProviderAdapter } from './providers/types.js';
 import { readRunbookSection, readRunbookSectionTool } from './builtins/readRunbook.js';
+import { screenPosting, screenPostingTool } from './builtins/screenPosting.js';
+import { harvestPostings, harvestPostingsTool, type BrowserToolCall } from './builtins/harvestPostings.js';
 
 /**
  * The 18 truthcv tools granted individually by `daily-apply.sh`, as their bare
@@ -68,11 +71,13 @@ const TRUTHCV_SERVER_NAME = 'truthcv';
  * containment still comes from the container, but the surface the agent may
  * actually call is now narrowed to the tools its RUNBOOK depends on.
  */
-const BROWSER_SERVER_NAME = 'browser';
+export const BROWSER_SERVER_NAME = 'browser';
 
 /**
  * The browser tools the agent's RUNBOOK (agent/RUNBOOK.md) actually instructs
- * it to call, as their bare (un-namespaced) tool names.
+ * it to call, as their bare (un-namespaced) tool names — split into a
+ * {@link BROWSER_REQUIRED_TOOL_NAMES} half and a {@link
+ * BROWSER_OPTIONAL_TOOL_NAMES} half, below.
  *
  * Unlike the truthcv list, the browser server USED TO BE a whole-server grant.
  * Narrowing it to this enumerated set is what makes {@link isToolAllowed}
@@ -81,7 +86,14 @@ const BROWSER_SERVER_NAME = 'browser';
  * is kept in `mcp.json`'s `browser.allowedTools` and mirrored here for the
  * {@link isToolAllowed} check.
  */
-const BROWSER_ALLOWED_TOOL_NAMES = [
+
+/**
+ * The browser tools whose absence must still fail startup loudly, the way
+ * the whole allow-list used to: the original ten this agent's RUNBOOK
+ * step-by-step browser instructions (navigate, click, type, snapshot, ...)
+ * actually call. See {@link checkAdvertisedBrowserTools}.
+ */
+const BROWSER_REQUIRED_TOOL_NAMES = [
   'browser_navigate',
   'browser_click',
   'browser_type',
@@ -93,6 +105,36 @@ const BROWSER_ALLOWED_TOOL_NAMES = [
   'browser_select_option',
   'browser_handle_dialog',
 ] as const;
+
+/**
+ * Tab-management tool names, granted so the harvest_postings built-in can
+ * harvest several boards concurrently, each in its own browser tab, when the
+ * server advertises them — see ./builtins/harvestPostings.ts. Allow-listed
+ * but OPTIONAL, UNLIKE {@link BROWSER_REQUIRED_TOOL_NAMES}: these names are
+ * this workspace's best guess at what upstream `@playwright/mcp` calls its
+ * tab tools, NOT a checked fact — the pinned package is `npm install -g`'d
+ * into the `browser` image at build time (browser/Dockerfile) and is not
+ * vendored anywhere in this workspace, so there was nothing to verify the
+ * names against. A wrong guess must never hard-fail every run, so
+ * {@link checkAdvertisedBrowserTools} does not require these; when the
+ * `browser` server does not advertise them, harvestPostings.ts degrades to
+ * harvesting boards serially, one at a time, in the single shared tab,
+ * instead of concurrently. These names being ADVERTISED is only half the
+ * gate: even when all four are present, harvestPostings.ts additionally
+ * probes the tab-listing TEXT it actually gets back at runtime (its exact
+ * rendering is likewise unverified) before committing to the concurrent
+ * path — see harvestTabs.ts's `probeTabListing`.
+ */
+const BROWSER_OPTIONAL_TOOL_NAMES = ['browser_tab_list', 'browser_tab_new', 'browser_tab_select', 'browser_tab_close'] as const;
+
+/**
+ * The full browser allow-list: {@link BROWSER_REQUIRED_TOOL_NAMES} plus
+ * {@link BROWSER_OPTIONAL_TOOL_NAMES}. Both halves are equally grantable via
+ * {@link isToolAllowed} and equally advertised via {@link buildToolRegistry}
+ * — they differ only in whether their absence fails startup, which only
+ * {@link checkAdvertisedBrowserTools} distinguishes.
+ */
+const BROWSER_ALLOWED_TOOL_NAMES = [...BROWSER_REQUIRED_TOOL_NAMES, ...BROWSER_OPTIONAL_TOOL_NAMES] as const;
 
 /**
  * Tools explicitly denied even if the allow-list would grant them.
@@ -201,6 +243,51 @@ const READ_RUNBOOK_SECTION_TOOL: RegisteredTool = {
 };
 
 /**
+ * The registry entry for the built-in {@link screenPostingTool}. Not
+ * MCP-backed, exactly like {@link READ_RUNBOOK_SECTION_TOOL}: its
+ * `namespacedName` is the bare tool name, and it is dispatched in
+ * {@link executeToolCall} before the allow-list check, bypassing
+ * `pool.callTool` entirely.
+ */
+const SCREEN_POSTING_TOOL: RegisteredTool = {
+  namespacedName: screenPostingTool.name,
+  serverName: BUILTIN_SERVER_NAME,
+  toolName: screenPostingTool.name,
+  definition: screenPostingTool,
+};
+
+/**
+ * The registry entry for the built-in {@link harvestPostingsTool}. Not
+ * MCP-backed, exactly like {@link SCREEN_POSTING_TOOL}, but its dispatch in
+ * {@link executeToolCall} DOES reach `pool.callTool` internally — via a
+ * {@link BrowserToolCall} closure that re-checks the allow-list and resolves
+ * the live namespaced browser tool name for every call it makes.
+ */
+const HARVEST_POSTINGS_TOOL: RegisteredTool = {
+  namespacedName: harvestPostingsTool.name,
+  serverName: BUILTIN_SERVER_NAME,
+  toolName: harvestPostingsTool.name,
+  definition: harvestPostingsTool,
+};
+
+/**
+ * The bare name of the harvest_postings built-in — exported so loop.ts's
+ * `partitionByServer` can route this tool's EXECUTION through the same
+ * serialized browser partition as model-issued `browser__*` calls.
+ *
+ * harvest_postings drives the browser internally, via `pool.callTool`, over
+ * the one shared MCP connection and Chromium profile every `browser__*` call
+ * also shares. Dispatching it through the unbounded "other" concurrency pool
+ * (as an ordinary builtin) let its internal browser_navigate/browser_snapshot
+ * calls interleave with a model-issued browser call in the same turn, or with
+ * another concurrent harvest_postings call's own calls — exactly the
+ * cross-call race the browser partition exists to prevent. Routing it into
+ * the browser partition instead means only one of {browser__* call,
+ * harvest_postings call} is ever in flight at a time, harness-wide.
+ */
+export const HARVEST_POSTINGS_TOOL_NAME = HARVEST_POSTINGS_TOOL.toolName;
+
+/**
  * Default path to the RUNBOOK the built-in reads, resolved relative to THIS
  * compiled file rather than the process cwd. In the built image this file is
  * `/app/agent/dist/harness/tools.js`, so two levels up lands on
@@ -245,18 +332,22 @@ export function buildToolRegistry(mcpTools: ReturnType<McpClientPool['listTools'
         inputSchema: tool.inputSchema,
       },
     }));
-  // Advertise the built-in RUNBOOK reader alongside the MCP-derived tools. It
-  // is appended AFTER the allow-list filter (which would deny its synthetic
-  // server) and before the sort, so the advertised block stays byte-stable.
-  return [...mcp, READ_RUNBOOK_SECTION_TOOL].sort((a, b) =>
+  // Advertise the built-in RUNBOOK reader and screening tool alongside the
+  // MCP-derived tools. Both are appended AFTER the allow-list filter (which
+  // would deny their synthetic server) and before the sort, so the advertised
+  // block stays byte-stable.
+  return [...mcp, READ_RUNBOOK_SECTION_TOOL, SCREEN_POSTING_TOOL, HARVEST_POSTINGS_TOOL].sort((a, b) =>
     a.namespacedName.localeCompare(b.namespacedName),
   );
 }
 
 /**
  * Given the pool's raw (unfiltered) tool list, return which
- * {@link BROWSER_ALLOWED_TOOL_NAMES} are ABSENT from the tools actually
+ * {@link BROWSER_REQUIRED_TOOL_NAMES} are ABSENT from the tools actually
  * advertised by the `browser` server. An empty array means all are present.
+ * {@link BROWSER_OPTIONAL_TOOL_NAMES} are deliberately NOT checked here — a
+ * missing optional (tab) tool must not fail startup; see that constant's own
+ * doc for why.
  *
  * This exists so a call site can fail loudly, at startup, if an upstream
  * `@playwright/mcp` rename silently drops a tool this agent's RUNBOOK depends
@@ -264,11 +355,11 @@ export function buildToolRegistry(mcpTools: ReturnType<McpClientPool['listTools'
  * call comes back as "unknown tool".
  *
  * @param mcpTools The pool's raw {@link McpClientPool.listTools} output.
- * @returns The allowlisted browser tool names the browser server does not
+ * @returns The required browser tool names the browser server does not
  *   advertise; empty when every one is present.
  */
 export function checkAdvertisedBrowserTools(mcpTools: ReturnType<McpClientPool['listTools']>): string[] {
-  return BROWSER_ALLOWED_TOOL_NAMES.filter(
+  return BROWSER_REQUIRED_TOOL_NAMES.filter(
     (name) =>
       !mcpTools.some((tool) => tool.serverName === BROWSER_SERVER_NAME && tool.toolName === name),
   );
@@ -296,6 +387,51 @@ export function isToolAllowed(serverName: string, toolName: string): boolean {
 }
 
 /**
+ * Whether every {@link BROWSER_OPTIONAL_TOOL_NAMES} tab tool is currently
+ * advertised (and so present in `registry`). Decides whether harvest_postings
+ * drives several boards concurrently, each in its own tab, or degrades to
+ * harvesting them serially in the single shared tab — see
+ * ./builtins/harvestPostings.ts.
+ *
+ * @param registry The current tool registry, from {@link buildToolRegistry}.
+ * @returns True when every tab-management tool is available to call.
+ */
+function browserTabToolsAvailable(registry: RegisteredTool[]): boolean {
+  return BROWSER_OPTIONAL_TOOL_NAMES.every((name) =>
+    registry.some((t) => t.serverName === BROWSER_SERVER_NAME && t.toolName === name),
+  );
+}
+
+/**
+ * Build the {@link BrowserToolCall} closure `harvest_postings` drives the
+ * browser through.
+ *
+ * Every call it makes is re-checked against {@link isToolAllowed} exactly as
+ * every other browser call is, and resolved to the CURRENT live namespaced
+ * name via `registry` (rebuilt fresh each turn by loop.ts's
+ * `refreshRegistry`) rather than a name guessed at here \u2014 an unrecognised or
+ * not-yet-advertised browser tool name is refused with an isError result,
+ * never dispatched blind.
+ *
+ * @param pool The MCP client pool to dispatch allowed browser calls through.
+ * @param registry The current tool registry, for resolving namespaced names.
+ * @returns A closure `harvest_postings` can call by bare browser tool name.
+ */
+function browserToolCall(pool: McpClientPool, registry: RegisteredTool[]): BrowserToolCall {
+  return async (toolName, args) => {
+    if (!isToolAllowed(BROWSER_SERVER_NAME, toolName)) {
+      return { content: `Tool '${toolName}' is not permitted by the allow-list.`, isError: true };
+    }
+    const target = registry.find((t) => t.serverName === BROWSER_SERVER_NAME && t.toolName === toolName);
+    if (!target) {
+      return { content: `Browser tool '${toolName}' is not currently available.`, isError: true };
+    }
+    const res = await pool.callTool(target.namespacedName, args);
+    return { content: res.content, isError: res.isError === true };
+  };
+}
+
+/**
  * The ONE choke point every tool call passes through.
  *
  * Looks the call up by its namespaced name in the registry. An unknown tool,
@@ -315,6 +451,14 @@ export function isToolAllowed(serverName: string, toolName: string): boolean {
  * @param maxContentChars Cap on the dispatched result's content, in characters.
  *   Defaults to {@link DEFAULT_MAX_TOOL_RESULT_CHARS}. A plain parameter, never
  *   read from `process.env` here — callers pass the value they want enforced.
+ * @param runbookPath Path to the RUNBOOK the built-in RUNBOOK reader reads.
+ *   Defaults to {@link DEFAULT_RUNBOOK_PATH}; tests override it to point at a
+ *   fixture.
+ * @param screeningAdapter The `screen_posting` built-in's own provider
+ *   adapter, threaded explicitly by the caller (loop.ts's `RunLoopOptions`)
+ *   rather than read from any module-level state — undefined means "not
+ *   configured", which screen_posting reports as an isError result, never a
+ *   throw.
  * @returns The result to feed back to the model.
  */
 export async function executeToolCall(
@@ -323,6 +467,7 @@ export async function executeToolCall(
   registry: RegisteredTool[],
   maxContentChars: number = DEFAULT_MAX_TOOL_RESULT_CHARS,
   runbookPath: string = DEFAULT_RUNBOOK_PATH,
+  screeningAdapter?: ProviderAdapter,
 ): Promise<ToolResult> {
   const tool = registry.find((t) => t.namespacedName === call.name);
   if (!tool) {
@@ -335,6 +480,44 @@ export async function executeToolCall(
   if (tool.namespacedName === READ_RUNBOOK_SECTION_TOOL.namespacedName) {
     const section = typeof call.arguments.section === 'string' ? call.arguments.section : '';
     const result = await readRunbookSection({ section }, runbookPath);
+    return {
+      toolCallId: call.id,
+      content: capToolResultContent(result.content, maxContentChars),
+      isError: result.isError,
+    };
+  }
+  // Likewise dispatched here, BEFORE the allow-list and WITHOUT touching the
+  // MCP pool: screen_posting is not MCP-backed. Unlike the RUNBOOK reader it
+  // needs a live provider adapter, which is not always configured (e.g. a
+  // fresh CliDeps in a test) — an absent one is an isError result, never a
+  // throw.
+  if (tool.namespacedName === SCREEN_POSTING_TOOL.namespacedName) {
+    if (!screeningAdapter) {
+      return {
+        toolCallId: call.id,
+        content: 'screen_posting is not configured: no screening provider adapter is available.',
+        isError: true,
+      };
+    }
+    const result = await screenPosting(call.arguments, screeningAdapter);
+    return {
+      toolCallId: call.id,
+      content: capToolResultContent(result.content, maxContentChars),
+      isError: result.isError,
+    };
+  }
+  // Likewise dispatched here, BEFORE the allow-list and without going through
+  // isToolAllowed itself \u2014 but UNLIKE screen_posting, harvest_postings DOES
+  // reach pool.callTool, via the browserToolCall closure below, which
+  // re-checks isToolAllowed and resolves the live namespaced name for every
+  // underlying browser__* call it makes, so the allow-list still governs
+  // every one of them individually.
+  if (tool.namespacedName === HARVEST_POSTINGS_TOOL.namespacedName) {
+    const result = await harvestPostings(
+      call.arguments,
+      browserToolCall(pool, registry),
+      browserTabToolsAvailable(registry),
+    );
     return {
       toolCallId: call.id,
       content: capToolResultContent(result.content, maxContentChars),

@@ -100,6 +100,7 @@ def record_discovery_coverage(
     status: str = "",
     postings_found: int = 0,
     reason: str = "",
+    tier: str = "",
 ) -> dict:
     """Record one board/query's discovery coverage for this run.
 
@@ -107,13 +108,20 @@ def record_discovery_coverage(
     stays absent from the record rather than getting silently reported as
     "empty" — the operator reads a missing entry as "not reached". ``channel``
     must be one of feed, direct or dork; ``status`` must be one of searched,
-    empty, login_walled or skipped.
+    empty, login_walled, blocked or skipped. ``empty`` means the search ran
+    and genuinely matched nothing; ``blocked`` means the board or query was
+    reachable but the results could not be read — a CAPTCHA, a consent
+    interstitial, a bot wall — and must never be reported as ``empty``.
+    ``tier`` is optional and records which extraction tier produced the
+    postings: one of api, harvest or llm, or "" when not applicable.
     """
     if not run_id:
         return {"recorded": False}
     if channel not in ("feed", "direct", "dork"):
         return {"recorded": False}
-    if status not in ("searched", "empty", "login_walled", "skipped"):
+    if status not in ("searched", "empty", "login_walled", "blocked", "skipped"):
+        return {"recorded": False}
+    if tier not in ("api", "harvest", "llm", ""):
         return {"recorded": False}
     entry = {
         "channel": channel,
@@ -121,6 +129,7 @@ def record_discovery_coverage(
         "status": status,
         "postings_found": postings_found,
         "reason": reason,
+        "tier": tier,
     }
     try:
         record = _runs_store.add_discovery_coverage(run_id, entry)

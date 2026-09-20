@@ -11,7 +11,7 @@ function statusLabel(status: DiscoveryCoverage["status"]): string {
  * order, so the same run always reads the same way. Statuses absent from the
  * channel's entries are omitted rather than shown as "0 empty". */
 function summariseByStatus(entries: DiscoveryCoverage[]): string {
-  const order: DiscoveryCoverage["status"][] = ["searched", "empty", "login_walled", "skipped"];
+  const order: DiscoveryCoverage["status"][] = ["searched", "blocked", "empty", "login_walled", "skipped"];
   const counts = new Map<string, number>();
   for (const entry of entries) {
     counts.set(entry.status, (counts.get(entry.status) ?? 0) + 1);

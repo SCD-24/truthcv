@@ -96,11 +96,13 @@ const wantsFeed = field === "job_config" ? "?include_feed=true" : "";
 try { u = new URL(base.replace(/\/mcp\/?$/, "") + "/api/agent/config" + wantsFeed); } catch { process.exit(1); }
 const http = u.protocol === "https:" ? nodeHttps : nodeHttp;
 // job_config is the one field the app may spend time on: it pulls postings
-// from API-backed job boards (jobfeeds.remoterocketship.BUDGET_SECONDS bounds
-// that at 12s server-side). 5s here would time out on a slow-but-working feed
-// and the run would abort on "config fetch failed" — the exact outcome the
-// feed's own never-raise handling exists to prevent. The scheduler's polls
-// keep the short timeout; they do no such work.
+// from two API-backed job feeds fanned out under ONE shared wall-clock
+// ceiling (api/routes.py's FEED_FETCH_BUDGET_SECONDS = 25s bounds the PAIR
+// combined, not each), leaving only 5s of headroom under this 30s socket
+// timeout. 5s here would time out on a slow-but-working feed and the run
+// would abort on "config fetch failed" — the exact outcome the feed's own
+// never-raise handling exists to prevent. The scheduler's polls keep the
+// short timeout; they do no such work.
 const timeout = field === "job_config" ? 30000 : 5000;
 const req = http.get(u, { timeout }, (res) => {
   if (res.statusCode !== 200) { res.resume(); process.exit(1); }

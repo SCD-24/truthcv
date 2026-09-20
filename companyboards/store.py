@@ -13,6 +13,10 @@ class CompanyBoard:
 
     company: str
     careers_url: str
+    # Free text the agent records via record_company_board (e.g. "greenhouse",
+    # "lever", "ashby", "personio"). This is the dispatch key jobfeeds.ats
+    # matches case-insensitively to pick a fetcher; blank or unrecognised
+    # values are skipped there, not an error.
     ats: str = ""
     status: str = "ok"
     resolved_at: str = ""

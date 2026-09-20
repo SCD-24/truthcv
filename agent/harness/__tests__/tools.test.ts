@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { McpClientPool, NamespacedTool } from '../mcp/client.js';
-import type { ToolCall } from '../providers/types.js';
+import type { HarnessEvent, ProviderAdapter, ToolCall } from '../providers/types.js';
 import {
   buildToolRegistry,
   checkAdvertisedBrowserTools,
@@ -9,8 +9,41 @@ import {
   isToolAllowed,
   type RegisteredTool,
 } from '../tools.js';
+import type { BrowserToolResult } from '../builtins/harvestPostings.js';
 
-/** The 10 browser tools enumerated in the browser allow-list. */
+/** A stub {@link ProviderAdapter} that yields exactly the given script once. */
+function stubScreeningAdapter(script: HarnessEvent[]): ProviderAdapter {
+  return {
+    async *sendMessage() {
+      for (const event of script) yield event;
+    },
+  };
+}
+
+/** A valid screen_posting call's arguments. */
+const SCREEN_POSTING_ARGS = {
+  url: 'https://example.com/jobs/1',
+  role: 'Senior Engineer',
+  company: 'Example Corp',
+  postingText: 'Fully remote, English required.',
+  profile: 'Backend (Remote)',
+  criteria: 'remote_model: remote',
+};
+
+/** A `done` event carrying a valid, passing verdict as its text. */
+function doneWithPassingVerdict(): HarnessEvent {
+  const verdict = JSON.stringify({
+    verdict: 'passed',
+    screeningBlocker: '',
+    failingCriterion: '',
+    reason: 'ok',
+    remoteArrangement: 'remote',
+    languageRequirement: '',
+  });
+  return { type: 'done', stopReason: 'end', message: { role: 'assistant', content: verdict } };
+}
+
+/** The 14 browser tools enumerated in the browser allow-list. */
 const BROWSER_TOOLS = [
   'browser_navigate',
   'browser_click',
@@ -22,6 +55,10 @@ const BROWSER_TOOLS = [
   'browser_press_key',
   'browser_select_option',
   'browser_handle_dialog',
+  'browser_tab_list',
+  'browser_tab_new',
+  'browser_tab_select',
+  'browser_tab_close',
 ];
 
 /** The 18 truthcv tools granted individually by daily-apply.sh. */
@@ -219,6 +256,202 @@ describe('executeToolCall content cap', () => {
   });
 });
 
+describe('buildToolRegistry with screen_posting', () => {
+  it('advertises screen_posting as a built-in, bare-named tool', () => {
+    const registry = buildToolRegistry([]);
+    const entry = registry.find((t) => t.namespacedName === 'screen_posting');
+
+    expect(entry).toBeDefined();
+    expect(entry?.serverName).toBe('builtin');
+    expect(entry?.toolName).toBe('screen_posting');
+  });
+});
+
+describe('executeToolCall dispatching screen_posting', () => {
+  it('never touches pool.callTool and returns the structured verdict', async () => {
+    const callTool = vi.fn(() => {
+      throw new Error('pool.callTool must not be invoked for screen_posting');
+    });
+    const pool = { callTool } as unknown as McpClientPool;
+    const registry = buildToolRegistry([]);
+    const adapter = stubScreeningAdapter([doneWithPassingVerdict()]);
+    const call: ToolCall = { id: 'call-1', name: 'screen_posting', arguments: SCREEN_POSTING_ARGS };
+
+    const result = await executeToolCall(pool, call, registry, undefined, undefined, adapter);
+
+    expect(callTool).not.toHaveBeenCalled();
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.content).verdict).toBe('passed');
+  });
+
+  // No module-level fallback exists any more (the screening adapter is
+  // threaded explicitly by the caller — see loop.ts's RunLoopOptions), so
+  // omitting it always means "unconfigured", regardless of what any other
+  // test in this file has done.
+  it('returns isError without a configured screening adapter, never throwing', async () => {
+    const pool = { callTool: vi.fn() } as unknown as McpClientPool;
+    const registry = buildToolRegistry([]);
+    const call: ToolCall = { id: 'call-1', name: 'screen_posting', arguments: SCREEN_POSTING_ARGS };
+
+    const result = await executeToolCall(pool, call, registry, undefined, undefined, undefined);
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('not configured');
+  });
+
+  it('returns isError when the argument is simply omitted (same default as explicit undefined)', async () => {
+    const pool = { callTool: vi.fn() } as unknown as McpClientPool;
+    const registry = buildToolRegistry([]);
+    const call: ToolCall = { id: 'call-1', name: 'screen_posting', arguments: SCREEN_POSTING_ARGS };
+
+    const result = await executeToolCall(pool, call, registry);
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('not configured');
+  });
+});
+
+describe('buildToolRegistry with harvest_postings', () => {
+  it('advertises harvest_postings as a built-in, bare-named tool', () => {
+    const registry = buildToolRegistry([]);
+    const entry = registry.find((t) => t.namespacedName === 'harvest_postings');
+
+    expect(entry).toBeDefined();
+    expect(entry?.serverName).toBe('builtin');
+    expect(entry?.toolName).toBe('harvest_postings');
+  });
+});
+
+describe('executeToolCall dispatching harvest_postings', () => {
+  // harvest_postings logs a real `harvest_postings.mode` stderr line on every
+  // call in this block — silence it so the run's stderr stays readable.
+  beforeEach(() => {
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A registry advertising harvest_postings plus every browser tool, so the
+   * built-in's internal browser calls resolve to real namespaced names. */
+  function registryWithBrowserTools(omit: readonly string[] = []): RegisteredTool[] {
+    const browserTools: NamespacedTool[] = BROWSER_TOOLS.filter((toolName) => !omit.includes(toolName)).map((toolName) => ({
+      namespacedName: `browser__${toolName}`,
+      serverName: 'browser',
+      toolName,
+      description: 'd',
+      inputSchema: { type: 'object' },
+    }));
+    return buildToolRegistry(browserTools as ReturnType<McpClientPool['listTools']>);
+  }
+
+  it('drives allow-listed browser tools through pool.callTool and returns structured results', async () => {
+    const callTool = vi.fn(async (name: string): Promise<BrowserToolResult> => {
+      if (name === 'browser__browser_tab_new') return { content: '[0]', isError: false };
+      if (name === 'browser__browser_tab_list') return { content: '[0]', isError: false };
+      if (name === 'browser__browser_navigate') return { content: 'ok', isError: false };
+      if (name === 'browser__browser_snapshot') {
+        return { content: '- link "Role" [ref=e1]: https://boards.greenhouse.io/acme/jobs/1', isError: false };
+      }
+      return { content: 'ok', isError: false };
+    });
+    const pool = { callTool } as unknown as McpClientPool;
+    const registry = registryWithBrowserTools();
+    const call: ToolCall = {
+      id: 'call-1',
+      name: 'harvest_postings',
+      arguments: { boards: [{ board: 'Acme', url: 'https://acme.example/jobs' }] },
+    };
+
+    const result = await executeToolCall(pool, call, registry);
+
+    expect(result.isError).toBe(false);
+    expect(callTool).toHaveBeenCalledWith('browser__browser_navigate', expect.anything());
+    const parsed = JSON.parse(result.content);
+    expect(parsed.results[0].outcome).toBe('searched');
+  });
+
+  it('refuses harvest_postings\' own internal browser calls, without touching pool.callTool, when NOTHING is advertised', async () => {
+    // With an EMPTY registry, harvest_postings' internal browserToolCall must
+    // report every browser tool unavailable — including the required
+    // browser_navigate call the degraded serial path makes FIRST — rather
+    // than guessing a namespaced name or reaching pool.callTool for it.
+    const callTool = vi.fn(async () => ({ content: 'should not be reached', isError: false }));
+    const pool = { callTool } as unknown as McpClientPool;
+    const registry = buildToolRegistry([]); // no browser tools advertised at all
+    const call: ToolCall = {
+      id: 'call-1',
+      name: 'harvest_postings',
+      arguments: { boards: [{ board: 'Acme', url: 'https://acme.example/jobs' }] },
+    };
+
+    const result = await executeToolCall(pool, call, registry);
+
+    expect(result.isError).toBe(false); // harvest_postings itself never throws
+    const parsed = JSON.parse(result.content);
+    expect(parsed.results[0].outcome).toBe('blocked');
+    expect(callTool).not.toHaveBeenCalled();
+  });
+
+  it('denies tab-tool name resolution when only ONE tab-management tool is unadvertised, falling back to serial rather than a partial concurrent attempt', async () => {
+    // Only browser_tab_close is missing; every REQUIRED tool plus the other
+    // three tab tools are advertised. tabToolsAvailable requires ALL FOUR, so
+    // this must still take the degraded serial path — no tab-tool call is
+    // ever attempted, denied or otherwise, proving the all-or-nothing gate
+    // works rather than a partially-resolved concurrent harvest.
+    const callTool = vi.fn(async (name: string): Promise<BrowserToolResult> => {
+      if (name === 'browser__browser_navigate') return { content: 'ok', isError: false };
+      if (name === 'browser__browser_snapshot') {
+        return { content: '- link "Role" [ref=e1]: https://boards.greenhouse.io/acme/jobs/1', isError: false };
+      }
+      return { content: 'should not be reached: unexpected tab-tool call', isError: true };
+    });
+    const pool = { callTool } as unknown as McpClientPool;
+    const registry = registryWithBrowserTools(['browser_tab_close']);
+    const call: ToolCall = {
+      id: 'call-1',
+      name: 'harvest_postings',
+      arguments: { boards: [{ board: 'Acme', url: 'https://acme.example/jobs' }] },
+    };
+
+    const result = await executeToolCall(pool, call, registry);
+
+    expect(result.isError).toBe(false);
+    expect(callTool.mock.calls.every(([name]) => !String(name).includes('tab'))).toBe(true);
+    const parsed = JSON.parse(result.content);
+    expect(parsed.results[0].outcome).toBe('searched');
+  });
+
+  it('resolves a real tab-tool name to its namespaced call and confines that board when it errors', async () => {
+    // The concurrent path IS taken (every tab tool advertised), and
+    // browser_tab_new resolves to the real namespaced 'browser__browser_tab_new'
+    // — proving tab-tool name resolution succeeds when the name is genuinely
+    // available, complementing the denial case above.
+    const callTool = vi.fn(async (name: string): Promise<BrowserToolResult> => {
+      // The upfront tab-listing probe must see a parseable listing so the
+      // concurrent path is actually taken — see harvestTabs.ts's
+      // `probeTabListing`.
+      if (name === 'browser__browser_tab_list') return { content: '[0] about:blank', isError: false };
+      if (name === 'browser__browser_tab_new') return { content: 'no more tabs', isError: true };
+      return { content: 'ok', isError: false };
+    });
+    const pool = { callTool } as unknown as McpClientPool;
+    const registry = registryWithBrowserTools();
+    const call: ToolCall = {
+      id: 'call-1',
+      name: 'harvest_postings',
+      arguments: { boards: [{ board: 'Acme', url: 'https://acme.example/jobs' }] },
+    };
+
+    const result = await executeToolCall(pool, call, registry);
+
+    expect(result.isError).toBe(false);
+    expect(callTool).toHaveBeenCalledWith('browser__browser_tab_new', expect.anything());
+    const parsed = JSON.parse(result.content);
+    expect(parsed.results[0].outcome).toBe('blocked');
+  });
+});
+
 describe('checkAdvertisedBrowserTools', () => {
   /** Build a raw namespaced-tool list for the given (server, tool) pairs. */
   function toolsList(pairs: [string, string][]): ReturnType<McpClientPool['listTools']> {
@@ -237,7 +470,7 @@ describe('checkAdvertisedBrowserTools', () => {
     expect(checkAdvertisedBrowserTools(advertised)).toEqual([]);
   });
 
-  it('returns the missing tool name when the browser server drops one', () => {
+  it('returns the missing tool name when the browser server drops a REQUIRED one', () => {
     const advertised = toolsList(
       BROWSER_TOOLS.filter((name) => name !== 'browser_snapshot').map(
         (name) => ['browser', name] as [string, string],
@@ -245,5 +478,14 @@ describe('checkAdvertisedBrowserTools', () => {
     );
     const missing = checkAdvertisedBrowserTools(advertised);
     expect(missing).toContain('browser_snapshot');
+  });
+
+  it('does not report a missing OPTIONAL tab tool as missing — its absence must not fail startup', () => {
+    const advertised = toolsList(
+      BROWSER_TOOLS.filter((name) => name !== 'browser_tab_new').map(
+        (name) => ['browser', name] as [string, string],
+      ),
+    );
+    expect(checkAdvertisedBrowserTools(advertised)).toEqual([]);
   });
 });

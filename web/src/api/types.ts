@@ -511,9 +511,10 @@ export interface RunRecord {
 export interface DiscoveryCoverage {
   channel: "feed" | "direct" | "dork";
   board: string;
-  status: "searched" | "empty" | "login_walled" | "skipped";
+  status: "searched" | "empty" | "login_walled" | "skipped" | "blocked";
   postingsFound: number;
   reason: string;
+  tier?: string;
 }
 
 /** Per-board screening summary for a run. */

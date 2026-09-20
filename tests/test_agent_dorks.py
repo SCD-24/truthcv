@@ -140,6 +140,31 @@ def test_total_is_truncated_at_max_queries():
     assert len(entries) == dorks.MAX_QUERIES  # 10 profiles * 4 default sources = 40 > 24
 
 
+def test_budget_is_shared_round_robin_so_no_profile_is_starved():
+    """Regression: filling MAX_QUERIES profile-by-profile (extend, then check
+    the cap) let early profiles exhaust the whole budget before a later
+    profile ever contributed a query. With enough boards to exceed the cap,
+    every enabled, keyword-bearing profile must still get at least one."""
+    boards = ["ashby", "greenhouse", "lever", "linkedin", "wellfound", "indeed"]
+    profiles = [
+        JobProfile(name=f"p{i}", enabled=True, keywords=["backend"])
+        for i in range(6)
+    ]
+    entries = dorks.compose_queries(profiles, None, boards)
+
+    assert len(entries) == dorks.MAX_QUERIES
+    profile_names = {e["profile"] for e in entries}
+    assert profile_names == {p.name for p in profiles}
+
+
+def test_disabled_and_keywordless_profiles_are_excluded_before_sharing_the_budget():
+    p1 = JobProfile(name="active", enabled=True, keywords=["backend"])
+    p2 = JobProfile(name="disabled", enabled=False, keywords=["backend"])
+    p3 = JobProfile(name="no-keywords", enabled=True, keywords=[])
+    entries = dorks.compose_queries([p1, p2, p3], None, ["ashby"])
+    assert {e["profile"] for e in entries} == {"active"}
+
+
 # ---------------------------------------------------------------------------
 # Posting freshness window
 # ---------------------------------------------------------------------------

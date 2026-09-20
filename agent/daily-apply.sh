@@ -429,19 +429,45 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     # Discovery channels are rendered in the order the RUNBOOK requires them
     # worked: feed, then direct boards, then dork queries.
 
-    # Postings pulled from API-backed job boards (Remote Rocketship) by the
-    # app, using the saved API key. Unlike the composed queries below these are
-    # already-matched postings, not entry points to search from — each line is
-    # a URL the agent can open and screen directly. The feed is a discovery
-    # channel like any other: a posting still passes the full profile criteria
-    # before it drives an application.
+    # Postings pulled from API-backed job boards by the app. Unlike the
+    # composed queries below these are already-matched postings, not entry
+    # points to search from — each line is a URL the agent can open and
+    # screen directly. The feed is a discovery channel like any other: a
+    # posting still passes the full profile criteria before it drives an
+    # application.
+    #
+    # Two distinct groups share this response and must NOT share one claim:
+    # Remote Rocketship postings (jobfeeds.remoterocketship) are matched
+    # against a specific enabled profile and carry that profile's name in
+    # `.profile`, so the "pre-filtered" claim below is broadly true for them —
+    # but not absolutely: filters_for_profile sets
+    # showJobsWithoutSalaryWithMinSalaryFilter, so a posting stating no salary
+    # still comes back even with a salary floor set, and per the board's own
+    # docs a location outside its known set narrows nothing. The header is
+    # worded to not overclaim either. Postings pulled straight from a
+    # watchlist company's own ATS (jobfeeds.ats) carry NO profile — that
+    # fetcher applies only a freshness window, no keyword/location/salary
+    # filtering — so even the hedged claim would be false for them. The two
+    # groups are told apart below by whether `.profile` is set, since only
+    # Remote Rocketship ever sets it; an empty `.profile` renders as "Company
+    # board" rather than an empty "[]".
+    #
     # Field names are the API's camelCase wire shape (api/schemas.py emits by
     # alias), not jobfeeds' snake_case dataclass fields — agent-config.js
-    # passes the response through untouched.
-    FEED="$(jq -r '.feedPostings[]? | "  - [\(.profile)] \(.title)\(if (.company // "") != "" then " — " + .company else "" end)\(if (.salaryRange // "") != "" then " (" + .salaryRange + ")" else "" end)\n    \(.url)"' <<<"$JOB_CONFIG")"
-    if [[ -n "$FEED" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Postings pulled from your API-backed job boards (already filtered by profile keywords, locations and salary floor; open and screen these directly — they are still subject to every profile criterion below):"$'\n'
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$FEED"$'\n'
+    # passes the response through untouched. The source/tier bracket is built
+    # from whichever of the two is present, joined with "/" only when both
+    # are, so tier still renders on a posting with no source (e.g. an older
+    # app image serving no source).
+    FEED_PROFILE_MATCHED="$(jq -r '.feedPostings[]? | select((.profile // "") != "") | "  - [\(.profile)] \(.title)\(if (.company // "") != "" then " — " + .company else "" end)\(if (.salaryRange // "") != "" then " (" + .salaryRange + ")" else "" end)\(if ((.source // "") != "" or (.tier // "") != "") then " [" + ([(.source // ""), (.tier // "")] | map(select(. != "")) | join("/")) + "]" else "" end)\n    \(.url)"' <<<"$JOB_CONFIG")"
+    if [[ -n "$FEED_PROFILE_MATCHED" ]]; then
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Postings pulled from your API-backed job boards (pre-filtered by the board's own keyword and location matching, where the board supports it; a posting naming no salary can still appear even with a salary floor set — open and screen these directly, they are still subject to every profile criterion below):"$'\n'
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$FEED_PROFILE_MATCHED"$'\n'
+    fi
+
+    FEED_COMPANY_BOARDS="$(jq -r '.feedPostings[]? | select((.profile // "") == "") | "  - [Company board] \(.title)\(if (.company // "") != "" then " — " + .company else "" end)\(if (.salaryRange // "") != "" then " (" + .salaryRange + ")" else "" end)\(if ((.source // "") != "" or (.tier // "") != "") then " [" + ([(.source // ""), (.tier // "")] | map(select(. != "")) | join("/")) + "]" else "" end)\n    \(.url)"' <<<"$JOB_CONFIG")"
+    if [[ -n "$FEED_COMPANY_BOARDS" ]]; then
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Postings pulled directly from watchlist companies' own applicant-tracking systems — NOT filtered by profile keywords, locations or salary floor (only a freshness window); screen each fully against your profile criteria before applying:"$'\n'
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$FEED_COMPANY_BOARDS"$'\n'
     fi
 
     # A feed failure is rendered rather than swallowed: an empty feed and a
@@ -662,6 +688,15 @@ RUN_OUTPUT="$RUN_LOG_DIR/run_${STAMP}_${TRUTHCV_RUN_ID}.output"
 # provider error, 4 MCP connection failure, 5 bad configuration, 6 the agent
 # ended cleanly without calling finish_run. They are logged and propagated
 # verbatim below, not remapped.
+#
+# The --screening-* flags configure the screen_posting built-in's own,
+# separate provider adapter (agent/harness/builtins/screenPosting.ts). Each
+# defaults, at the shell level, to the SAME value as its main-model
+# equivalent above (AGENT_SCREENING_MODEL falling back to $AGENT_MODEL, and
+# so on) — so an operator who sets no AGENT_SCREENING_* container env var
+# gets today's exact behaviour: one model doing both jobs. Set the
+# AGENT_SCREENING_* env vars to point screening at a separate, cheaper model
+# instead.
 node "$HARNESS_CLI" \
   --prompt-file "$HARNESS_PROMPT_FILE" \
   --model "$AGENT_MODEL" \
@@ -675,6 +710,12 @@ node "$HARNESS_CLI" \
   --context-window "${AGENT_ROUTE_CONTEXT_WINDOW:-${AGENT_CONTEXT_WINDOW:-0}}" \
   --max-tool-result-chars "${AGENT_MAX_TOOL_RESULT_CHARS:-24000}" \
   --prompt-cache "${AGENT_PROMPT_CACHE:-true}" \
+  --screening-model "${AGENT_SCREENING_MODEL:-$AGENT_MODEL}" \
+  --screening-provider "${AGENT_SCREENING_PROVIDER:-$AGENT_LLM_PROVIDER}" \
+  --screening-wire "${AGENT_SCREENING_WIRE:-$AGENT_LLM_WIRE}" \
+  --screening-token "${AGENT_SCREENING_API_KEY:-$AGENT_LLM_API_KEY}" \
+  --screening-base-url "${AGENT_SCREENING_BASE_URL:-$AGENT_LLM_BASE_URL}" \
+  --screening-auth-type "${AGENT_SCREENING_AUTH_TYPE:-$AGENT_LLM_AUTH_TYPE}" \
   --output-file "$RUN_OUTPUT" \
   --reason-file "$REASON_FILE" \
   </dev/null >>"$RUN_LOG" 2>&1

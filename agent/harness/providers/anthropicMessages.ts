@@ -165,13 +165,18 @@ function buildBody(request: ModelRequest, opts: AnthropicMessagesOptions): unkno
     addCacheControlToLastBlock(anthropicMessages[0]);
     addCacheControlToLastBlock(anthropicMessages[anthropicMessages.length - 1]);
   }
-  return {
+  const body: Record<string, unknown> = {
     model: opts.model,
     max_tokens: request.maxTokens ?? 4096,
     system: buildSystem(request.systemPrompt, opts),
     messages: anthropicMessages,
-    tools: toAnthropicTools(request.tools, cacheEnabled),
   };
+  // Omitted entirely when there are no tools, rather than sent as `[]`: the
+  // OpenAI-compatible wire's own adapter must do the same (openrouter/ollama
+  // reject an empty `tools` array with HTTP 400), and an empty Anthropic
+  // `tools` array carries no cache_control breakpoint anyway.
+  if (request.tools.length > 0) body.tools = toAnthropicTools(request.tools, cacheEnabled);
+  return body;
 }
 
 /** Translate an Anthropic stop_reason to a normalised StopReason. */

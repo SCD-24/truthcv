@@ -12,6 +12,7 @@ recognised extras added on top.
 
 from __future__ import annotations
 
+from itertools import zip_longest
 from urllib.parse import quote_plus
 
 from agentconfig.boards import DEFAULT_BOARD_DOMAINS, is_api_source, resolve_domain, resolve_signin_url
@@ -174,6 +175,26 @@ def compose_profile_queries(
     return results
 
 
+def _round_robin(query_lists: list[list[dict]], limit: int) -> list[dict]:
+    """Interleave several query lists one-per-round, capped at ``limit`` total.
+
+    Filling profiles one at a time (extend, then check the cap) lets an early
+    profile with enough boards consume the whole budget before a later
+    profile ever contributes a query. Taking one query per round from each
+    list in turn instead gives every profile a fair share of its boards
+    before a well-supplied profile gets a second query.
+    """
+    results: list[dict] = []
+    for round_group in zip_longest(*query_lists):
+        for item in round_group:
+            if item is None:
+                continue
+            results.append(item)
+            if len(results) >= limit:
+                return results
+    return results
+
+
 def compose_queries(
     profiles: list[JobProfile],
     max_posting_age_days: int | None = None,
@@ -181,16 +202,18 @@ def compose_queries(
 ) -> list[dict]:
     """Compose dork queries for every enabled, keyword-bearing profile, capped at MAX_QUERIES.
 
+    The MAX_QUERIES budget is distributed round-robin across profiles (see
+    ``_round_robin``) rather than filled profile-by-profile, so a run with
+    enough boards to exceed the cap still gives every enabled, keyword-bearing
+    profile at least one query instead of starving the later ones.
+
     ``sources`` is the operator's globally configured job boards, shared
     across all profiles; ``None`` means defaults only. See
     ``compose_profile_queries`` for what it accepts and how direct-mode
     boards are excluded.
     """
-    results: list[dict] = []
-    for profile in profiles:
-        if not profile.enabled or not profile.keywords:
-            continue
-        results.extend(compose_profile_queries(profile, max_posting_age_days, sources))
-        if len(results) >= MAX_QUERIES:
-            break
-    return results[:MAX_QUERIES]
+    eligible = [p for p in profiles if p.enabled and p.keywords]
+    per_profile = [
+        compose_profile_queries(p, max_posting_age_days, sources) for p in eligible
+    ]
+    return _round_robin(per_profile, MAX_QUERIES)

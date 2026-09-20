@@ -1186,23 +1186,100 @@ def _resolved_job_boards(cfg: agent_config_store.AgentConfig) -> list[dict]:
     return result
 
 
-def _fetch_feed_postings(cfg):
-    """Pull postings for every API-backed board the operator has configured.
+def _target_company_boards(cfg: agent_config_store.AgentConfig) -> list:
+    """Recorded company boards pruned to the current watchlist.
 
-    Only Remote Rocketship exists today; the resolved-source check is what
-    keeps it opt-in, so an operator who has not added the board pays no
-    request even with a key sitting in secrets.enc. The check goes through
-    boards.is_api_source rather than comparing to the catalog key, so a board
-    added as a raw domain reaches the feed like any other.
+    Matched by identity key (not raw casefold equality) so a legal-entity
+    suffix on either side does not exclude a board that is really for a
+    target company. Shared by ``get_agent_config``'s ``company_boards``
+    response field and ``_fetch_feed_postings``'s ATS fan-out, so the two
+    never drift onto different prunings of the same store.
     """
-    from agentconfig import boards
-    from jobfeeds import remoterocketship
+    from companyboards import store as board_store
 
-    if not any(boards.is_api_source(source) for source in cfg.resolved_board_sources()):
-        return remoterocketship.FeedResult()
-    return remoterocketship.fetch_postings(
-        cfg.profiles, remoterocketship.api_key(), cfg.max_posting_age_days
-    )
+    boards_store_boards = board_store.load()
+    board_store.prune(cfg.target_companies)
+    target_company_keys = {company_identity_key(name) for name in cfg.target_companies}
+    return [
+        board for board in boards_store_boards.values()
+        if company_identity_key(board.company) in target_company_keys
+    ]
+
+
+def _merge_feed_results(*results):
+    """Merge several ``FeedResult``s into one, de-duplicated by URL.
+
+    One source failing must not empty out a working one, so every result's
+    postings are kept regardless of whether that same result also carries an
+    error; the errors themselves are joined so a simultaneous failure of more
+    than one source is not silently reduced to just the first.
+    """
+    from jobfeeds import FeedResult
+
+    postings = []
+    seen_urls = set()
+    errors = []
+    for result in results:
+        for posting in result.postings:
+            if posting.url and posting.url not in seen_urls:
+                seen_urls.add(posting.url)
+                postings.append(posting)
+        if result.error:
+            errors.append(result.error)
+    return FeedResult(postings=postings, error=" ".join(errors))
+
+
+# Combined wall-clock ceiling for BOTH the Remote Rocketship and per-company
+# ATS fetches TOGETHER, not each source's own separate budget. agent/agent-
+# config.js gives the job_config request a fixed 30s socket timeout and
+# treats a timeout as a hard failure: it destroys the request and calls
+# process.exit(1), discarding the whole config — profiles, feed, company
+# boards, and dorks. Each fetcher's own BUDGET_SECONDS (20.0s) was sized on
+# the assumption it was the ONLY fetch running; fanning out to two
+# independent fetchers with independent budgets can now approach 40s.
+# Threading this ONE shared deadline into both callers instead keeps them
+# together under a single ceiling: whatever the first fetcher spends comes
+# out of what the second is given. 25s leaves 5s of headroom under the 30s
+# socket timeout for the rest of the config route's own work.
+FEED_FETCH_BUDGET_SECONDS = 25.0
+
+
+def _fetch_feed_postings(cfg: agent_config_store.AgentConfig, company_boards: list):
+    """Pull postings for every API-backed source the operator has configured.
+
+    Fans out across two independent sources and merges them, de-duplicated by
+    URL (see ``_merge_feed_results``):
+
+    - Remote Rocketship, gated on the resolved-source check plus its saved
+      key. The check goes through boards.is_api_source rather than comparing
+      to the catalog key, so a board added as a raw domain reaches the feed
+      like any other.
+    - Each watchlist company's own ATS API (jobfeeds.ats), gated only on that
+      company's ``CompanyBoard.ats`` naming a recognised ATS — no key needed.
+
+    Neither fetcher ever raises, and this function does not either: a source
+    that fails degrades the merged ``error`` rather than emptying the
+    response, while the other source's postings still arrive.
+
+    The two fetches share ONE wall-clock deadline (FEED_FETCH_BUDGET_SECONDS)
+    instead of each getting its own — see that constant's comment for why.
+    """
+    import time
+
+    from agentconfig import boards
+    from jobfeeds import ats, remoterocketship
+
+    deadline = time.monotonic() + FEED_FETCH_BUDGET_SECONDS
+
+    if any(boards.is_api_source(source) for source in cfg.resolved_board_sources()):
+        rr_result = remoterocketship.fetch_postings(
+            cfg.profiles, remoterocketship.api_key(), cfg.max_posting_age_days, deadline=deadline
+        )
+    else:
+        rr_result = remoterocketship.FeedResult()
+
+    ats_result = ats.fetch_ats_postings(company_boards, cfg.max_posting_age_days, deadline=deadline)
+    return _merge_feed_results(rr_result, ats_result)
 
 
 @router.get("/job-boards/{source}/key", response_model=JobBoardKeyStatus)
@@ -1263,24 +1340,17 @@ def get_agent_config(include_feed: bool = False) -> AgentConfigModel:
     making every page load wait on a third-party API — or fail with it — is a
     cost paid for nothing, since the browser never renders the postings.
     """
-    from companyboards import store as board_store
     from agentconfig.dorks import compose_direct_boards, compose_queries
-    
+
     cfg = agent_config_store.load()
     data = cfg.to_dict()
-    
-    # Load company boards and prune to target watchlist
-    boards_store_boards = board_store.load()
-    board_store.prune(cfg.target_companies)
-    
-    # Populate company_boards in response. Matched by identity key (not raw
-    # casefold equality) so a legal-entity suffix on either side does not
-    # exclude a board that is really for a target company.
-    target_company_keys = {company_identity_key(name) for name in cfg.target_companies}
+
+    # Company boards, pruned to the current target watchlist. Shared with the
+    # feed fan-out below so the two do not load/prune the store separately.
+    target_boards = _target_company_boards(cfg)
     data["company_boards"] = [
         {"company": board.company, "careers_url": board.careers_url, "ats": board.ats, "status": board.status, "resolved_at": board.resolved_at}
-        for board in boards_store_boards.values()
-        if company_identity_key(board.company) in target_company_keys
+        for board in target_boards
     ]
 
     # Populate job_boards with the resolved (defaults-first) list.
@@ -1302,7 +1372,7 @@ def get_agent_config(include_feed: bool = False) -> AgentConfigModel:
     # raises, so a Remote Rocketship outage degrades this response to the
     # config it always carried rather than failing the agent's config fetch.
     if include_feed:
-        feed = _fetch_feed_postings(cfg)
+        feed = _fetch_feed_postings(cfg, target_boards)
         data["feed_postings"] = [p.to_dict() for p in feed.postings]
         data["feed_error"] = feed.error
 
