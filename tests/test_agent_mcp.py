@@ -642,6 +642,46 @@ def test_record_screening_omitted_fields_are_not_written(data_dir):
     assert s["approval"] == ""
 
 
+def test_record_screening_without_screened_date_persists_todays_utc_date(data_dir):
+    """A caller that omits screened_date must not get a blank one back: the
+    operator scanning screening dates expects a just-recorded screening to
+    carry today's date, not ''."""
+    before = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    s = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/no-date-1",
+        role="Data Engineer",
+        company="ExampleCo",
+        verdict="rejected",
+    )
+    after = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    assert s["screened_date"] in {before, after}
+
+    from screening import store as screening_store
+
+    reloaded = screening_store.get(s["id"])
+    assert reloaded is not None
+    assert reloaded.screened_date in {before, after}
+
+
+def test_record_screening_with_explicit_screened_date_keeps_it(data_dir):
+    """An explicitly supplied screened_date must be kept unchanged, not
+    overwritten with today's date."""
+    s = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/explicit-date-1",
+        role="Data Engineer",
+        company="ExampleCo",
+        verdict="rejected",
+        screened_date="2020-01-15",
+    )
+    assert s["screened_date"] == "2020-01-15"
+
+    from screening import store as screening_store
+
+    reloaded = screening_store.get(s["id"])
+    assert reloaded is not None
+    assert reloaded.screened_date == "2020-01-15"
+
+
 def test_record_screening_deferred_with_no_posting_text_persists_nothing(data_dir):
     """A deferred verdict is about to queue for the operator's decision, so it
     is rejected — and nothing is stored — without usable posting text."""

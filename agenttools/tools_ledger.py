@@ -17,6 +17,7 @@ so the agent and the wizard can never disagree about what happened.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 import agentconfig.store as _agentconfig_store
 from agentconfig.salary import clamp_ask as _clamp_ask
@@ -541,6 +542,12 @@ def record_screening(
         reason = gated["reason"]
         remote_arrangement = gated["remote_arrangement"]
         language_requirement = gated["language_requirement"]
+    if not screened_date:
+        # The caller left it blank: stamp today's UTC date rather than leave
+        # it empty, since that is what an operator scanning screening dates
+        # expects a just-recorded screening to carry. An explicitly supplied
+        # date is always kept as given.
+        screened_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     named = {
         "failing_criterion": failing_criterion,
         "reason": reason,

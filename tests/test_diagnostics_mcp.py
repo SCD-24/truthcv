@@ -213,6 +213,42 @@ def test_clamp_limit_passes_through_an_in_range_value():
     assert _clamp_limit(37) == 37
 
 
+def test_list_screenings_sorts_by_created_at_falling_back_to_screened_date(monkeypatch):
+    """Ordering is by created_at descending, not screened_date: a record with
+    no screened_date (e.g. freshly recorded via record_screening before this
+    fix, or a caller that genuinely has none) must still sort by when it was
+    actually created, not fall to the bottom for want of a screened_date."""
+    import api.diagnostics_mcp as diagnostics_mcp
+    from screening.model import Screening
+
+    older_with_screened_date = Screening(
+        id="s-old",
+        company="OldCo",
+        role="Engineer",
+        url="https://jobs.example.com/old",
+        screened_date="2020-01-01",
+        created_at="2020-01-01T00:00:00+00:00",
+    )
+    newer_with_empty_screened_date = Screening(
+        id="s-new",
+        company="NewCo",
+        role="Engineer",
+        url="https://jobs.example.com/new",
+        screened_date="",
+        created_at="2024-06-01T00:00:00+00:00",
+    )
+
+    monkeypatch.setattr(
+        diagnostics_mcp._screening_store,
+        "load_all",
+        lambda: [older_with_screened_date, newer_with_empty_screened_date],
+    )
+    result = diagnostics_mcp.list_screenings()
+
+    ids = [s["id"] for s in result["screenings"]]
+    assert ids == ["s-new", "s-old"]
+
+
 def test_list_runs_non_positive_limit_is_clamped_to_the_default_not_unbounded(
     data_dir, monkeypatch
 ):

@@ -88,14 +88,16 @@ def _screening_summary(s) -> dict:
 
 
 def list_screenings(limit: int = 50, offset: int = 0) -> dict:
-    """A summarised page of screening records, newest-screened first.
+    """A summarised page of screening records, newest-created first.
 
     Each entry carries only a truncated preview of `posting_text`; the full
     posting body is not diagnostic information and can be large. `limit` is
     clamped by `_clamp_limit` (default 50, cap 200; <=0 means the default).
     """
     records = sorted(
-        _screening_store.load_all(), key=lambda s: s.screened_date, reverse=True
+        _screening_store.load_all(),
+        key=lambda s: s.created_at or (f"{s.screened_date}T00:00:00+00:00" if s.screened_date else ""),
+        reverse=True,
     )
     total = len(records)
     if offset > 0:
@@ -166,7 +168,7 @@ _DIAG_TOOL_REGISTRY = {
     ),
     "list_screenings": (
         list_screenings,
-        "Lists screening records, newest-screened first, summarised with "
+        "Lists screening records, newest-created first, summarised with "
         "posting_text truncated to a short preview. Read-only. "
         "limit defaults to 50, capped at 200; limit<=0 means the default.",
     ),
