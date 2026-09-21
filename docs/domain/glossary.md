@@ -147,3 +147,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:start comp:services-layer -->
 - **Services Layer** (`services-layer`) - backend component.
 <!-- generated:end comp:services-layer -->
+
+<!-- generated:start comp:job-feeds -->
+- **Job Feeds** (`job-feeds`) - backend component.
+<!-- generated:end comp:job-feeds -->

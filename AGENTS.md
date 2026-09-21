@@ -1,0 +1,32 @@
+<!-- generated:start file:adapter:Codex -->
+# Aether Agent Workspace — Agent Entrypoint
+
+Generated thin adapter. Canonical documentation lives in `docs/` — follow the links; never duplicate content here.
+
+- Operating contract: [docs/conventions/agent-operating-contract.md](docs/conventions/agent-operating-contract.md)
+- System map: [docs/architecture/system-map.md](docs/architecture/system-map.md)
+- Architecture overview: [docs/architecture/overview.md](docs/architecture/overview.md)
+- Maturity & capabilities: [docs/system-level.yml](docs/system-level.yml)
+<!-- generated:end file:adapter:Codex -->
+
+## Repository scope
+
+This is a single repository covering the whole system. It was previously split
+in two — TruthCV generated the documents, a separate `Jobs` repo ran the
+applications — and that second repo has been retired and its capabilities
+folded in here. If you find a reference to a `Jobs` repository, or an absolute
+path into one, it is stale; the only place that repository is described is
+[`docs/jobs-retirement-audit.md`](docs/jobs-retirement-audit.md), which records
+what was carried over.
+
+Two services, one image family:
+
+- **`app`** — the wizard, the API, the guardrail, the ledger. Started by
+  `docker compose up`.
+- **`agent`** — the unattended application agent, started along with `app` on
+  a bare `docker compose up` (only `ollama` still sits behind a compose
+  profile). Schedule is configured on the Agents page (default 09:00/15:00
+  weekdays; RUN_AT/RUN_DAYS are fallback only). Drives a containerised
+  headful Chromium in the sibling `browser` service over HTTP MCP. There is
+  no in-container browser and no headless fallback; see
+  [`agent/README.md`](agent/README.md).

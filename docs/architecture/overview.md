@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-25 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+26 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -184,3 +184,7 @@ Screens discovered postings against the active job profile's criteria and record
 <!-- generated:start comp:services-layer -->
 ## Services Layer (`services-layer`, BACKEND)
 <!-- generated:end comp:services-layer -->
+
+<!-- generated:start comp:job-feeds -->
+## Job Feeds (`job-feeds`, BACKEND)
+<!-- generated:end comp:job-feeds -->

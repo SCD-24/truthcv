@@ -72,59 +72,6 @@ Define general standards, style guides, and testing rules for your AI agents to 
 - **Minimum text contrast ratio:** `4.5:1 (WCAG AA)`
 <!-- generated:end cap:global-rules -->
 
-## Per-language rules (hand-written)
-
-The projected global rules above are phrased for a single-language project. This
-repository is not one: the backend and its tests are Python, while `web/` and
-`agent/` are TypeScript/JavaScript. Where this section and a projected rule
-disagree, **follow this section** - it describes the toolchain that actually
-exists in the repo.
-
-### Test frameworks
-
-The projected rule `Jest for Frontend, Vitest for Backend Node` is wrong twice:
-there is no Jest anywhere in this repository, and the backend is Python, not
-Node. The real mapping is:
-
-| Surface | Runner | Tests live in | Command |
-|---|---|---|---|
-| Python backend | pytest | `tests/` | `pytest -q` from the repo root |
-| Web UI | Vitest | `web/src/**/*.test.tsx` | `npm test` in `web/` |
-| Application Agent | Vitest | `agent/__tests__/` | `npm test` in `agent/` |
-
-Configuration lives in `pyproject.toml` (`[tool.pytest.ini_options]`,
-`testpaths = ["tests"]`), `web/vite.config.ts`, and `agent/vitest.config.ts`.
-
-Write tests in the runner that owns the file you changed: never a JS test for
-Python code, and never a Python test for `web/` or `agent/` code.
-
-`.github/workflows/ci.yml` gates `pytest -q` and `web`'s `npm test`. The
-`agent/` Vitest suite is **not** in CI, so run it locally whenever you touch
-`agent/`.
-
-### File and function length limits
-
-The 400-line file limit and the 25-line function limit apply to **both** Python
-and TS/JS, with two qualifications:
-
-- **They do not apply to test files.** `tests/test_agent_mcp.py` (1330 lines)
-  and several other suites exceed 400 lines by design. Do not split a test file
-  to satisfy the rule.
-- **They bind new files and deliberate rewrites.** `api/routes.py` (2308 lines)
-  and `api/schemas.py` (1484 lines) are long for historical reasons; an
-  incidental edit in one of them is not an invitation to refactor it. Propose a
-  split as its own piece of work.
-
-### Formatting and naming
-
-`Prettier + ESLint (fix on save)` covers `web/` and `agent/` only. No Python
-formatter (black, ruff) is configured, so in Python match the surrounding
-file's style rather than reformatting it.
-
-`camelCase for JS, PascalCase for classes` is the JS/TS convention. Python
-follows PEP 8: `snake_case` for functions, variables and modules, `PascalCase`
-for classes.
-
 <!-- generated:start cap:canonical-names -->
 ## Canonical Names
 
@@ -142,6 +89,7 @@ Use these exact names and ids when discussing the architecture.
 | Cover Letter Engine | `cover-letter-engine` | backend |
 | Gmail / Google OAuth API | `gmail-api` | custom |
 | Guardrail Validator | `guardrail-validator` | backend |
+| Job Feeds | `job-feeds` | backend |
 | Keyword Vocabulary | `keyword-vocabulary` | backend |
 | LLM Provider Layer | `llm-provider-layer` | backend |
 | LLM Provider Service | `llm-provider-service` | custom |
@@ -162,5 +110,5 @@ Use these exact names and ids when discussing the architecture.
 <!-- generated:start cap:system-boundary -->
 ## System Boundary
 
-The declared system consists of 25 component(s) and 88 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
+The declared system consists of 26 component(s) and 91 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
 <!-- generated:end cap:system-boundary -->

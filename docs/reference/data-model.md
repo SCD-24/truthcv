@@ -114,4 +114,6 @@ Projected from `schema` widgets on the architecture canvas.
 | Field | Type | Flags | Notes |
 |---|---|---|---|
 | `boardBreakdown` | BoardBreakdown[] | derived on read | Per job board (from screening URL host): postingsSeen, forReview, rejected |
+| `discovery_coverage[].tier` | string |  | Which extraction tier produced the postings: api, harvest, llm, or empty when not applicable. |
+| `discovery_coverage[].status` | string |  | searched \| empty \| blocked \| login_walled \| skipped. 'blocked' means the page was unreadable (CAPTCHA/consent/bot wall), distinct from 'empty'. |
 <!-- generated:end comp:run-store -->

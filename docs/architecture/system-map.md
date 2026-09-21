@@ -13,6 +13,7 @@ graph TD
     cover-letter-engine["Cover Letter Engine <br/> <small>(BACKEND)</small>"]
     gmail-api["Gmail / Google OAuth API <br/> <small>(CUSTOM)</small>"]
     guardrail-validator["Guardrail Validator <br/> <small>(BACKEND)</small>"]
+    job-feeds["Job Feeds <br/> <small>(BACKEND)</small>"]
     keyword-vocabulary["Keyword Vocabulary <br/> <small>(BACKEND)</small>"]
     llm-provider-layer["LLM Provider Layer <br/> <small>(BACKEND)</small>"]
     llm-provider-service["LLM Provider Service <br/> <small>(CUSTOM)</small>"]
@@ -39,6 +40,7 @@ graph TD
     api -->|in-process| cover-letter-engine
     api -->|HTTPS| gmail-api
     api -->|in-process| guardrail-validator
+    api -->|in-process| job-feeds
     api -->|in-process| onboarding-store
     api -->|in-process| prompt-store
     api -->|in-process| renderer
@@ -71,6 +73,8 @@ graph TD
     guardrail-validator -->|in-process| keyword-vocabulary
     guardrail-validator -->|in-process| storage-leaf
     guardrail-validator -->|in-process| truth-store
+    job-feeds -->|in-process| company-research
+    job-feeds -->|in-process| secret-store
     keyword-vocabulary -->|in-process| storage-leaf
     keyword-vocabulary -->|file I/O| truth-data-volume
     llm-provider-layer -->|HTTPS| llm-provider-service
@@ -130,6 +134,7 @@ graph TD
 - [Cover Letter Engine](overview.md) (`cover-letter-engine`, backend)
 - [Gmail / Google OAuth API](overview.md) (`gmail-api`, custom)
 - [Guardrail Validator](overview.md) (`guardrail-validator`, backend)
+- [Job Feeds](overview.md) (`job-feeds`, backend)
 - [Keyword Vocabulary](overview.md) (`keyword-vocabulary`, backend)
 - [LLM Provider Layer](overview.md) (`llm-provider-layer`, backend)
 - [LLM Provider Service](overview.md) (`llm-provider-service`, custom)
@@ -159,6 +164,7 @@ graph TD
 - [api → cover-letter-engine](interactions/api--cover-letter-engine.md) via `in-process`
 - [api → gmail-api](interactions/api--gmail-api.md) via `HTTPS`
 - [api → guardrail-validator](interactions/api--guardrail-validator.md) via `in-process`
+- [api → job-feeds](interactions/api--job-feeds.md) via `in-process`
 - [api → onboarding-store](interactions/api--onboarding-store.md) via `in-process`
 - [api → prompt-store](interactions/api--prompt-store.md) via `in-process`
 - [api → renderer](interactions/api--renderer.md) via `in-process`
@@ -191,6 +197,8 @@ graph TD
 - [guardrail-validator → keyword-vocabulary](interactions/guardrail-validator--keyword-vocabulary.md) via `in-process`
 - [guardrail-validator → storage-leaf](interactions/guardrail-validator--storage-leaf.md) via `in-process`
 - [guardrail-validator → truth-store](interactions/guardrail-validator--truth-store.md) via `in-process`
+- [job-feeds → company-research](interactions/job-feeds--company-research.md) via `in-process`
+- [job-feeds → secret-store](interactions/job-feeds--secret-store.md) via `in-process`
 - [keyword-vocabulary → storage-leaf](interactions/keyword-vocabulary--storage-leaf.md) via `in-process`
 - [keyword-vocabulary → truth-data-volume](interactions/keyword-vocabulary--truth-data-volume.md) via `file I/O`
 - [llm-provider-layer → llm-provider-service](interactions/llm-provider-layer--llm-provider-service.md) via `HTTPS`
@@ -239,5 +247,5 @@ graph TD
 
 ## Groups
 
-- [TruthCV Container (single Docker image)](groups/truthcv-container-single-docker-image.md) (`truthcv-container-single-docker-image`, 15 member(s))
+- [TruthCV Container (single Docker image)](groups/truthcv-container-single-docker-image.md) (`truthcv-container-single-docker-image`, 16 member(s))
 <!-- generated:end file:system-map -->
