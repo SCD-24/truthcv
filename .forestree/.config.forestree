@@ -2509,7 +2509,7 @@
       "term": "Application"
     }
   ],
-  "forestreeFormatVersion": false,
+  "forestreeFormatVersion": true,
   "globalRules": {
     "custom": {
       "accessibility": "",

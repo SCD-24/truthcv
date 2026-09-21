@@ -1,7 +1,7 @@
 <!-- generated:start file:adapter:claude -->
-# Aether Agent Workspace — Agent Entrypoint
+# Aether Agent Workspace - Agent Entrypoint
 
-Generated thin adapter. Canonical documentation lives in `docs/` — follow the links; never duplicate content here.
+Generated thin adapter. Canonical documentation lives in `docs/` - follow the links; never duplicate content here.
 
 - Operating contract: [docs/conventions/agent-operating-contract.md](docs/conventions/agent-operating-contract.md)
 - System map: [docs/architecture/system-map.md](docs/architecture/system-map.md)

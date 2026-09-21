@@ -30,7 +30,7 @@ Define general standards, style guides, and testing rules for your AI agents to 
 - **Require integration tests for all primary API routing contracts**
 - **Mock all outbound network requests and external API endpoints**
 - **Add a regression test for every bug fix before it is merged**
-- **Keep tests deterministic — no reliance on real time, randomness, or live network**
+- **Keep tests deterministic - no reliance on real time, randomness, or live network**
 
 ## AI Agent Rules
 - **Before writing code, explain your implementation plan first**
@@ -109,5 +109,5 @@ Use these exact names and ids when discussing the architecture.
 <!-- generated:start cap:system-boundary -->
 ## System Boundary
 
-The declared system consists of 25 component(s) and 88 connection(s) — see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
+The declared system consists of 25 component(s) and 88 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
 <!-- generated:end cap:system-boundary -->
