@@ -22,6 +22,19 @@ function throwingAdapter(message: string): ProviderAdapter {
   };
 }
 
+/** A stub adapter that yields a different scripted event list on each
+ * successive call — the last script repeats once `scripts` is exhausted. */
+function sequencedAdapter(scripts: HarnessEvent[][]): ProviderAdapter {
+  let call = 0;
+  return {
+    async *sendMessage() {
+      const script = scripts[Math.min(call, scripts.length - 1)];
+      call += 1;
+      for (const event of script) yield event;
+    },
+  };
+}
+
 /** A `done` event carrying the given assistant text. */
 function doneWith(text: string): HarnessEvent {
   return { type: 'done', stopReason: 'end', message: { role: 'assistant', content: text } };
@@ -154,6 +167,62 @@ describe('screenPosting', () => {
     const result = await screenPosting(VALID_ARGS, adapter);
 
     expect(result.isError).toBe(true);
+  });
+
+  it('parses a reply missing the screeningBlocker and remoteArrangement keys', async () => {
+    const sparseJson = JSON.stringify({
+      verdict: 'passed',
+      failingCriterion: '',
+      reason: 'Matches remote and language criteria.',
+      languageRequirement: '',
+    });
+    const adapter = stubAdapter([doneWith(sparseJson)]);
+
+    const result = await screenPosting(VALID_ARGS, adapter);
+
+    expect(result.isError).toBe(false);
+    const verdict = JSON.parse(result.content);
+    expect(verdict.verdict).toBe('passed');
+    expect(verdict.screening_blocker).toBe('');
+    expect(verdict.remote_arrangement).toBe('');
+  });
+
+  it('parses a reply wrapped in a ```json code fence', async () => {
+    const fenced = '```json\n' + VALID_VERDICT_JSON + '\n```';
+    const adapter = stubAdapter([doneWith(fenced)]);
+
+    const result = await screenPosting(VALID_ARGS, adapter);
+
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.content).verdict).toBe('passed');
+  });
+
+  it('retries once after a provider error, succeeding on the second call', async () => {
+    const adapter = sequencedAdapter([
+      [{ type: 'error', message: 'upstream 500', retryable: true }],
+      [doneWith(VALID_VERDICT_JSON)],
+    ]);
+
+    const result = await screenPosting(VALID_ARGS, adapter);
+
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.content).verdict).toBe('passed');
+  });
+
+  it('returns isError after two consecutive provider errors', async () => {
+    let calls = 0;
+    const adapter: ProviderAdapter = {
+      async *sendMessage() {
+        calls += 1;
+        yield { type: 'error', message: 'upstream 500', retryable: true };
+      },
+    };
+
+    const result = await screenPosting(VALID_ARGS, adapter);
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('upstream 500');
+    expect(calls).toBe(2);
   });
 
   it('never calls the provider when a required argument is missing', async () => {

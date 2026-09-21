@@ -181,13 +181,19 @@ def set_note(run_id: str, note: str) -> RunRecord | None:
 
 
 def add_discovery_coverage(run_id: str, entry: dict) -> RunRecord | None:
-    """Append one discovery-coverage entry to the run's record."""
+    """Append one discovery-coverage entry to the run's record, in call
+    order. A genuine second pass over the same (channel, board) — with
+    different status/counts — is its own distinct entry; only an exact
+    duplicate of the immediately preceding entry is collapsed (not
+    appended again) — that is a retry re-send, whereas a later pass that
+    happens to repeat an earlier pass's exact values stays distinct."""
     with locked(runs_path()):
         runs = load_all()
         record = next((r for r in runs if r.id == run_id), None)
         if record is None:
             return None
-        record.discovery_coverage.append(entry)
+        if not record.discovery_coverage or record.discovery_coverage[-1] != entry:
+            record.discovery_coverage.append(entry)
         _write_all(runs)
         return record
 

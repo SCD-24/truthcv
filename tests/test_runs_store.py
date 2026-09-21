@@ -217,6 +217,130 @@ def test_add_discovery_coverage_appends_and_reloads(data_dir):
     ]
 
 
+def test_add_discovery_coverage_collapses_an_exact_duplicate_retry(data_dir):
+    store.start("run-retry", trigger="scheduled", apply_cap=0)
+
+    entry = {
+        "channel": "feed",
+        "board": "indeed",
+        "status": "searched",
+        "postings_found": 12,
+        "reason": "",
+    }
+    store.add_discovery_coverage("run-retry", entry)
+    second = store.add_discovery_coverage("run-retry", dict(entry))
+
+    assert second is not None
+    assert len(second.discovery_coverage) == 1
+    assert second.discovery_coverage[0] == entry
+
+
+def test_add_discovery_coverage_keeps_a_genuine_second_pass_as_a_distinct_entry(data_dir):
+    store.start("run-second-pass", trigger="scheduled", apply_cap=0)
+
+    store.add_discovery_coverage(
+        "run-second-pass",
+        {
+            "channel": "feed",
+            "board": "indeed",
+            "status": "searched",
+            "postings_found": 12,
+            "reason": "",
+        },
+    )
+    second = store.add_discovery_coverage(
+        "run-second-pass",
+        {
+            "channel": "feed",
+            "board": "indeed",
+            "status": "blocked",
+            "postings_found": 0,
+            "reason": "consent interstitial",
+        },
+    )
+
+    assert second is not None
+    assert len(second.discovery_coverage) == 2
+    assert second.discovery_coverage == [
+        {
+            "channel": "feed",
+            "board": "indeed",
+            "status": "searched",
+            "postings_found": 12,
+            "reason": "",
+        },
+        {
+            "channel": "feed",
+            "board": "indeed",
+            "status": "blocked",
+            "postings_found": 0,
+            "reason": "consent interstitial",
+        },
+    ]
+
+
+def test_add_discovery_coverage_keeps_a_later_pass_repeating_earlier_values_distinct(data_dir):
+    store.start("run-repeat-values", trigger="scheduled", apply_cap=0)
+
+    entry = {
+        "channel": "feed",
+        "board": "indeed",
+        "status": "searched",
+        "postings_found": 12,
+        "reason": "",
+    }
+    store.add_discovery_coverage("run-repeat-values", dict(entry))
+    store.add_discovery_coverage(
+        "run-repeat-values",
+        {
+            "channel": "feed",
+            "board": "indeed",
+            "status": "blocked",
+            "postings_found": 0,
+            "reason": "consent interstitial",
+        },
+    )
+    third = store.add_discovery_coverage("run-repeat-values", dict(entry))
+
+    assert third is not None
+    assert len(third.discovery_coverage) == 3
+    assert third.discovery_coverage[0] == entry
+    assert third.discovery_coverage[2] == entry
+
+
+def test_add_discovery_coverage_keeps_same_board_on_different_channels_separate(data_dir):
+    store.start("run-multi-channel", trigger="scheduled", apply_cap=0)
+
+    store.add_discovery_coverage(
+        "run-multi-channel",
+        {"channel": "feed", "board": "indeed", "status": "searched", "postings_found": 12, "reason": ""},
+    )
+    second = store.add_discovery_coverage(
+        "run-multi-channel",
+        {"channel": "direct", "board": "indeed", "status": "searched", "postings_found": 5, "reason": ""},
+    )
+
+    assert second is not None
+    assert len(second.discovery_coverage) == 2
+    assert [e["channel"] for e in second.discovery_coverage] == ["feed", "direct"]
+
+
+def test_add_discovery_coverage_appends_distinct_boards_in_order(data_dir):
+    store.start("run-distinct-boards", trigger="scheduled", apply_cap=0)
+
+    store.add_discovery_coverage(
+        "run-distinct-boards",
+        {"channel": "feed", "board": "indeed", "status": "searched", "postings_found": 12, "reason": ""},
+    )
+    second = store.add_discovery_coverage(
+        "run-distinct-boards",
+        {"channel": "direct", "board": "linkedin", "status": "login_walled", "postings_found": 0, "reason": "login required"},
+    )
+
+    assert second is not None
+    assert [e["board"] for e in second.discovery_coverage] == ["indeed", "linkedin"]
+
+
 def test_add_discovery_coverage_is_a_no_op_for_an_unknown_run(data_dir):
     assert store.add_discovery_coverage("never-started", {"channel": "feed"}) is None
 

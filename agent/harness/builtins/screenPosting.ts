@@ -229,6 +229,38 @@ function isKnownValue(value: unknown, known: readonly string[]): value is string
 }
 
 /**
+ * Resolve an optional enumerated field: an ABSENT (`undefined`) value is
+ * tolerated as '' — the screening model frequently omits a key it has
+ * nothing to say for — but a genuinely present, unrecognised value is still
+ * rejected. Returns undefined on rejection so the caller can bail out of
+ * {@link parseVerdict} exactly as {@link isKnownValue} would.
+ */
+function knownOrAbsent(value: unknown, known: readonly string[]): string | undefined {
+  if (value === undefined) return '';
+  return isKnownValue(value, known) ? value : undefined;
+}
+
+/**
+ * Strip a ```json ... ``` (or bare ``` ... ```) code fence wrapping `text`,
+ * then extract the first `{...}` JSON object substring — tolerating a
+ * screening reply that adds a fence or stray prose around the object it was
+ * told to return alone. Falls through to the (fenceless) trimmed text when
+ * no such fence or object boundary is found, leaving `JSON.parse` to reject
+ * it exactly as before.
+ */
+function extractJson(text: string): string {
+  const trimmed = text.trim();
+  const fenceMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  const unfenced = fenceMatch ? fenceMatch[1].trim() : trimmed;
+  const start = unfenced.indexOf('{');
+  const end = unfenced.lastIndexOf('}');
+  if (start !== -1 && end !== -1 && end > start) {
+    return unfenced.slice(start, end + 1);
+  }
+  return unfenced;
+}
+
+/**
  * Parse and validate the screening subagent's JSON reply into a
  * {@link ScreeningVerdict}, or undefined when it is not a well-formed one.
  *
@@ -242,22 +274,24 @@ function isKnownValue(value: unknown, known: readonly string[]): value is string
 function parseVerdict(text: string): ScreeningVerdict | undefined {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(extractJson(text));
   } catch {
     return undefined;
   }
   if (typeof parsed !== 'object' || parsed === null) return undefined;
   const raw = parsed as Record<string, unknown>;
   if (!isKnownValue(raw.verdict, VERDICT_VALUES)) return undefined;
-  if (!isKnownValue(raw.screeningBlocker, BLOCKER_VALUES)) return undefined;
-  if (!isKnownValue(raw.remoteArrangement, REMOTE_ARRANGEMENT_VALUES)) return undefined;
-  if (!raw.verdict && !raw.screeningBlocker) return undefined;
+  const screeningBlocker = knownOrAbsent(raw.screeningBlocker, BLOCKER_VALUES);
+  if (screeningBlocker === undefined) return undefined;
+  const remoteArrangement = knownOrAbsent(raw.remoteArrangement, REMOTE_ARRANGEMENT_VALUES);
+  if (remoteArrangement === undefined) return undefined;
+  if (!raw.verdict && !screeningBlocker) return undefined;
   return {
     verdict: raw.verdict,
-    screeningBlocker: raw.screeningBlocker,
+    screeningBlocker,
     failingCriterion: typeof raw.failingCriterion === 'string' ? raw.failingCriterion : '',
     reason: typeof raw.reason === 'string' ? raw.reason : '',
-    remoteArrangement: raw.remoteArrangement,
+    remoteArrangement,
     languageRequirement: typeof raw.languageRequirement === 'string' ? raw.languageRequirement : '',
   };
 }
@@ -267,21 +301,43 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Run the isolated screening request, returning a verdict or an error message. */
+/** The provider call is attempted this many times before giving up — one
+ * original attempt plus one retry — when it errors or returns an
+ * unparseable verdict; a transient provider hiccup or a malformed reply
+ * shouldn't cost the whole screening on its own. */
+const SCREENING_ATTEMPTS = 2;
+
+/**
+ * Run the isolated screening request, returning a verdict or an error
+ * message. Retries the provider call ONCE — on a thrown error, an `error`
+ * event, or a reply that fails to parse as a valid verdict — before giving
+ * up; only the SECOND failure's message is returned.
+ */
 async function runScreening(
   adapter: ProviderAdapter,
   request: ModelRequest,
 ): Promise<{ verdict?: ScreeningVerdict; errorContent?: string }> {
-  let reply: { text: string; error?: string };
-  try {
-    reply = await collectScreeningReply(adapter, request);
-  } catch (err) {
-    return { errorContent: `screen_posting provider call failed: ${errorMessage(err)}` };
+  let last: { verdict?: ScreeningVerdict; errorContent?: string } = {};
+  for (let attempt = 0; attempt < SCREENING_ATTEMPTS; attempt++) {
+    let reply: { text: string; error?: string };
+    try {
+      reply = await collectScreeningReply(adapter, request);
+    } catch (err) {
+      last = { errorContent: `screen_posting provider call failed: ${errorMessage(err)}` };
+      continue;
+    }
+    if (reply.error) {
+      last = { errorContent: `screen_posting provider error: ${reply.error}` };
+      continue;
+    }
+    const verdict = parseVerdict(reply.text);
+    if (!verdict) {
+      last = { errorContent: 'screen_posting: the screening model did not return a valid verdict' };
+      continue;
+    }
+    return { verdict };
   }
-  if (reply.error) return { errorContent: `screen_posting provider error: ${reply.error}` };
-  const verdict = parseVerdict(reply.text);
-  if (!verdict) return { errorContent: 'screen_posting: the screening model did not return a valid verdict' };
-  return { verdict };
+  return last;
 }
 
 /**

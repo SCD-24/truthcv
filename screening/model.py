@@ -86,7 +86,9 @@ class Screening:
     posting_text: str = ""
     # The employer's publication date, best-effort: many boards publish none.
     # Empty means unknown and is never inferred. `screened_date` is the date
-    # this posting was found, which is a different thing.
+    # this posting was found, which is a different thing: record_screening
+    # stamps it with today's UTC date when the caller omits it, so only
+    # imported/legacy records may legitimately hold ''.
     posted_date: str = ""
     # The JobProfile name whose criteria this posting was screened against —
     # the evidence trail for `failing_criterion`/`reason` when either names a

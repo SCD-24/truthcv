@@ -393,6 +393,10 @@ describe('runCli token redaction', () => {
         { type: 'toolCall', toolCall: screenCall },
         { type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [screenCall] } },
       ],
+      // Two error scripts: runScreening (SCREENING_ATTEMPTS=2) retries once on
+      // an error event, so both attempts must fail with the token-bearing
+      // message or the retry consumes the finishRunTurn script instead.
+      [{ type: 'error', message: `screening provider 401: key=${screeningToken}`, retryable: false }],
       [{ type: 'error', message: `screening provider 401: key=${screeningToken}`, retryable: false }],
       finishRunTurn,
       [doneEnd],
