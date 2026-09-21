@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,6 +21,11 @@ from services.errors import Conflict, NotFound, Refused, ServiceError, Unavailab
 from storage import data_dir
 
 from .config import cors_origins, port, public_url, static_dir
+from .diagnostics_mcp import (
+    diagnostics_mcp_app,
+    diagnostics_session_manager,
+    diagnostics_token_ok,
+)
 from .prompt_routes import prompt_router
 from .routes import reconcile_orphaned_runs, router
 
@@ -86,7 +92,7 @@ async def _handle_call_tool(ctx, params) -> types.CallToolResult:
             content=[
                 types.TextContent(
                     type="text",
-                    text=str(result),
+                    text=json.dumps(result, ensure_ascii=False),
                 )
             ]
         )
@@ -128,7 +134,8 @@ async def lifespan(app: FastAPI):
         # Startup must not fail because of runs.json
 
     async with _mcp_server.session_manager.run():
-        yield
+        async with diagnostics_session_manager.run():
+            yield
 
 app = FastAPI(title="TruthCV", version="1.0.0", lifespan=lifespan)
 
@@ -223,6 +230,58 @@ async def mcp_json_rpc_endpoint(request: Request):
         elif message["type"] == "http.response.body":
             body_parts.append(message.get("body", b""))
     
+    body = b"".join(body_parts)
+    return StreamingResponse(iter([body]), status_code=status_code, headers=headers)
+
+
+@app.api_route("/mcp/diagnostics", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD", "TRACE"])
+async def mcp_diagnostics_json_rpc_endpoint(request: Request):
+    """Read-only diagnostics MCP streamable-HTTP JSON-RPC endpoint.
+
+    Guarded by DIAGNOSTICS_MCP_TOKEN as a bearer token (Authorization: Bearer
+    <token>); 404 — not 401/403 — on a missing, malformed, wrong, or unset
+    token, matching api.routes._agent_token_ok's convention so the response
+    carries no authentication hint. The token itself is never logged.
+    """
+    auth_header = request.headers.get("authorization", "")
+    scheme, _, token = auth_header.partition(" ")
+    if scheme.lower() != "bearer" or not diagnostics_token_ok(token.strip()):
+        raise HTTPException(status_code=404)
+
+    # Forward the request to the diagnostics MCP ASGI app
+    responses = []
+
+    async def receive():
+        if not hasattr(receive, "called"):
+            receive.called = True
+            body = await request.body()
+            return {
+                "type": "http.request",
+                "body": body,
+                "more_body": False,
+            }
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        responses.append(message)
+
+    await diagnostics_mcp_app(request.scope, receive, send)
+
+    status_code = 200
+    headers = {}
+    body_parts = []
+
+    for message in responses:
+        if message["type"] == "http.response.start":
+            status_code = message["status"]
+            raw_headers = message.get("headers", [])
+            headers = {
+                name.decode("latin-1"): value.decode("latin-1")
+                for name, value in raw_headers
+            }
+        elif message["type"] == "http.response.body":
+            body_parts.append(message.get("body", b""))
+
     body = b"".join(body_parts)
     return StreamingResponse(iter([body]), status_code=status_code, headers=headers)
 
