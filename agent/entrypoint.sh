@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Container entrypoint for the agent service (agent/Dockerfile,
 # docker-compose.yml `agent` service, plan agent-container-and-schedule task
-# t-3). Ported from the retiring Jobs project's docker/entrypoint.sh.
+# t-3). Ported from the retired Jobs project's docker/entrypoint.sh.
 #
 # Modes:
 #   RUN_ONCE=1   run immediately, exit with the run's status (use this to test)

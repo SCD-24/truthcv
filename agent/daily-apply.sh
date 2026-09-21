@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Daily job-application run for TruthCV's unattended agent (agent/Dockerfile,
 # docker-compose.yml `agent` service, plan agent-container-and-schedule task
-# t-2). Ported from the retiring Jobs project's bin/daily-apply.sh, moved off
+# t-2). Ported from the retired Jobs project's bin/daily-apply.sh, moved off
 # that project's filesystem and onto TruthCV's MCP tool surface.
 #
 # Preconditions are checked first and the run aborts loudly rather than
