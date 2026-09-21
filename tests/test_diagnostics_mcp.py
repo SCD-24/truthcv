@@ -31,10 +31,13 @@ fighting it with a second `asyncio.run()`.
 
 from __future__ import annotations
 
+import json
+
 from fastapi.testclient import TestClient
 
 from api.diagnostics_mcp import (
     _DIAG_TOOL_REGISTRY,
+    _clamp_limit,
     _handle_diag_call_tool,
     _handle_diag_list_tools,
 )
@@ -175,8 +178,9 @@ def test_get_status_round_trips_through_the_call_tool_handler(data_dir):
     result = _run_sync(_handle_diag_call_tool(None, params))
     text = result.content[0].text
     assert not result.is_error, text
-    assert "encryption_available" in text
-    assert "runs" in text
+    payload = json.loads(text)
+    assert "encryption_available" in payload
+    assert "runs" in payload
 
 
 def test_list_runs_round_trips_a_seeded_run(data_dir):
@@ -188,4 +192,44 @@ def test_list_runs_round_trips_a_seeded_run(data_dir):
     result = _run_sync(_handle_diag_call_tool(None, params))
     text = result.content[0].text
     assert not result.is_error, text
-    assert "diag-run-1" in text
+    payload = json.loads(text)
+    assert any(r["id"] == "diag-run-1" for r in payload["runs"])
+
+
+# --- _clamp_limit -----------------------------------------------------------
+
+
+def test_clamp_limit_non_positive_yields_the_default():
+    assert _clamp_limit(0) == 50
+    assert _clamp_limit(-1) == 50
+    assert _clamp_limit(None) == 50
+
+
+def test_clamp_limit_caps_above_the_maximum():
+    assert _clamp_limit(10000) == 200
+
+
+def test_clamp_limit_passes_through_an_in_range_value():
+    assert _clamp_limit(37) == 37
+
+
+def test_list_runs_non_positive_limit_is_clamped_to_the_default_not_unbounded(
+    data_dir, monkeypatch
+):
+    """A limit<=0 must apply _DEFAULT_LIST_LIMIT, not be treated as
+    "no limit" — proven by lowering the default below the seeded record
+    count and checking the page is bounded accordingly."""
+    import api.diagnostics_mcp as diagnostics_mcp
+    import runs.store as runs_store
+
+    monkeypatch.setattr(diagnostics_mcp, "_DEFAULT_LIST_LIMIT", 2)
+    for i in range(3):
+        runs_store.start(f"diag-clamp-run-{i}", trigger="scheduled", apply_cap=0)
+
+    params = _ToolCallParams(name="list_runs", arguments={"limit": -5})
+    result = _run_sync(_handle_diag_call_tool(None, params))
+    text = result.content[0].text
+    assert not result.is_error, text
+    payload = json.loads(text)
+    assert payload["total"] == 3
+    assert len(payload["runs"]) == 2

@@ -16,6 +16,7 @@ route and lifespan; this module has no FastAPI route of its own.
 from __future__ import annotations
 
 import hmac
+import json
 import os
 
 from mcp import types
@@ -33,10 +34,31 @@ from agenttools.mcp_app import _input_schema
 # diagnostic information).
 _POSTING_TEXT_PREVIEW_CHARS = 280
 
+# Bounds applied to every list_* tool's `limit` argument by _clamp_limit.
+_DEFAULT_LIST_LIMIT = 50
+_MAX_LIST_LIMIT = 200
+
+
+def _clamp_limit(limit: int | None) -> int:
+    """Clamp a caller-supplied list `limit` into a safe, bounded range.
+
+    A missing or non-positive limit (None, 0, or negative) means "use the
+    default" — `_DEFAULT_LIST_LIMIT` — rather than "no limit", so a remote
+    MCP client can never force an unbounded page by passing 0 or -1. Any
+    limit above `_MAX_LIST_LIMIT` is capped there.
+    """
+    if not limit or limit <= 0:
+        return _DEFAULT_LIST_LIMIT
+    return min(limit, _MAX_LIST_LIMIT)
+
 
 def list_runs(limit: int = 50, offset: int = 0) -> dict:
-    """One page of run records, newest-started first, with the total drawn from."""
-    records, total = _runs_store.list_page(limit=limit, offset=offset)
+    """One page of run records, newest-started first, with the total drawn from.
+
+    `limit` is clamped by `_clamp_limit`: <=0 (or omitted) means the default
+    of 50, and anything above 200 is capped there — never "all records".
+    """
+    records, total = _runs_store.list_page(limit=_clamp_limit(limit), offset=offset)
     return {"total": total, "runs": [r.to_dict() for r in records]}
 
 
@@ -69,7 +91,8 @@ def list_screenings(limit: int = 50, offset: int = 0) -> dict:
     """A summarised page of screening records, newest-screened first.
 
     Each entry carries only a truncated preview of `posting_text`; the full
-    posting body is not diagnostic information and can be large.
+    posting body is not diagnostic information and can be large. `limit` is
+    clamped by `_clamp_limit` (default 50, cap 200; <=0 means the default).
     """
     records = sorted(
         _screening_store.load_all(), key=lambda s: s.screened_date, reverse=True
@@ -77,8 +100,7 @@ def list_screenings(limit: int = 50, offset: int = 0) -> dict:
     total = len(records)
     if offset > 0:
         records = records[offset:]
-    if limit and limit > 0:
-        records = records[:limit]
+    records = records[:_clamp_limit(limit)]
     return {"total": total, "screenings": [_screening_summary(s) for s in records]}
 
 
@@ -99,15 +121,18 @@ def _application_summary(a) -> dict:
 
 
 def list_applications(limit: int = 50, offset: int = 0) -> dict:
-    """A summarised page of tracked applications, newest-created first."""
+    """A summarised page of tracked applications, newest-created first.
+
+    `limit` is clamped by `_clamp_limit` (default 50, cap 200; <=0 means
+    the default).
+    """
     records = sorted(
         _applications_store.load_all(), key=lambda a: a.created_at, reverse=True
     )
     total = len(records)
     if offset > 0:
         records = records[offset:]
-    if limit and limit > 0:
-        records = records[:limit]
+    records = records[:_clamp_limit(limit)]
     return {"total": total, "applications": [_application_summary(a) for a in records]}
 
 
@@ -132,7 +157,8 @@ def get_status() -> dict:
 _DIAG_TOOL_REGISTRY = {
     "list_runs": (
         list_runs,
-        "Lists agent run records, newest-started first. Read-only.",
+        "Lists agent run records, newest-started first. Read-only. "
+        "limit defaults to 50, capped at 200; limit<=0 means the default.",
     ),
     "get_run": (
         get_run,
@@ -141,11 +167,14 @@ _DIAG_TOOL_REGISTRY = {
     "list_screenings": (
         list_screenings,
         "Lists screening records, newest-screened first, summarised with "
-        "posting_text truncated to a short preview. Read-only.",
+        "posting_text truncated to a short preview. Read-only. "
+        "limit defaults to 50, capped at 200; limit<=0 means the default.",
     ),
     "list_applications": (
         list_applications,
-        "Lists tracked applications, newest-created first, summarised. Read-only.",
+        "Lists tracked applications, newest-created first, summarised. "
+        "Read-only. limit defaults to 50, capped at 200; limit<=0 means "
+        "the default.",
     ),
     "get_status": (
         get_status,
@@ -217,7 +246,7 @@ async def _handle_diag_call_tool(ctx, params) -> types.CallToolResult:
             content=[
                 types.TextContent(
                     type="text",
-                    text=str(result),
+                    text=json.dumps(result, ensure_ascii=False),
                 )
             ]
         )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -91,7 +92,7 @@ async def _handle_call_tool(ctx, params) -> types.CallToolResult:
             content=[
                 types.TextContent(
                     type="text",
-                    text=str(result),
+                    text=json.dumps(result, ensure_ascii=False),
                 )
             ]
         )
