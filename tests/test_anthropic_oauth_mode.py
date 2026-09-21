@@ -27,11 +27,33 @@ def test_oauth_mode_uses_bearer_beta_and_preamble(monkeypatch):
     assert captured["ctor"]["auth_token"] == "tok-1"
     assert captured["ctor"]["default_headers"] == {"anthropic-beta": "oauth-2025-04-20"}
     system = captured["create"]["system"]
+    assert len(system) == 2
     assert system[0] == {"type": "text", "text": CLAUDE_CODE_PREAMBLE}
-    assert system[1] == {"type": "text", "text": "do a thing"}
+    assert "cache_control" not in system[0]
+    assert system[1] == {
+        "type": "text",
+        "text": "do a thing",
+        "cache_control": {"type": "ephemeral"},
+    }
 
 
 def test_key_mode_unchanged(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
     provider = AnthropicProvider()
     assert provider._oauth is False
+
+
+def test_key_mode_system_has_cache_control(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
+    captured: dict = {}
+    provider = AnthropicProvider()
+    provider._anthropic = _fake_anthropic(captured)
+    provider._client = provider._anthropic.Anthropic()
+    assert provider.complete("do a thing", [{"role": "user", "content": "hi"}]) == "pong"
+    system = captured["create"]["system"]
+    assert len(system) == 1
+    assert system[0] == {
+        "type": "text",
+        "text": "do a thing",
+        "cache_control": {"type": "ephemeral"},
+    }

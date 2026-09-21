@@ -73,6 +73,7 @@ import {
   type LoopResult,
 } from './loop.js';
 import { checkAdvertisedBrowserTools } from './tools.js';
+import { DEFAULT_FALLBACK_CONTEXT_WINDOW, type CompactionConfig } from './compaction.js';
 
 /** The CLI's process exit codes; see the module comment for the full contract. */
 export const ExitCode = {
@@ -140,11 +141,12 @@ export interface CliConfig {
   maxTurns: number;
   /**
    * The model's context window in tokens, as stated by the operator, or 0 when
-   * unstated. 0 means "unknown" and disables PROACTIVE compaction — never a
-   * guess, because compacting against a wrong window fails both ways: too high
-   * still overflows, too low silently discards context that was fitting. A run
-   * without it is still covered reactively, when the provider says the context
-   * is too long.
+   * unstated. An operator-stated value always wins. 0/unstated no longer turns
+   * proactive compaction off: `runAgent` falls back to a conservative default
+   * (see `DEFAULT_FALLBACK_CONTEXT_WINDOW` in compaction.ts) rather than let an
+   * unbounded transcript grow with nothing but the reactive path to catch it.
+   * A run is still covered reactively either way, when the provider says the
+   * context is too long.
    */
   contextWindow: number;
   /**
@@ -284,13 +286,17 @@ async function resolvePrompt(
  * There is deliberately no per-model table behind this. A table of model ids to
  * window sizes is wrong the day a model ships and wrong again when a provider
  * changes a served window, and being wrong here is worse than knowing nothing:
- * the reactive path already covers an unstated window using the provider's own
- * verdict. So the number is stated by whoever deployed the model, or not at all.
+ * an unstated window still gets proactive compaction, just against
+ * `runAgent`'s conservative `DEFAULT_FALLBACK_CONTEXT_WINDOW` rather than a
+ * guessed per-model figure, and the reactive path covers the rest using the
+ * provider's own verdict either way. So the exact number is stated by whoever
+ * deployed the model, or not at all — there is no third, guessed option.
  *
  * State it as the model's INPUT capacity, not its headline total: the two
  * differ by whatever the provider reserves for the response (Anthropic reports
  * the input figure as `max_input_tokens` on its models endpoint), and the
- * difference is large enough to matter at the trigger point.
+ * difference is large enough to matter at the trigger point. A value here,
+ * once it passes `MIN_CONTEXT_WINDOW`, always wins over the fallback.
  */
 function resolveContextWindow(flag: string | undefined, envVal: string | undefined): number {
   const raw = (flag || envVal || '').trim();
@@ -482,9 +488,11 @@ export function validateConfig(config: CliConfig): string[] {
   if (!Number.isInteger(config.maxToolConcurrency) || config.maxToolConcurrency <= 0)
     errors.push('--max-tool-concurrency must be a positive integer');
   if (!Number.isInteger(config.contextWindow) || config.contextWindow < 0)
-    errors.push('--context-window must be a whole number of tokens, digits only (0 or unset means unknown)');
+    errors.push(
+      '--context-window must be a whole number of tokens, digits only (0 or unset applies a conservative fallback)',
+    );
   else if (config.contextWindow > 0 && config.contextWindow < MIN_CONTEXT_WINDOW)
-    errors.push(`--context-window must be at least ${MIN_CONTEXT_WINDOW} tokens, or 0/unset for unknown`);
+    errors.push(`--context-window must be at least ${MIN_CONTEXT_WINDOW} tokens, or 0/unset to use the conservative fallback`);
   errors.push(...validateAuth(config));
   if (!PROVIDERS.includes(config.screeningProvider))
     errors.push('a valid --screening-provider (claude|codex|openrouter|ollama) is required');
@@ -678,6 +686,26 @@ async function tryBuildPool(
 }
 
 /**
+ * Resolve the `compactionConfig` handed to {@link runLoop}, and whether it is
+ * running on the fallback rather than an operator-stated figure.
+ *
+ * Always returns a real, truthy `contextWindow`: proactive compaction now runs
+ * unconditionally, against whatever the operator stated or, failing that,
+ * `DEFAULT_FALLBACK_CONTEXT_WINDOW`. See that constant's doc comment for why
+ * generous is the safe direction to err in here.
+ *
+ * @param config The resolved configuration.
+ * @returns The compaction config to pass to the loop, and whether it used the fallback.
+ */
+export function resolveCompactionConfig(config: CliConfig): { compactionConfig: CompactionConfig; usedFallback: boolean } {
+  const usedFallback = !config.contextWindow;
+  return {
+    compactionConfig: { contextWindow: config.contextWindow || DEFAULT_FALLBACK_CONTEXT_WINDOW },
+    usedFallback,
+  };
+}
+
+/**
  * Run the loop, streaming events; returns the result plus a failure-detail
  * getter on success, or an error exit code.
  *
@@ -703,6 +731,12 @@ async function runAgent(
   tokens: readonly string[],
 ): Promise<{ result: LoopResult; getFailureDetail: () => string | undefined } | number> {
   const stream = createEventStream(emit.json);
+  const { compactionConfig, usedFallback } = resolveCompactionConfig(config);
+  if (usedFallback) {
+    emit.err(
+      `context window unstated; using conservative fallback of ${DEFAULT_FALLBACK_CONTEXT_WINDOW} tokens for proactive compaction`,
+    );
+  }
   try {
     const result = await runLoop({
       adapter,
@@ -714,9 +748,7 @@ async function runAgent(
         maxToolResultChars: config.maxToolResultChars,
         maxToolConcurrency: config.maxToolConcurrency,
       },
-      // Omitted entirely when unstated, so the loop's own "no window, no
-      // proactive compaction" guard is the single place that decision lives.
-      ...(config.contextWindow ? { compactionConfig: { contextWindow: config.contextWindow } } : {}),
+      compactionConfig,
       screeningAdapter,
       onEvent: stream.onEvent,
     });

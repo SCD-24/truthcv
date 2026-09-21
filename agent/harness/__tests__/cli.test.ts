@@ -5,7 +5,8 @@ import { join } from 'node:path';
 
 import type { McpClientPool, NamespacedTool } from '../mcp/client.js';
 import type { HarnessEvent, ProviderAdapter, ToolCall } from '../providers/types.js';
-import { ExitCode, runCli, type CliDeps } from '../cli.js';
+import { ExitCode, runCli, resolveCompactionConfig, type CliDeps, type CliConfig } from '../cli.js';
+import { DEFAULT_FALLBACK_CONTEXT_WINDOW } from '../compaction.js';
 
 /** A tool call referencing the fake pool's one allowed tool. */
 const A_TOOL_CALL: ToolCall = { id: 'c1', name: 'truthcv__start_run', arguments: {} };
@@ -425,6 +426,43 @@ describe('the context window reaches the loop and the adapter', () => {
     await runCli(['--context-window', '128000', ...BASE_ARGS, 'go'], {}, deps);
 
     expect(createAdapter.mock.calls[0][0].contextWindow).toBe(128000);
+  });
+
+  it('resolveCompactionConfig falls back to DEFAULT_FALLBACK_CONTEXT_WINDOW when unstated', () => {
+    const { compactionConfig, usedFallback } = resolveCompactionConfig({ contextWindow: 0 } as CliConfig);
+
+    expect(compactionConfig.contextWindow).toBe(DEFAULT_FALLBACK_CONTEXT_WINDOW);
+    expect(compactionConfig.contextWindow).toBe(32768);
+    expect(usedFallback).toBe(true);
+  });
+
+  it('resolveCompactionConfig passes a stated window through unchanged', () => {
+    const { compactionConfig, usedFallback } = resolveCompactionConfig({ contextWindow: 128000 } as CliConfig);
+
+    expect(compactionConfig.contextWindow).toBe(128000);
+    expect(usedFallback).toBe(false);
+  });
+
+  it('compacts proactively and logs the fallback when no window is stated', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, stderr } = harness(adapter, fakePool());
+
+    await runCli([...BASE_ARGS, 'go'], {}, deps);
+
+    // Not `... 32768 tokens` verbatim: BASE_ARGS's token is the literal 'tok',
+    // and redaction replaces every occurrence of a configured credential —
+    // including as a substring of 'tokens' — with a placeholder.
+    expect(stderr.join('\n')).toContain(`conservative fallback of ${DEFAULT_FALLBACK_CONTEXT_WINDOW}`);
+    expect(stderr.join('\n')).toContain('context window unstated');
+  });
+
+  it('does not log a fallback when the operator stated a window', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, stderr } = harness(adapter, fakePool());
+
+    await runCli(['--context-window', '128000', ...BASE_ARGS, 'go'], {}, deps);
+
+    expect(stderr.join('\n')).not.toContain('conservative fallback');
   });
 
   // parseInt stops at the first non-digit and keeps what it has, so every

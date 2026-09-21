@@ -47,15 +47,26 @@ class AnthropicProvider(LLMProvider):
         )
 
     def _system_param(self, system: str):
+        """Build the `system` param as content blocks with a cache breakpoint.
+
+        The last block always carries `cache_control: {"type": "ephemeral"}` so
+        repeated calls sharing the same system prefix (truth data + JSON-schema
+        instruction) hit Anthropic's prompt cache. Uses the same
+        `cache_control: {"type": "ephemeral"}` marker shape as
+        agent/harness/providers/anthropicMessages.ts, but the caching decision
+        deliberately differs: that adapter leaves its `system` field uncached
+        (it caches tools/messages instead), while here the system prefix IS the
+        big repeated payload, so it carries the breakpoint.
+        """
         if not self._oauth:
-            return system
+            return [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
         from connections.auth.claude import CLAUDE_CODE_PREAMBLE
 
         # Subscription tokens are rejected unless this exact preamble is the
-        # first system block.
+        # first system block, byte-identical and uncached.
         return [
             {"type": "text", "text": CLAUDE_CODE_PREAMBLE},
-            {"type": "text", "text": system},
+            {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}},
         ]
 
     def list_models(self) -> list[dict[str, str]]:

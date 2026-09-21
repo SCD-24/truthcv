@@ -3,6 +3,8 @@ import {
   compact,
   estimateTokens,
   shouldCompact,
+  planCompaction,
+  renderDroppedTranscript,
   KEEP_RECENT,
   PIN_LEADING,
   type CompactionConfig,
@@ -147,6 +149,78 @@ describe('shouldCompact accounting', () => {
 
     expect(shouldCompact([], usage, config)).toBe(false);
     expect(shouldCompact(tail, usage, config)).toBe(true);
+  });
+});
+
+describe('compact with a summary override', () => {
+  const config: CompactionConfig = { contextWindow: 1000 };
+
+  // compact() itself stays pure/synchronous; producing a model-generated
+  // summary and deciding whether it is good enough is loop.ts's job. This is
+  // the contract loop.ts relies on: pass a summary, it lands verbatim.
+  it('uses the override text instead of the mechanical summary', () => {
+    const messages = makeMessages(PIN_LEADING + KEEP_RECENT + 4);
+
+    const { messages: out, record } = compact(messages, config, 'MODEL SUMMARY: applied to Acme, pending reply.');
+
+    expect(record?.summary).toBe('MODEL SUMMARY: applied to Acme, pending reply.');
+    const summaryMessage = out.find((m) => m.role === 'system');
+    expect(summaryMessage?.content).toBe('[compaction] MODEL SUMMARY: applied to Acme, pending reply.');
+  });
+
+  it('falls back to the mechanical summary when the override is blank', () => {
+    const messages = makeMessages(PIN_LEADING + KEEP_RECENT + 4);
+
+    const { record } = compact(messages, config, '   ');
+
+    expect(record?.summary).toContain('Summarized');
+  });
+
+  it('leaves the mechanical summary in place when no override is given at all', () => {
+    const messages = makeMessages(PIN_LEADING + KEEP_RECENT + 4);
+
+    const { record } = compact(messages, config);
+
+    expect(record?.summary).toContain('Summarized');
+  });
+});
+
+describe('planCompaction', () => {
+  const config: CompactionConfig = { contextWindow: 1000 };
+
+  it('agrees with compact() about whether there is anything to drop', () => {
+    const messages = makeMessages(PIN_LEADING + KEEP_RECENT + 4);
+
+    const plan = planCompaction(messages);
+    const { record } = compact(messages, config);
+
+    expect(plan).not.toBeNull();
+    expect(plan?.dropped.length).toBe(record?.droppedMessageCount);
+  });
+
+  it('returns null exactly when compact() would no-op', () => {
+    const messages = makeMessages(KEEP_RECENT);
+
+    expect(planCompaction(messages)).toBeNull();
+  });
+});
+
+describe('renderDroppedTranscript', () => {
+  it('renders dropped turns as bounded plain text', () => {
+    const dropped = makeMessages(5, 5000);
+
+    const text = renderDroppedTranscript(dropped, 100);
+
+    expect(text).toContain('[transcript truncated]');
+    expect(text.length).toBeLessThan(200);
+  });
+
+  it('includes message content for a small dropped set', () => {
+    const dropped = [{ role: 'user' as const, content: 'applied to Acme via URL https://x/jobs/1' }];
+
+    const text = renderDroppedTranscript(dropped);
+
+    expect(text).toContain('applied to Acme via URL https://x/jobs/1');
   });
 });
 
