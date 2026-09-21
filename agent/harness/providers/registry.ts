@@ -53,6 +53,14 @@ const OPENAI_WIRE_DEFAULTS: Partial<Record<Provider, string>> = {
   openrouter: 'https://openrouter.ai/api/v1',
 };
 
+/** Human-readable vendor name used in OpenAI-wire error events, keyed by
+ * logical provider. Providers absent here default to 'OpenAI'. */
+const OPENAI_WIRE_VENDOR_LABELS: Partial<Record<Provider, string>> = {
+  openrouter: 'OpenRouter',
+  ollama: 'Ollama',
+  codex: 'OpenAI',
+};
+
 /** Build an Anthropic Messages adapter, routing OAuth vs api-key auth. */
 function buildAnthropic(opts: ProviderAdapterOptions): ProviderAdapter {
   const useOauth = opts.authType === 'oauth';
@@ -72,6 +80,7 @@ function buildOpenAi(opts: ProviderAdapterOptions): ProviderAdapter {
     baseUrl,
     apiKey: opts.token,
     contextWindow: opts.contextWindow,
+    vendorLabel: OPENAI_WIRE_VENDOR_LABELS[opts.provider] ?? 'OpenAI',
   });
 }
 

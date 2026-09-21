@@ -25,6 +25,9 @@ export interface OpenAiChatCompletionsOptions {
   model: string;
   /** Optional context window, forwarded as Ollama's `options.num_ctx`. */
   contextWindow?: number;
+  /** Display name used in error events (e.g. "OpenAI request failed with
+   * status ..."); defaults to 'OpenAI'. */
+  vendorLabel?: string;
 }
 
 /** HTTP statuses worth retrying. */
@@ -122,8 +125,13 @@ interface OpenAiResponse {
 
 /** Adapter for the OpenAI Chat Completions API. */
 export class OpenAiChatCompletionsAdapter implements ProviderAdapter {
+  /** Display name used in error events; defaults to 'OpenAI'. */
+  private readonly vendorLabel: string;
+
   /** Construct with resolved auth, base URL and model options. */
-  constructor(private readonly opts: OpenAiChatCompletionsOptions) {}
+  constructor(private readonly opts: OpenAiChatCompletionsOptions) {
+    this.vendorLabel = opts.vendorLabel ?? 'OpenAI';
+  }
 
   /** Send a request and yield normalised events to completion. */
   async *sendMessage(request: ModelRequest): AsyncGenerator<HarnessEvent, void, unknown> {
@@ -138,11 +146,11 @@ export class OpenAiChatCompletionsAdapter implements ProviderAdapter {
       // See the Anthropic adapter: a thrown fetch escapes the retry loop, so
       // the one failure class most likely to be transient is reported as a
       // retryable event instead.
-      yield networkErrorEvent('OpenAI', err);
+      yield networkErrorEvent(this.vendorLabel, err);
       return;
     }
     if (!response.ok) {
-      yield errorEvent(response.status, await readBody(response), retryAfterMsFrom(response.headers));
+      yield errorEvent(this.vendorLabel, response.status, await readBody(response), retryAfterMsFrom(response.headers));
       return;
     }
     let payload: unknown;
@@ -154,7 +162,7 @@ export class OpenAiChatCompletionsAdapter implements ProviderAdapter {
       // socket death as a failed connect — a long response over a flapping
       // link is exactly where it happens. Retryable for the same reason: a
       // body we never read cannot have been acted on.
-      yield networkErrorEvent('OpenAI', err);
+      yield networkErrorEvent(this.vendorLabel, err);
       return;
     }
     const parsed = payload as OpenAiErrorBody;
@@ -164,7 +172,7 @@ export class OpenAiChatCompletionsAdapter implements ProviderAdapter {
       // parsed, so it is re-serialised to feed `detailFromBody`, which takes
       // response text and knows where both vendors nest `error.message`.
       yield providerErrorEvent(
-        'OpenAI',
+        this.vendorLabel,
         response.status,
         JSON.stringify(payload) ?? '',
         completionErrorRetryable(parsed?.error?.code),
@@ -178,8 +186,8 @@ export class OpenAiChatCompletionsAdapter implements ProviderAdapter {
 
 /** Build an error HarnessEvent for a non-2xx status, carrying the provider's
  * own explanation when it sent one. */
-function errorEvent(status: number, body: string, retryAfterMs?: number): HarnessEvent {
-  return providerErrorEvent('OpenAI', status, body, RETRYABLE_STATUS.has(status), retryAfterMs);
+function errorEvent(vendorLabel: string, status: number, body: string, retryAfterMs?: number): HarnessEvent {
+  return providerErrorEvent(vendorLabel, status, body, RETRYABLE_STATUS.has(status), retryAfterMs);
 }
 
 /** Shape of the fields we read from a 2xx body that carries no completion. */

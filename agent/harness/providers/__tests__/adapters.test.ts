@@ -157,6 +157,42 @@ describe('provider adapters', () => {
     expect(events).toContainEqual({ type: 'error', message: expect.any(String), retryable: false });
   });
 
+  it('labels a status error with the configured vendorLabel instead of OpenAI', async () => {
+    stubFetch(429, {});
+    const events = await collect(
+      createOpenAiChatCompletionsAdapter({ apiKey: 'k', baseUrl: 'http://x', model: 'gpt', vendorLabel: 'OpenRouter' }),
+    );
+    expect(events).toContainEqual({
+      type: 'error',
+      message: expect.stringMatching(/^OpenRouter request failed with status 429/),
+      retryable: true,
+    });
+  });
+
+  it('labels a thrown fetch with the configured vendorLabel instead of OpenAI', async () => {
+    stubFetchThrowing();
+    const events = await collect(
+      createOpenAiChatCompletionsAdapter({ apiKey: 'k', baseUrl: 'http://x', model: 'gpt', vendorLabel: 'OpenRouter' }),
+    );
+    expect(events).toContainEqual({
+      type: 'error',
+      message: expect.stringMatching(/^OpenRouter request could not be sent/),
+      retryable: true,
+    });
+  });
+
+  it('keeps the OpenAI label when no vendorLabel is supplied', async () => {
+    stubFetchThrowing();
+    const events = await collect(
+      createOpenAiChatCompletionsAdapter({ apiKey: 'k', baseUrl: 'http://x', model: 'gpt' }),
+    );
+    expect(events).toContainEqual({
+      type: 'error',
+      message: expect.stringMatching(/^OpenAI request could not be sent/),
+      retryable: true,
+    });
+  });
+
   it('sends a subscription token with the Claude Code preamble first', async () => {
     // Without this block the Messages API answers 429 rate_limit_error with the
     // message "Error" — indistinguishable from an exhausted quota, and not one.
