@@ -6,7 +6,7 @@
 # Run it against the built image:
 #   docker compose run --rm --entrypoint /app/agent/smoke-test.sh agent
 #
-# Ported from the retiring Jobs project's docker/smoke-test.sh, but the checks
+# Ported from the retired Jobs project's docker/smoke-test.sh, but the checks
 # are necessarily different: that image contained its own Chrome under Xvfb and
 # its smoke test verified the browser stack. THIS image contains no browser at
 # all on purpose (agent/Dockerfile, BROWSER STRATEGY) - the browser lives
