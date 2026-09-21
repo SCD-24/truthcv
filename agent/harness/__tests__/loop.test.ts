@@ -1,8 +1,32 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import type { McpClientPool, NamespacedTool } from '../mcp/client.js';
-import type { ConversationMessage, HarnessEvent, ProviderAdapter, ToolCall } from '../providers/types.js';
+import type { ConversationMessage, HarnessEvent, ModelRequest, ProviderAdapter, ToolCall } from '../providers/types.js';
 import { backoffDelay, classifyError, isRetryable, runLoop } from '../loop.js';
+
+/**
+ * Like {@link scriptedAdapter}, but also records every request handed to
+ * `sendMessage` — needed to tell a proactive-compaction summarizer call
+ * (no tools, a bounded transcript of only the dropped turns) apart from an
+ * ordinary turn.
+ */
+function scriptedAdapterCapturing(scripts: HarnessEvent[][]): {
+  adapter: ProviderAdapter;
+  calls: () => number;
+  requests: ModelRequest[];
+} {
+  const requests: ModelRequest[] = [];
+  let callCount = 0;
+  const adapter: ProviderAdapter = {
+    async *sendMessage(request) {
+      requests.push(request);
+      const script = scripts[Math.min(callCount, scripts.length - 1)];
+      callCount += 1;
+      for (const event of script) yield event;
+    },
+  };
+  return { adapter, calls: () => callCount, requests };
+}
 
 /** An injected sleep that never actually waits, so tests run instantly. */
 const noSleep = async (): Promise<void> => {};
@@ -602,7 +626,10 @@ describe('compaction the provider asks for', () => {
     });
 
     expect(result.stopReason).toBe('end');
-    expect(calls()).toBeGreaterThan(1);
+    // Exactly two: the turn that overflowed, and the resend after compacting.
+    // A third call would mean the reactive path asked the model to summarize
+    // — the one call it must never make, since the context just overflowed.
+    expect(calls()).toBe(2);
   });
 
   it('reports the compaction it was forced into', async () => {
@@ -696,6 +723,101 @@ describe('compaction the provider asks for', () => {
     });
 
     expect(result.stopReason).toBe('end');
+  });
+});
+
+describe('model-generated compaction summaries', () => {
+  function longConversation(): ConversationMessage[] {
+    return Array.from({ length: 40 }, (_, i) => ({
+      role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+      content: `turn ${i} `.repeat(50),
+    }));
+  }
+
+  it('uses the adapter-produced summary for a proactive compaction', async () => {
+    const summaryDone: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'MODEL SUMMARY: applied to Acme, pending reply.' },
+    };
+    const { adapter, calls, requests } = scriptedAdapterCapturing([[summaryDone], [doneEnd]]);
+    const { pool } = fakePool();
+    const events: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: longConversation(),
+      config: { maxTurns: 5 },
+      compactionConfig: { contextWindow: 1000 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e && e.kind === 'compaction') events.push(e.detail ?? '');
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    // The summarizer call, then the actual turn — no more.
+    expect(calls()).toBe(2);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toContain('MODEL SUMMARY: applied to Acme, pending reply.');
+
+    // The summarizer request must be unable to recurse into tool use, and
+    // must be built only from the dropped turns (not the ones being kept).
+    expect(requests[0].tools).toEqual([]);
+    expect(requests[0].messages[0]?.content).toContain('Summarize these dropped agent turns');
+    expect(requests[0].messages[0]?.content).not.toContain('turn 39 ');
+  });
+
+  it('falls back to the mechanical summary when the adapter call errors', async () => {
+    const summaryError: HarnessEvent = { type: 'error', message: 'summarizer unavailable', retryable: false };
+    const { adapter, calls } = scriptedAdapterCapturing([[summaryError], [doneEnd]]);
+    const { pool } = fakePool();
+    const events: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: longConversation(),
+      config: { maxTurns: 5 },
+      compactionConfig: { contextWindow: 1000 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e && e.kind === 'compaction') events.push(e.detail ?? '');
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    expect(calls()).toBe(2);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toContain('Summarized');
+    expect(events[0]).not.toContain('MODEL SUMMARY');
+  });
+
+  it('falls back to the mechanical summary when the adapter replies with nothing usable', async () => {
+    const emptyDone: HarnessEvent = { type: 'done', stopReason: 'end', message: { role: 'assistant', content: '   ' } };
+    const { adapter, calls } = scriptedAdapterCapturing([[emptyDone], [doneEnd]]);
+    const { pool } = fakePool();
+    const events: string[] = [];
+
+    await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: longConversation(),
+      config: { maxTurns: 5 },
+      compactionConfig: { contextWindow: 1000 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e && e.kind === 'compaction') events.push(e.detail ?? '');
+      },
+    });
+
+    expect(calls()).toBe(2);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toContain('Summarized');
   });
 });
 

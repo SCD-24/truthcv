@@ -29,7 +29,14 @@ import {
   HARVEST_POSTINGS_TOOL_NAME,
   type RegisteredTool,
 } from './tools.js';
-import { compact, shouldCompact, type CompactionConfig, type TokenUsage } from './compaction.js';
+import {
+  compact,
+  shouldCompact,
+  planCompaction,
+  renderDroppedTranscript,
+  type CompactionConfig,
+  type TokenUsage,
+} from './compaction.js';
 
 /** An error event narrowed out of the {@link HarnessEvent} union. */
 type ErrorEvent = Extract<HarnessEvent, { type: 'error' }>;
@@ -79,6 +86,18 @@ export const DEFAULT_TOOL_CONCURRENCY = 4;
 
 /** Base unit for exponential backoff and its jitter, in milliseconds. */
 const BASE_RETRY_DELAY_MS = 1_000;
+
+/** Cap on generated tokens for the proactive-compaction summarizer request. */
+const SUMMARY_MAX_TOKENS = 500;
+
+/**
+ * Ceiling on an accepted model-generated compaction summary, in characters.
+ * Generous relative to {@link SUMMARY_MAX_TOKENS} (roughly 4 chars/token, so
+ * ~2000 expected) so a normal reply is never rejected on length alone; a
+ * reply past this is implausible for a ~500-token request and treated the
+ * same as an adapter error — fall back to the mechanical summary.
+ */
+const MAX_MODEL_SUMMARY_CHARS = 4000;
 
 /**
  * Default number of turns reserved at the end of the budget for the model to
@@ -396,7 +415,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
   };
   while (true) {
     const registry = await refreshRegistry(pool);
-    state.messages = maybeCompact(state, compactionConfig, onEvent);
+    state.messages = await maybeCompact(state, compactionConfig, adapter, onEvent);
     const tools = registry.map((r) => r.definition);
     const request: ModelRequest = { systemPrompt, messages: state.messages, tools };
     const sentMessageCount = state.messages.length;
@@ -429,43 +448,97 @@ async function refreshRegistry(pool: McpClientPool): Promise<RegisteredTool[]> {
 /**
  * Apply compaction before sending, but only when a real context window is set.
  *
- * The window is the operator's to state (see cli.ts): unknown means no
- * proactive compaction, because compacting against a guessed window is worse
- * than not compacting — too high still overflows, too low silently throws away
- * context that was fitting. Runs without a stated window are covered by the
- * reactive path in {@link applyError} instead, which needs no number because
- * the provider supplies the verdict.
+ * The window is the operator's to state, or cli.ts's own conservative
+ * fallback when they state none — see `resolveCompactionConfig` there.
+ * Compaction always runs against a real number now; the escape hatch that
+ * disables it entirely lives one level down, in {@link shouldCompact}'s own
+ * falsy-window check, for a caller (e.g. a test) that passes none at all.
  *
  * Only the messages appended since the provider's last count are estimated;
  * the counted prefix uses the provider's own number.
+ *
+ * Async because compacting here (unlike the reactive path) asks `adapter` for
+ * a model-generated summary of what is about to be dropped — see {@link
+ * applyCompaction}.
  */
-function maybeCompact(
+async function maybeCompact(
   state: LoopState,
   config: CompactionConfig | undefined,
+  adapter: ProviderAdapter,
   onEvent?: (event: HarnessEvent | LoopEvent) => void,
-): ConversationMessage[] {
+): Promise<ConversationMessage[]> {
   if (!config || !config.contextWindow) return state.messages;
   const untracked = state.messages.slice(state.usageCoveredMessages);
   if (!shouldCompact(untracked, state.usage, config)) return state.messages;
-  return applyCompaction(state, config, onEvent, 'approaching the context window');
+  return applyCompaction(state, config, adapter, onEvent, 'approaching the context window');
 }
 
 /**
- * Compact, reset the usage anchor, and report it. Shared by the proactive and
- * reactive paths so a compaction is recorded and re-anchored identically
- * however it was triggered.
+ * Ask the model to summarize the turns compaction is about to drop, for a
+ * denser synthetic message than {@link compact}'s own mechanical
+ * count-and-tool-names text.
+ *
+ * Deliberately isolated: an isolated, no-tools, bounded-transcript request
+ * that can never recurse into compaction and never sees anything beyond the
+ * dropped turns themselves — never the live, still-growing conversation that
+ * triggered compaction in the first place, which is exactly the thing that
+ * could itself overflow. Returns undefined (never throws) on any adapter
+ * error, an empty reply, or a reply implausibly long for a summary — the
+ * caller falls back to the mechanical summary in every one of those cases, so
+ * asking the model can only ever do as well as before, never worse.
+ */
+async function summarizeDropped(adapter: ProviderAdapter, dropped: ConversationMessage[]): Promise<string | undefined> {
+  const transcript = renderDroppedTranscript(dropped);
+  const request: ModelRequest = {
+    systemPrompt: '',
+    messages: [
+      {
+        role: 'user',
+        content: `Summarize these dropped agent turns: key facts, decisions made, URLs/postings handled, and pending state.\n\n${transcript}`,
+      },
+    ],
+    tools: [],
+    maxTokens: SUMMARY_MAX_TOKENS,
+  };
+  let text = '';
+  try {
+    for await (const event of adapter.sendMessage(request)) {
+      if (event.type === 'error') return undefined;
+      if (event.type === 'done') {
+        text = event.message.content;
+        break;
+      }
+    }
+  } catch {
+    return undefined;
+  }
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.length > MAX_MODEL_SUMMARY_CHARS) return undefined;
+  return trimmed;
+}
+
+/**
+ * Compact, reset the usage anchor, and report it. PROACTIVE path only — the
+ * reactive path (`compactAndRetry`) compacts mechanically and never reaches
+ * here, because it fires exactly when the context has just overflowed, the
+ * one moment a model call to describe what is being dropped is itself at
+ * greatest risk of overflowing; `compactAndRetry` has no `adapter` reference
+ * at all, which makes that structural rather than a flag to remember.
  *
  * The anchor must be dropped here: the provider's last count described a
  * conversation that no longer exists, and carrying it forward would keep
  * re-triggering against a prefix that has been thrown away.
  */
-function applyCompaction(
+async function applyCompaction(
   state: LoopState,
   config: CompactionConfig,
+  adapter: ProviderAdapter,
   onEvent: ((event: HarnessEvent | LoopEvent) => void) | undefined,
   why: string,
-): ConversationMessage[] {
-  const { messages: compacted, record } = compact(state.messages, config);
+): Promise<ConversationMessage[]> {
+  const plan = planCompaction(state.messages);
+  const summaryText = plan ? await summarizeDropped(adapter, plan.dropped) : undefined;
+  const { messages: compacted, record } = compact(state.messages, config, summaryText);
   if (record) {
     state.usage = undefined;
     state.usageCoveredMessages = 0;

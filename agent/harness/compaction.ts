@@ -56,6 +56,24 @@ const DEFAULT_RESERVE_TOKENS = 2000;
 const DEFAULT_TRIGGER_RATIO = 0.75;
 
 /**
+ * Conservative context-window fallback used by the CLI when the operator
+ * states none.
+ *
+ * The trade-off is asymmetric, not a guess split down the middle. A fallback
+ * that is too HIGH is rescued by the reactive `compactAndRetry` path: the
+ * provider itself will say the context is too long, and the loop compacts and
+ * resends — a normal, bounded recovery already exercised on every provider. A
+ * fallback that is too LOW has no such backstop: it compacts every few turns
+ * for no reason, silently discarding context that would have fit, and nothing
+ * ever overflows to reveal the loss. So this number is deliberately generous
+ * — comfortably under context windows real hosted models ship with today, so
+ * proactive compaction still does useful work rather than never firing, while
+ * staying far above the point where it would routinely fire and shed history
+ * that fit fine.
+ */
+export const DEFAULT_FALLBACK_CONTEXT_WINDOW = 32768;
+
+/**
  * Deterministic, rough token estimate for text that carries no reported usage.
  *
  * This is an estimate for the untracked tail of the conversation, not an exact
@@ -138,7 +156,11 @@ export interface CompactionRecord {
   type: 'compaction';
   /** How many older messages were removed from the history. */
   droppedMessageCount: number;
-  /** Human-readable summary naming the dropped count and topics. */
+  /**
+   * The summary text actually used in the synthetic message: the caller's
+   * override (e.g. model-generated) when {@link compact} was given one,
+   * otherwise the mechanical summary computed here.
+   */
   summary: string;
 }
 
@@ -158,6 +180,79 @@ function summarise(dropped: ConversationMessage[]): string {
   return `Summarized ${dropped.length} earlier turns (dropped)${suffix}.`;
 }
 
+/** The would-be split of a compaction, without mutating anything or building a summary. */
+export interface CompactionPlan {
+  /** Messages that would be kept verbatim at the head. */
+  pinned: ConversationMessage[];
+  /** Messages that would be dropped and folded into the summary. */
+  dropped: ConversationMessage[];
+  /** Messages that would be kept verbatim at the tail. */
+  kept: ConversationMessage[];
+}
+
+/**
+ * Compute the {@link PIN_LEADING}/pairedBoundary/{@link KEEP_RECENT} split
+ * {@link compact} itself uses, without mutating anything or building a
+ * summary. Exposed so a caller can inspect — or render, for a model-generated
+ * summary — the turns about to be dropped BEFORE {@link compact} commits to
+ * removing them.
+ *
+ * Returns null exactly when {@link compact} itself would no-op: too few
+ * messages, or a batch-preserving boundary that leaves nothing between the
+ * pinned head and the kept tail — so the two never disagree about whether
+ * there is anything to drop.
+ */
+export function planCompaction(messages: ConversationMessage[]): CompactionPlan | null {
+  if (messages.length <= PIN_LEADING + KEEP_RECENT) return null;
+  const keepFrom = pairedBoundary(messages, messages.length - KEEP_RECENT);
+  const pinned = messages.slice(0, PIN_LEADING);
+  const dropped = messages.slice(PIN_LEADING, keepFrom);
+  const kept = messages.slice(keepFrom);
+  // Moving the boundary back to keep a batch whole can leave nothing between
+  // the pinned head and the kept tail. Saying so, rather than describing a
+  // drop of nothing, is what lets a caller tell "there is something to
+  // compact" from "already at its floor".
+  if (dropped.length === 0) return null;
+  return { pinned, dropped, kept };
+}
+
+/** Max characters of the bounded transcript rendered for a model summarizer. */
+const MAX_TRANSCRIPT_CHARS = 8000;
+
+/**
+ * Render dropped turns into a bounded, plain-text transcript for a model
+ * summarizer to read.
+ *
+ * Reuses the same content + tool-call + tool-result extraction {@link
+ * messageTokens} uses for token accounting, because that is exactly what a
+ * turn "cost" and exactly what a summary needs to describe. Bounded by total
+ * characters, not just per-message: the summarizer's own request could itself
+ * overflow if handed the whole dropped range verbatim — which would make the
+ * compaction summarizer the thing that causes the very problem compaction
+ * exists to solve.
+ *
+ * @param dropped The turns {@link planCompaction} identified as about to be dropped.
+ * @param maxChars Character budget for the rendered transcript.
+ */
+export function renderDroppedTranscript(dropped: ConversationMessage[], maxChars = MAX_TRANSCRIPT_CHARS): string {
+  const lines: string[] = [];
+  let total = 0;
+  for (const message of dropped) {
+    const toolCalls = (message.toolCalls ?? []).map((c) => `${c.name}(${JSON.stringify(c.arguments)})`).join(', ');
+    const toolResults = (message.toolResults ?? []).map((r) => r.content).join(' ');
+    const body = [message.content, toolCalls, toolResults].filter(Boolean).join(' ');
+    const line = `[${message.role}] ${body}`.trim();
+    if (!line) continue;
+    if (total + line.length > maxChars) {
+      lines.push('[transcript truncated]');
+      break;
+    }
+    lines.push(line);
+    total += line.length;
+  }
+  return lines.join('\n');
+}
+
 /**
  * Compact the conversation, keeping the first {@link PIN_LEADING} messages and
  * the most recent {@link KEEP_RECENT} byte-identical, and folding everything
@@ -166,26 +261,22 @@ function summarise(dropped: ConversationMessage[]): string {
  * Safe to call unconditionally: when there are not more than the keep-minimum
  * messages there is nothing to drop, so it returns the messages unchanged and
  * a null record. Callers are still expected to gate on {@link shouldCompact}.
+ *
+ * `summaryText`, when given and non-blank, replaces the mechanical {@link
+ * summarise} text verbatim in the synthetic message and the returned record.
+ * This function stays pure and synchronous either way — producing a
+ * model-generated summary, and deciding whether it is good enough to use, is
+ * entirely the caller's job (see loop.ts's `applyCompaction`).
  */
 export function compact(
   messages: ConversationMessage[],
   _config: CompactionConfig,
+  summaryText?: string,
 ): { messages: ConversationMessage[]; record: CompactionRecord | null } {
-  if (messages.length <= PIN_LEADING + KEEP_RECENT) {
-    return { messages, record: null };
-  }
-  const keepFrom = pairedBoundary(messages, messages.length - KEEP_RECENT);
-  const pinned = messages.slice(0, PIN_LEADING);
-  const dropped = messages.slice(PIN_LEADING, keepFrom);
-  const kept = messages.slice(keepFrom);
-  // Moving the boundary back to keep a batch whole can leave nothing between
-  // the pinned head and the kept tail. Saying so, rather than emitting a
-  // summary of nothing, is what lets a caller tell "compacted" from "already
-  // at its floor" — the difference between resending and giving up.
-  if (dropped.length === 0) {
-    return { messages, record: null };
-  }
-  const summary = summarise(dropped);
+  const plan = planCompaction(messages);
+  if (!plan) return { messages, record: null };
+  const { pinned, dropped, kept } = plan;
+  const summary = summaryText?.trim() ? summaryText.trim() : summarise(dropped);
   const summaryMessage: ConversationMessage = { role: 'system', content: `[compaction] ${summary}` };
   const record: CompactionRecord = { type: 'compaction', droppedMessageCount: dropped.length, summary };
   return { messages: [...pinned, summaryMessage, ...kept], record };
