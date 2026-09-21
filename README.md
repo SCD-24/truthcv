@@ -285,6 +285,7 @@ precedence once configured.
 | `OLLAMA_HOST` | Ollama endpoint (compose sets this automatically). |
 | `RUN_AT` / `RUN_DAYS` | Fallback agent schedule, used only when the Agents page's schedule is unreachable. |
 | `TZ` | Fallback timezone the agent's schedule and logs are interpreted in (default `UTC`). The Agents page's schedule timezone takes precedence. |
+| `DIAGNOSTICS_MCP_TOKEN` | Optional — bearer token guarding the read-only `/mcp/diagnostics` endpoint. Unset/empty (the default) disables the endpoint entirely: every request to it returns 404. See "Diagnostics MCP (read-only)" below. |
 
 Generate `ENCRYPTION_KEY` or `AGENT_API_TOKEN` with either of the following:
 
@@ -324,6 +325,44 @@ CI/CD = Continuous Integration and Continuous Delivery
 > expansion) as truthful in a rendered CV. Because of that, add only genuine
 > equivalences — never loose or approximate synonyms. A false equivalence here
 > would let an unattested claim pass the guardrail.
+
+### Diagnostics MCP (read-only)
+
+`/mcp/diagnostics` is a second, separate MCP streamable-HTTP JSON-RPC endpoint
+on the `app` service, for a remote MCP client (Claude Desktop, an inspector,
+your own tooling) to inspect a running TruthCV without touching the
+operational `/mcp` surface the agent uses. It exposes exactly five read-only
+tools — `list_runs`, `get_run`, `list_screenings`, `list_applications`,
+`get_status` — and none of them can start a run, record a screening or
+application, or generate a document. `get_status` reports per-store counts
+and whether secret encryption is available; it never returns any secret
+material.
+
+To enable it, set a non-empty `DIAGNOSTICS_MCP_TOKEN` in `.env` (e.g.
+`openssl rand -hex 32`) and restart the `app` service. Every request must
+carry it as a bearer token:
+
+```
+Authorization: Bearer <your DIAGNOSTICS_MCP_TOKEN>
+```
+
+A missing, wrong, or (while the token is unset) any Authorization header at
+all gets a bare 404 — same convention as the agent's own token-guarded
+routes — so the response never hints at whether the endpoint exists.
+
+Register it in an MCP client as a streamable-HTTP server at
+`http://<host>:<APP_PORT>/mcp/diagnostics` with that header attached; consult
+your client's docs for where it wants custom headers configured.
+
+> **Never publish the unauthenticated `/mcp` endpoint off-network.** `/mcp`
+> (the operational surface the agent uses) carries no authentication at all —
+> it relies entirely on being reachable only inside the Docker compose
+> network. Exposing it (a port mapping, a reverse proxy, a tunnel) hands
+> anyone who can reach it the ability to record applications, submit
+> screenings and generate letters as you. If you need remote access, put a
+> reverse proxy with its own auth in front, or use `/mcp/diagnostics` (which
+> is at least bearer-token-guarded and strictly read-only) instead — and even
+> then, prefer a private network or tunnel over a public port.
 
 ## Local development (without Docker)
 

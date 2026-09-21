@@ -31,6 +31,11 @@ services:
       - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
+      # Bearer token guarding the read-only /mcp/diagnostics endpoint
+      # (api/diagnostics_mcp.py) — separate from AGENT_API_TOKEN and never
+      # required by the operational /mcp surface. Unset/empty means the
+      # endpoint accepts no token at all (404 on every request).
+      - DIAGNOSTICS_MCP_TOKEN=${DIAGNOSTICS_MCP_TOKEN:-}
       # Port the agent's supervisor.js control server listens on. The app
       # service forwards /api/agent/run and /api/agent/status to it.
       - AGENT_CONTROL_PORT=${AGENT_CONTROL_PORT:-9099}
