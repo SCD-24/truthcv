@@ -165,10 +165,12 @@ export interface SettingsStatus {
 }
 
 /** Jev cross-check settings status (the raw key is never sent to the browser).
- * Jev only runs during screening when a key is saved AND useForScreening is on. */
+ * Jev only runs during screening when a key is saved AND useForScreening is on.
+ * useForEmailTracking gates Gmail response tracking the same way. */
 export interface JevSettings {
   keySet: boolean;
   useForScreening: boolean;
+  useForEmailTracking: boolean;
   encryptionAvailable: boolean;
 }
 
@@ -177,6 +179,23 @@ export interface JevSettings {
 export interface JevSettingsUpdate {
   apiKey?: string;
   useForScreening?: boolean;
+  useForEmailTracking?: boolean;
+}
+
+/** Result of POST /api/auth/gmail/start: where to send the browser to
+ * complete the Gmail OAuth flow. */
+export interface GmailStartResult {
+  authUrl: string;
+}
+
+/** GET /api/gmail/status: never 403s, reports the useForEmailTracking gate's
+ * own state (trackingEnabled) so the UI can explain unavailability instead
+ * of surfacing a blanket error. */
+export interface GmailStatus {
+  connected: boolean;
+  email: string | null;
+  reauthRequired: boolean;
+  trackingEnabled: boolean;
 }
 
 /** One selectable model, discovered live from the provider's API/SDK. */

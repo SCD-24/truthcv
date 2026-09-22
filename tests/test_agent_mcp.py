@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 from api.main import app
 from applications.store import load_all as load_applications
 from agenttools import server as mcp_server
-from agenttools import tools_ledger, tools_letter, tools_boards, tools_research
+from agenttools import tools_ledger, tools_letter, tools_boards, tools_gmail, tools_research
 from companyresearch import store as company_findings_store
 from providers.fake import FakeProvider
 from truth.answers import register_canonical_cv
@@ -64,6 +64,7 @@ def test_no_registered_tool_accepts_an_approval_parameter():
         "recommend_salary",
         "record_company_finding",
         "get_company_findings",
+        "check_gmail_responses",
     }
     offenses = []
     for name, fn in mcp_server.TOOLS.items():
@@ -98,6 +99,7 @@ def test_no_tool_module_reaches_the_guardrail_allow_list():
         tools_letter.__name__: tools_letter,
         tools_ledger.__name__: tools_ledger,
         tools_boards.__name__: tools_boards,
+        tools_gmail.__name__: tools_gmail,
         tools_research.__name__: tools_research,
     }
     assert module_names <= modules.keys(), (

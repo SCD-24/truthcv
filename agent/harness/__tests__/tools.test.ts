@@ -61,7 +61,7 @@ const BROWSER_TOOLS = [
   'browser_tab_close',
 ];
 
-/** The 18 truthcv tools granted individually by daily-apply.sh. */
+/** The 19 truthcv tools granted individually by daily-apply.sh. */
 const TRUTHCV_TOOLS = [
   'generate_cover_letter',
   'record_application',
@@ -81,6 +81,7 @@ const TRUTHCV_TOOLS = [
   'record_run_note',
   'record_postings_seen',
   'record_discovery_coverage',
+  'check_gmail_responses',
 ];
 
 /** Build a one-entry registry for a (server, tool) pair. */
@@ -97,7 +98,7 @@ function callFor(namespacedName: string): ToolCall {
 }
 
 describe('isToolAllowed', () => {
-  it('grants every one of the 18 named truthcv tools', () => {
+  it('grants every one of the 19 named truthcv tools', () => {
     for (const name of TRUTHCV_TOOLS) {
       expect(isToolAllowed('truthcv', name)).toBe(true);
     }
@@ -105,7 +106,7 @@ describe('isToolAllowed', () => {
 
   it('denies an unlisted truthcv tool', () => {
     expect(isToolAllowed('truthcv', 'delete_everything')).toBe(false);
-    expect(isToolAllowed('truthcv', 'some_unlisted_18th_tool')).toBe(false);
+    expect(isToolAllowed('truthcv', 'some_unlisted_19th_tool')).toBe(false);
   });
 
   it('grants only the enumerated browser allow-list tools, not the whole server', () => {

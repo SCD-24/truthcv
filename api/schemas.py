@@ -423,6 +423,7 @@ class JevSettingsStatus(_Camel):
 
     key_set: bool = False
     use_for_screening: bool = False
+    use_for_email_tracking: bool = False
     encryption_available: bool = True
 
 
@@ -434,6 +435,7 @@ class JevSettingsUpdate(_Camel):
 
     api_key: str | None = None
     use_for_screening: bool | None = None
+    use_for_email_tracking: bool | None = None
 
 
 class CompanyBoardModel(_Camel):
@@ -1201,6 +1203,26 @@ class PollLoginResult(_Camel):
 
 class CompleteLoginRequest(_Camel):
     code: str
+
+
+class GmailStatusModel(_Camel):
+    """GET /api/gmail/status response.
+
+    Reports the useForEmailTracking gate's own state instead of 403ing, so
+    the Settings page can explain why Gmail is unavailable rather than
+    getting a blanket error.
+    """
+
+    connected: bool = False
+    email: str | None = None
+    reauth_required: bool = False
+    tracking_enabled: bool = False
+
+
+class GmailSyncRequest(_Camel):
+    """POST /api/gmail/responses/sync body."""
+
+    force: bool = False
 
 
 class ApiKeyRequest(_Camel):

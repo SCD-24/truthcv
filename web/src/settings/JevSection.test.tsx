@@ -19,6 +19,7 @@ function makeSettings(overrides: Partial<JevSettings> = {}): JevSettings {
   return {
     keySet: false,
     useForScreening: false,
+    useForEmailTracking: false,
     encryptionAvailable: true,
     ...overrides,
   };

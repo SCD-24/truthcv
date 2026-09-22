@@ -2074,6 +2074,14 @@
       "id": "jev-api",
       "name": "Jev (TypeSafe System One) API",
       "type": "custom"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "id": "gmail-response-sync",
+      "name": "Gmail Response Sync",
+      "type": "backend"
     }
   ],
   "connections": [
@@ -2536,6 +2544,36 @@
       "from": "screening-engine",
       "protocol": "HTTPS",
       "to": "jev-api"
+    },
+    {
+      "from": "gmail-response-sync",
+      "protocol": "HTTPS",
+      "to": "gmail-api"
+    },
+    {
+      "from": "gmail-response-sync",
+      "protocol": "in-process",
+      "to": "application-tracker"
+    },
+    {
+      "from": "gmail-response-sync",
+      "protocol": "in-process",
+      "to": "llm-provider-layer"
+    },
+    {
+      "from": "gmail-response-sync",
+      "protocol": "in-process",
+      "to": "connections"
+    },
+    {
+      "from": "gmail-response-sync",
+      "protocol": "file I/O",
+      "to": "truth-data-volume"
+    },
+    {
+      "from": "api",
+      "protocol": "in-process",
+      "to": "gmail-response-sync"
     }
   ],
   "definitions": [
@@ -2826,7 +2864,8 @@
         "keyword-vocabulary",
         "storage-leaf",
         "services-layer",
-        "job-feeds"
+        "job-feeds",
+        "gmail-response-sync"
       ],
       "name": "TruthCV Container (single Docker image)",
       "w": 1861.8301559792023,
@@ -5330,6 +5369,10 @@
     "gmail-api": {
       "x": 340,
       "y": 215
+    },
+    "gmail-response-sync": {
+      "x": 200,
+      "y": 200
     },
     "guardrail-validator": {
       "x": 1245,

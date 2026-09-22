@@ -10,6 +10,8 @@ import type {
   SettingsUpdate,
   JevSettings,
   JevSettingsUpdate,
+  GmailStartResult,
+  GmailStatus,
   TestResult,
   ProfileStatus,
   OnboardingState,
@@ -295,6 +297,17 @@ export function saveJevSettings(body: JevSettingsUpdate): Promise<JevSettings> {
 /** Test the saved Jev key. */
 export function testJevKey(): Promise<TestResult> {
   return request("/api/settings/jev/test", { method: "POST" });
+}
+
+/** Begin the Gmail OAuth flow. 403s unless a Jev key is saved and
+ * useForEmailTracking is on. */
+export function startGmailLogin(): Promise<GmailStartResult> {
+  return request("/api/auth/gmail/start", { method: "POST" });
+}
+
+/** Gmail connection status for the Settings page. Never 403s. */
+export function getGmailStatus(): Promise<GmailStatus> {
+  return request("/api/gmail/status");
 }
 
 /** Generate a guardrail-truthful cover letter for the current posting.

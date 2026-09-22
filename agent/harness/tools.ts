@@ -28,7 +28,7 @@ import { screenPosting, screenPostingTool } from './builtins/screenPosting.js';
 import { harvestPostings, harvestPostingsTool, type BrowserToolCall } from './builtins/harvestPostings.js';
 
 /**
- * The 18 truthcv tools granted individually by `daily-apply.sh`, as their bare
+ * The 19 truthcv tools granted individually by `daily-apply.sh`, as their bare
  * (un-namespaced) tool names.
  *
  * These are enumerated one by one ON PURPOSE: naming each tool keeps the blast
@@ -55,6 +55,7 @@ const TRUTHCV_ALLOWED_TOOL_NAMES = [
   'record_run_note',
   'record_postings_seen',
   'record_discovery_coverage',
+  'check_gmail_responses',
 ] as const;
 
 /** The MCP server key of the truthcv tool surface the named grants apply to. */

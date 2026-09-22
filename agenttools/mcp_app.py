@@ -10,6 +10,7 @@ import inspect
 from typing import Any
 
 from agenttools.tools_boards import record_company_board as _record_company_board
+from agenttools.tools_gmail import check_gmail_responses as _check_gmail_responses
 from agenttools.tools_ledger import (
     check_cooldown as _check_cooldown,
     get_approved_applications as _get_approved_applications,
@@ -132,6 +133,16 @@ _TOOL_REGISTRY = {
         _get_company_findings,
         "Returns every finding recorded for a company and its open contradictions. A non-empty "
         "open_contradictions means the company must NOT be applied to until the operator resolves it.",
+    ),
+    "check_gmail_responses": (
+        _check_gmail_responses,
+        "Runs a Gmail response-tracking sync and returns a summary: skipped (true when the sync was "
+        "throttled and did nothing this call), processed (messages processed this sync, 0 when "
+        "skipped), applied (status transitions auto-applied by THIS sync from Jev-confirmed employer "
+        "replies — not the lifetime total), and pending (suggestions currently awaiting operator "
+        "review). Call this once at the start of a scheduled run. Errors when Gmail response-tracking "
+        "isn't configured and opted in — that's expected when the operator hasn't enabled it, and not "
+        "a run failure.",
     ),
     "start_run": (
         _start_run,

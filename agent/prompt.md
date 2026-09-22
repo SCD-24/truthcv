@@ -204,6 +204,11 @@ tools:
   its open contradictions. Call it before screening a company; a non-empty
   `open_contradictions` means you must not apply to it until the operator
   resolves it.
+- `check_gmail_responses` — runs a Gmail response-tracking sync so employer
+  email replies are reflected before you begin discovery. See "Run
+  identity" below for when to call it. Errors (not a run failure) when
+  Gmail response tracking isn't configured and opted in — ignore that and
+  continue normally.
 
 Do not use any other tool to substitute for these. Do not write a cover
 letter, an application record, or a screening verdict by any means other than
@@ -222,6 +227,11 @@ the composed prompt, or by the launcher). Call `start_run` with it before
 doing anything else, and `finish_run` with it before you exit — see the tool
 descriptions above and `agent/RUNBOOK.md`'s "Run identity" section for the
 full obligation, including on an early stop.
+
+On a scheduled run, call `check_gmail_responses` once at the very start,
+right after `start_run`, so any employer email replies are reflected before
+you begin discovery. It errors (not a run failure) when Gmail response
+tracking isn't configured and opted in — ignore that and continue normally.
 
 ## The approve/deny boundary
 

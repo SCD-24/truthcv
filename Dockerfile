@@ -48,6 +48,7 @@ COPY connections/ ./connections/
 COPY modelrouting/ ./modelrouting/
 COPY agenttools/ ./agenttools/
 COPY onboarding/ ./onboarding/
+COPY gmailsync/ ./gmailsync/
 COPY api/ ./api/
 
 # Built frontend bundle from stage 1.

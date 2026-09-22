@@ -8,12 +8,12 @@ from email.utils import parseaddr
 
 import httpx
 
-from applications.store import load_all
+from applications.store import get as get_application, load_all, update as update_application
 from connections.auth.gmail import AuthError, get_valid_access_token
 from providers import ProviderError, get_provider
-from truth.answers import load as load_answers
+from screening import jev
 
-from .matcher import match_message
+from .matcher import _app_domains, match_message
 from .model import GmailSuggestion, GmailSyncState
 from .store import load_suggestions, load_sync_state, save_suggestions, save_sync_state
 
@@ -147,15 +147,34 @@ def _classify_message(subject: str, snippet: str, body: str) -> tuple[str, str]:
     return classification, suggested
 
 
-def _query(last_synced_at: float, target_email: str) -> str:
-    parts = [f'to:{target_email}']
+#: Statuses still considered "open" — a response hasn't yet been recorded via
+#: an auto-applied Rejected/Interviewing transition, so the application is
+#: still worth scanning for an employer reply.
+OPEN_STATUSES = {"Applied", "Waiting"}
+
+
+def _application_query(app, last_synced_at: float) -> str:
+    """Gmail query scoped to one application's domains/company, after a cursor.
+
+    Reuses matcher._app_domains — the same website/application_url domains
+    and company token match_message later scores attribution against — so
+    the query and the eventual attribution stay in sync. Returns "" when the
+    application has no domain or company signal to search on, so the caller
+    can skip it rather than issuing an unscoped query.
+    """
+    domains = _app_domains(app)
+    if not domains:
+        return ""
+    scoped = " OR ".join(f"from:{d}" for d in sorted(domains))
+    parts = [f"({scoped})"]
     if last_synced_at > 0:
         parts.append(f"after:{int(last_synced_at)}")
     return " ".join(parts)
 
 
 def _pending_candidates():
-    return [app for app in load_all() if not app.response_received]
+    """Applications still in an open status (Applied/Waiting) worth scanning."""
+    return [app for app in load_all() if app.status in OPEN_STATUSES]
 
 
 def _sender_email(value: str) -> str:
@@ -174,6 +193,118 @@ def pending_suggestions() -> list[GmailSuggestion]:
     return _sorted_pending(load_suggestions())
 
 
+def _collect_message_ids(client: GmailClient, pending_apps: list, sync_state: GmailSyncState, processed_ids: set[str]) -> list[str]:
+    """Distinct new message ids across every open application's scoped query.
+
+    Issues one Gmail query per open application (skipping any with no domain
+    or company signal), and dedupes ids already in ``processed_ids`` or seen
+    earlier in this same run — a message can legitimately match more than
+    one application's query.
+    """
+    seen_ids: list[str] = []
+    seen_set: set[str] = set()
+    for app in pending_apps:
+        query = _application_query(app, sync_state.last_synced_at)
+        if not query:
+            continue
+        for item in client.list_messages(query):
+            message_id = str(item.get("id", ""))
+            if not message_id or message_id in processed_ids or message_id in seen_set:
+                continue
+            seen_set.add(message_id)
+            seen_ids.append(message_id)
+    return seen_ids
+
+
+# Classification -> (Jev confirmation statement, status to apply on confirm).
+# Only these two classifications ever auto-apply a status; everything else
+# (offer, confirmation, other) is left for the operator to review manually.
+_CONFIRM_STATEMENTS = {
+    "rejection": ("This email tells the candidate their job application was rejected.", "Rejected"),
+    "interview": ("This email invites the candidate to interview for the job application.", "Interviewing"),
+}
+
+
+def _evidence_note(message_id: str, sender: str, subject: str, date: str) -> str:
+    """One evidence paragraph documenting an auto-applied status change."""
+    return (
+        f"Gmail sync: status auto-updated from an employer reply "
+        f'(message {message_id}, from {sender}, subject "{subject}", {date}).'
+    )
+
+
+def _apply_decision(app_id: str, status: str, message_id: str, sender: str, subject: str, date: str) -> None:
+    """Set an application's status from a Jev-confirmed employer reply, with evidence."""
+    app = get_application(app_id)
+    existing_notes = (app.notes if app else "").strip()
+    note = _evidence_note(message_id, sender, subject, date)
+    notes = f"{existing_notes}\n\n{note}" if existing_notes else note
+    update_application(app_id, {"status": status, "response_received": True, "notes": notes})
+
+
+def _confirm_decision(classification: str, subject: str, body: str) -> tuple[str, str] | None:
+    """Ask Jev to confirm a rejection/interview classification before acting.
+
+    Returns ``(status, decision)`` where decision is "confirmed" or
+    "declined", or None for classifications with no auto-apply mapping.
+    Never logs the email text.
+    """
+    spec = _CONFIRM_STATEMENTS.get(classification)
+    if spec is None:
+        return None
+    statement, status = spec
+    confirmed = jev.confirm(statement, f"{subject}\n\n{body}")
+    return status, "confirmed" if confirmed else "declined"
+
+
+def _process_message(client: GmailClient, message_id: str, pending_apps: list, by_id: dict[str, GmailSuggestion]) -> None:
+    """Fetch, match, and classify one message; record a suggestion if matched.
+
+    A rejection/interview classification is put to Jev for confirmation; on
+    confirm the matched application's status is auto-updated with evidence
+    in its notes and the suggestion is recorded as applied. On decline (or
+    any other classification) the suggestion is left pending and no
+    application is touched.
+    """
+    metadata = client.get_metadata(message_id)
+    sender = _header(metadata, "From")
+    subject = _header(metadata, "Subject")
+    date = _header(metadata, "Date")
+    snippet = str(metadata.get("snippet", ""))
+    match = match_message(pending_apps, sender=sender, subject=subject, snippet=snippet)
+    if match is None:
+        return
+    full = client.get_full(message_id)
+    body = _decode_body(full.get("payload") or {})
+    classification, suggested_status = _classify_message(subject, snippet, body)
+    if message_id in by_id:
+        return
+    decision = ""
+    suggestion_state = "pending"
+    outcome = _confirm_decision(classification, subject, body)
+    if outcome is not None:
+        status, decision = outcome
+        if decision == "confirmed":
+            _apply_decision(match.application_id, status, message_id, sender, subject, date)
+            suggestion_state = "applied"
+    by_id[message_id] = GmailSuggestion(
+        id=message_id,
+        application_id=match.application_id,
+        application_label=match.application_label,
+        sender=sender,
+        sender_email=_sender_email(sender),
+        subject=subject,
+        date=date,
+        snippet=snippet,
+        classification=classification,
+        suggested_status=suggested_status,
+        match_confidence=match.confidence,
+        match_evidence=match.evidence,
+        state=suggestion_state,
+        decision=decision,
+    )
+
+
 def run_sync(*, force: bool = False) -> dict:
     sync_state = load_sync_state()
     now = time.time()
@@ -184,49 +315,14 @@ def run_sync(*, force: bool = False) -> dict:
             "processed": 0,
             "suggestions": len(_sorted_pending(load_suggestions())),
         }
-    answers = load_answers()
-    if not answers.email.strip():
-        raise GmailSyncError("Set your email address in Answers before syncing Gmail.")
     client = build_gmail_client()
     existing = load_suggestions()
     by_id = {item.id: item for item in existing}
     processed_ids = set(sync_state.processed_message_ids)
     pending_apps = _pending_candidates()
-    new_processed: list[str] = []
-    query = _query(sync_state.last_synced_at, answers.email.strip())
-    for item in client.list_messages(query):
-        message_id = str(item.get("id", ""))
-        if not message_id or message_id in processed_ids:
-            continue
-        metadata = client.get_metadata(message_id)
-        sender = _header(metadata, "From")
-        subject = _header(metadata, "Subject")
-        date = _header(metadata, "Date")
-        snippet = str(metadata.get("snippet", ""))
-        match = match_message(pending_apps, sender=sender, subject=subject, snippet=snippet)
-        if match is None:
-            new_processed.append(message_id)
-            continue
-        full = client.get_full(message_id)
-        body = _decode_body(full.get("payload") or {})
-        classification, suggested_status = _classify_message(subject, snippet, body)
-        if message_id not in by_id:
-            by_id[message_id] = GmailSuggestion(
-                id=message_id,
-                application_id=match.application_id,
-                application_label=match.application_label,
-                sender=sender,
-                sender_email=_sender_email(sender),
-                subject=subject,
-                date=date,
-                snippet=snippet,
-                classification=classification,
-                suggested_status=suggested_status,
-                match_confidence=match.confidence,
-                match_evidence=match.evidence,
-                state="pending",
-            )
-        new_processed.append(message_id)
+    new_processed = _collect_message_ids(client, pending_apps, sync_state, processed_ids)
+    for message_id in new_processed:
+        _process_message(client, message_id, pending_apps, by_id)
     sync_state.last_synced_at = now
     sync_state.processed_message_ids = sorted(processed_ids.union(new_processed))
     save_suggestions(list(by_id.values()))

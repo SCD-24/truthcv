@@ -35,6 +35,10 @@ class GmailSuggestion:
     match_confidence: str = ""
     match_evidence: list[str] = field(default_factory=list)
     state: str = "pending"
+    # The Jev auto-apply verdict for a rejection/interview classification:
+    # "" (not judged — e.g. offer/confirmation/other), "confirmed", or
+    # "declined".
+    decision: str = ""
 
     @classmethod
     def from_dict(cls, raw: dict | None) -> "GmailSuggestion":
@@ -53,6 +57,7 @@ class GmailSuggestion:
             match_confidence=str(raw.get("match_confidence", "")),
             match_evidence=[str(v) for v in raw.get("match_evidence") or []],
             state=str(raw.get("state", "pending")),
+            decision=str(raw.get("decision", "")),
         )
 
     def to_dict(self) -> dict:

@@ -14,10 +14,10 @@ import os
 from datetime import date
 import urllib.error
 import urllib.request
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
-from fastapi import APIRouter, File, Header, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
+from fastapi.responses import RedirectResponse, StreamingResponse
 
 import tailor as tailor_engine
 from providers import ProviderError, get_provider
@@ -59,6 +59,7 @@ from connections import catalog
 from connections.auth.claude import AuthError, get_valid_access_token
 from connections.auth import claude as claude_auth
 from connections.auth import codex as codex_auth
+from connections.auth import gmail as gmail_auth
 from providers import (
     ANTHROPIC_COMPAT_OPENROUTER_BASE_URL,
     OPENROUTER_BASE_URL,
@@ -117,6 +118,8 @@ from .schemas import (
     CoverLetterRequest,
     CooldownResult,
     CoverLetterResult,
+    GmailStatusModel,
+    GmailSyncRequest,
     JevSettingsStatus,
     JevSettingsUpdate,
     JobBoardKeyStatus,
@@ -1337,6 +1340,7 @@ def get_jev_settings() -> JevSettingsStatus:
     return JevSettingsStatus(
         key_set=bool(conn.get("apiKey")),
         use_for_screening=conn.get("useForScreening") is True,
+        use_for_email_tracking=conn.get("useForEmailTracking") is True,
         encryption_available=secretstore.encryption_available(),
     )
 
@@ -1344,12 +1348,15 @@ def get_jev_settings() -> JevSettingsStatus:
 @router.put("/settings/jev", response_model=JevSettingsStatus)
 def put_jev_settings(body: JevSettingsUpdate) -> JevSettingsStatus:
     """Save (or, with an empty string, clear) the Jev API key and/or the
-    useForScreening toggle. Saving a non-empty key requires encryption."""
+    useForScreening / useForEmailTracking toggles. Saving a non-empty key
+    requires encryption."""
     updates: dict = {}
     if body.api_key is not None:
         updates["apiKey"] = body.api_key.strip() or None
     if body.use_for_screening is not None:
         updates["useForScreening"] = body.use_for_screening
+    if body.use_for_email_tracking is not None:
+        updates["useForEmailTracking"] = body.use_for_email_tracking
     # Any persisted field — including the toggle — is written through the
     # same encrypted store as the key, so a write of either kind needs a
     # valid ENCRYPTION_KEY, not just a non-empty api_key.
@@ -1361,6 +1368,7 @@ def put_jev_settings(body: JevSettingsUpdate) -> JevSettingsStatus:
     return JevSettingsStatus(
         key_set=bool(conn.get("apiKey")),
         use_for_screening=conn.get("useForScreening") is True,
+        use_for_email_tracking=conn.get("useForEmailTracking") is True,
         encryption_available=secretstore.encryption_available(),
     )
 
@@ -1372,6 +1380,103 @@ def test_jev_settings() -> TestResult:
 
     ok, detail = jev.check_key(secretstore.get_connection("jev").get("apiKey", ""))
     return TestResult(ok=ok, detail=detail)
+
+
+def require_gmail_tracking_enabled() -> None:
+    """Raise 403 unless Gmail response-tracking is configured and opted in.
+
+    Gated on the same secretstore "jev" record as Jev screening cross-checks:
+    a non-empty apiKey AND useForEmailTracking set to True. Gmail sync
+    auto-applies Jev-confirmed transitions, so it must never run on a bare
+    Gmail connection without this explicit opt-in.
+    """
+    conn = secretstore.get_connection("jev")
+    if not conn.get("apiKey") or conn.get("useForEmailTracking") is not True:
+        raise HTTPException(
+            status_code=403,
+            detail="Gmail response-tracking requires a saved Jev API key and useForEmailTracking enabled.",
+        )
+
+
+@router.post("/auth/gmail/start", response_model=StartLoginResult)
+def start_gmail_login(request: Request) -> StartLoginResult:
+    """Begin the Gmail OAuth flow. Gated on the useForEmailTracking opt-in."""
+    require_gmail_tracking_enabled()
+    redirect_uri = str(request.url_for("gmail_callback"))
+    try:
+        return StartLoginResult.model_validate(gmail_auth.start_login(redirect_uri))
+    except gmail_auth.AuthError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/auth/gmail/callback", name="gmail_callback")
+def complete_gmail_login(
+    code: str | None = None, state: str | None = None, error: str | None = None
+) -> RedirectResponse:
+    """Complete the Gmail OAuth flow, then redirect back to the app root.
+
+    Gated the same as /start: a request reaching here without the feature
+    enabled 403s rather than silently completing a login the operator can't
+    use yet.
+
+    Unlike a JSON API route, this one is a browser redirect target: there is
+    nowhere for a JSON error page to be seen. Google's own denied-consent
+    redirect (`?error=access_denied`, with no `code`/`state`) and a failed
+    token exchange are therefore never raised as HTTP errors — both redirect
+    back to the app root with a `gmailError` query param instead of the
+    normal success redirect, so `code`/`state` are optional here. The same
+    goes for the feature gate: closed mid-flow (key cleared or the toggle
+    turned off while the consent screen was open), it redirects with
+    `gmailError=not_enabled` rather than rendering a 403 JSON body.
+    """
+    try:
+        require_gmail_tracking_enabled()
+    except HTTPException:
+        query = urlencode({"gmailError": "not_enabled"})
+        return RedirectResponse(url=f"/?{query}")
+    if error or not code or not state:
+        query = urlencode({"gmailError": error or "missing_code"})
+        return RedirectResponse(url=f"/?{query}")
+    try:
+        gmail_auth.complete_login(code, state)
+    except gmail_auth.AuthError:
+        query = urlencode({"gmailError": "auth_failed"})
+        return RedirectResponse(url=f"/?{query}")
+    return RedirectResponse(url="/")
+
+
+@router.get("/gmail/status", response_model=GmailStatusModel)
+def get_gmail_status() -> GmailStatusModel:
+    """Gmail connection status for the Settings page.
+
+    Unlike /auth/gmail/start and /callback, this route never 403s: it
+    reports the useForEmailTracking gate's own state (tracking_enabled) so
+    the UI can explain why Gmail is unavailable, rather than getting a
+    blanket error.
+    """
+    jev_conn = secretstore.get_connection("jev")
+    tracking_enabled = bool(jev_conn.get("apiKey")) and jev_conn.get("useForEmailTracking") is True
+    oauth = secretstore.get_connection("gmail").get("oauth") or {}
+    return GmailStatusModel(
+        connected=bool(oauth.get("email")),
+        email=oauth.get("email") or None,
+        reauth_required=oauth.get("reauthRequired") is True,
+        tracking_enabled=tracking_enabled,
+    )
+
+
+@router.post("/gmail/responses/sync")
+def sync_gmail_responses(body: GmailSyncRequest | None = None) -> dict:
+    """Trigger a Gmail response-tracking sync. Gated the same as the OAuth
+    routes: requires a saved Jev key and useForEmailTracking enabled.
+
+    Returns gmailsync.service.run_sync's own summary dict unchanged.
+    """
+    require_gmail_tracking_enabled()
+    from gmailsync import service as gmailsync_service
+
+    force = body.force if body is not None else False
+    return gmailsync_service.run_sync(force=force)
 
 
 @router.get("/agent/config", response_model=AgentConfigModel)
