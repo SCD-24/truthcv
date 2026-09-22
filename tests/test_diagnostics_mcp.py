@@ -3,9 +3,9 @@
 
 These pin down the two things that matter about a second, bearer-token-only
 MCP surface: that it is unreachable without the right token (404, never a
-hint-carrying 401/403), and that once authenticated it exposes only the five
-read-only diagnostics tools — never any tool from the operational registry
-that can write.
+hint-carrying 401/403), and that once authenticated it exposes only the
+seven read-only diagnostics tools — never any tool from the operational
+registry that can write.
 
 The 404-gate tests use a bare ``TestClient(app)`` (no lifespan): the auth
 check in api.main's /mcp/diagnostics route runs and rejects the request
@@ -42,6 +42,7 @@ from api.diagnostics_mcp import (
     _handle_diag_list_tools,
 )
 from api.main import app
+from gmailsync.model import GmailSuggestion, GmailSyncState
 
 
 class _ToolCallParams:
@@ -146,17 +147,19 @@ def test_existing_operational_mcp_endpoint_has_no_auth_gate(data_dir, monkeypatc
     assert r.status_code != 404
 
 
-def test_registry_holds_exactly_the_five_read_only_tools():
+def test_registry_holds_exactly_the_seven_read_only_tools():
     assert set(_DIAG_TOOL_REGISTRY) == {
         "list_runs",
         "get_run",
         "list_screenings",
         "list_applications",
         "get_status",
+        "get_gmail_sync_status",
+        "list_gmail_suggestions",
     }
 
 
-def test_tools_list_handler_advertises_exactly_the_five_diagnostics_tools():
+def test_tools_list_handler_advertises_exactly_the_seven_diagnostics_tools():
     result = _run_sync(_handle_diag_list_tools(None, None))
     names = {tool.name for tool in result.tools}
     assert names == {
@@ -165,6 +168,8 @@ def test_tools_list_handler_advertises_exactly_the_five_diagnostics_tools():
         "list_screenings",
         "list_applications",
         "get_status",
+        "get_gmail_sync_status",
+        "list_gmail_suggestions",
     }
     # None of the operational, write-capable tools are reachable here.
     assert "record_application" not in names
@@ -181,6 +186,47 @@ def test_get_status_round_trips_through_the_call_tool_handler(data_dir):
     payload = json.loads(text)
     assert "encryption_available" in payload
     assert "runs" in payload
+    assert "gmail_suggestions" in payload
+    assert "gmail_last_synced_at" in payload
+
+
+def test_get_gmail_sync_status_round_trips_through_the_call_tool_handler(data_dir):
+    import gmailsync.store as gmailsync_store
+
+    gmailsync_store.save_sync_state(
+        GmailSyncState(last_synced_at=1700000000.0, processed_message_ids=["m1", "m2", "m3"])
+    )
+
+    params = _ToolCallParams(name="get_gmail_sync_status", arguments={})
+    result = _run_sync(_handle_diag_call_tool(None, params))
+    text = result.content[0].text
+    assert not result.is_error, text
+    payload = json.loads(text)
+    assert payload["last_synced_at"] == 1700000000.0
+    assert payload["processed_message_count"] == 3
+
+
+def test_list_gmail_suggestions_round_trips_seeded_suggestions_newest_first(data_dir):
+    """Seeds real RFC-2822 Gmail `Date` headers, chosen so a lexicographic
+    string sort would order them wrongly ("Wed" > "Fri"): only parsing the
+    dates puts the 2025 suggestion first."""
+    import gmailsync.store as gmailsync_store
+
+    gmailsync_store.save_suggestions(
+        [
+            GmailSuggestion(id="g-old", date="Wed, 5 Jun 2024 09:00:00 +0000"),
+            GmailSuggestion(id="g-new", date="Fri, 3 Jan 2025 10:00:00 +0000"),
+        ]
+    )
+
+    params = _ToolCallParams(name="list_gmail_suggestions", arguments={})
+    result = _run_sync(_handle_diag_call_tool(None, params))
+    text = result.content[0].text
+    assert not result.is_error, text
+    payload = json.loads(text)
+    assert payload["total"] == 2
+    ids = [s["id"] for s in payload["suggestions"]]
+    assert ids == ["g-new", "g-old"]
 
 
 def test_list_runs_round_trips_a_seeded_run(data_dir):
@@ -269,3 +315,26 @@ def test_list_runs_non_positive_limit_is_clamped_to_the_default_not_unbounded(
     payload = json.loads(text)
     assert payload["total"] == 3
     assert len(payload["runs"]) == 2
+
+
+def test_list_gmail_suggestions_non_positive_limit_is_clamped_to_the_default_not_unbounded(
+    data_dir, monkeypatch
+):
+    """Same guarantee as list_runs's clamp test, for list_gmail_suggestions:
+    a limit<=0 must apply _DEFAULT_LIST_LIMIT, not be treated as "no
+    limit"."""
+    import api.diagnostics_mcp as diagnostics_mcp
+    import gmailsync.store as gmailsync_store
+
+    monkeypatch.setattr(diagnostics_mcp, "_DEFAULT_LIST_LIMIT", 2)
+    gmailsync_store.save_suggestions(
+        [GmailSuggestion(id=f"g-{i}", date=f"2024-01-0{i+1}T00:00:00+00:00") for i in range(3)]
+    )
+
+    params = _ToolCallParams(name="list_gmail_suggestions", arguments={"limit": -5})
+    result = _run_sync(_handle_diag_call_tool(None, params))
+    text = result.content[0].text
+    assert not result.is_error, text
+    payload = json.loads(text)
+    assert payload["total"] == 3
+    assert len(payload["suggestions"]) == 2
