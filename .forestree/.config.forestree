@@ -208,6 +208,11 @@
                   "desc": "Stop a run: forwards cancel to the supervisor when it owns the run, otherwise closes the record as failed/orphaned. 404 unknown run, 409 already finished.",
                   "method": "POST",
                   "path": "/api/runs/{run_id}/stop"
+                },
+                {
+                  "desc": "Manually trigger a Gmail response sync (wired to the Web UI's Sync-now button); delegates to Gmail Response Sync",
+                  "method": "POST",
+                  "path": "/api/gmail/responses/sync"
                 }
               ]
             },
