@@ -8,6 +8,8 @@ import type {
   ModelList,
   SettingsStatus,
   SettingsUpdate,
+  JevSettings,
+  JevSettingsUpdate,
   TestResult,
   ProfileStatus,
   OnboardingState,
@@ -273,6 +275,26 @@ export function testConnection(body: SettingsUpdate): Promise<TestResult> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+/** Read Jev cross-check settings status (the raw key is never sent back). */
+export function getJevSettings(): Promise<JevSettings> {
+  return request("/api/settings/jev");
+}
+
+/** Save Jev settings (encrypted at rest). An empty apiKey clears the stored
+ * key; omitted fields are left unchanged. Returns fresh status. */
+export function saveJevSettings(body: JevSettingsUpdate): Promise<JevSettings> {
+  return request("/api/settings/jev", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Test the saved Jev key. */
+export function testJevKey(): Promise<TestResult> {
+  return request("/api/settings/jev/test", { method: "POST" });
 }
 
 /** Generate a guardrail-truthful cover letter for the current posting.

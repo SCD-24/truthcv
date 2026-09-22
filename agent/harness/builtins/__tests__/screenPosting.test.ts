@@ -56,6 +56,10 @@ const VALID_VERDICT_JSON = JSON.stringify({
   reason: 'Matches remote and language criteria.',
   remoteArrangement: 'remote',
   languageRequirement: '',
+  salaryStated: '',
+  employmentCountryStated: '',
+  roleTypeStated: '',
+  eorStated: '',
 });
 
 describe('screenPosting', () => {
@@ -77,6 +81,10 @@ describe('screenPosting', () => {
       reason: 'Matches remote and language criteria.',
       remote_arrangement: 'remote',
       language_requirement: '',
+      salary_stated: '',
+      employment_country_stated: '',
+      role_type_stated: '',
+      eor_stated: '',
     });
   });
 
@@ -87,7 +95,18 @@ describe('screenPosting', () => {
 
     const keys = Object.keys(JSON.parse(result.content)).sort();
     expect(keys).toEqual(
-      ['failing_criterion', 'language_requirement', 'reason', 'remote_arrangement', 'screening_blocker', 'verdict'].sort(),
+      [
+        'failing_criterion',
+        'language_requirement',
+        'reason',
+        'remote_arrangement',
+        'screening_blocker',
+        'verdict',
+        'salary_stated',
+        'employment_country_stated',
+        'role_type_stated',
+        'eor_stated',
+      ].sort(),
     );
   });
 
@@ -185,6 +204,113 @@ describe('screenPosting', () => {
     expect(verdict.verdict).toBe('passed');
     expect(verdict.screening_blocker).toBe('');
     expect(verdict.remote_arrangement).toBe('');
+  });
+
+  it('parses the four new stated-evidence fields when present', async () => {
+    const json = JSON.stringify({
+      verdict: 'passed',
+      screeningBlocker: '',
+      failingCriterion: '',
+      reason: 'Matches every criterion.',
+      remoteArrangement: 'remote',
+      languageRequirement: '',
+      salaryStated: '$120k-140k',
+      employmentCountryStated: 'Germany',
+      roleTypeStated: 'contract',
+      eorStated: 'yes',
+    });
+    const adapter = stubAdapter([doneWith(json)]);
+
+    const result = await screenPosting(VALID_ARGS, adapter);
+
+    expect(result.isError).toBe(false);
+    const verdict = JSON.parse(result.content);
+    expect(verdict.salary_stated).toBe('$120k-140k');
+    expect(verdict.employment_country_stated).toBe('Germany');
+    expect(verdict.role_type_stated).toBe('contract');
+    expect(verdict.eor_stated).toBe('yes');
+  });
+
+  it('defaults the four new stated-evidence fields to \'\' when missing', async () => {
+    const sparseJson = JSON.stringify({
+      verdict: 'passed',
+      failingCriterion: '',
+      reason: 'Matches remote and language criteria.',
+      languageRequirement: '',
+    });
+    const adapter = stubAdapter([doneWith(sparseJson)]);
+
+    const result = await screenPosting(VALID_ARGS, adapter);
+
+    expect(result.isError).toBe(false);
+    const verdict = JSON.parse(result.content);
+    expect(verdict.salary_stated).toBe('');
+    expect(verdict.employment_country_stated).toBe('');
+    expect(verdict.role_type_stated).toBe('');
+    expect(verdict.eor_stated).toBe('');
+  });
+
+  it('defaults the four new stated-evidence fields to \'\' when non-string', async () => {
+    const json = JSON.stringify({
+      verdict: 'passed',
+      screeningBlocker: '',
+      failingCriterion: '',
+      reason: 'Matches every criterion.',
+      remoteArrangement: 'remote',
+      languageRequirement: '',
+      salaryStated: 12345,
+      employmentCountryStated: null,
+      roleTypeStated: true,
+      eorStated: {},
+    });
+    const adapter = stubAdapter([doneWith(json)]);
+
+    const result = await screenPosting(VALID_ARGS, adapter);
+
+    expect(result.isError).toBe(false);
+    const verdict = JSON.parse(result.content);
+    expect(verdict.salary_stated).toBe('');
+    expect(verdict.employment_country_stated).toBe('');
+    expect(verdict.role_type_stated).toBe('');
+    expect(verdict.eor_stated).toBe('');
+  });
+
+  it("normalises an unrecognised eorStated value ('probably') to ''", async () => {
+    const json = JSON.stringify({
+      verdict: 'passed',
+      screeningBlocker: '',
+      failingCriterion: '',
+      reason: 'Matches every criterion.',
+      remoteArrangement: 'remote',
+      languageRequirement: '',
+      eorStated: 'probably',
+    });
+    const adapter = stubAdapter([doneWith(json)]);
+
+    const result = await screenPosting(VALID_ARGS, adapter);
+
+    expect(result.isError).toBe(false);
+    const verdict = JSON.parse(result.content);
+    expect(verdict.eor_stated).toBe('');
+  });
+
+  it("normalises a wrong-case eorStated value ('Yes') the same way remoteArrangement does", async () => {
+    const json = JSON.stringify({
+      verdict: 'passed',
+      screeningBlocker: '',
+      failingCriterion: '',
+      reason: 'Matches every criterion.',
+      remoteArrangement: 'remote',
+      languageRequirement: '',
+      eorStated: 'Yes',
+    });
+    const adapter = stubAdapter([doneWith(json)]);
+
+    const result = await screenPosting(VALID_ARGS, adapter);
+
+    expect(result.isError).toBe(false);
+    const verdict = JSON.parse(result.content);
+    expect(verdict.eor_stated).toBe('');
   });
 
   it('parses a reply wrapped in a ```json code fence', async () => {

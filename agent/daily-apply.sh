@@ -304,7 +304,16 @@ the enabled profile's name you screened against in profile, what the
 posting itself says about remote work — remote, hybrid, on_site, or
 unstated when it does not say — in remote_arrangement, and any language the
 posting EXPLICITLY requires (e.g. 'German') in language_requirement, or ''
-when it states none.
+when it states none. Also pass the posting's own stated salary in
+salary_stated, its own stated employment country in
+employment_country_stated, its own stated role type (e.g. 'contract',
+'full-time') in role_type_stated, and whether the posting states hiring is
+through an EOR / employer-of-record arrangement in eor_stated ('yes' when
+the posting states employment IS via an EOR, 'no' when it states direct
+employment, 'unstated' when you looked and it does not say, or '' when not
+applicable). All four are the posting's OWN stated values, never the
+profile's, and none of them is mandatory; '' is a legitimate, common
+answer, not an omission.
 company, verdict, role and url are each required.
 It enters the operator's approval queue; they draft the letter and decide.
 
@@ -315,9 +324,10 @@ is also rejected, storing nothing, without usable posting_text — a real
 posting body, not a login wall or a 404 page; a posting you could not read
 takes a screening_blocker instead. A \"passed\" or \"deferred\" verdict is
 also rejected, storing nothing, without usable profile and remote_arrangement
-values. Evidence that contradicts the profile's remote model or working
-language is stored as an automatic rejection — not an error to retry, and
-never fabricate 'remote'/'' to get past it.
+values. Evidence that contradicts any of the profile's six hard
+requirements (remote model, working language, salary floor, employment
+country, rejected role types, or EOR) is stored as an automatic rejection —
+not an error to retry, and never fabricate 'remote'/'' to get past it.
 
 Phase 0 is unchanged: postings the operator already approved ARE applied to,
 using the cover_letter text that arrives with each item, verbatim."
@@ -334,15 +344,26 @@ profile's name you screened against in profile, what the posting itself says
 about remote work — remote, hybrid, on_site, or unstated when it does not
 say — in remote_arrangement, and any language the posting EXPLICITLY
 requires (e.g. 'German') in language_requirement, or '' when it states none.
+Also pass the posting's own stated salary in salary_stated, its own stated
+employment country in employment_country_stated, its own stated role type
+(e.g. 'contract', 'full-time') in role_type_stated, and whether the posting
+states hiring is through an EOR / employer-of-record arrangement in
+eor_stated ('yes' when the posting states employment IS via an EOR, 'no'
+when it states direct employment, 'unstated' when you looked and it does
+not say, or '' when not applicable). All four are the posting's OWN stated
+values, never the profile's, and none of them is mandatory; '' is a
+legitimate, common answer, not an omission.
 
 record_screening REJECTS the call and stores nothing unless company, verdict,
 role and url all carry usable values. A \"passed\" or \"deferred\" verdict is
 also rejected, storing nothing, without usable posting_text — a real posting
 body, not a login wall or a 404 page; a posting you could not read takes a
 screening_blocker instead. profile and remote_arrangement are also required
-for a passed/deferred verdict. Evidence that contradicts the profile's
-remote model or working language is stored as an automatic rejection — not
-an error to retry, and never fabricate 'remote'/'' to get past it."
+for a passed/deferred verdict. Evidence that contradicts any of the
+profile's six hard requirements (remote model, working language, salary
+floor, employment country, rejected role types, or EOR) is stored as an
+automatic rejection — not an error to retry, and never fabricate
+'remote'/'' to get past it."
 fi
 
 # jq program rendering one criteria block per ENABLED configured profile:

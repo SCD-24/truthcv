@@ -206,5 +206,5 @@ def evaluate_hard_requirements(profile: JobProfile, posting_text: str) -> list[t
         if not isinstance(score, (int, float)) or isinstance(score, bool):
             continue
         if score >= JEV_REJECT_THRESHOLD:
-            failures.append((name, f"Jev flagged: {instructions} (confidence {score:.2f})"))
+            failures.append((name, f"{instructions} (confidence {score:.2f})"))
     return failures

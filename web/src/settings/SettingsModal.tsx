@@ -15,6 +15,7 @@ import { AccountsSection } from "./AccountsSection";
 import { DefaultModelSection } from "./DefaultModelSection";
 import { TaskModelsSection } from "./TaskModelsSection";
 import { JobSearchPolicySection } from "./JobSearchPolicySection";
+import { JevSection } from "./JevSection";
 import { useWizard } from "../wizard/store";
 import type { ConnectionList, Routing } from "../api/types";
 import "../styles/settings.css";
@@ -162,6 +163,8 @@ export function SettingsModal({
             )}
 
             <JobSearchPolicySection />
+
+            <JevSection />
 
             <SettingsSection
               title="Replay tour"
