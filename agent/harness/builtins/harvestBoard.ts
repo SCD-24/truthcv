@@ -16,9 +16,11 @@ import { callOnBoardTab, closeAllOpenedTabs, createAsyncLock, createBoardTab, se
 import type { AsyncLock } from './harvestTabs.js';
 import type { BrowserToolCall, HarvestBoardRequest, HarvestBoardResult } from './harvestTypes.js';
 
-/** How many boards harvest concurrently, each in its own tab. Kept small
- * deliberately — these tabs share one Chromium profile and one MCP
- * connection. */
+/** How many boards harvest concurrently, each in its own tab, in the
+ * TAB-PER-BOARD FALLBACK path — taken when the session-per-worker path
+ * (agent/harness/builtins/harvestSessions.ts) has fewer than two available
+ * browser sessions. Kept small deliberately — these tabs share one Chromium
+ * profile and one MCP connection. */
 export const MAX_CONCURRENT_HARVEST_TABS = 3;
 
 /** Coerce an unknown thrown value into a message string. */
@@ -85,8 +87,11 @@ async function harvestBoardSafely(
 }
 
 /** Same per-board failure containment as {@link harvestBoardSafely}, for the
- * degraded serial path's single shared tab. */
-async function harvestOneBoardSafely(call: BrowserToolCall, board: HarvestBoardRequest): Promise<HarvestBoardResult> {
+ * degraded serial path's single shared tab — also reused as-is by
+ * harvestSessions.ts's session-per-worker path, whose leased session plays
+ * the same "one call scoped to one board at a time" role a serial `call`
+ * plays here, so the same containment applies unchanged. */
+export async function harvestOneBoardSafely(call: BrowserToolCall, board: HarvestBoardRequest): Promise<HarvestBoardResult> {
   try {
     return await harvestOneBoard(call, board);
   } catch (err) {

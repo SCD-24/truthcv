@@ -37,6 +37,41 @@ export function expandPlaceholders(raw: string, env: NodeJS.ProcessEnv): string 
   });
 }
 
+/** Default number of EXTRA browser-server sessions harvestSessions.ts's
+ * worker pool may open, beyond the harness's own single shared browser
+ * connection — see agent/harness/mcp/sessionPool.ts. */
+const DEFAULT_BROWSER_SESSIONS = 3;
+
+/** Upper bound on `AGENT_BROWSER_SESSIONS`, regardless of what is
+ * configured — every session shares the ONE Chromium profile
+ * (agent/harness/mcp/sessionPool.ts's module doc), so a typo like `300`
+ * must not open 300 connections against it. A value above this is clamped
+ * down to it rather than rejected outright, so an over-large but otherwise
+ * well-formed value still runs, just capped. */
+const MAX_BROWSER_SESSIONS = 8;
+
+/**
+ * Resolve `AGENT_BROWSER_SESSIONS` from `env`, using the same
+ * unset-or-empty-falls-back-to-default convention as
+ * {@link expandPlaceholders}'s `${VAR:-default}` placeholders. A value that
+ * is not a non-negative integer also falls back to the default, rather than
+ * let a typo silently zero out or explode harvest concurrency. `0` (or `1`)
+ * disables the extra-session harvest path entirely, falling back to the
+ * existing tab/serial harvest paths (see harvestPostings.ts). A well-formed
+ * value above {@link MAX_BROWSER_SESSIONS} is clamped down to that cap rather
+ * than falling back to the default — a typo like `300` must never open that
+ * many connections against the one shared Chromium profile.
+ *
+ * @param env The environment to read AGENT_BROWSER_SESSIONS from.
+ * @returns A non-negative integer, at most {@link MAX_BROWSER_SESSIONS}: how
+ *   many extra browser sessions to allow.
+ */
+export function resolveBrowserSessionCount(env: NodeJS.ProcessEnv): number {
+  const raw = env.AGENT_BROWSER_SESSIONS;
+  if (raw === undefined || raw === '' || !/^\d+$/.test(raw)) return DEFAULT_BROWSER_SESSIONS;
+  return Math.min(Number.parseInt(raw, 10), MAX_BROWSER_SESSIONS);
+}
+
 /**
  * Load and normalise an MCP config JSON file into a flat server list.
  *

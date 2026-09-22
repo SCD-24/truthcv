@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { expandPlaceholders, loadMcpConfig } from '../config.js';
+import { expandPlaceholders, loadMcpConfig, resolveBrowserSessionCount } from '../config.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 // this file lives at agent/harness/mcp/__tests__; mcp.json is at agent/mcp.json.
@@ -50,5 +50,43 @@ describe('expandPlaceholders', () => {
   it('treats an empty env value as unset and uses the default', () => {
     const env = { X: '' } as NodeJS.ProcessEnv;
     expect(expandPlaceholders('${X:-fallback}', env)).toBe('fallback');
+  });
+});
+
+describe('resolveBrowserSessionCount', () => {
+  it('falls back to the default (3) when unset', () => {
+    expect(resolveBrowserSessionCount({} as NodeJS.ProcessEnv)).toBe(3);
+  });
+
+  it('falls back to the default when empty', () => {
+    expect(resolveBrowserSessionCount({ AGENT_BROWSER_SESSIONS: '' } as NodeJS.ProcessEnv)).toBe(3);
+  });
+
+  it('falls back to the default when non-numeric', () => {
+    expect(resolveBrowserSessionCount({ AGENT_BROWSER_SESSIONS: 'abc' } as NodeJS.ProcessEnv)).toBe(3);
+  });
+
+  it('falls back to the default when negative', () => {
+    expect(resolveBrowserSessionCount({ AGENT_BROWSER_SESSIONS: '-1' } as NodeJS.ProcessEnv)).toBe(3);
+  });
+
+  it('honours 0 (disables the extra-session path) rather than falling back', () => {
+    expect(resolveBrowserSessionCount({ AGENT_BROWSER_SESSIONS: '0' } as NodeJS.ProcessEnv)).toBe(0);
+  });
+
+  it('honours a well-formed positive value', () => {
+    expect(resolveBrowserSessionCount({ AGENT_BROWSER_SESSIONS: '1' } as NodeJS.ProcessEnv)).toBe(1);
+  });
+
+  it("falls back to the default for '3.5' — /^\\d+$/ rejects any non-integer", () => {
+    expect(resolveBrowserSessionCount({ AGENT_BROWSER_SESSIONS: '3.5' } as NodeJS.ProcessEnv)).toBe(3);
+  });
+
+  it('clamps a well-formed value above the cap (8) down to the cap', () => {
+    expect(resolveBrowserSessionCount({ AGENT_BROWSER_SESSIONS: '300' } as NodeJS.ProcessEnv)).toBe(8);
+  });
+
+  it("falls back to the default for '1e9' — /^\\d+$/ rejects exponential notation, so this never reaches the clamp", () => {
+    expect(resolveBrowserSessionCount({ AGENT_BROWSER_SESSIONS: '1e9' } as NodeJS.ProcessEnv)).toBe(3);
   });
 });

@@ -252,6 +252,15 @@ services:
       # deliberately as a validating seam so a second driver can be added
       # later without touching every call site that reads it.
       - AGENT_BROWSER_DRIVER=${AGENT_BROWSER_DRIVER:-browser}
+      # How many EXTRA MCP sessions harvest_postings' session-per-worker path
+      # (agent/harness/mcp/sessionPool.ts) may open to the `browser` service,
+      # beyond the harness's own single shared browser connection. Every
+      # session shares the one signed-in Chromium profile above — this is
+      # concurrency within one profile, not multiple profiles. `1` disables
+      # the parallel-harvest path, falling back to the existing tab path.
+      # Invalid values (unset/empty/non-numeric/negative) fall back to 3;
+      # values above 8 are clamped down to 8.
+      - AGENT_BROWSER_SESSIONS=${AGENT_BROWSER_SESSIONS:-3}
       # Where session-server.js listens, used by daily-apply.sh to reclaim the
       # browser from an attended sign-in session before a run.
       - SESSION_SERVER_PORT=${SESSION_SERVER_PORT:-8932}

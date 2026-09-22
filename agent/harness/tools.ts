@@ -26,6 +26,7 @@ import type { ProviderAdapter } from './providers/types.js';
 import { readRunbookSection, readRunbookSectionTool } from './builtins/readRunbook.js';
 import { screenPosting, screenPostingTool } from './builtins/screenPosting.js';
 import { harvestPostings, harvestPostingsTool, type BrowserToolCall } from './builtins/harvestPostings.js';
+import { BrowserSessionPool } from './mcp/sessionPool.js';
 
 /**
  * The 19 truthcv tools granted individually by `daily-apply.sh`, as their bare
@@ -284,9 +285,40 @@ const HARVEST_POSTINGS_TOOL: RegisteredTool = {
  * another concurrent harvest_postings call's own calls — exactly the
  * cross-call race the browser partition exists to prevent. Routing it into
  * the browser partition instead means only one of {browser__* call,
- * harvest_postings call} is ever in flight at a time, harness-wide.
+ * harvest_postings call} is ever in flight at a time, harness-wide. (That is
+ * about not letting two SEPARATE tool calls interleave; it says nothing
+ * about how many browser CONNECTIONS exist — one harvest_postings call may
+ * itself drive several independent sessions in parallel internally, via
+ * {@link getSessionPool}/harvestSessions.ts.)
  */
 export const HARVEST_POSTINGS_TOOL_NAME = HARVEST_POSTINGS_TOOL.toolName;
+
+/**
+ * One {@link BrowserSessionPool} per `McpClientPool` instance, lazily built
+ * and cached so repeated {@link executeToolCall} calls across a run's many
+ * turns reuse the same extra browser sessions instead of reconnecting every
+ * turn. Keyed by the pool object itself (a `WeakMap`) rather than passed
+ * through `RunLoopOptions`, so loop.ts needs no new parameter to thread this
+ * through — it stays entirely internal to dispatching `harvest_postings`.
+ */
+const sessionPools = new WeakMap<McpClientPool, BrowserSessionPool>();
+
+/**
+ * Get (or lazily create) the {@link BrowserSessionPool} for `pool`. Reads
+ * `AGENT_BROWSER_SESSIONS` from `process.env` directly — the one place in
+ * this harness that does, since the pool never needs to be configured from
+ * anywhere else.
+ *
+ * @param pool The harness's own MCP client pool, already connected.
+ * @returns The cached pool for `pool`, creating it on first use.
+ */
+function getSessionPool(pool: McpClientPool): BrowserSessionPool {
+  const cached = sessionPools.get(pool);
+  if (cached) return cached;
+  const created = new BrowserSessionPool(pool, process.env);
+  sessionPools.set(pool, created);
+  return created;
+}
 
 /**
  * Default path to the RUNBOOK the built-in reads, resolved relative to THIS
@@ -385,6 +417,22 @@ export function isToolAllowed(serverName: string, toolName: string): boolean {
   if (serverName === BROWSER_SERVER_NAME) return (BROWSER_ALLOWED_TOOL_NAMES as readonly string[]).includes(toolName);
   const truthcvAllowed = (TRUTHCV_ALLOWED_TOOL_NAMES as readonly string[]).includes(toolName);
   return serverName === TRUTHCV_SERVER_NAME && truthcvAllowed;
+}
+
+/**
+ * Whether a bare BROWSER tool name may be called at all, reproducing the
+ * exact {@link isToolAllowed} decision and refusal wording {@link browserToolCall}
+ * uses for the tab/serial harvest paths - exported so harvest_postings' own
+ * session-per-worker path (harvestSessions.ts) can consult the SAME
+ * allow-list decision for calls it dispatches on a leased session's own MCP
+ * client directly, never through `browserToolCall` itself.
+ *
+ * @param toolName The tool's own (un-namespaced) name.
+ * @returns The refusal message when the tool is not permitted; `undefined`
+ *   when it is.
+ */
+export function isBrowserToolCallPermitted(toolName: string): string | undefined {
+  return isToolAllowed(BROWSER_SERVER_NAME, toolName) ? undefined : `Tool '${toolName}' is not permitted by the allow-list.`;
 }
 
 /**
@@ -508,16 +556,25 @@ export async function executeToolCall(
     };
   }
   // Likewise dispatched here, BEFORE the allow-list and without going through
-  // isToolAllowed itself \u2014 but UNLIKE screen_posting, harvest_postings DOES
-  // reach pool.callTool, via the browserToolCall closure below, which
-  // re-checks isToolAllowed and resolves the live namespaced name for every
-  // underlying browser__* call it makes, so the allow-list still governs
-  // every one of them individually.
+  // isToolAllowed itself directly - but UNLIKE screen_posting, harvest_postings
+  // DOES reach pool.callTool, via one of TWO paths depending which harvest
+  // mode it picks internally: the tab/serial paths call the browserToolCall
+  // closure below, which re-checks isToolAllowed and resolves the live
+  // namespaced name for every underlying browser__* call; the
+  // session-per-worker path instead dispatches on each leased session's OWN
+  // MCP client directly (no `pool`, no namespaced name to resolve), so it is
+  // handed isBrowserToolCallPermitted below instead - harvestSessions.ts's
+  // toolCallFor consults it before every call, reusing the exact same
+  // isToolAllowed decision and refusal wording - so the allow-list still
+  // governs every one of them individually, just via two call sites of the
+  // same underlying check.
   if (tool.namespacedName === HARVEST_POSTINGS_TOOL.namespacedName) {
     const result = await harvestPostings(
       call.arguments,
       browserToolCall(pool, registry),
       browserTabToolsAvailable(registry),
+      getSessionPool(pool),
+      isBrowserToolCallPermitted,
     );
     return {
       toolCallId: call.id,
