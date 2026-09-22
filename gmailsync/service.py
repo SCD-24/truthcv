@@ -232,14 +232,16 @@ def _collect_message_ids(client: GmailClient, pending_apps: list, sync_state: Gm
 
     The queries are built up front, in application order, then run
     concurrently on a bounded thread pool (GMAIL_FETCH_MAX_WORKERS workers)
-    since each is an independent Gmail API round trip. Results are then
-    merged into seen_ids/seen_set SERIALLY, one query's results at a time in
-    that same application order, so the dedupe order — and which id "wins"
-    when a message matches more than one query — stays identical to a plain
-    serial run. Futures are also resolved in that order: if more than one
-    query raised, the caller sees the same exception a serial run would have
-    raised first (the earliest one in application order), not whichever
-    query happened to fail first in wall-clock time.
+    since each is an independent Gmail API round trip. Futures are resolved
+    inside the with-block, in application order, so a raised exception is
+    the same one a serial run would have raised first — not whichever query
+    happened to fail first in wall-clock time. On the first exception,
+    executor.shutdown(cancel_futures=True) cancels every query still queued
+    behind the workers (an in-flight query still finishes) before the
+    exception is re-raised unchanged. Results are then merged into
+    seen_ids/seen_set SERIALLY, one query's results at a time in that same
+    order, so the dedupe order — and which id "wins" when a message matches
+    more than one query — stays identical to a plain serial run.
     """
     queries: list[str] = []
     for app in pending_apps:
@@ -248,17 +250,19 @@ def _collect_message_ids(client: GmailClient, pending_apps: list, sync_state: Gm
             queries.append(query)
     if not queries:
         return []
-    logger.info(
-        "gmail sync: dispatching %d list_messages queries (max_workers=%d)",
-        len(queries),
-        GMAIL_FETCH_MAX_WORKERS,
-    )
+    logger.info("gmail sync: dispatching %d list_messages queries (max_workers=%d)", len(queries), GMAIL_FETCH_MAX_WORKERS)
     with ThreadPoolExecutor(max_workers=GMAIL_FETCH_MAX_WORKERS) as executor:
         futures = [executor.submit(client.list_messages, query) for query in queries]
+        try:
+            results = [future.result() for future in futures]
+        except BaseException:
+            # Cancel every still-queued query and re-raise unchanged.
+            executor.shutdown(cancel_futures=True)
+            raise
     seen_ids: list[str] = []
     seen_set: set[str] = set()
-    for future in futures:
-        for item in future.result():
+    for result in results:
+        for item in result:
             message_id = str(item.get("id", ""))
             if not message_id or message_id in processed_ids or message_id in seen_set:
                 continue
@@ -365,23 +369,24 @@ def run_sync(*, force: bool = False) -> dict:
     pending_apps = _pending_candidates()
     new_processed = _collect_message_ids(client, pending_apps, sync_state, processed_ids)
     if new_processed:
-        # Prefetch get_metadata for every new message id concurrently, bounded
-        # by GMAIL_FETCH_MAX_WORKERS, then hand the results to _process_message
-        # one at a time, in the same order as new_processed. Resolving each
-        # future before moving to the next keeps classification, get_full,
-        # the by_id mutation, and _apply_decision on the main thread and in
-        # application order — identical side effects and, if a fetch raised,
-        # the same exception a serial run would have surfaced first.
-        logger.info(
-            "gmail sync: prefetching metadata for %d messages (max_workers=%d)",
-            len(new_processed),
-            GMAIL_FETCH_MAX_WORKERS,
-        )
+        # Prefetch get_metadata for every new message id concurrently,
+        # bounded by GMAIL_FETCH_MAX_WORKERS. Each future is resolved inside
+        # the with-block in application order and its message is processed
+        # IMMEDIATELY — so, exactly like a serial run, every message before a
+        # failing fetch has already been classified and applied when the
+        # exception surfaces. On the first exception,
+        # executor.shutdown(cancel_futures=True) cancels every fetch still
+        # queued behind the workers (an in-flight fetch still finishes)
+        # before it is re-raised unchanged.
+        logger.info("gmail sync: prefetching metadata for %d messages (max_workers=%d)", len(new_processed), GMAIL_FETCH_MAX_WORKERS)
         with ThreadPoolExecutor(max_workers=GMAIL_FETCH_MAX_WORKERS) as executor:
             metadata_futures = [(message_id, executor.submit(client.get_metadata, message_id)) for message_id in new_processed]
-        for message_id, future in metadata_futures:
-            metadata = future.result()
-            _process_message(client, message_id, metadata, pending_apps, by_id)
+            try:
+                for message_id, future in metadata_futures:
+                    _process_message(client, message_id, future.result(), pending_apps, by_id)
+            except BaseException:
+                executor.shutdown(cancel_futures=True)
+                raise
     sync_state.last_synced_at = now
     sync_state.processed_message_ids = sorted(processed_ids.union(new_processed))
     save_suggestions(list(by_id.values()))

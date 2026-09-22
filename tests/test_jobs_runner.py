@@ -13,11 +13,12 @@ not a timing guess.
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 
 from jobs.model import STATUS_DONE, STATUS_FAILED, STATUS_PENDING, STATUS_RUNNING
-from jobs.runner import MAX_WORKERS, get, list_jobs, submit
+from jobs.runner import MAX_RETAINED_JOBS, MAX_WORKERS, get, list_jobs, submit
 
 _WAIT_TIMEOUT_S = 5.0
 
@@ -26,6 +27,55 @@ def _wait(event: threading.Event, msg: str) -> None:
     """Wait for event, failing loudly instead of hanging on a bug."""
     if not event.wait(_WAIT_TIMEOUT_S):
         pytest.fail(msg)
+
+
+_STATUS_POLL_S = 5.0
+
+
+def _submit_trivial(kind):
+    """Submit a job whose fn sets an Event and returns; return (id, event)."""
+    ran = threading.Event()
+
+    def fn(ran=ran):
+        ran.set()
+
+    return submit(kind, fn).id, ran
+
+
+def _wait_all_ran(events):
+    for i, event in enumerate(events):
+        _wait(event, f"burst job {i} never ran")
+
+
+def _wait_all_terminal_or_evicted(ids):
+    """Spin-poll (no sleep) until every id is DONE/FAILED or already evicted.
+
+    Bridges the tiny window between a job's fn setting its "ran" Event and
+    ``_run_job`` recording the terminal status a few bytecodes later.
+    """
+    for jid in ids:
+        deadline = time.monotonic() + _STATUS_POLL_S
+        while time.monotonic() < deadline:
+            job = get(jid)
+            if job is None or job.status in (STATUS_DONE, STATUS_FAILED):
+                break
+        else:
+            pytest.fail(f"job {jid} never reached a terminal status")
+
+
+def _burst_finished_jobs(n, kind):
+    """Submit ``n`` trivial jobs, wait until each is terminal, return their ids
+    in submission order (so ``created_at`` is monotonic across the list).
+    """
+    ids = []
+    events = []
+    for _ in range(n):
+        jid, ran = _submit_trivial(kind)
+        ids.append(jid)
+        events.append(ran)
+    _wait_all_ran(events)
+    _wait_all_terminal_or_evicted(ids)
+    return ids
 
 
 def _saturate_pool():
@@ -181,3 +231,68 @@ def test_get_and_list_jobs_are_thread_safe_under_concurrency():
 
     # Unblock every job's fn so no worker is left stuck for later tests.
     release.set()
+
+
+def test_submitting_past_cap_evicts_oldest_finished_survives_newest():
+    # Comfortably outrun MAX_RETAINED_JOBS plus whatever finished jobs any
+    # earlier test in this process may have left behind (those are strictly
+    # older than everything submitted here, so they are evicted first).
+    ids = _burst_finished_jobs(MAX_RETAINED_JOBS + 150, "cap-evict-burst")
+
+    # Force one more eviction pass against the now-settled, fully-terminal
+    # state so the registry is squeezed down to the cap deterministically.
+    submit("evict-trigger", lambda: None)
+
+    assert get(ids[0]) is None
+    assert get(ids[-1]) is not None
+    assert len(list_jobs()) <= MAX_RETAINED_JOBS
+
+
+def test_pending_and_running_jobs_are_never_evicted_even_over_cap():
+    # Push well past the cap with finished jobs first, while every worker is
+    # free to actually run and finish them.
+    _burst_finished_jobs(MAX_RETAINED_JOBS + 50, "cap-pending-burst")
+
+    # Saturate every worker with a job blocked on its own release Event:
+    # these are RUNNING and must never be evicted, however far over cap the
+    # registry has been pushed.
+    started = [threading.Event() for _ in range(MAX_WORKERS)]
+    release = [threading.Event() for _ in range(MAX_WORKERS)]
+
+    def make_blocker(i):
+        def blocker():
+            started[i].set()
+            release[i].wait(_WAIT_TIMEOUT_S)
+
+        return blocker
+
+    running_ids = [submit("held-running", make_blocker(i)).id for i in range(MAX_WORKERS)]
+    for e in started:
+        _wait(e, "blocker never started")
+    for jid in running_ids:
+        assert get(jid).status == STATUS_RUNNING
+
+    # With every worker now busy, these queue up PENDING behind the
+    # blockers -- each submit() call above and below also runs an eviction
+    # pass, which must skip both sets entirely.
+    pending_ids = [submit("queued-behind-blockers", lambda: None).id for _ in range(3)]
+    for jid in pending_ids:
+        assert get(jid).status == STATUS_PENDING
+
+    for jid in [*running_ids, *pending_ids]:
+        job = get(jid)
+        assert job is not None
+        assert job.status in (STATUS_PENDING, STATUS_RUNNING)
+
+    for e in release:
+        e.set()
+
+
+def test_registry_stays_at_or_under_cap_after_a_burst_of_finished_jobs():
+    _burst_finished_jobs(MAX_RETAINED_JOBS + 75, "cap-burst")
+
+    # One more submit forces a final eviction pass against fully-settled
+    # state so the cap holds exactly, not just "close to" the limit.
+    submit("evict-trigger-2", lambda: None)
+
+    assert len(list_jobs()) <= MAX_RETAINED_JOBS

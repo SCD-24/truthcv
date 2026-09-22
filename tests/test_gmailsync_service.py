@@ -404,6 +404,109 @@ def test_metadata_prefetch_still_processes_messages_in_application_order(monkeyp
     assert suggestions["m2"].state == "applied"
 
 
+def test_collect_message_ids_cancels_queued_queries_after_first_failure(monkeypatch, data_dir):
+    """When one application's list_messages call fails (e.g. revoked auth),
+    _collect_message_ids must not let every other queued query run to
+    completion — only the four already claimed by the 4-worker pool may
+    have started; anything still sitting in the queue behind them must be
+    cancelled via executor.shutdown(cancel_futures=True), and the original
+    exception must surface unchanged.
+
+    Proven deterministically with no sleeps, using 8 queries (twice the
+    pool size) and a 5-party threading.Barrier — the four queries the pool
+    can claim immediately (application order 0-3, guaranteed by the work
+    queue's FIFO order since none of the four can finish before all four
+    have arrived) plus this test thread. Nothing proceeds past the barrier
+    until all five have arrived, so once this thread's wait() returns, the
+    other four queries are provably still untouched in the queue — checked
+    immediately. The failing query then blocks on a second Event, so it
+    cannot free its worker (and race to claim a queued query) before that
+    check runs. A patched ThreadPoolExecutor splits shutdown(cancel_futures=
+    True) in two, so a third Event fires only once the still-queued futures
+    have actually been drained/cancelled — only then is a fourth Event
+    released, letting the other three claimed queries (and, defensively,
+    any queued query that still slipped through before the drain) finish.
+    """
+    apps = [_make_app(company=f"Company {i}", website=f"https://company{i}.example") for i in range(8)]
+    sync_state = service.GmailSyncState()
+    fail_query = service._application_query(apps[0], 0)
+    first_four_queries = {service._application_query(apps[i], 0) for i in range(4)}
+
+    claimed_barrier = threading.Barrier(5)
+    release_failure = threading.Event()
+    drained_event = threading.Event()
+    hold_others = threading.Event()
+    lock = threading.Lock()
+    started_queries: list[str] = []
+
+    class CancelOnFailureClient(FakeGmailClient):
+        """First application's query fails once released; the other three
+        of the first four claimed by the pool, and defensively any other
+        query that still starts, block until hold_others is released."""
+
+        def list_messages(self, query):
+            with lock:
+                started_queries.append(query)
+            if query in first_four_queries:
+                claimed_barrier.wait(timeout=5)
+                if query == fail_query:
+                    release_failure.wait(timeout=5)
+                    raise service.GmailSyncError("Gmail access was revoked or expired.", reconnect_required=True)
+            hold_others.wait(timeout=5)
+            return []
+
+    real_executor = service.ThreadPoolExecutor
+
+    class _ObservableExecutor(real_executor):
+        """Splits shutdown(cancel_futures=True) into its drain step and its
+        wait-for-running-futures step, so the test can observe the instant
+        the still-queued futures have been cancelled before anything still
+        running is allowed to finish."""
+
+        def shutdown(self, wait=True, *, cancel_futures=False):
+            if not cancel_futures:
+                return super().shutdown(wait=wait, cancel_futures=cancel_futures)
+            super().shutdown(wait=False, cancel_futures=True)
+            drained_event.set()
+            if wait:
+                super().shutdown(wait=True)
+
+    monkeypatch.setattr(service, "ThreadPoolExecutor", _ObservableExecutor)
+
+    client = CancelOnFailureClient()
+    outcome: dict = {}
+
+    def run():
+        try:
+            service._collect_message_ids(client, apps, sync_state, set())
+        except BaseException as exc:  # noqa: BLE001 - captured for the main thread to assert on
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=run)
+    thread.start()
+
+    claimed_barrier.wait(timeout=5)
+    # All 4 workers are claimed and blocked right here, at the barrier —
+    # none has been released yet, so none could have freed up to claim any
+    # of the 4 still-queued queries. Safe to assert deterministically.
+    assert len(started_queries) == 4
+
+    release_failure.set()
+    assert drained_event.wait(timeout=5)
+    # The still-queued futures are now cancelled — safe to let everything
+    # still running finish without risking a queued query slipping through.
+    hold_others.set()
+
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+
+    error = outcome.get("error")
+    assert isinstance(error, service.GmailSyncError)
+    assert error.reconnect_required is True
+    # The queued queries behind the first four were cancelled, not run.
+    assert len(started_queries) < 8
+
+
 # --- confirm() fail-open coverage (beside tests/test_screening_jev.py) -----
 
 

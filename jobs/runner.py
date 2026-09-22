@@ -30,6 +30,13 @@ logger = logging.getLogger(__name__)
 # can run at once so a burst of requests cannot spawn unbounded threads.
 MAX_WORKERS = 4
 
+# Bounded registry size: nothing ever removes a finished job from ``_jobs``
+# on its own, so a long-running server would otherwise accumulate an
+# unbounded number of done/failed records. Once the registry grows past this
+# many entries, submit() evicts the oldest finished/failed jobs (never
+# pending/running ones) until it is back at or under the cap.
+MAX_RETAINED_JOBS = 200
+
 _executor = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="job-runner")
 _lock = threading.Lock()
 _jobs: dict[str, Job] = {}
@@ -50,10 +57,42 @@ def submit(kind: str, fn: Callable[[], Any]) -> Job:
     job = Job(id=str(uuid.uuid4()), kind=kind, status=STATUS_PENDING)
     with _lock:
         _jobs[job.id] = job
+        evicted = _evict_oldest_finished_locked()
 
+    # Log outside the critical section (matching "job submitted" below) so a
+    # slow logging handler can never stall other threads on the registry lock.
+    for stale_id, stale_kind, stale_status in evicted:
+        logger.info(
+            "job evicted",
+            extra={"job_id": stale_id, "job_kind": stale_kind, "job_status": stale_status},
+        )
     logger.info("job submitted", extra={"job_id": job.id, "job_kind": job.kind})
     _executor.submit(_run_job, job, fn)
     return job
+
+
+def _evict_oldest_finished_locked() -> list[tuple[str, str, str]]:
+    """Evict the oldest finished/failed jobs until the registry fits the cap.
+
+    Must be called with ``_lock`` already held. Only STATUS_DONE and
+    STATUS_FAILED jobs are ever evicted; pending/running jobs are always
+    kept, so the registry may transiently exceed MAX_RETAINED_JOBS while
+    many jobs are in flight at once. Returns ``(id, kind, status)`` for each
+    evicted job so the caller can log them after releasing the lock.
+    """
+    if len(_jobs) <= MAX_RETAINED_JOBS:
+        return []
+    evictable = sorted(
+        (j for j in _jobs.values() if j.status in (STATUS_DONE, STATUS_FAILED)),
+        key=lambda j: j.created_at,
+    )
+    evicted: list[tuple[str, str, str]] = []
+    for stale in evictable:
+        if len(_jobs) <= MAX_RETAINED_JOBS:
+            break
+        del _jobs[stale.id]
+        evicted.append((stale.id, stale.kind, stale.status))
+    return evicted
 
 
 def get(job_id: str) -> Job | None:
