@@ -117,3 +117,21 @@ Projected from `schema` widgets on the architecture canvas.
 | `discovery_coverage[].tier` | string |  | Which extraction tier produced the postings: api, harvest, llm, or empty when not applicable. |
 | `discovery_coverage[].status` | string |  | searched \| empty \| blocked \| login_walled \| skipped. 'blocked' means the page was unreadable (CAPTCHA/consent/bot wall), distinct from 'empty'. |
 <!-- generated:end comp:run-store -->
+
+<!-- generated:start comp:job-runner -->
+## Job Runner (`job-runner`)
+
+### Job record
+
+| Field | Type | Flags | Notes |
+|---|---|---|---|
+| `id` | UUID string | Primary Key | - |
+| `kind` | string | - | caller-supplied job kind, e.g. gmail sync, feed refresh |
+| `status` | string | - | pending \| running \| done \| failed |
+| `progress` | float | - | caller-defined 0..1 fraction, default 0.0 |
+| `result` | Any | - | set only when status=done |
+| `error` | string \| null | - | set only when status=failed |
+| `created_at` | float (epoch) | - | - |
+| `started_at` | float (epoch) \| null | - | - |
+| `finished_at` | float (epoch) \| null | - | - |
+<!-- generated:end comp:job-runner -->

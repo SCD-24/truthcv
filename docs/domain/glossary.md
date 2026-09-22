@@ -161,5 +161,5 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:end comp:gmail-response-sync -->
 
 <!-- generated:start comp:job-runner -->
-- **Job Runner** (`job-runner`) - backend component.
+- **Job Runner** (`job-runner`) - backend component. Bounded background job executor (jobs/): a shared thread pool (MAX_WORKERS=4) plus an in-memory, thread-safe registry of Job records. Callers submit a zero-argument callable via submit(kind, fn); it runs on a worker thread and its outcome (result or exception) is recorded on the returned Job. get()/list_jobs() poll registry state. Registry is in-memory only - jobs are not persisted across restarts.
 <!-- generated:end comp:job-runner -->
