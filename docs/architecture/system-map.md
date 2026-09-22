@@ -13,6 +13,7 @@ graph TD
     cover-letter-engine["Cover Letter Engine <br/> <small>(BACKEND)</small>"]
     gmail-api["Gmail / Google OAuth API <br/> <small>(CUSTOM)</small>"]
     guardrail-validator["Guardrail Validator <br/> <small>(BACKEND)</small>"]
+    jev-api["Jev (TypeSafe System One) API <br/> <small>(CUSTOM)</small>"]
     job-feeds["Job Feeds <br/> <small>(BACKEND)</small>"]
     keyword-vocabulary["Keyword Vocabulary <br/> <small>(BACKEND)</small>"]
     llm-provider-layer["LLM Provider Layer <br/> <small>(BACKEND)</small>"]
@@ -94,6 +95,7 @@ graph TD
     screening-engine -->|in-process| agent-config
     screening-engine -->|in-process| application-tracker
     screening-engine -->|in-process| company-research
+    screening-engine -->|HTTPS| jev-api
     screening-engine -->|in-process| storage-leaf
     screening-engine -->|file I/O| truth-data-volume
     secret-store -->|in-process| storage-leaf
@@ -134,6 +136,7 @@ graph TD
 - [Cover Letter Engine](overview.md) (`cover-letter-engine`, backend)
 - [Gmail / Google OAuth API](overview.md) (`gmail-api`, custom)
 - [Guardrail Validator](overview.md) (`guardrail-validator`, backend)
+- [Jev (TypeSafe System One) API](overview.md) (`jev-api`, custom)
 - [Job Feeds](overview.md) (`job-feeds`, backend)
 - [Keyword Vocabulary](overview.md) (`keyword-vocabulary`, backend)
 - [LLM Provider Layer](overview.md) (`llm-provider-layer`, backend)
@@ -218,6 +221,7 @@ graph TD
 - [screening-engine → agent-config](interactions/screening-engine--agent-config.md) via `in-process`
 - [screening-engine → application-tracker](interactions/screening-engine--application-tracker.md) via `in-process`
 - [screening-engine → company-research](interactions/screening-engine--company-research.md) via `in-process`
+- [screening-engine → jev-api](interactions/screening-engine--jev-api.md) via `HTTPS`
 - [screening-engine → storage-leaf](interactions/screening-engine--storage-leaf.md) via `in-process`
 - [screening-engine → truth-data-volume](interactions/screening-engine--truth-data-volume.md) via `file I/O`
 - [secret-store → storage-leaf](interactions/secret-store--storage-leaf.md) via `in-process`

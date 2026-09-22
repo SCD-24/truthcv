@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-26 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+27 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -188,3 +188,11 @@ Screens discovered postings against the active job profile's criteria and record
 <!-- generated:start comp:job-feeds -->
 ## Job Feeds (`job-feeds`, BACKEND)
 <!-- generated:end comp:job-feeds -->
+
+<!-- generated:start comp:jev-api -->
+## Jev (TypeSafe System One) API (`jev-api`, CUSTOM)
+
+External third-party Jev (TypeSafe) service at https://api.typesafe.ai/v1/systemone. Screening posts job-posting text to it for hard-requirement cross-checks (screening/jev.py), invoked from the agent tool surface (_evaluate_jev_criteria) and the API's check_key route.
+
+**Tech:** TypeSafe System One REST API, HTTPS
+<!-- generated:end comp:jev-api -->

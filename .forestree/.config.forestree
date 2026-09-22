@@ -309,6 +309,21 @@
                   "desc": "List available models for a provider (live model-list lookup).",
                   "method": "POST",
                   "path": "/api/models"
+                },
+                {
+                  "desc": "Read the Jev key status and screening toggle",
+                  "method": "GET",
+                  "path": "/api/settings/jev"
+                },
+                {
+                  "desc": "Update the Jev key and screening toggle",
+                  "method": "PUT",
+                  "path": "/api/settings/jev"
+                },
+                {
+                  "desc": "Test the configured Jev key",
+                  "method": "POST",
+                  "path": "/api/settings/jev/test"
                 }
               ]
             },
@@ -2023,6 +2038,42 @@
       "id": "job-feeds",
       "name": "Job Feeds",
       "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "External third-party Jev (TypeSafe) service at https://api.typesafe.ai/v1/systemone. Screening posts job-posting text to it for hard-requirement cross-checks (screening/jev.py), invoked from the agent tool surface (_evaluate_jev_criteria) and the API's check_key route."
+            },
+            "h": 180,
+            "id": "widget-1790064185007-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "TypeSafe System One REST API",
+                "HTTPS"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1790064185040-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          }
+        ]
+      },
+      "id": "jev-api",
+      "name": "Jev (TypeSafe System One) API",
+      "type": "custom"
     }
   ],
   "connections": [
@@ -2480,6 +2531,11 @@
       "from": "api",
       "protocol": "in-process",
       "to": "job-feeds"
+    },
+    {
+      "from": "screening-engine",
+      "protocol": "HTTPS",
+      "to": "jev-api"
     }
   ],
   "definitions": [
