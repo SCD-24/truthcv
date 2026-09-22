@@ -1,10 +1,11 @@
-"""gmailsync.service: per-application query scoping, open-status filtering,
-Jev-gated auto-apply with evidence notes, decline handling, and dedupe.
+"""gmailsync.service: per-application query scoping, closed-status filtering,
+Jev-only classification/auto-apply with evidence notes, decline handling,
+and dedupe.
 
 Also covers screening.jev.confirm's fail-open behavior directly (HTTP
 error/timeout/bad shape), alongside tests/test_screening_jev.py's patterns.
-The Gmail HTTP layer, the LLM provider, and Jev are all mocked here — this
-suite must never make a live call to any of them.
+The Gmail HTTP layer and Jev are both mocked here — this suite must never
+make a live call to either.
 """
 
 from __future__ import annotations
@@ -80,32 +81,14 @@ class _AlwaysReturnsClient(FakeGmailClient):
         return [{"id": "m1"}]
 
 
-class _FakeProvider:
-    """A get_provider() stand-in returning a fixed classification for every call."""
+def _confirm_matching(keyword_by_statement: dict[str, str]):
+    """jev.confirm fake: confirms a statement when its keyword is in the state text."""
 
-    def __init__(self, classification: str):
-        self._classification = classification
+    def fake(statement, state):
+        keyword = keyword_by_statement.get(statement)
+        return bool(keyword) and keyword in state
 
-    def extract_json(self, prompt, messages, schema):
-        return {"classification": self._classification}
-
-
-class _RoutingProvider:
-    """A get_provider() stand-in that classifies by a substring of the subject."""
-
-    def __init__(self, mapping: dict[str, str]):
-        self._mapping = mapping
-
-    def extract_json(self, prompt, messages, schema):
-        text = messages[0]["content"]
-        for needle, classification in self._mapping.items():
-            if needle in text:
-                return {"classification": classification}
-        return {"classification": "other"}
-
-
-def _fake_get_provider(provider):
-    return lambda task=None, refresh=False: provider
+    return fake
 
 
 # --- (1) per-application query construction --------------------------------
@@ -122,10 +105,26 @@ def test_application_query_scopes_by_domain_and_company(data_dir):
     assert "from:acme.example" in query
     assert "from:jobs.acme.example" in query
     assert "from:acme" in query
+    assert '"Acme Corp"' in query
     assert "after:" not in query
 
     query_after = service._application_query(app, 1700000000)
     assert "after:1700000000" in query_after
+
+
+def test_application_query_with_company_but_no_domains_still_searches(data_dir):
+    app = _make_app(company="Acme Corp", website="", application_url="")
+
+    query = service._application_query(app, 0)
+    assert query != ""
+    assert '"Acme Corp"' in query
+
+
+def test_application_query_with_no_company_token_and_no_domains_is_skipped(data_dir):
+    app = _make_app(company="!!!", website="", application_url="")
+
+    query = service._application_query(app, 0)
+    assert query == ""
 
 
 def test_run_sync_issues_one_query_per_open_application_and_no_full_inbox_query(monkeypatch, data_dir):
@@ -134,7 +133,6 @@ def test_run_sync_issues_one_query_per_open_application_and_no_full_inbox_query(
     app2 = _make_app(company="Globex Inc", website="https://globex.example", status="Waiting")
     client = FakeGmailClient()
     monkeypatch.setattr(service, "build_gmail_client", lambda: client)
-    monkeypatch.setattr(service, "get_provider", _fake_get_provider(_FakeProvider("other")))
 
     result = service.run_sync(force=True)
 
@@ -148,16 +146,17 @@ def test_run_sync_issues_one_query_per_open_application_and_no_full_inbox_query(
 # --- (2) Applied/Waiting candidate filter -----------------------------------
 
 
-def test_pending_candidates_filters_to_applied_and_waiting(data_dir):
+def test_pending_candidates_excludes_closed_statuses(data_dir):
     applied = _make_app(status="Applied")
     waiting = _make_app(status="Waiting")
+    draft = _make_app(status="Draft", company="Initech", website="https://initech.example")
+    blank = _make_app(status="")
     _make_app(status="Rejected")
     _make_app(status="Interviewing")
     _make_app(status="Offer")
-    _make_app(status="")
 
     ids = {a.id for a in service._pending_candidates()}
-    assert ids == {applied.id, waiting.id}
+    assert ids == {applied.id, waiting.id, draft.id, blank.id}
 
 
 # --- (3) Rejected/Interviewing auto-apply with note evidence ---------------
@@ -182,9 +181,15 @@ def test_matched_rejection_and_interview_auto_apply_with_evidence(monkeypatch, d
     )
     monkeypatch.setattr(service, "build_gmail_client", lambda: client)
     monkeypatch.setattr(
-        service, "get_provider", _fake_get_provider(_RoutingProvider({"Rejected update": "rejection", "Interview invite": "interview"}))
+        service.jev,
+        "confirm",
+        _confirm_matching(
+            {
+                service._CONFIRM_STATEMENTS["rejection"][0]: "Rejected update",
+                service._CONFIRM_STATEMENTS["interview"][0]: "Interview invite",
+            }
+        ),
     )
-    monkeypatch.setattr(service.jev, "confirm", lambda statement, state: True)
 
     service.run_sync(force=True)
 
@@ -218,7 +223,6 @@ def test_jev_decline_leaves_status_and_suggestion_pending(monkeypatch, data_dir)
     meta = _metadata("m1", "Recruiter <no-reply@acme.example>", "Update", "Mon, 1 Jan 2024 00:00:00 +0000", "regret")
     client = FakeGmailClient(messages_by_query={query: [{"id": "m1"}]}, metadata_by_id={"m1": meta})
     monkeypatch.setattr(service, "build_gmail_client", lambda: client)
-    monkeypatch.setattr(service, "get_provider", _fake_get_provider(_FakeProvider("rejection")))
     monkeypatch.setattr(service.jev, "confirm", lambda statement, state: False)
 
     service.run_sync(force=True)
@@ -231,11 +235,78 @@ def test_jev_decline_leaves_status_and_suggestion_pending(monkeypatch, data_dir)
     suggestions = load_suggestions()
     assert len(suggestions) == 1
     assert suggestions[0].state == "pending"
-    assert suggestions[0].decision == "declined"
+    assert suggestions[0].classification == "other"
+    assert suggestions[0].decision == ""
     assert len(service.pending_suggestions()) == 1
 
 
 # --- (5) processed-id dedupe ------------------------------------------------
+
+
+def test_low_confidence_match_does_not_auto_apply(monkeypatch, data_dir):
+    save_answers(Answers(email="me@example.com"))
+    app = _make_app(company="Acme Corp", website="https://acme.example", status="Applied")
+    query = service._application_query(app, 0)
+    meta = _metadata(
+        "m1",
+        "Recruiter <news@unrelated-domain.example>",
+        "Acme Corp rejected your application",
+        "Mon, 1 Jan 2024 00:00:00 +0000",
+        "regret to inform",
+    )
+    client = FakeGmailClient(messages_by_query={query: [{"id": "m1"}]}, metadata_by_id={"m1": meta})
+    monkeypatch.setattr(service, "build_gmail_client", lambda: client)
+    monkeypatch.setattr(
+        service.jev,
+        "confirm",
+        _confirm_matching({service._CONFIRM_STATEMENTS["rejection"][0]: "Acme Corp rejected your application"}),
+    )
+
+    service.run_sync(force=True)
+
+    updated = applications.get(app.id)
+    assert updated.status == "Applied"
+    assert updated.response_received is False
+    assert updated.notes == ""
+
+    suggestions = {s.id: s for s in load_suggestions()}
+    assert suggestions["m1"].match_confidence == "low"
+    assert suggestions["m1"].state == "pending"
+    assert suggestions["m1"].decision == ""
+    assert suggestions["m1"].classification == "rejection"
+    assert suggestions["m1"].suggested_status == "Rejected"
+
+
+def test_draft_with_non_draft_sibling_company_is_not_a_candidate(monkeypatch, data_dir):
+    save_answers(Answers(email="me@example.com"))
+    applied_app = _make_app(company="Acme Corp", website="https://acme.example", status="Applied")
+    draft_app = _make_app(company="Acme Corp", website="https://acme.example", status="Draft")
+    query = service._application_query(applied_app, 0)
+    meta = _metadata(
+        "m1", "Recruiter <no-reply@acme.example>", "Rejected update", "Mon, 1 Jan 2024 00:00:00 +0000", "We regret"
+    )
+    client = FakeGmailClient(messages_by_query={query: [{"id": "m1"}]}, metadata_by_id={"m1": meta})
+    monkeypatch.setattr(service, "build_gmail_client", lambda: client)
+    monkeypatch.setattr(
+        service.jev,
+        "confirm",
+        _confirm_matching({service._CONFIRM_STATEMENTS["rejection"][0]: "Rejected update"}),
+    )
+
+    service.run_sync(force=True)
+
+    updated_applied = applications.get(applied_app.id)
+    assert updated_applied.status == "Rejected"
+    assert updated_applied.response_received is True
+
+    updated_draft = applications.get(draft_app.id)
+    assert updated_draft.status == "Draft"
+    assert updated_draft.response_received is False
+    assert updated_draft.notes == ""
+
+    suggestions = {s.id: s for s in load_suggestions()}
+    assert suggestions["m1"].application_id == applied_app.id
+    assert suggestions["m1"].state == "applied"
 
 
 def test_dedupes_message_id_appearing_in_multiple_app_queries(monkeypatch, data_dir):
@@ -245,7 +316,6 @@ def test_dedupes_message_id_appearing_in_multiple_app_queries(monkeypatch, data_
     meta = _metadata("m1", "Recruiter <no-reply@acme.example>", "Update", "Mon, 1 Jan 2024 00:00:00 +0000", "regret")
     client = _AlwaysReturnsClient(metadata_by_id={"m1": meta})
     monkeypatch.setattr(service, "build_gmail_client", lambda: client)
-    monkeypatch.setattr(service, "get_provider", _fake_get_provider(_FakeProvider("other")))
 
     result = service.run_sync(force=True)
 
@@ -259,7 +329,6 @@ def test_processed_message_ids_dedupe_across_runs(monkeypatch, data_dir):
     meta = _metadata("m1", "Recruiter <no-reply@acme.example>", "Update", "Mon, 1 Jan 2024 00:00:00 +0000", "regret")
     client = _AlwaysReturnsClient(metadata_by_id={"m1": meta})
     monkeypatch.setattr(service, "build_gmail_client", lambda: client)
-    monkeypatch.setattr(service, "get_provider", _fake_get_provider(_FakeProvider("other")))
 
     first = service.run_sync(force=True)
     assert first["processed"] == 1

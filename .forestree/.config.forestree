@@ -2573,11 +2573,6 @@
     {
       "from": "gmail-response-sync",
       "protocol": "in-process",
-      "to": "llm-provider-layer"
-    },
-    {
-      "from": "gmail-response-sync",
-      "protocol": "in-process",
       "to": "connections"
     },
     {
@@ -2589,6 +2584,11 @@
       "from": "api",
       "protocol": "in-process",
       "to": "gmail-response-sync"
+    },
+    {
+      "from": "gmail-response-sync",
+      "protocol": "HTTPS",
+      "to": "jev-api"
     }
   ],
   "definitions": [
