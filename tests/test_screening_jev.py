@@ -226,6 +226,76 @@ def test_check_key_fail_open_on_error(monkeypatch):
     assert ok is False
 
 
+def test_check_key_detail_on_http_401(monkeypatch, caplog):
+    def handler(request):
+        return urllib.error.HTTPError(jev.API_URL, 401, "Unauthorized", {}, None)
+
+    _install_fake_urlopen(monkeypatch, handler)
+    ok, detail = jev.check_key("a_key_secret")
+    assert ok is False
+    assert "rejected" in detail
+    assert "a_key_secret" not in detail
+    assert "a_key_secret" not in caplog.text
+
+
+def test_check_key_detail_on_http_500(monkeypatch, caplog):
+    def handler(request):
+        return urllib.error.HTTPError(jev.API_URL, 500, "Server Error", {}, None)
+
+    _install_fake_urlopen(monkeypatch, handler)
+    ok, detail = jev.check_key("a_key_secret")
+    assert ok is False
+    assert "HTTP 500" in detail
+    assert "a_key_secret" not in detail
+    assert "a_key_secret" not in caplog.text
+
+
+def test_check_key_detail_on_url_error(monkeypatch, caplog):
+    def handler(request):
+        return urllib.error.URLError("boom")
+
+    _install_fake_urlopen(monkeypatch, handler)
+    ok, detail = jev.check_key("a_key_secret")
+    assert ok is False
+    assert detail == "Could not reach Jev."
+    assert "a_key_secret" not in caplog.text
+
+
+def test_check_key_detail_on_timeout(monkeypatch, caplog):
+    def handler(request):
+        return TimeoutError("timed out")
+
+    _install_fake_urlopen(monkeypatch, handler)
+    ok, detail = jev.check_key("a_key_secret")
+    assert ok is False
+    assert detail == "Could not reach Jev."
+    assert "a_key_secret" not in caplog.text
+
+
+def test_check_key_detail_on_unparseable_body(monkeypatch, caplog):
+    def handler(request):
+        return ({}, ValueError("bad json"))
+
+    _install_fake_urlopen(monkeypatch, handler)
+    ok, detail = jev.check_key("a_key_secret")
+    assert ok is False
+    assert "unexpected response" in detail
+    assert "a_key_secret" not in detail
+    assert "a_key_secret" not in caplog.text
+
+
+def test_check_key_detail_on_non_dict_body(monkeypatch, caplog):
+    def handler(request):
+        return []
+
+    _install_fake_urlopen(monkeypatch, handler)
+    ok, detail = jev.check_key("a_key_secret")
+    assert ok is False
+    assert "unexpected response" in detail
+    assert "a_key_secret" not in detail
+    assert "a_key_secret" not in caplog.text
+
+
 # --- non-dict / malformed responses ----------------------------------------
 
 
