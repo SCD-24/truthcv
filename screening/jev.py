@@ -67,9 +67,13 @@ def enabled() -> bool:
     return secretstore.get_connection("jev").get("useForScreening") is True
 
 
-def _post(key: str, state: str, questions: dict[str, dict[str, str]]) -> dict | None:
-    """POST one systemone request. Returns the parsed JSON body, or None on
-    any failure. Never raises; never logs the key or the posting text."""
+def _post(
+    key: str, state: str, questions: dict[str, dict[str, str]]
+) -> tuple[dict | None, str | None]:
+    """POST one systemone request. Returns ``(data, None)`` on success or
+    ``(None, detail)`` on failure, where ``detail`` is a caller-safe summary
+    of what went wrong. Never raises; never logs or returns the key or the
+    posting text."""
     payload = json.dumps({"state": state, "model": MODEL, "questions": questions}).encode()
     request = urllib.request.Request(
         API_URL,
@@ -86,24 +90,26 @@ def _post(key: str, state: str, questions: dict[str, dict[str, str]]) -> dict | 
     except urllib.error.HTTPError as exc:
         # MUST be caught before URLError: HTTPError subclasses it.
         logger.warning("Jev request failed with HTTP %s", exc.code)
-        return None
+        if exc.code in (401, 403):
+            return None, f"Jev rejected the API key (HTTP {exc.code})."
+        return None, f"Jev returned HTTP {exc.code}."
     except urllib.error.URLError as exc:
         logger.warning("Jev request failed: %s", type(exc).__name__)
-        return None
+        return None, "Could not reach Jev."
     except TimeoutError as exc:
         logger.warning("Jev request timed out: %s", type(exc).__name__)
-        return None
+        return None, "Could not reach Jev."
     except (OSError, http.client.HTTPException) as exc:
         logger.warning("Jev request failed: %s", type(exc).__name__)
-        return None
+        return None, "Could not reach Jev."
     except ValueError as exc:
         logger.warning("Jev returned an unparseable response: %s", type(exc).__name__)
-        return None
+        return None, "Jev returned an unexpected response."
 
     if not isinstance(data, dict):
         logger.warning("Jev returned an unexpected response shape: %s", type(data).__name__)
-        return None
-    return data
+        return None, "Jev returned an unexpected response."
+    return data, None
 
 
 def check_key(key: str) -> tuple[bool, str]:
@@ -114,13 +120,13 @@ def check_key(key: str) -> tuple[bool, str]:
     key = key.strip() if isinstance(key, str) else ""
     if not key:
         return False, "No API key saved."
-    result = _post(
+    result, detail = _post(
         key,
         "This is a connectivity check.",
         {"ping": {"type": "noul", "instructions": "This text is a connectivity check."}},
     )
     if result is None:
-        return False, "Could not reach Jev."
+        return False, detail
     if not isinstance(result.get("answers"), dict):
         return False, "Jev returned an unexpected response shape."
     return True, "Jev accepted the key."
@@ -152,7 +158,9 @@ def confirm(statement: str, state: str) -> bool:
     """
     if not _email_tracking_enabled():
         return False
-    result = _post(_saved_key(), state, {"decision": {"type": "noul", "instructions": statement}})
+    result, _detail = _post(
+        _saved_key(), state, {"decision": {"type": "noul", "instructions": statement}}
+    )
     if result is None:
         return False
     answers = result.get("answers")
@@ -226,7 +234,7 @@ def evaluate_hard_requirements(profile: JobProfile, posting_text: str) -> list[t
         return []
 
     key = _saved_key()
-    result = _post(
+    result, _detail = _post(
         key,
         posting_text,
         {name: {"type": "noul", "instructions": instructions} for name, instructions in questions.items()},
