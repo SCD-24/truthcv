@@ -11,6 +11,7 @@ make a live call to either.
 from __future__ import annotations
 
 import json
+import threading
 import urllib.error
 
 import pytest
@@ -337,6 +338,70 @@ def test_processed_message_ids_dedupe_across_runs(monkeypatch, data_dir):
     second = service.run_sync(force=True)
     assert second["processed"] == 0
     assert client.metadata_calls == 1
+
+
+# --- concurrent metadata prefetch keeps serial processing order -----------
+
+
+def test_metadata_prefetch_still_processes_messages_in_application_order(monkeypatch, data_dir):
+    """run_sync prefetches get_metadata on a thread pool, but must still feed
+    _process_message the results in application order — same classification,
+    same auto-apply, same evidence-note order a plain serial run would have
+    produced. Proven by forcing message "m2"'s get_metadata call to finish
+    BEFORE message "m1"'s (via a threading.Event, no sleeps) and checking
+    that m1 is still applied — and its evidence note still appended — before
+    m2's.
+    """
+    save_answers(Answers(email="me@example.com"))
+    app = _make_app(company="Acme Corp", website="https://acme.example", status="Applied")
+    query = service._application_query(app, 0)
+    meta1 = _metadata(
+        "m1", "Recruiter <no-reply@acme.example>", "We regret to inform", "Mon, 1 Jan 2024 00:00:00 +0000", "m1"
+    )
+    meta2 = _metadata(
+        "m2", "Recruiter <no-reply@acme.example>", "We still regret to inform", "Tue, 2 Jan 2024 00:00:00 +0000", "m2"
+    )
+
+    m2_metadata_fetched = threading.Event()
+    metadata_fetch_order: list[str] = []
+
+    class ReorderingClient(FakeGmailClient):
+        """Forces m2's get_metadata to complete before m1's, deterministically."""
+
+        def get_metadata(self, message_id):
+            if message_id == "m1":
+                m2_metadata_fetched.wait(timeout=5)
+            result = super().get_metadata(message_id)
+            metadata_fetch_order.append(message_id)
+            if message_id == "m2":
+                m2_metadata_fetched.set()
+            return result
+
+    client = ReorderingClient(
+        messages_by_query={query: [{"id": "m1"}, {"id": "m2"}]},
+        metadata_by_id={"m1": meta1, "m2": meta2},
+    )
+    monkeypatch.setattr(service, "build_gmail_client", lambda: client)
+    monkeypatch.setattr(
+        service.jev,
+        "confirm",
+        _confirm_matching({service._CONFIRM_STATEMENTS["rejection"][0]: "regret"}),
+    )
+
+    result = service.run_sync(force=True)
+
+    # get_metadata really did complete out of application order.
+    assert metadata_fetch_order == ["m2", "m1"]
+
+    # ...yet _process_message ran in application order: m1's evidence note
+    # was appended before m2's, exactly as a serial run would have done.
+    updated = applications.get(app.id)
+    assert updated.notes.index("message m1") < updated.notes.index("message m2")
+    assert result["processed"] == 2
+
+    suggestions = {s.id: s for s in load_suggestions()}
+    assert suggestions["m1"].state == "applied"
+    assert suggestions["m2"].state == "applied"
 
 
 # --- confirm() fail-open coverage (beside tests/test_screening_jev.py) -----

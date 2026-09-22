@@ -9,6 +9,7 @@ and target experience.
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
 
@@ -91,10 +92,20 @@ def tailor(
     plus the draft for internal render use.
     """
     keywords, aliases = extract_keywords_with_aliases(posting, provider_for("keywords"))
-    experiences, education, skills = select_and_rephrase(
-        posting, keywords, truth, provider_for("tailor")
-    )
-    inferences = detect_inferences(keywords, truth, provider_for("infer"), aliases)
+
+    # select_and_rephrase and detect_inferences are independent LLM calls, each
+    # resolving its own provider; run them concurrently. Futures are resolved
+    # in the same order the serial calls happened in, so a caller sees the same
+    # exception (type/message) it would have from the serial version.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        select_future = executor.submit(
+            select_and_rephrase, posting, keywords, truth, provider_for("tailor")
+        )
+        infer_future = executor.submit(
+            detect_inferences, keywords, truth, provider_for("infer"), aliases
+        )
+        experiences, education, skills = select_future.result()
+        inferences = infer_future.result()
 
     draft = Draft(
         experiences=experiences,

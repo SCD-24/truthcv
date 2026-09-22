@@ -444,3 +444,45 @@ def test_render_survives_a_broken_verifier(client, monkeypatch):
     rr = r.json()
     assert rr["blocked"] is False
     assert rr["pdfUrl"] == "/api/download/cv.pdf"
+
+
+def test_render_pdf_url_survives_a_failing_docx_render(client, monkeypatch):
+    """PDF and DOCX render on separate threads: a DOCX RenderUnavailable must
+    not cost the PDF url."""
+    from pathlib import Path
+
+    _seed_truth_with_summary("Engineer at Acme, strong in Python")
+    monkeypatch.setattr(render_cv, "render_pdf", lambda html, name: Path("/fake/cv.pdf"))
+
+    def _boom(html, name):
+        raise render_cv.RenderUnavailable("docx backend down")
+
+    monkeypatch.setattr(render_cv, "render_docx", _boom)
+
+    r = client.post("/api/render")
+    assert r.status_code == 200
+    rr = r.json()
+    assert rr["blocked"] is False
+    assert rr["pdfUrl"] == "/api/download/cv.pdf"
+    assert rr["docxUrl"] is None
+
+
+def test_render_docx_url_survives_a_failing_pdf_render(client, monkeypatch):
+    """PDF and DOCX render on separate threads: a PDF RenderUnavailable must
+    not cost the DOCX url."""
+    from pathlib import Path
+
+    _seed_truth_with_summary("Engineer at Acme, strong in Python")
+
+    def _boom(html, name):
+        raise render_cv.RenderUnavailable("pdf backend down")
+
+    monkeypatch.setattr(render_cv, "render_pdf", _boom)
+    monkeypatch.setattr(render_cv, "render_docx", lambda html, name: Path("/fake/cv.docx"))
+
+    r = client.post("/api/render")
+    assert r.status_code == 200
+    rr = r.json()
+    assert rr["blocked"] is False
+    assert rr["docxUrl"] == "/api/download/cv.docx"
+    assert rr["pdfUrl"] is None

@@ -159,3 +159,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:start comp:gmail-response-sync -->
 - **Gmail Response Sync** (`gmail-response-sync`) - backend component.
 <!-- generated:end comp:gmail-response-sync -->
+
+<!-- generated:start comp:job-runner -->
+- **Job Runner** (`job-runner`) - backend component.
+<!-- generated:end comp:job-runner -->

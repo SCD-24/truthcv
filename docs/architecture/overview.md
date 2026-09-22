@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-28 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+29 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -200,3 +200,7 @@ External third-party Jev (TypeSafe) service at https://api.typesafe.ai/v1/system
 <!-- generated:start comp:gmail-response-sync -->
 ## Gmail Response Sync (`gmail-response-sync`, BACKEND)
 <!-- generated:end comp:gmail-response-sync -->
+
+<!-- generated:start comp:job-runner -->
+## Job Runner (`job-runner`, BACKEND)
+<!-- generated:end comp:job-runner -->

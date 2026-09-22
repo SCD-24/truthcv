@@ -1268,23 +1268,39 @@ def _fetch_feed_postings(cfg: agent_config_store.AgentConfig, company_boards: li
 
     The two fetches share ONE wall-clock deadline (FEED_FETCH_BUDGET_SECONDS)
     instead of each getting its own — see that constant's comment for why.
+    They also run on two threads instead of one after another, so the slower
+    of the two governs the wall-clock cost of this function rather than their
+    sum; the shared deadline still bounds each individually exactly as when
+    they ran serially.
     """
+    import threading
     import time
 
     from agentconfig import boards
     from jobfeeds import ats, remoterocketship
 
     deadline = time.monotonic() + FEED_FETCH_BUDGET_SECONDS
+    results: dict = {}
 
-    if any(boards.is_api_source(source) for source in cfg.resolved_board_sources()):
-        rr_result = remoterocketship.fetch_postings(
-            cfg.profiles, remoterocketship.api_key(), cfg.max_posting_age_days, deadline=deadline
-        )
-    else:
-        rr_result = remoterocketship.FeedResult()
+    def _run_remote_rocketship() -> None:
+        if any(boards.is_api_source(source) for source in cfg.resolved_board_sources()):
+            results["rr"] = remoterocketship.fetch_postings(
+                cfg.profiles, remoterocketship.api_key(), cfg.max_posting_age_days, deadline=deadline
+            )
+        else:
+            results["rr"] = remoterocketship.FeedResult()
 
-    ats_result = ats.fetch_ats_postings(company_boards, cfg.max_posting_age_days, deadline=deadline)
-    return _merge_feed_results(rr_result, ats_result)
+    def _run_ats() -> None:
+        results["ats"] = ats.fetch_ats_postings(company_boards, cfg.max_posting_age_days, deadline=deadline)
+
+    rr_thread = threading.Thread(target=_run_remote_rocketship)
+    ats_thread = threading.Thread(target=_run_ats)
+    rr_thread.start()
+    ats_thread.start()
+    rr_thread.join()
+    ats_thread.join()
+
+    return _merge_feed_results(results["rr"], results["ats"])
 
 
 @router.get("/job-boards/{source}/key", response_model=JobBoardKeyStatus)

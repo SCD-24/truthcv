@@ -2097,6 +2097,14 @@
       "id": "gmail-response-sync",
       "name": "Gmail Response Sync",
       "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "id": "job-runner",
+      "name": "Job Runner",
+      "type": "backend"
     }
   ],
   "connections": [
@@ -2589,6 +2597,21 @@
       "from": "gmail-response-sync",
       "protocol": "HTTPS",
       "to": "jev-api"
+    },
+    {
+      "from": "api",
+      "protocol": "in-process",
+      "to": "job-runner"
+    },
+    {
+      "from": "job-runner",
+      "protocol": "in-process",
+      "to": "gmail-response-sync"
+    },
+    {
+      "from": "job-runner",
+      "protocol": "in-process",
+      "to": "job-feeds"
     }
   ],
   "definitions": [
@@ -2880,7 +2903,8 @@
         "storage-leaf",
         "services-layer",
         "job-feeds",
-        "gmail-response-sync"
+        "gmail-response-sync",
+        "job-runner"
       ],
       "name": "TruthCV Container (single Docker image)",
       "w": 1861.8301559792023,
@@ -5400,6 +5424,10 @@
     "job-feeds": {
       "x": 308,
       "y": 240
+    },
+    "job-runner": {
+      "x": 980,
+      "y": 200
     },
     "keyword-vocabulary": {
       "x": 881,

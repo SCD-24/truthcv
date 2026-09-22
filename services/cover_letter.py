@@ -15,6 +15,7 @@ with the unverifiable tokens and the flagged claims — nothing is rendered.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 
 import applications as app_store
@@ -182,15 +183,45 @@ def generate_cover_letter(
     if app_id:
         app_store.save_cover_letter_document(app_id, letter["text"])
 
+    # PDF and DOCX are independent, slow, best-effort steps — run them on two
+    # threads (mirroring services/render_cv.py) so one does not wait on the
+    # other. Each keeps its own try/except so a RenderUnavailable backend for
+    # one format never costs the other.
     pdf_url = docx_url = None
-    try:
-        pdf_url = f"/api/download/{render_pdf(html, pdf_name).name}"
-    except RenderUnavailable:
-        pass
-    try:
-        docx_url = f"/api/download/{render_docx(html, docx_name).name}"
-    except RenderUnavailable:
-        pass
+    # Unexpected (non-RenderUnavailable) errors raised on a render thread are
+    # re-raised after join, PDF's first — matching the serial version, where
+    # they propagated to the caller instead of being swallowed by the thread.
+    unexpected: dict[str, BaseException] = {}
+
+    def _render_pdf_task() -> None:
+        """Best-effort PDF render; runs on its own thread."""
+        nonlocal pdf_url
+        try:
+            pdf_url = f"/api/download/{render_pdf(html, pdf_name).name}"
+        except RenderUnavailable:
+            pass
+        except BaseException as exc:  # noqa: BLE001 — re-raised after join
+            unexpected["pdf"] = exc
+
+    def _render_docx_task() -> None:
+        """Best-effort DOCX render; runs on its own thread."""
+        nonlocal docx_url
+        try:
+            docx_url = f"/api/download/{render_docx(html, docx_name).name}"
+        except RenderUnavailable:
+            pass
+        except BaseException as exc:  # noqa: BLE001 — re-raised after join
+            unexpected["docx"] = exc
+
+    pdf_thread = threading.Thread(target=_render_pdf_task)
+    docx_thread = threading.Thread(target=_render_docx_task)
+    pdf_thread.start()
+    docx_thread.start()
+    pdf_thread.join()
+    docx_thread.join()
+    for key in ("pdf", "docx"):
+        if key in unexpected:
+            raise unexpected[key]
 
     return CoverLetterOutcome(
         blocked=False,

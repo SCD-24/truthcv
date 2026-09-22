@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import base64
 import html
+import logging
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from email.utils import parseaddr
 
 import httpx
@@ -16,7 +18,16 @@ from .matcher import _app_domains, _normalize, match_message
 from .model import GmailSuggestion, GmailSyncState
 from .store import load_suggestions, load_sync_state, save_suggestions, save_sync_state
 
+logger = logging.getLogger(__name__)
+
 SYNC_THROTTLE_S = 300
+
+#: Bounded worker count for concurrent Gmail API fetches — both the per-
+#: application list_messages queries in _collect_message_ids and the
+#: per-message get_metadata prefetch in run_sync share this same pool size,
+#: so a sync run never opens more than this many concurrent Gmail requests
+#: regardless of how many applications or new messages there are.
+GMAIL_FETCH_MAX_WORKERS = 4
 
 
 class GmailSyncError(RuntimeError):
@@ -218,14 +229,36 @@ def _collect_message_ids(client: GmailClient, pending_apps: list, sync_state: Gm
     domain or company signal), and dedupes ids already in ``processed_ids``
     or seen earlier in this same run — a message can legitimately match
     more than one application's query.
+
+    The queries are built up front, in application order, then run
+    concurrently on a bounded thread pool (GMAIL_FETCH_MAX_WORKERS workers)
+    since each is an independent Gmail API round trip. Results are then
+    merged into seen_ids/seen_set SERIALLY, one query's results at a time in
+    that same application order, so the dedupe order — and which id "wins"
+    when a message matches more than one query — stays identical to a plain
+    serial run. Futures are also resolved in that order: if more than one
+    query raised, the caller sees the same exception a serial run would have
+    raised first (the earliest one in application order), not whichever
+    query happened to fail first in wall-clock time.
     """
-    seen_ids: list[str] = []
-    seen_set: set[str] = set()
+    queries: list[str] = []
     for app in pending_apps:
         query = _application_query(app, sync_state.last_synced_at)
-        if not query:
-            continue
-        for item in client.list_messages(query):
+        if query:
+            queries.append(query)
+    if not queries:
+        return []
+    logger.info(
+        "gmail sync: dispatching %d list_messages queries (max_workers=%d)",
+        len(queries),
+        GMAIL_FETCH_MAX_WORKERS,
+    )
+    with ThreadPoolExecutor(max_workers=GMAIL_FETCH_MAX_WORKERS) as executor:
+        futures = [executor.submit(client.list_messages, query) for query in queries]
+    seen_ids: list[str] = []
+    seen_set: set[str] = set()
+    for future in futures:
+        for item in future.result():
             message_id = str(item.get("id", ""))
             if not message_id or message_id in processed_ids or message_id in seen_set:
                 continue
@@ -260,8 +293,14 @@ def _apply_decision(app_id: str, status: str, message_id: str, sender: str, subj
     update_application(app_id, {"status": status, "response_received": True, "notes": notes})
 
 
-def _process_message(client: GmailClient, message_id: str, pending_apps: list, by_id: dict[str, GmailSuggestion]) -> None:
-    """Fetch, match, and classify one message; record a suggestion if matched.
+def _process_message(client: GmailClient, message_id: str, metadata: dict, pending_apps: list, by_id: dict[str, GmailSuggestion]) -> None:
+    """Match and classify one already-fetched message; record a suggestion if matched.
+
+    ``metadata`` is the message's get_metadata payload, fetched ahead of
+    time by run_sync's prefetch (see run_sync) rather than fetched here —
+    this function itself does no concurrent work, so classification,
+    get_full, the by_id mutation, and _apply_decision all still run
+    serially on the caller's thread, in application order.
 
     A rejection/interview classification is a Jev confirmation in itself
     (see _classify_message), so it auto-applies immediately — the matched
@@ -273,7 +312,6 @@ def _process_message(client: GmailClient, message_id: str, pending_apps: list, b
     by hand even though the classification is recorded. Any other
     classification is left pending and no application is touched.
     """
-    metadata = client.get_metadata(message_id)
     sender = _header(metadata, "From")
     subject = _header(metadata, "Subject")
     date = _header(metadata, "Date")
@@ -326,8 +364,24 @@ def run_sync(*, force: bool = False) -> dict:
     processed_ids = set(sync_state.processed_message_ids)
     pending_apps = _pending_candidates()
     new_processed = _collect_message_ids(client, pending_apps, sync_state, processed_ids)
-    for message_id in new_processed:
-        _process_message(client, message_id, pending_apps, by_id)
+    if new_processed:
+        # Prefetch get_metadata for every new message id concurrently, bounded
+        # by GMAIL_FETCH_MAX_WORKERS, then hand the results to _process_message
+        # one at a time, in the same order as new_processed. Resolving each
+        # future before moving to the next keeps classification, get_full,
+        # the by_id mutation, and _apply_decision on the main thread and in
+        # application order — identical side effects and, if a fetch raised,
+        # the same exception a serial run would have surfaced first.
+        logger.info(
+            "gmail sync: prefetching metadata for %d messages (max_workers=%d)",
+            len(new_processed),
+            GMAIL_FETCH_MAX_WORKERS,
+        )
+        with ThreadPoolExecutor(max_workers=GMAIL_FETCH_MAX_WORKERS) as executor:
+            metadata_futures = [(message_id, executor.submit(client.get_metadata, message_id)) for message_id in new_processed]
+        for message_id, future in metadata_futures:
+            metadata = future.result()
+            _process_message(client, message_id, metadata, pending_apps, by_id)
     sync_state.last_synced_at = now
     sync_state.processed_message_ids = sorted(processed_ids.union(new_processed))
     save_suggestions(list(by_id.values()))

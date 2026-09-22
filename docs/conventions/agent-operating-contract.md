@@ -92,6 +92,7 @@ Use these exact names and ids when discussing the architecture.
 | Guardrail Validator | `guardrail-validator` | backend |
 | Jev (TypeSafe System One) API | `jev-api` | custom |
 | Job Feeds | `job-feeds` | backend |
+| Job Runner | `job-runner` | backend |
 | Keyword Vocabulary | `keyword-vocabulary` | backend |
 | LLM Provider Layer | `llm-provider-layer` | backend |
 | LLM Provider Service | `llm-provider-service` | custom |
@@ -112,5 +113,5 @@ Use these exact names and ids when discussing the architecture.
 <!-- generated:start cap:system-boundary -->
 ## System Boundary
 
-The declared system consists of 28 component(s) and 98 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
+The declared system consists of 29 component(s) and 101 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
 <!-- generated:end cap:system-boundary -->
