@@ -413,12 +413,13 @@ CI/CD = Continuous Integration and Continuous Delivery
 `/mcp/diagnostics` is a second, separate MCP streamable-HTTP JSON-RPC endpoint
 on the `app` service, for a remote MCP client (Claude Desktop, an inspector,
 your own tooling) to inspect a running TruthCV without touching the
-operational `/mcp` surface the agent uses. It exposes exactly five read-only
+operational `/mcp` surface the agent uses. It exposes exactly seven read-only
 tools — `list_runs`, `get_run`, `list_screenings`, `list_applications`,
-`get_status` — and none of them can start a run, record a screening or
-application, or generate a document. `get_status` reports per-store counts
-and whether secret encryption is available; it never returns any secret
-material.
+`get_status`, `get_gmail_sync_status`, `list_gmail_suggestions` — and none of
+them can start a run, record a screening or application, or generate a
+document. `get_status` reports per-store counts (including Gmail suggestion
+count and last sync time) and whether secret encryption is available; it
+never returns any secret material.
 
 To enable it, set a non-empty `DIAGNOSTICS_MCP_TOKEN` in `.env` (e.g.
 `openssl rand -hex 32`) and restart the `app` service. Every request must
