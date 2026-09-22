@@ -194,7 +194,12 @@ connection is only useful here for auto-applying Jev-confirmed transitions.
    request host at runtime, so it must match exactly).
 5. Set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in `.env` to
    the client's id and secret.
-6. Connect from **Settings → Gmail** in the app.
+6. If the app is served behind a reverse proxy, or reached at anything other
+   than `localhost:<APP_PORT>`, set `GOOGLE_OAUTH_REDIRECT_URI` in `.env` to
+   the exact redirect URI registered above — request-derived detection can't
+   be trusted through a proxy uvicorn doesn't trust, and the value must match
+   the Google console entry character-for-character.
+7. Connect from **Settings → Gmail** in the app.
 
 ## Unattended application agent
 
@@ -360,6 +365,7 @@ precedence once configured.
 | `RUN_AT` / `RUN_DAYS` | Fallback agent schedule, used only when the Agents page's schedule is unreachable. |
 | `TZ` | Fallback timezone the agent's schedule and logs are interpreted in (default `UTC`). The Agents page's schedule timezone takes precedence. |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Optional — Google OAuth client credentials backing the Gmail connection. See [Gmail response tracking](#gmail-response-tracking-optional) above for full setup steps. Unset, connecting Gmail reports "Google OAuth is not configured on the server." |
+| `GOOGLE_OAUTH_REDIRECT_URI` | Optional — overrides the request-derived Gmail OAuth redirect URI. Needed behind a reverse proxy or when the app is reached at a non-localhost hostname; must match the Google console's registered redirect URI character-for-character. |
 | `JEV_API_KEY` | Optional — fallback credential for [Jev cross-checking](#jev-cross-checking-optional), consulted only when no key is saved via Settings → Jev. Not present in `.env.example` by design. Supplies the key only — the use-for toggles are still set from Settings → Jev. |
 | `DIAGNOSTICS_MCP_TOKEN` | Optional — bearer token guarding the read-only `/mcp/diagnostics` endpoint. Unset/empty (the default) disables the endpoint entirely: every request to it returns 404. See "Diagnostics MCP (read-only)" below. |
 

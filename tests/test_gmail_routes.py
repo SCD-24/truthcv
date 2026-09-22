@@ -76,6 +76,47 @@ def test_gate_open_start_returns_auth_url(client, monkeypatch):
     assert "authUrl" in body and body["authUrl"]
 
 
+def test_gate_open_start_uses_redirect_uri_override(client, monkeypatch):
+    """GOOGLE_OAUTH_REDIRECT_URI, when set, must be sent to start_login
+    verbatim instead of the request-derived URI."""
+    _open_gate()
+    override = "https://truthcv.home.arpa/api/auth/gmail/callback"
+    monkeypatch.setenv("GOOGLE_OAUTH_REDIRECT_URI", override)
+    received = []
+
+    def fake_start_login(redirect_uri):
+        received.append(redirect_uri)
+        return {"flow": "browser", "authUrl": "https://accounts.google.com/o/oauth2/v2/auth?state=s1"}
+
+    monkeypatch.setattr("connections.auth.gmail.start_login", fake_start_login)
+    resp = client.post("/api/auth/gmail/start")
+    assert resp.status_code == 200
+    assert received == [override]
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_gate_open_start_uses_request_uri_when_override_unset(client, monkeypatch, value):
+    """With GOOGLE_OAUTH_REDIRECT_URI unset or blank, the request-derived URI
+    must still be used, unchanged from current behavior."""
+    _open_gate()
+    if value is None:
+        monkeypatch.delenv("GOOGLE_OAUTH_REDIRECT_URI", raising=False)
+    else:
+        monkeypatch.setenv("GOOGLE_OAUTH_REDIRECT_URI", value)
+    received = []
+
+    def fake_start_login(redirect_uri):
+        received.append(redirect_uri)
+        return {"flow": "browser", "authUrl": "https://accounts.google.com/o/oauth2/v2/auth?state=s1"}
+
+    monkeypatch.setattr("connections.auth.gmail.start_login", fake_start_login)
+    resp = client.post("/api/auth/gmail/start")
+    assert resp.status_code == 200
+    assert len(received) == 1
+    assert received[0].endswith("/api/auth/gmail/callback")
+    assert received[0] != "https://truthcv.home.arpa/api/auth/gmail/callback"
+
+
 def test_gate_open_callback_completes_login(client, monkeypatch):
     _open_gate()
     calls = []
