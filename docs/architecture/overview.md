@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-28 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+29 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -200,3 +200,11 @@ External third-party Jev (TypeSafe) service at https://api.typesafe.ai/v1/system
 <!-- generated:start comp:gmail-response-sync -->
 ## Gmail Response Sync (`gmail-response-sync`, BACKEND)
 <!-- generated:end comp:gmail-response-sync -->
+
+<!-- generated:start comp:job-runner -->
+## Job Runner (`job-runner`, BACKEND)
+
+Bounded background job executor (jobs/): a shared thread pool (MAX_WORKERS=4) plus an in-memory, thread-safe registry of Job records. Callers submit a zero-argument callable via submit(kind, fn); it runs on a worker thread and its outcome (result or exception) is recorded on the returned Job. get()/list_jobs() poll registry state. Registry is in-memory only - jobs are not persisted across restarts.
+
+**Tech:** Python, concurrent.futures ThreadPoolExecutor
+<!-- generated:end comp:job-runner -->

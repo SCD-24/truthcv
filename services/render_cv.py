@@ -12,6 +12,7 @@ with the unverifiable tokens and the flagged claims.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 
 import applications as app_store
@@ -226,21 +227,55 @@ def render_cv(
     if app_id:
         app_store.save_cv_document(app_id, html)
 
+    # PDF (+ verification) and DOCX are independent, slow, best-effort steps —
+    # run them on two threads so one does not wait on the other. Each keeps its
+    # own try/except so a RenderUnavailable backend for one format never costs
+    # the other. ATS warnings from verify_pdf are collected separately and only
+    # appended to `ats` AFTER both threads join, so their order in the result
+    # never depends on thread scheduling.
     pdf_url = docx_url = None
-    try:
-        pdf_path = render_pdf(html, pdf_name)
-        pdf_url = f"/api/download/{pdf_path.name}"
+    pdf_ats_warnings: list[dict] = []
+    # Unexpected (non-RenderUnavailable) errors raised on a render thread are
+    # re-raised after join, PDF's first — matching the serial version, where
+    # they propagated to the caller instead of being swallowed by the thread.
+    unexpected: dict[str, BaseException] = {}
+
+    def _render_pdf_task() -> None:
+        """Best-effort PDF render + verification; runs on its own thread."""
+        nonlocal pdf_url
         try:
-            ats.extend(verify_pdf(pdf_path, html, default_max_pages()))
-        except Exception:  # noqa: BLE001 — verification must never cost the render
+            pdf_path = render_pdf(html, pdf_name)
+            pdf_url = f"/api/download/{pdf_path.name}"
+            try:
+                pdf_ats_warnings.extend(verify_pdf(pdf_path, html, default_max_pages()))
+            except Exception:  # noqa: BLE001 — verification must never cost the render
+                pass
+        except RenderUnavailable:
             pass
-    except RenderUnavailable:
-        pass
-    try:
-        docx_path = render_docx(html, docx_name)
-        docx_url = f"/api/download/{docx_path.name}"
-    except RenderUnavailable:
-        pass
+        except BaseException as exc:  # noqa: BLE001 — re-raised after join
+            unexpected["pdf"] = exc
+
+    def _render_docx_task() -> None:
+        """Best-effort DOCX render; runs on its own thread."""
+        nonlocal docx_url
+        try:
+            docx_path = render_docx(html, docx_name)
+            docx_url = f"/api/download/{docx_path.name}"
+        except RenderUnavailable:
+            pass
+        except BaseException as exc:  # noqa: BLE001 — re-raised after join
+            unexpected["docx"] = exc
+
+    pdf_thread = threading.Thread(target=_render_pdf_task)
+    docx_thread = threading.Thread(target=_render_docx_task)
+    pdf_thread.start()
+    docx_thread.start()
+    pdf_thread.join()
+    docx_thread.join()
+    for key in ("pdf", "docx"):
+        if key in unexpected:
+            raise unexpected[key]
+    ats.extend(pdf_ats_warnings)
 
     return RenderOutcome(
         blocked=False,

@@ -759,6 +759,49 @@
             "w": 440,
             "x": 200,
             "y": 200
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "List every known background job with its current status",
+                  "method": "GET",
+                  "path": "/api/jobs"
+                },
+                {
+                  "desc": "Fetch one job's status/result by id (404 for unknown id)",
+                  "method": "GET",
+                  "path": "/api/jobs/{job_id}"
+                },
+                {
+                  "desc": "Start a background job (202 Accepted); kinds: gmail-sync (guarded by Gmail tracking gate), feed-refresh",
+                  "method": "POST",
+                  "path": "/api/jobs/{kind}"
+                },
+                {
+                  "desc": "List all known background jobs",
+                  "method": "GET",
+                  "path": "/api/jobs"
+                },
+                {
+                  "desc": "Poll one job's status/result",
+                  "method": "GET",
+                  "path": "/api/jobs/{job_id}"
+                },
+                {
+                  "desc": "Submit a background job of the given kind (202 Accepted)",
+                  "method": "POST",
+                  "path": "/api/jobs/{kind}"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1790091479559-20",
+            "title": "Job routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 30,
+            "y": 30
           }
         ]
       },
@@ -2097,6 +2140,109 @@
       "id": "gmail-response-sync",
       "name": "Gmail Response Sync",
       "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Bounded background job executor (jobs/): a shared thread pool (MAX_WORKERS=4) plus an in-memory, thread-safe registry of Job records. Callers submit a zero-argument callable via submit(kind, fn); it runs on a worker thread and its outcome (result or exception) is recorded on the returned Job. get()/list_jobs() poll registry state. Registry is in-memory only - jobs are not persisted across restarts."
+            },
+            "h": 180,
+            "id": "widget-1790091508394-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Python",
+                "concurrent.futures ThreadPoolExecutor"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1790091508428-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "Primary Key",
+                  "name": "id",
+                  "notes": "-",
+                  "type": "UUID string"
+                },
+                {
+                  "flags": "-",
+                  "name": "kind",
+                  "notes": "caller-supplied job kind, e.g. gmail sync, feed refresh",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "status",
+                  "notes": "pending | running | done | failed",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "progress",
+                  "notes": "caller-defined 0..1 fraction, default 0.0",
+                  "type": "float"
+                },
+                {
+                  "flags": "-",
+                  "name": "result",
+                  "notes": "set only when status=done",
+                  "type": "Any"
+                },
+                {
+                  "flags": "-",
+                  "name": "error",
+                  "notes": "set only when status=failed",
+                  "type": "string | null"
+                },
+                {
+                  "flags": "-",
+                  "name": "created_at",
+                  "notes": "-",
+                  "type": "float (epoch)"
+                },
+                {
+                  "flags": "-",
+                  "name": "started_at",
+                  "notes": "-",
+                  "type": "float (epoch) | null"
+                },
+                {
+                  "flags": "-",
+                  "name": "finished_at",
+                  "notes": "-",
+                  "type": "float (epoch) | null"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1790091508465-2",
+            "title": "Job record",
+            "type": "schema",
+            "w": 440,
+            "x": 90,
+            "y": 90
+          }
+        ]
+      },
+      "id": "job-runner",
+      "name": "Job Runner",
+      "type": "backend"
     }
   ],
   "connections": [
@@ -2589,6 +2735,21 @@
       "from": "gmail-response-sync",
       "protocol": "HTTPS",
       "to": "jev-api"
+    },
+    {
+      "from": "api",
+      "protocol": "in-process",
+      "to": "job-runner"
+    },
+    {
+      "from": "job-runner",
+      "protocol": "in-process",
+      "to": "gmail-response-sync"
+    },
+    {
+      "from": "job-runner",
+      "protocol": "in-process",
+      "to": "job-feeds"
     }
   ],
   "definitions": [
@@ -2880,7 +3041,8 @@
         "storage-leaf",
         "services-layer",
         "job-feeds",
-        "gmail-response-sync"
+        "gmail-response-sync",
+        "job-runner"
       ],
       "name": "TruthCV Container (single Docker image)",
       "w": 1861.8301559792023,
@@ -5400,6 +5562,10 @@
     "job-feeds": {
       "x": 308,
       "y": 240
+    },
+    "job-runner": {
+      "x": 980,
+      "y": 200
     },
     "keyword-vocabulary": {
       "x": 881,

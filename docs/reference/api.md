@@ -9,6 +9,12 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) - not ex
 
 | Method | Path | Description |
 |---|---|---|
+| **GET** | `/api/jobs` | List every known background job with its current status |
+| **GET** | `/api/jobs/{job_id}` | Fetch one job's status/result by id (404 for unknown id) |
+| **POST** | `/api/jobs/{kind}` | Start a background job (202 Accepted); kinds: gmail-sync (guarded by Gmail tracking gate), feed-refresh |
+| **GET** | `/api/jobs` | List all known background jobs |
+| **GET** | `/api/jobs/{job_id}` | Poll one job's status/result |
+| **POST** | `/api/jobs/{kind}` | Submit a background job of the given kind (202 Accepted) |
 | **GET** | `/api/applications` | List all tracked job applications. |
 | **POST** | `/api/applications` | Create a new application record. |
 | **PUT** | `/api/applications/{id}` | Update an application record (fields and status flags). |

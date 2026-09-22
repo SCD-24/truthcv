@@ -3,8 +3,11 @@ non-truth claim surfaces as an Inference, never in the draft."""
 
 from __future__ import annotations
 
+import threading
+
 import yaml
 
+from providers.base import ProviderError
 from providers.fake import FakeProvider
 from truth.model import Bullet, Experience, Skill, Truth
 from tailor import tailor, claims_for_ids
@@ -338,6 +341,79 @@ def test_uncovered_keywords_honours_alias_argument():
         )
         == ["CI/CD"]
     )
+
+
+def test_select_and_infer_run_concurrently(data_dir):
+    """select_and_rephrase and detect_inferences each get their own provider
+    (tailor/infer) and run concurrently, not serially.
+
+    A shared threading.Barrier(2) only releases once BOTH blocking providers'
+    extract_json calls have reached it. If tailor() ran the two calls
+    serially, the first call would block alone until the barrier's timeout
+    and raise BrokenBarrierError, failing this test.
+    """
+    barrier = threading.Barrier(2, timeout=5)
+
+    class BlockingProvider(FakeProvider):
+        """A FakeProvider whose extract_json waits at a shared barrier."""
+
+        def extract_json(self, system, messages, schema):
+            barrier.wait()  # released only once both sides have arrived
+            return super().extract_json(system, messages, schema)
+
+    keywords_provider = FakeProvider(router=_router)
+    tailor_provider = BlockingProvider(router=_router)
+    infer_provider = BlockingProvider(router=_router)
+    providers = {
+        "keywords": keywords_provider,
+        "tailor": tailor_provider,
+        "infer": infer_provider,
+    }
+
+    truth = _truth()
+    result = tailor(
+        "A backend role using Python and Kubernetes.", truth, lambda task=None: providers[task]
+    )
+
+    # both blocking providers reached extract_json, proving the two branches
+    # overlapped instead of one waiting for the other to finish first
+    assert tailor_provider.calls and infer_provider.calls
+    assert tailor_provider.calls[0]["schema"]["properties"].keys() >= {"experiences"}
+    assert infer_provider.calls[0]["schema"]["properties"].keys() >= {"inferences"}
+
+    # result/draft shape is identical to the serial version's
+    draft = result["draft"]
+    valid_ids = truth.all_ids()
+    assert all(e.source_id in valid_ids for e in draft.experiences)
+    assert result["keywords"] == ["Python", "Kubernetes"]
+    assert len(result["inferences"]) == 1
+    assert result["inferences"][0]["claim"] == "Experience with Kubernetes"
+
+
+def test_first_exception_propagates_unchanged(data_dir):
+    """If either concurrent branch raises, the caller sees that exact error,
+    same as the serial version would (select_and_rephrase runs 'first')."""
+
+    class FailingSelectProvider(FakeProvider):
+        def extract_json(self, system, messages, schema):
+            props = (schema or {}).get("properties", {})
+            if "experiences" in props:
+                raise ProviderError("boom-select")
+            return super().extract_json(system, messages, schema)
+
+    providers = {
+        "keywords": FakeProvider(router=_router),
+        "tailor": FailingSelectProvider(router=_router),
+        "infer": FakeProvider(router=_router),
+    }
+
+    raised = None
+    try:
+        tailor("posting", _truth(), lambda task=None: providers[task])
+    except ProviderError as exc:
+        raised = exc
+    assert raised is not None
+    assert str(raised) == "boom-select"
 
 
 def test_draft_keyword_aliases_round_trip_and_legacy_default():

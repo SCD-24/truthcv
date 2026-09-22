@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 import httpx
 import pytest
 from cryptography.fernet import Fernet
@@ -319,42 +321,81 @@ def test_an_ats_board_reaches_the_feed_with_no_key_configured(client, data_dir, 
     assert [p["url"] for p in got["feedPostings"]] == ["https://acme.example/gh/1"]
 
 
-def test_the_combined_fetch_stays_under_one_shared_wall_clock_ceiling(client, data_dir, mock_http, monkeypatch):
-    """BLOCKING 1: Remote Rocketship and the ATS fetch used to each get their
-    OWN independent 20s budget, so together they could approach 40s against
-    agent-config.js's fixed 30s socket timeout for job_config — the exact
-    abort the feed's never-raise design exists to prevent. They must instead
-    share ONE combined deadline: whatever Remote Rocketship spends comes out
-    of what the ATS fetch is given, not a fresh budget of its own. Proven here
-    by pinning the clock (no real time, no real network) and checking the
-    per-request timeout the ATS fetch is actually given after Remote
-    Rocketship has consumed almost the whole combined ceiling."""
-    from api import routes
+def test_the_combined_fetch_shares_one_deadline_between_both_sources(client, data_dir, mock_http, monkeypatch):
+    """BLOCKING 1 / task t-1: Remote Rocketship and the ATS fetch used to each
+    get their OWN independent 20s budget, so together they could approach 40s
+    against agent-config.js's fixed 30s socket timeout for job_config — the
+    exact abort the feed's never-raise design exists to prevent. They must
+    instead share ONE deadline value rather than each computing a fresh
+    BUDGET_SECONDS window of its own.
+
+    The two fetches now run concurrently on their own threads (see
+    api/routes.py's ``_fetch_feed_postings``) rather than one after another,
+    so there is no longer a well-defined "first fetcher's spend eats into the
+    second's budget" moment to pin a fake clock to — whichever thread the
+    scheduler happens to run first is not something a test should assume.
+    What IS still guaranteed, and worth proving, is that both fetchers are
+    handed the exact same ``deadline`` object: this captures the ``deadline``
+    kwarg each of the two underlying calls actually receives and checks they
+    match, regardless of which one the scheduler happens to start first."""
     from companyboards import store as board_store
     from jobfeeds import ats as ats_module
+    from jobfeeds import remoterocketship as rr_module
 
     _configure(client, monkeypatch)
     client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
     board_store.record("Acme", "https://boards.greenhouse.io/acme", "greenhouse")
 
-    clock = {"t": 0.0}
-    monkeypatch.setattr(ats_module.time, "monotonic", lambda: clock["t"])
-    ats_timeouts = []
+    deadlines_seen = {}
+    real_rr_fetch = rr_module.fetch_postings
+    real_ats_fetch = ats_module.fetch_ats_postings
 
-    def handler(request):
-        if "greenhouse" in request.url.host:
-            ats_timeouts.append(request.extensions["timeout"]["read"])
-            return httpx.Response(200, json={"jobs": []})
-        # Remote Rocketship consumes almost the whole combined ceiling before
-        # the ATS fetch ever gets to run.
-        clock["t"] += routes.FEED_FETCH_BUDGET_SECONDS - 1.0
-        return httpx.Response(200, json={"jobOpenings": []})
+    def spy_rr_fetch(*args, **kwargs):
+        deadlines_seen["remoterocketship"] = kwargs.get("deadline")
+        return real_rr_fetch(*args, **kwargs)
 
-    mock_http(handler)
+    def spy_ats_fetch(*args, **kwargs):
+        deadlines_seen["ats"] = kwargs.get("deadline")
+        return real_ats_fetch(*args, **kwargs)
+
+    monkeypatch.setattr(rr_module, "fetch_postings", spy_rr_fetch)
+    monkeypatch.setattr(ats_module, "fetch_ats_postings", spy_ats_fetch)
+    mock_http(lambda r: httpx.Response(200, json={"jobs": [], "jobOpenings": []}))
+
     client.get("/api/agent/config?include_feed=true")
 
-    assert ats_timeouts, "the ATS fetch never ran"
-    # Only ~1s of the shared ceiling was left — a fresh 20s BUDGET_SECONDS (or
-    # even the 8s per-request TIMEOUT_SECONDS) would mean the ceiling was not
-    # actually shared.
-    assert ats_timeouts[0] == pytest.approx(1.0)
+    assert deadlines_seen.get("remoterocketship") is not None
+    assert deadlines_seen.get("ats") is not None
+    assert deadlines_seen["remoterocketship"] == deadlines_seen["ats"]
+
+
+def test_remote_rocketship_and_ats_are_fetched_concurrently_not_serially(client, data_dir, mock_http, monkeypatch):
+    """Task t-1: the two sources run on separate threads sharing one deadline,
+    not one after another. Proven with a two-party Barrier: each mock handler
+    waits on it before responding, so if the fetches ran serially the SECOND
+    one would be a lone party and time out waiting for a partner that never
+    arrives — this only completes, with both sources' postings merged, because
+    both threads reach the barrier together."""
+    from companyboards import store as board_store
+
+    _configure(client, monkeypatch)
+    client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
+    board_store.record("Acme", "https://boards.greenhouse.io/acme", "greenhouse")
+
+    barrier = threading.Barrier(2, timeout=5)
+
+    def handler(request):
+        barrier.wait()
+        if "greenhouse" in request.url.host:
+            return httpx.Response(
+                200, json={"jobs": [{"title": "GH Role", "absolute_url": "https://acme.example/gh/1"}]}
+            )
+        return httpx.Response(
+            200, json={"jobOpenings": [{"roleTitle": "RR Role", "url": "https://acme.example/rr/1"}]}
+        )
+
+    mock_http(handler)
+    got = client.get("/api/agent/config?include_feed=true").json()
+    urls = {p["url"] for p in got["feedPostings"]}
+    assert urls == {"https://acme.example/gh/1", "https://acme.example/rr/1"}
+    assert got["feedError"] == ""

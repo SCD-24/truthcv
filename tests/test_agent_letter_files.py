@@ -348,6 +348,71 @@ def test_two_concurrent_renders_both_produce_a_file(data_dir, monkeypatch):
     assert _pdfs(data_dir) == [_expected_name("s1", "Shared text.")]
 
 
+def test_cover_letter_service_pdf_survives_a_failing_docx_render(data_dir, monkeypatch):
+    """services/cover_letter.py renders PDF and DOCX on two threads (mirroring
+    services/render_cv.py's two-thread render). A DOCX RenderUnavailable on its
+    own thread must not cost the PDF url."""
+    import services.cover_letter as cover_letter_svc
+    from providers.fake import FakeProvider
+
+    provider = FakeProvider(
+        json_responses=[
+            {"paragraphs": [{"text": "Dear team, I write to apply.", "claims": []}]}
+        ]
+    )
+
+    def _boom_docx(html, name):
+        raise cover_letter_svc.RenderUnavailable("docx backend down")
+
+    monkeypatch.setattr(cover_letter_svc, "render_pdf", lambda html, name: _data_dir() / name)
+    monkeypatch.setattr(cover_letter_svc, "render_docx", _boom_docx)
+
+    outcome = cover_letter_svc.generate_cover_letter(
+        application_id=None,
+        posting="A role building payments systems.",
+        length="Short",
+        provider=provider,
+        approved_ids=set(),
+        denied_ids=set(),
+    )
+
+    assert outcome.blocked is False
+    assert outcome.pdf_url == "/api/download/cover_letter.pdf"
+    assert outcome.docx_url is None
+
+
+def test_cover_letter_service_docx_survives_a_failing_pdf_render(data_dir, monkeypatch):
+    """The symmetric case: a PDF RenderUnavailable on its own thread must not
+    cost the DOCX url."""
+    import services.cover_letter as cover_letter_svc
+    from providers.fake import FakeProvider
+
+    provider = FakeProvider(
+        json_responses=[
+            {"paragraphs": [{"text": "Dear team, I write to apply.", "claims": []}]}
+        ]
+    )
+
+    def _boom_pdf(html, name):
+        raise cover_letter_svc.RenderUnavailable("pdf backend down")
+
+    monkeypatch.setattr(cover_letter_svc, "render_pdf", _boom_pdf)
+    monkeypatch.setattr(cover_letter_svc, "render_docx", lambda html, name: _data_dir() / name)
+
+    outcome = cover_letter_svc.generate_cover_letter(
+        application_id=None,
+        posting="A role building payments systems.",
+        length="Short",
+        provider=provider,
+        approved_ids=set(),
+        denied_ids=set(),
+    )
+
+    assert outcome.blocked is False
+    assert outcome.docx_url == "/api/download/cover_letter.docx"
+    assert outcome.pdf_url is None
+
+
 def test_a_profile_edit_re_renders_the_letter(data_dir, fake_renderer):
     """The header is part of the document, so it is part of the digest. An
     operator who corrects their email would otherwise send a CV carrying the
