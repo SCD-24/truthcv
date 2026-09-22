@@ -164,6 +164,21 @@ export interface SettingsStatus {
   ollamaHost: string;
 }
 
+/** Jev cross-check settings status (the raw key is never sent to the browser).
+ * Jev only runs during screening when a key is saved AND useForScreening is on. */
+export interface JevSettings {
+  keySet: boolean;
+  useForScreening: boolean;
+  encryptionAvailable: boolean;
+}
+
+/** A Jev settings save payload. Empty apiKey clears the stored key; omitted
+ * fields are left unchanged. */
+export interface JevSettingsUpdate {
+  apiKey?: string;
+  useForScreening?: boolean;
+}
+
 /** One selectable model, discovered live from the provider's API/SDK. */
 export interface ModelInfo {
   id: string;

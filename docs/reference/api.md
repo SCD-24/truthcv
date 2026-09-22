@@ -67,6 +67,9 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) - not ex
 | **POST** | `/api/settings` | Save provider selection + API key/model/host; encrypts to ./data/secrets.enc via ENCRYPTION_KEY. Empty apiKey leaves the stored key unchanged. |
 | **POST** | `/api/settings/test` | Test connection: a tiny live provider call with saved/submitted credentials. Returns {ok, detail}. |
 | **POST** | `/api/models` | List available models for a provider (live model-list lookup). |
+| **GET** | `/api/settings/jev` | Read the Jev key status and screening toggle |
+| **PUT** | `/api/settings/jev` | Update the Jev key and screening toggle |
+| **POST** | `/api/settings/jev/test` | Test the configured Jev key |
 | **POST** | `/mcp` | Streamable-HTTP JSON-RPC MCP tool surface (agenttools/mcp_app.py) used by the Application Agent container; in-network only. |
 | **DELETE** | `/api/prompt-fragments/{id}` | Delete a user prompt fragment by id; 204 on success, 404 if unknown, 400 if seeded/undeletable |
 | **GET** | `/api/screenings` | Every screening record, most recent first; optional ?approval= narrows to the queue. |

@@ -57,8 +57,10 @@ _TOOL_REGISTRY = {
         "A 'passed' or 'deferred' verdict is REJECTED, storing nothing, when it has no usable posting text (a real posting body, not a login wall or a 404 page). "
         "A posting you could not read takes a screening_blocker instead. "
         "For a passed or deferred verdict, also pass profile (the enabled JobProfile name you screened against), remote_arrangement (what the posting itself states — remote, hybrid, on_site, or unstated), "
-        "and language_requirement (any language the posting explicitly requires, or '' for none) — profile and remote_arrangement are required and the call is rejected without them. "
-        "Evidence that contradicts the named profile's remote model or working language is stored as an automatic rejection (verdict downgraded to rejected), not an error to retry. "
+        "language_requirement (any language the posting explicitly requires, or '' for none), and the posting's own stated evidence for its other hard requirements: salary_stated (the posting's stated salary or range), "
+        "employment_country_stated (the posting's stated employment country), role_type_stated (the posting's stated role type, e.g. contract vs permanent), and eor_stated (yes, no, or unstated — whether the posting requires an EOR/PEO employer of record) — "
+        "profile and remote_arrangement are required and the call is rejected without them; the rest are optional and '' means the posting stated nothing on that point. "
+        "Evidence that contradicts ANY of the named profile's six hard requirements — remote model, working language, salary floor, employment country, rejected role types, or EOR — is stored as an automatic rejection (verdict downgraded to rejected), not an error to retry. "
         "Pass your run_id (from start_run) on EVERY call, so this screening is attributed to your run and the run's coverage counters reflect the work you actually did.",
     ),
     "check_cooldown": (

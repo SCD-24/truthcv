@@ -17,6 +17,7 @@ so the agent and the wizard can never disagree about what happened.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 
 import agentconfig.store as _agentconfig_store
@@ -43,13 +44,18 @@ from screening.posting import validate_posting_text as _validate_posting_text
 from screening.role import validate_role_title as _validate_role_title
 from screening.criteria import validate_remote_arrangement as _validate_remote_arrangement
 from screening.criteria import validate_language_requirement as _validate_language_requirement
-from screening.criteria import evaluate as _evaluate_criteria
+from screening.criteria import validate_eor_stated as _validate_eor_stated
+from screening.criteria import validate_stated_text as _validate_stated_text
+from screening.criteria import evaluate_hard_requirements as _evaluate_hard_requirements
+import screening.jev as _jev
 from services.screenings import create_screening as create_or_get_screening
 import services.applications as _applications_service
 from screening.url import validate_posting_url as _validate_posting_url
 from truth.answers import canonical_cv as _canonical_cv
 from truth.answers import load as _load_answers
 from truth.emailalias import alias_email as _alias_email
+
+logger = logging.getLogger(__name__)
 
 
 def _backfill_from_screening(fields: dict, screening_id: str) -> dict:
@@ -299,20 +305,12 @@ def record_application(
     return result
 
 
-def _evaluate_profile_criteria(
-    profile_name: str, arrangement: str, requirement: str, agent_reason: str
-) -> dict:
-    """Check ``profile_name``'s criteria against the posting's stated evidence.
+def _load_enabled_profile(profile_name: str):
+    """Return the named ENABLED JobProfile, or raise ``ValueError`` naming the enabled ones.
 
-    Loads the agent config and matches ``profile_name`` among ENABLED
-    profiles only — a disabled or unknown name raises ``ValueError`` naming
-    the profiles that are actually enabled, since evaluating against a
-    profile nobody is currently searching under would be meaningless.
-    Returns ``{}`` when the posting is compatible. Otherwise returns a dict
-    with ``verdict='rejected'``, the failing criterion, and a reason that
-    prefixes the criteria evidence onto whatever reason the agent supplied,
-    so the operator sees both why the posting failed and what the agent said
-    about it.
+    Evaluating hard requirements against a profile nobody is currently
+    searching under would be meaningless, so a disabled or unknown name is
+    refused rather than silently matched.
     """
     cfg = _agentconfig_store.load()
     enabled = [p for p in cfg.profiles if p.enabled]
@@ -323,12 +321,59 @@ def _evaluate_profile_criteria(
         raise ValueError(
             f"Unknown or disabled profile {profile_name!r}. Enabled profiles: {names}."
         )
-    failing_criterion, evidence_reason = _evaluate_criteria(
-        profile.remote_model, profile.working_language, arrangement, requirement
-    )
+    return profile
+
+
+def _evaluate_profile_criteria(profile_name: str, evidence: dict, agent_reason: str) -> dict:
+    """Check ``profile_name``'s six hard requirements against the posting's stated evidence.
+
+    Loads the named ENABLED profile via ``_load_enabled_profile`` (which
+    raises ``ValueError`` naming the enabled ones for an unknown/disabled
+    name), then runs ``screening.criteria.evaluate_hard_requirements`` over
+    ``evidence``. Returns ``{}`` when the posting is compatible with every
+    one of remote model, working language, salary floor, employment country,
+    rejected role types, and EOR/PEO allowance. Otherwise returns a dict with
+    ``verdict='rejected'``, the failing criterion, and a reason that prefixes
+    the criteria evidence onto whatever reason the agent supplied, so the
+    operator sees both why the posting failed and what the agent said about
+    it.
+    """
+    profile = _load_enabled_profile(profile_name)
+    failing_criterion, evidence_reason = _evaluate_hard_requirements(profile, evidence)
     if not failing_criterion:
         return {}
     combined_reason = f"{evidence_reason} {agent_reason}".strip()
+    return {
+        "verdict": "rejected",
+        "failing_criterion": failing_criterion,
+        "reason": combined_reason,
+    }
+
+
+def _evaluate_jev_criteria(profile_name: str, posting_text: str, agent_reason: str) -> dict:
+    """Cross-check the posting against Jev's opinion of the profile's hard requirements.
+
+    Called only after the deterministic checks in ``_evaluate_profile_criteria``
+    pass, since Jev never overrides a deterministic rejection. Returns ``{}``
+    when Jev is disabled, reports no failures, or errors for any reason — a
+    transport error, a timeout, or an unexpected response must never break
+    screening, so any exception is logged and swallowed here. Otherwise uses
+    only the FIRST reported failure and returns the same ``verdict='rejected'``/
+    ``failing_criterion``/``reason`` shape as ``_evaluate_profile_criteria``,
+    with the reason prefixed 'Jev: '.
+    """
+    try:
+        if not _jev.enabled():
+            return {}
+        profile = _load_enabled_profile(profile_name)
+        failures = _jev.evaluate_hard_requirements(profile, posting_text)
+    except Exception:
+        logger.warning("Jev hard-requirement cross-check failed; ignoring.", exc_info=True)
+        return {}
+    if not failures:
+        return {}
+    failing_criterion, jev_reason = failures[0]
+    combined_reason = f"Jev: {jev_reason} {agent_reason}".strip()
     return {
         "verdict": "rejected",
         "failing_criterion": failing_criterion,
@@ -342,6 +387,10 @@ def _gate_queueing_verdict(
     profile: str,
     remote_arrangement: str,
     language_requirement: str,
+    salary_stated: str,
+    employment_country_stated: str,
+    role_type_stated: str,
+    eor_stated: str,
     failing_criterion: str,
     reason: str,
 ) -> dict:
@@ -349,14 +398,19 @@ def _gate_queueing_verdict(
 
     Called only when the record is about to queue (no ``screening_blocker``).
     Validates ``posting_text``, refuses (raises ``ValueError``) a call with no
-    ``profile`` or no ``remote_arrangement``, normalises the arrangement and
-    language requirement, then evaluates them against the named ENABLED
-    profile. A contradicted verdict is downgraded to ``rejected`` — with
-    ``failing_criterion`` set and the criteria evidence prefixed onto
-    ``reason`` — rather than raised, so a genuinely bad call still gets a
-    stored, explained record instead of nothing. Returns the (possibly
-    updated) posting_text/verdict/failing_criterion/reason/remote_arrangement/
-    language_requirement as a dict.
+    ``profile`` or no ``remote_arrangement``, normalises all six evidence
+    fields, then evaluates them against the named ENABLED profile's six hard
+    requirements (remote model, working language, salary floor, employment
+    country, rejected role types, EOR). A contradicted verdict is downgraded
+    to ``rejected`` — with ``failing_criterion`` set and the criteria evidence
+    prefixed onto ``reason`` — rather than raised, so a genuinely bad call
+    still gets a stored, explained record instead of nothing. When the
+    deterministic checks all pass and Jev cross-checking is enabled, Jev's own
+    opinion of the same six requirements is checked too (see
+    ``_evaluate_jev_criteria``); its first reported failure downgrades the
+    verdict the same way, with the reason prefixed 'Jev: '. Returns the
+    (possibly updated) posting_text/verdict/failing_criterion/reason plus the
+    six (possibly normalised) evidence fields, as a dict.
     """
     posting_text = _validate_posting_text(posting_text)
     if not profile or not remote_arrangement:
@@ -371,13 +425,32 @@ def _gate_queueing_verdict(
         )
     remote_arrangement = _validate_remote_arrangement(remote_arrangement)
     language_requirement = _validate_language_requirement(language_requirement)
-    override = _evaluate_profile_criteria(
-        profile, remote_arrangement, language_requirement, reason
-    )
+    eor_stated = _validate_eor_stated(eor_stated)
+    if salary_stated:
+        salary_stated = _validate_stated_text(salary_stated)
+    if employment_country_stated:
+        employment_country_stated = _validate_stated_text(employment_country_stated)
+    if role_type_stated:
+        role_type_stated = _validate_stated_text(role_type_stated)
+    evidence = {
+        "remote_arrangement": remote_arrangement,
+        "language_requirement": language_requirement,
+        "salary_stated": salary_stated,
+        "employment_country_stated": employment_country_stated,
+        "role_type_stated": role_type_stated,
+        "eor_stated": eor_stated,
+    }
+    override = _evaluate_profile_criteria(profile, evidence, reason)
     if override:
         validated_verdict = override["verdict"]
         failing_criterion = override["failing_criterion"]
         reason = override["reason"]
+    else:
+        override = _evaluate_jev_criteria(profile, posting_text, reason)
+        if override:
+            validated_verdict = override["verdict"]
+            failing_criterion = override["failing_criterion"]
+            reason = override["reason"]
     return {
         "posting_text": posting_text,
         "verdict": validated_verdict,
@@ -385,6 +458,10 @@ def _gate_queueing_verdict(
         "reason": reason,
         "remote_arrangement": remote_arrangement,
         "language_requirement": language_requirement,
+        "salary_stated": salary_stated,
+        "employment_country_stated": employment_country_stated,
+        "role_type_stated": role_type_stated,
+        "eor_stated": eor_stated,
     }
 
 
@@ -422,6 +499,10 @@ def record_screening(
     profile: str = "",
     remote_arrangement: str = "",
     language_requirement: str = "",
+    salary_stated: str = "",
+    employment_country_stated: str = "",
+    role_type_stated: str = "",
+    eor_stated: str = "",
     **fields,
 ) -> dict:
     """Persist one screening verdict via ``screening.store.create``.
@@ -493,18 +574,26 @@ def record_screening(
     evidence is unverifiable: the operator cannot tell which profile's
     criteria this posting supposedly met, and an unchecked remote_arrangement
     is exactly how non-remote postings reached the queue before this gate
-    existed. ``language_requirement`` is NOT required — "" legitimately means
-    the posting stated no language requirement. Both are normalised by
-    ``screening.criteria``'s validators, then checked against the named
-    profile's ``remote_model``/``working_language`` (the profile must be one
-    of the agent config's ENABLED profiles, or the call is refused naming the
-    ones that are). When the posting's stated evidence conflicts with the
-    profile, the asserted verdict is NOT stored: the record is downgraded to
-    ``verdict='rejected'`` with ``failing_criterion`` set and the criteria
-    evidence prefixed onto any ``reason`` supplied, and — being rejected — it
-    never reaches the approval queue. A "rejected" verdict, or any call
-    carrying a ``screening_blocker``, is exempt from this gate exactly as
-    they are exempt from the ``posting_text`` requirement above.
+    existed. ``language_requirement``, ``salary_stated``,
+    ``employment_country_stated``, ``role_type_stated`` and ``eor_stated`` are
+    NOT required — each is the posting's OWN stated value for that piece of
+    evidence, and "" legitimately means the posting stated nothing on that
+    point. All are normalised by ``screening.criteria``'s validators, then
+    checked — together with ``remote_arrangement`` — against the named
+    profile's six hard requirements: remote model, working language, salary
+    floor, employment country, rejected role types, and EOR/PEO allowance
+    (the profile must be one of the agent config's ENABLED profiles, or the
+    call is refused naming the ones that are). When the posting's stated
+    evidence conflicts with ANY of the six, the asserted verdict is NOT
+    stored: the record is downgraded to ``verdict='rejected'`` with
+    ``failing_criterion`` set and the criteria evidence prefixed onto any
+    ``reason`` supplied, and — being rejected — it never reaches the approval
+    queue. When Jev cross-checking is enabled and the deterministic checks all
+    pass, Jev's own opinion of the same six requirements is checked too; its
+    first reported failure downgrades the verdict the same way, with the
+    reason prefixed 'Jev: '. A "rejected" verdict, or any call carrying a
+    ``screening_blocker``, is exempt from this gate exactly as they are
+    exempt from the ``posting_text`` requirement above.
 
     Every field above is named explicitly rather than left to ``**fields``,
     because the MCP inputSchema is derived from this signature: a field absent
@@ -532,6 +621,10 @@ def record_screening(
             profile,
             remote_arrangement,
             language_requirement,
+            salary_stated,
+            employment_country_stated,
+            role_type_stated,
+            eor_stated,
             failing_criterion,
             reason,
         )
@@ -542,6 +635,10 @@ def record_screening(
         reason = gated["reason"]
         remote_arrangement = gated["remote_arrangement"]
         language_requirement = gated["language_requirement"]
+        salary_stated = gated["salary_stated"]
+        employment_country_stated = gated["employment_country_stated"]
+        role_type_stated = gated["role_type_stated"]
+        eor_stated = gated["eor_stated"]
     if not screened_date:
         # The caller left it blank: stamp today's UTC date rather than leave
         # it empty, since that is what an operator scanning screening dates
@@ -561,6 +658,10 @@ def record_screening(
         "profile": profile,
         "remote_arrangement": remote_arrangement,
         "language_requirement": language_requirement,
+        "salary_stated": salary_stated,
+        "employment_country_stated": employment_country_stated,
+        "role_type_stated": role_type_stated,
+        "eor_stated": eor_stated,
     }
     return _finalize_screening(fields, named)
 

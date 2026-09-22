@@ -72,9 +72,14 @@ tools:
   `criteria`. Returns a compact verdict whose keys are exactly
   `record_screening`'s own argument names: `verdict` (or a
   `screening_blocker` when the posting could not be read),
-  `failing_criterion`, `reason`, `remote_arrangement`, and
-  `language_requirement` (the posting's OWN stated values, never the
-  profile's). **This tool never records anything** — it has
+  `failing_criterion`, `reason`, `remote_arrangement`,
+  `language_requirement`, `salary_stated`, `employment_country_stated`,
+  `role_type_stated`, and `eor_stated` (the posting's OWN stated values,
+  never the profile's — `eor_stated` is `""`/`"yes"`/`"no"`/`"unstated"`,
+  reflecting whether the posting states hiring is through an EOR /
+  employer-of-record arrangement, where `"unstated"` means you looked and
+  the posting did not say).
+  **This tool never records anything** — it has
   no access to the screening ledger. You must still call `record_screening`
   yourself for every posting it screens, verdict included, exactly as below;
   the approve/deny gate is unaffected and enforced only there.
@@ -133,10 +138,22 @@ tools:
   is what the posting itself states about remote work — `remote`, `hybrid`,
   `on_site`, or `unstated` when it does not say. Also pass
   `language_requirement`, the language the posting EXPLICITLY requires (e.g.
-  "German"), or `""` when it states none. Evidence that contradicts the
-  named profile's remote model or working language is stored as an
-  automatic rejection (the verdict is downgraded to `rejected`) — not an
-  error to retry, and never fabricate `remote`/`""` to get past it.
+  "German"), or `""` when it states none. Also pass `salary_stated` (the
+  posting's own stated salary, or `""` when it states none),
+  `employment_country_stated` (the posting's own stated employment country,
+  or `""` when it states none), `role_type_stated` (the posting's own
+  stated role type, e.g. "contract" or "full-time", or `""` when it states
+  none), and `eor_stated` (whether the posting states hiring is through an
+  EOR / employer-of-record arrangement: `"yes"` when the posting states
+  employment IS via an EOR, `"no"` when it states direct employment,
+  `"unstated"` when you looked and it does not say, or `""` when not
+  applicable). All four are the posting's OWN stated
+  values, never the profile's, and none of them is mandatory — `""` is a
+  legitimate, common answer, not an omission. Evidence that contradicts any
+  of the profile's six hard requirements (remote model, working language,
+  salary floor, employment country, rejected role types, or EOR) is stored
+  as an automatic rejection (the verdict is downgraded to `rejected`) — not
+  an error to retry, and never fabricate `remote`/`""` to get past it.
   One posting gets ONE record, forever. If a screening already exists for the
   `url` you pass, nothing is written and the existing record comes back with
   `"created": false` — the verdict you reached is discarded, because that

@@ -77,6 +77,21 @@ export interface ScreeningVerdict {
   /** A working language the posting explicitly requires, free text, or ''
    * when it states none. */
   languageRequirement: string;
+  /** The posting's OWN stated salary, free text (e.g. "$120k-140k"), or ''
+   * when it states none. */
+  salaryStated: string;
+  /** The posting's OWN stated employment country, free text, or '' when it
+   * states none. */
+  employmentCountryStated: string;
+  /** The posting's OWN stated role type (e.g. "contract", "full-time"),
+   * free text, or '' when it states none. */
+  roleTypeStated: string;
+  /** Whether the posting states hiring is through an EOR / employer-of-record
+   * arrangement — one of `EOR_STATED_VALUES`. 'yes' means the posting states
+   * employment IS via an EOR, 'no' means it states direct employment,
+   * 'unstated' means the agent looked and the posting did not say, and ''
+   * means not applicable. */
+  eorStated: string;
 }
 
 /** The result shape this handler returns, mirroring every other built-in's
@@ -103,6 +118,9 @@ const BLOCKER_VALUES = ['', 'login_required', 'unreadable', 'not_found', 'expire
 /** Mirrors `screening/criteria.py`'s `REMOTE_ARRANGEMENT_VALUES`. */
 const REMOTE_ARRANGEMENT_VALUES = ['', 'remote', 'hybrid', 'on_site', 'unstated'] as const;
 
+/** Mirrors `screening/criteria.py`'s `EOR_STATED_VALUES`. */
+const EOR_STATED_VALUES = ['', 'yes', 'no', 'unstated'] as const;
+
 /** The provider-facing definition advertised to the main loop's model. */
 export const screenPostingTool: ToolDefinition = {
   name: 'screen_posting',
@@ -112,8 +130,12 @@ export const screenPostingTool: ToolDefinition = {
     "through every hard filter yourself, in this conversation. Returns a compact verdict, " +
     "using record_screening's own argument names so it can be passed straight through: " +
     "'verdict' (passed/rejected/deferred, or '' with a screening_blocker), 'failing_criterion', " +
-    "'reason', 'remote_arrangement' and 'language_requirement' (the posting's OWN stated " +
-    "values, not the profile's). This tool NEVER records anything — you must still call " +
+    "'reason', 'remote_arrangement', 'language_requirement', 'salary_stated', " +
+    "'employment_country_stated', 'role_type_stated' and 'eor_stated' (the posting's OWN " +
+    "stated values, never the profile's — eor_stated is ''/'yes'/'no'/'unstated', reflecting " +
+    "whether the posting states hiring is through an EOR / employer-of-record arrangement: " +
+    "'yes' means the posting states employment IS via an EOR, 'no' means it states direct " +
+    "employment, and 'unstated' means you looked and the posting did not say). This tool NEVER records anything — you must still call " +
     'record_screening yourself with this verdict and the posting_text you already hold; ' +
     'the approve/deny gate is unaffected by this tool and enforced only there.',
   inputSchema: {
@@ -151,9 +173,17 @@ const SCREENING_SYSTEM_PROMPT =
   'empty), "failingCriterion" (which criterion failed, or ""), "reason" (one line explaining ' +
   'the verdict), "remoteArrangement" (the POSTING\'S OWN stated remote arrangement: "remote", ' +
   '"hybrid", "on_site", "unstated" if it does not say, or "" if not applicable), and ' +
-  '"languageRequirement" (a language the posting explicitly requires, or ""). Never guess a ' +
-  'verdict for a posting you could not read — use screeningBlocker instead. Judge only the ' +
-  'stated criteria; never invent facts the posting does not state.';
+  '"languageRequirement" (a language the posting explicitly requires, or ""), "salaryStated" ' +
+  '(the POSTING\'S OWN stated salary, or "" if it states none), "employmentCountryStated" ' +
+  '(the POSTING\'S OWN stated employment country, or "" if it states none), "roleTypeStated" ' +
+  '(the POSTING\'S OWN stated role type, e.g. "contract" or "full-time", or "" if it states ' +
+  'none), and "eorStated" (whether the posting states hiring is through an EOR / ' +
+  'employer-of-record arrangement: "yes" if the posting states employment IS via an EOR, ' +
+  '"no" if it states direct employment, "unstated" if you looked and it does not say, or ' +
+  '"" if not applicable). Never ' +
+  'guess a verdict for a posting you could not read — use screeningBlocker instead. Never ' +
+  'report a stated value the posting does not itself state, and never copy it from the ' +
+  'profile — judge and report only what the posting says.';
 
 /** Build the isolated conversation's one user turn from the tool arguments. */
 function buildScreeningPrompt(args: ScreenPostingArgs): string {
@@ -241,6 +271,19 @@ function knownOrAbsent(value: unknown, known: readonly string[]): string | undef
 }
 
 /**
+ * Resolve an optional enumerated field to '' whenever it is absent OR an
+ * unrecognised value — unlike {@link knownOrAbsent}, an unrecognised value
+ * here does NOT invalidate the whole verdict. Used for `eorStated`:
+ * `screening/criteria.py`'s `validate_eor_stated` RAISES on an unrecognised
+ * value, refusing the entire `record_screening` call — a screening model
+ * answering e.g. 'probably' should silently lose that one field, not the
+ * whole screening.
+ */
+function knownOrEmpty(value: unknown, known: readonly string[]): string {
+  return isKnownValue(value, known) ? value : '';
+}
+
+/**
  * Strip a ```json ... ``` (or bare ``` ... ```) code fence wrapping `text`,
  * then extract the first `{...}` JSON object substring — tolerating a
  * screening reply that adds a fence or stray prose around the object it was
@@ -293,6 +336,10 @@ function parseVerdict(text: string): ScreeningVerdict | undefined {
     reason: typeof raw.reason === 'string' ? raw.reason : '',
     remoteArrangement,
     languageRequirement: typeof raw.languageRequirement === 'string' ? raw.languageRequirement : '',
+    salaryStated: typeof raw.salaryStated === 'string' ? raw.salaryStated : '',
+    employmentCountryStated: typeof raw.employmentCountryStated === 'string' ? raw.employmentCountryStated : '',
+    roleTypeStated: typeof raw.roleTypeStated === 'string' ? raw.roleTypeStated : '',
+    eorStated: knownOrEmpty(raw.eorStated, EOR_STATED_VALUES),
   };
 }
 
@@ -359,6 +406,10 @@ function toRecordScreeningFields(verdict: ScreeningVerdict): Record<string, stri
     reason: verdict.reason,
     remote_arrangement: verdict.remoteArrangement,
     language_requirement: verdict.languageRequirement,
+    salary_stated: verdict.salaryStated,
+    employment_country_stated: verdict.employmentCountryStated,
+    role_type_stated: verdict.roleTypeStated,
+    eor_stated: verdict.eorStated,
   };
 }
 

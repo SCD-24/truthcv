@@ -439,8 +439,13 @@ screening in an isolated subagent conversation, backed by its own (often
 cheaper) model, and returns a compact verdict, using `record_screening`'s own
 argument names so it can be passed straight through — `verdict` (or a
 `screening_blocker` when the posting could not be read at all),
-`failing_criterion`, `reason`, `remote_arrangement`, and `language_requirement`,
-the last two being the posting's OWN stated values, never the profile's.
+`failing_criterion`, `reason`, `remote_arrangement`, `language_requirement`,
+`salary_stated`, `employment_country_stated`, `role_type_stated`, and
+`eor_stated`, the last six being the posting's OWN stated values, never the
+profile's (`eor_stated` is `""`/`"yes"`/`"no"`/`"unstated"`, reflecting
+whether the posting states hiring is through an EOR / employer-of-record
+arrangement, where `"unstated"` means you looked and the posting did not
+say).
 Continue into the Applying steps below only for a posting `screen_posting`
 reports as `passed`.
 
@@ -741,11 +746,26 @@ posting merely WRITTEN in German for a role that does not itself demand
 German has no language requirement: pass `""`. This one is never mandatory;
 "" is a legitimate, common answer, not an omission.
 
-A posting whose stated evidence CONTRADICTS the named profile's remote model
-or working language is stored as a REJECTION automatically — the verdict you
-asserted is discarded, `failing_criterion` is set, and the record never
-reaches the approval queue. This is not an error to retry and not a bug to
-work around: it is the gate doing its job. Do not vary the profile, the
+`salary_stated`, `employment_country_stated`, `role_type_stated`, and
+`eor_stated` carry the same kind of evidence, and are likewise the
+posting's OWN stated values, never the profile's. `salary_stated` is the
+posting's own stated salary, `employment_country_stated` is the posting's
+own stated employment country, and `role_type_stated` is the posting's own
+stated role type (e.g. "contract", "full-time") — all free text, `""` when
+the posting states none. `eor_stated` is whether the posting states hiring
+is through an EOR / employer-of-record arrangement: `"yes"` when the
+posting states employment IS via an EOR, `"no"` when it states direct
+employment, `"unstated"` when you looked and the posting does not say, or
+`""` when not applicable. None of these
+four is mandatory; `""` is a legitimate, common answer, not an omission.
+
+A posting whose stated evidence CONTRADICTS any of the profile's six hard
+requirements — remote model, working language, salary floor, employment
+country, rejected role types, or EOR — is stored as a REJECTION
+automatically — the verdict you asserted is discarded, `failing_criterion`
+is set, and the record never reaches the approval queue. This is not an
+error to retry and not a bug to work around: it is the gate doing its job.
+Do not vary the profile, the
 arrangement, or the language and call it again to see if a different
 combination gets through.
 

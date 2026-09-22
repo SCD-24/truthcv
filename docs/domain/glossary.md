@@ -151,3 +151,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:start comp:job-feeds -->
 - **Job Feeds** (`job-feeds`) - backend component.
 <!-- generated:end comp:job-feeds -->
+
+<!-- generated:start comp:jev-api -->
+- **Jev (TypeSafe System One) API** (`jev-api`) - custom component. External third-party Jev (TypeSafe) service at https://api.typesafe.ai/v1/systemone. Screening posts job-posting text to it for hard-requirement cross-checks (screening/jev.py), invoked from the agent tool surface (_evaluate_jev_criteria) and the API's check_key route.
+<!-- generated:end comp:jev-api -->

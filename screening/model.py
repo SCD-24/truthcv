@@ -102,6 +102,20 @@ class Screening:
     # "German"). "" means the posting states none — never inferred from
     # e.g. the posting's own language.
     language_requirement: str = ""
+    # Highest salary figure the posting states, free text (e.g. "80k",
+    # "€70,000-90,000"). "" means the posting states no salary — never
+    # inferred.
+    salary_stated: str = ""
+    # The employment country/location the posting states, free text. ""
+    # means the posting states none.
+    employment_country_stated: str = ""
+    # The role type (e.g. "contract", "agency") the posting states, free
+    # text. "" means the posting states none.
+    role_type_stated: str = ""
+    # The posting's own stated EOR/PEO requirement. See
+    # screening.criteria.EOR_STATED_VALUES: "" means not supplied,
+    # "unstated" means the agent looked and the posting did not say.
+    eor_stated: str = ""
     # Approval state. Deliberately absent from EDITABLE: that tuple is what
     # store.create()/update() copy from caller-supplied fields, and the agent's
     # record_screening(**fields) reaches create() directly. Listing these there
@@ -159,6 +173,10 @@ class Screening:
         "profile",
         "remote_arrangement",
         "language_requirement",
+        "salary_stated",
+        "employment_country_stated",
+        "role_type_stated",
+        "eor_stated",
         "screening_blocker",
         # Which run produced this record. Editable so record_screening's
         # create() call can persist it; only ever set, never cleared.

@@ -89,6 +89,7 @@ Use these exact names and ids when discussing the architecture.
 | Cover Letter Engine | `cover-letter-engine` | backend |
 | Gmail / Google OAuth API | `gmail-api` | custom |
 | Guardrail Validator | `guardrail-validator` | backend |
+| Jev (TypeSafe System One) API | `jev-api` | custom |
 | Job Feeds | `job-feeds` | backend |
 | Keyword Vocabulary | `keyword-vocabulary` | backend |
 | LLM Provider Layer | `llm-provider-layer` | backend |
@@ -110,5 +111,5 @@ Use these exact names and ids when discussing the architecture.
 <!-- generated:start cap:system-boundary -->
 ## System Boundary
 
-The declared system consists of 26 component(s) and 91 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
+The declared system consists of 27 component(s) and 92 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
 <!-- generated:end cap:system-boundary -->

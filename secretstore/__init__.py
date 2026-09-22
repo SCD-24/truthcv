@@ -153,7 +153,7 @@ def save_store(store: dict) -> None:
     write_secrets(store)
 
 
-_ENV_KEY_FALLBACK = {"claude": "ANTHROPIC_API_KEY", "codex": "OPENAI_API_KEY"}
+_ENV_KEY_FALLBACK = {"claude": "ANTHROPIC_API_KEY", "codex": "OPENAI_API_KEY", "jev": "JEV_API_KEY"}
 _V1_PROVIDER_TO_CARD = {"anthropic": "claude", "openai": "codex", "ollama": "ollama"}
 
 
