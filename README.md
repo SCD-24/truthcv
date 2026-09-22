@@ -124,10 +124,11 @@ The button is on the Applications page; the browser downloads the zip directly.
 
 ## Jev cross-checking (optional)
 
-TruthCV can optionally cross-check its own screening decisions and Gmail-derived
-status changes against Jev (TypeSafe System One), a third-party verification
-API. It's opt-in and used only as a secondary check on top of TruthCV's own
-judgment — nothing in the app requires it.
+TruthCV can optionally cross-check its own screening decisions against Jev
+(TypeSafe System One), a third-party verification API, and — for
+[Gmail response tracking](#gmail-response-tracking-optional) — use it as the
+classifier itself rather than a secondary check. It's opt-in; nothing in the
+app requires it.
 
 Connect it from **Settings → Jev**, which saves the key into the same
 encrypted secret store as your other credentials. There's no `.env` variable
@@ -142,9 +143,11 @@ Two independent toggles control where Jev is consulted:
 - **useForScreening** — cross-checks a posting's hard requirements (role
   type, salary floor, employment country, EOR, remote model) against Jev
   before rejecting or passing it during screening.
-- **useForEmailTracking** — required before an employer-reply classification
-  from [Gmail response tracking](#gmail-response-tracking-optional) is
-  allowed to auto-apply a status change; see below.
+- **useForEmailTracking** — required before Gmail can be connected at all;
+  with it off, `jev.confirm` fails open to `False` for every employer-reply
+  classification, so each synced message is left an unclassified pending
+  suggestion instead of being classified or auto-applied; see
+  [Gmail response tracking](#gmail-response-tracking-optional) below.
 
 A Jev answer is only treated as a confirmation at or above a confidence
 (Noul) score of **0.8**; anything lower is treated as inconclusive. Jev
@@ -157,25 +160,28 @@ transport error.
 ## Gmail response tracking (optional)
 
 Connect Gmail from **Settings → Gmail** to have TruthCV watch your inbox for
-employer replies to open applications (status `Applied` or `Waiting`) and
-suggest — or, when confirmed, apply — a status update.
+employer replies to every application that isn't already **Interviewing**,
+**Offer**, or **Rejected**, and suggest — or, when classified, apply — a
+status update. A sync runs at most once every 5 minutes.
 
-Each sync issues one scoped query per open application, built from that
+Each sync issues one scoped query per application, built from that
 application's website/application-URL domains plus the first word of the
-company name, so it only fetches messages that look related to an
-application you're tracking (a broad company name can still match some
-unrelated senders). Any
-match is classified by the LLM as a rejection, interview invite, offer,
-confirmation, or other. Only a **rejection** or **interview** classification
-can auto-apply anything, and even then only after it's cross-checked with
-[Jev](#jev-cross-checking-optional): the classification is put to Jev as a
-yes/no question, and the application's status is only moved to **Rejected**
-or **Interviewing** if Jev confirms it. When it does, an evidence note
-(message id, sender, subject, date) is appended to the application's notes.
-Every other case — Jev declines to confirm, or the classification is offer,
-confirmation, or other — is left as a pending suggestion for you to review
-and apply by hand; nothing is auto-applied without a confirmed
-rejection/interview.
+company name, OR'd with a quoted full-text search on the company name
+itself, so it only fetches messages that look related to an application
+you're tracking (a broad company name can still match some unrelated
+senders) even when an application has no usable domain to search on.
+
+Classification is done entirely by [Jev](#jev-cross-checking-optional) —
+there's no LLM call involved. Each match is put to Jev as two yes/no
+questions in turn, asking whether the email is a rejection and then whether
+it's an interview invite; the first one Jev confirms wins the
+classification. Only a **rejection** or **interview** classification
+auto-applies anything, moving the application's status to **Rejected** or
+**Interviewing** respectively and appending an evidence note (message id,
+sender, subject, date) to its notes. Everything else — Jev confirms neither
+question — is classified unrelated and left as a pending suggestion for you
+to review and apply by hand; nothing is auto-applied without a Jev
+confirmation.
 
 Connecting Gmail itself requires a saved Jev key with **useForEmailTracking**
 enabled — the connect button is blocked until that's set, since a Gmail

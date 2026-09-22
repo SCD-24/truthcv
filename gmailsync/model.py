@@ -35,9 +35,9 @@ class GmailSuggestion:
     match_confidence: str = ""
     match_evidence: list[str] = field(default_factory=list)
     state: str = "pending"
-    # The Jev auto-apply verdict for a rejection/interview classification:
-    # "" (not judged — e.g. offer/confirmation/other), "confirmed", or
-    # "declined".
+    # The Jev classification verdict: "confirmed" for an auto-applied
+    # rejection/interview classification, "" otherwise (Jev confirmed
+    # neither statement, so the suggestion stays pending).
     decision: str = ""
 
     @classmethod

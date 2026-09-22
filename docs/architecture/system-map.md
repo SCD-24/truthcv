@@ -76,7 +76,7 @@ graph TD
     gmail-response-sync -->|in-process| application-tracker
     gmail-response-sync -->|in-process| connections
     gmail-response-sync -->|HTTPS| gmail-api
-    gmail-response-sync -->|in-process| llm-provider-layer
+    gmail-response-sync -->|HTTPS| jev-api
     gmail-response-sync -->|file I/O| truth-data-volume
     guardrail-validator -->|in-process| keyword-vocabulary
     guardrail-validator -->|in-process| storage-leaf
@@ -209,7 +209,7 @@ graph TD
 - [gmail-response-sync → application-tracker](interactions/gmail-response-sync--application-tracker.md) via `in-process`
 - [gmail-response-sync → connections](interactions/gmail-response-sync--connections.md) via `in-process`
 - [gmail-response-sync → gmail-api](interactions/gmail-response-sync--gmail-api.md) via `HTTPS`
-- [gmail-response-sync → llm-provider-layer](interactions/gmail-response-sync--llm-provider-layer.md) via `in-process`
+- [gmail-response-sync → jev-api](interactions/gmail-response-sync--jev-api.md) via `HTTPS`
 - [gmail-response-sync → truth-data-volume](interactions/gmail-response-sync--truth-data-volume.md) via `file I/O`
 - [guardrail-validator → keyword-vocabulary](interactions/guardrail-validator--keyword-vocabulary.md) via `in-process`
 - [guardrail-validator → storage-leaf](interactions/guardrail-validator--storage-leaf.md) via `in-process`
