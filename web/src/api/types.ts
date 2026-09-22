@@ -198,6 +198,15 @@ export interface GmailStatus {
   trackingEnabled: boolean;
 }
 
+/** Result of POST /api/gmail/responses/sync: the sync backend's dict is
+ * returned unchanged, so keys stay snake_case here. */
+export interface GmailSyncSummary {
+  skipped: boolean;
+  last_synced_at: number | null;
+  processed: number;
+  suggestions: number;
+}
+
 /** One selectable model, discovered live from the provider's API/SDK. */
 export interface ModelInfo {
   id: string;

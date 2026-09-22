@@ -12,6 +12,7 @@ import type {
   JevSettingsUpdate,
   GmailStartResult,
   GmailStatus,
+  GmailSyncSummary,
   TestResult,
   ProfileStatus,
   OnboardingState,
@@ -303,6 +304,16 @@ export function testJevKey(): Promise<TestResult> {
  * useForEmailTracking is on. */
 export function startGmailLogin(): Promise<GmailStartResult> {
   return request("/api/auth/gmail/start", { method: "POST" });
+}
+
+/** POST /api/gmail/responses/sync with {force: true}: 403s unless a Jev key
+ * is saved and useForEmailTracking is on. */
+export function syncGmailResponses(): Promise<GmailSyncSummary> {
+  return request("/api/gmail/responses/sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ force: true }),
+  });
 }
 
 /** Gmail connection status for the Settings page. Never 403s. */
