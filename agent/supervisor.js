@@ -83,6 +83,42 @@ let currentChild = null;
 /** SIGKILL escalation timer for a cancel in progress, so it can be cleared. */
 let killTimer = null;
 
+/**
+ * Guards against a run's outcome being posted to the app twice: once by
+ * settle() when the child actually exits, and once by the SIGTERM/SIGINT
+ * handler recording an honest "shutting down" finish before it does. Reset
+ * per run at the top of doRun(). The API's finish_if_running is a no-op on a
+ * duplicate call regardless — this just avoids the redundant network call and
+ * a possibly-misleading second log line.
+ */
+let runOutcomePosted = false;
+
+/**
+ * The `started` promise (the run-record start POST) for the run currently in
+ * progress, hoisted from doRun()'s local `started` so the SIGTERM/SIGINT
+ * handler — which cannot see doRun's closure — can await it too before
+ * posting its own finish. Assigned at the top of doRun(), alongside
+ * runOutcomePosted.
+ */
+let currentRunStarted = null;
+
+/**
+ * The in-flight finish POST chain from settle(), non-null exactly while a
+ * `/finish` call for the run just ended is still on the wire. Lets the idle
+ * shutdown path (no active run, but a finish still posting) wait for it
+ * instead of exiting out from under it. Nulled by settle() once the chain
+ * completes.
+ */
+let pendingFinish = null;
+
+/**
+ * The shutdown handler's own finish POST promise, non-null exactly while
+ * handleShutdownSignal() is recording a shutdown finish. Lets settle()'s
+ * latched early-return wait for it before calling onSettled (which in
+ * RUN_ONCE mode exits the process) instead of racing it.
+ */
+let shutdownFinish = null;
+
 // How long a cancelled run gets to exit on SIGTERM before SIGKILL. daily-apply.sh
 // and the Node harness process it spawns have MCP servers and a headful browser
 // session to tear down, so this is generous; the escalation exists for a wedged
@@ -271,6 +307,7 @@ function doRun(trigger = "manual", onSettled) {
   runState.lastStartedAt = new Date().toISOString();
   runState.currentRunId = runId;
   runState.lastRunId = runId;
+  runOutcomePosted = false;
 
   // Create the run record before the child does anything, so a run that dies
   // in its preconditions or on its very first model call is still accounted
@@ -282,6 +319,7 @@ function doRun(trigger = "manual", onSettled) {
   // record, so a child that dies instantly cannot have its finish overtake its
   // start and leave a record stuck at "running".
   const started = postToApp(`/api/agent/runs/${runId}/start`, { trigger });
+  currentRunStarted = started;
 
   // detached: the run is a tree — daily-apply.sh, the Node harness process it
   // spawns, and the stdio MCP servers under it. Its own process group is what
@@ -317,18 +355,37 @@ function doRun(trigger = "manual", onSettled) {
     // is cleared.
     runState.currentRunId = null;
 
+    if (runOutcomePosted) {
+      // The shutdown handler already recorded an honest outcome for this run
+      // before the child actually exited — do not post a second, possibly
+      // conflicting finish call racing it. If that finish is still in
+      // flight, wait for it (bounded) before handing off to onSettled, which
+      // in RUN_ONCE mode exits the process and would otherwise cut it off.
+      if (shutdownFinish !== null) {
+        const bounded = new Promise((resolve) => setTimeout(resolve, SHUTDOWN_GRACE_MS).unref());
+        Promise.race([shutdownFinish, bounded]).finally(() => onSettled?.(rc));
+      } else {
+        onSettled?.(rc);
+      }
+      return;
+    }
+    runOutcomePosted = true;
+
     // Close the record out. This is the ONLY path that sees every ending: a
     // run SIGKILLed after a cancel, or one whose shell never started, runs no
     // in-container code of its own. finish_if_running leaves a record the
     // model already closed with its own finish_run alone — that account names
     // where the run actually stopped and is the better one.
     const outcome = outcomeFor(rc, cancelled, takeReasonFile(runId));
-    started
+    pendingFinish = started
       .then(() => postToApp(`/api/agent/runs/${runId}/finish`, outcome))
       .then((ok) => {
         if (!ok) log(`run ${runId}: could not record the run outcome with the app`);
       })
-      .finally(() => onSettled?.(rc));
+      .finally(() => {
+        pendingFinish = null;
+        onSettled?.(rc);
+      });
   }
 
   child.on("close", (code, signal) => {
@@ -397,6 +454,93 @@ function cancelRun() {
 
   return true;
 }
+
+// ---------------------------------------------------------------------------
+// Graceful shutdown
+// ---------------------------------------------------------------------------
+// Docker's default stop grace period is 10s: SIGTERM, then SIGKILL if the
+// process has not exited by then. A container restart (redeploy, host
+// reboot, `docker compose down`) sends SIGTERM to this process regardless of
+// whether a run is active. Before this, nothing handled it: an active run's
+// record was left at "running" forever — indistinguishable from a wedged
+// run — and the child tree could survive past the parent's own death. This
+// path is bounded well under the 10s budget so it always finishes before
+// docker's own escalation to SIGKILL would.
+
+/** Upper bound on the whole shutdown path, comfortably inside docker's 10s default stop grace. */
+const SHUTDOWN_GRACE_MS = 4000;
+
+/** Exit code per signal, matching the shell's 128+n convention (same idea as {@link SIGNAL_EXIT_CODES}). */
+const SHUTDOWN_EXIT_CODES = { SIGTERM: 143, SIGINT: 130 };
+
+/**
+ * Handle SIGTERM/SIGINT. With no run active, exits promptly. With a run
+ * active, signals its process group like cancelRun() does, records an honest
+ * "failed" finish so the run's record is not left stuck at "running", and
+ * exits — the whole path bounded by {@link SHUTDOWN_GRACE_MS}.
+ *
+ * @param {"SIGTERM"|"SIGINT"} signal
+ */
+function handleShutdownSignal(signal) {
+  const exitCode = SHUTDOWN_EXIT_CODES[signal];
+  const runId = runState.currentRunId;
+
+  if (runId === null) {
+    if (pendingFinish !== null) {
+      log(`${signal} received — no active run, but a prior run's finish POST is still in flight; waiting up to ${SHUTDOWN_GRACE_MS}ms for it`);
+      const bounded = new Promise((resolve) => setTimeout(resolve, SHUTDOWN_GRACE_MS).unref());
+      Promise.race([pendingFinish, bounded]).finally(() => {
+        log(`${signal} shutdown complete — exiting`);
+        process.exit(exitCode);
+      });
+      return;
+    }
+    log(`${signal} received — no active run, exiting`);
+    process.exit(exitCode);
+    return;
+  }
+
+  log(`${signal} received — run ${runId} is active; signalling it and recording a shutdown finish`);
+
+  if (currentChild && currentChild.pid) {
+    try {
+      process.kill(-currentChild.pid, "SIGTERM");
+    } catch (err) {
+      log(`shutdown: SIGTERM not delivered to run ${runId} (${err.code || err.message})`);
+    }
+  }
+
+  const finished = (async () => {
+    if (runOutcomePosted) return; // settle() already won the race
+    runOutcomePosted = true;
+    // Wait for the run record to exist before closing it out — finish_if_running
+    // is a no-op against a record that has not been created yet, which would
+    // otherwise leave it stuck at "running" for a run that started just before
+    // this signal arrived. currentRunStarted is doRun's `started` promise,
+    // hoisted to module scope for exactly this handler.
+    await currentRunStarted;
+    // Read as late as reasonably possible (after the child-group SIGTERM
+    // above and the start-record await here) to give the dying child a
+    // chance to write it, without adding an extra sleep of our own.
+    const reason = takeReasonFile(runId);
+    const ok = await postToApp(`/api/agent/runs/${runId}/finish`, {
+      status: "failed",
+      stoppedReason: reason || "supervisor shut down mid-run (container stopping)",
+    });
+    if (!ok) log(`shutdown: could not record run ${runId}'s outcome with the app`);
+  })();
+  shutdownFinish = finished;
+
+  const bounded = new Promise((resolve) => setTimeout(resolve, SHUTDOWN_GRACE_MS).unref());
+
+  Promise.race([finished, bounded]).finally(() => {
+    log(`${signal} shutdown complete (run ${runId}) — exiting`);
+    process.exit(exitCode);
+  });
+}
+
+process.on("SIGTERM", () => handleShutdownSignal("SIGTERM"));
+process.on("SIGINT", () => handleShutdownSignal("SIGINT"));
 
 // ---------------------------------------------------------------------------
 // Schedule fetching

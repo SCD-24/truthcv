@@ -227,7 +227,7 @@ function lacksCompletion(body: OpenAiErrorBody): boolean {
  * transient upstream hiccup fatal ends a whole unattended overnight run on one
  * blip, while calling a permanent condition transient costs a bounded handful
  * of attempts
- * (`maxConsecutiveRetries`, 8) before the run ends anyway. So the default is
+ * (`maxConsecutiveRetries`, 12) before the run ends anyway. So the default is
  * to retry.
  */
 function completionErrorRetryable(code: unknown): boolean {

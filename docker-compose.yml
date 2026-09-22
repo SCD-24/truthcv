@@ -212,6 +212,14 @@ services:
       # itself never passes through that hand-out, so its cap is prompt-level
       # only — see agent/RUNBOOK.md.
       - AGENT_MAX_TURNS=${AGENT_MAX_TURNS:-400}
+      # Cap on consecutive retryable-error retries within one turn, before the
+      # loop gives up on a persistently failing provider call. Defaults to 12
+      # (agent/harness/loop.ts / agent/README.md).
+      - AGENT_MAX_RETRIES=${AGENT_MAX_RETRIES:-12}
+      # Ceiling on a single retry's backoff delay, in ms, so a provider
+      # effectively saying "retry in hours" fails fast instead of parking an
+      # unattended run. Defaults to 300000 (5 minutes).
+      - AGENT_MAX_RETRY_DELAY_MS=${AGENT_MAX_RETRY_DELAY_MS:-300000}
       # The model's INPUT context capacity in tokens, if you know it. Unset (0)
       # means unknown: the harness then does no proactive compaction and relies
       # on the provider's own "context too long" error to compact and retry.

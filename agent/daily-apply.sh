@@ -729,6 +729,8 @@ node "$HARNESS_CLI" \
   --base-url "$AGENT_LLM_BASE_URL" \
   --mcp-config "$MCP_CONFIG" \
   --max-turns "${AGENT_MAX_TURNS:-400}" \
+  --max-retries "${AGENT_MAX_RETRIES:-12}" \
+  --max-retry-delay-ms "${AGENT_MAX_RETRY_DELAY_MS:-300000}" \
   --context-window "${AGENT_ROUTE_CONTEXT_WINDOW:-${AGENT_CONTEXT_WINDOW:-0}}" \
   --max-tool-result-chars "${AGENT_MAX_TOOL_RESULT_CHARS:-24000}" \
   --prompt-cache "${AGENT_PROMPT_CACHE:-true}" \
