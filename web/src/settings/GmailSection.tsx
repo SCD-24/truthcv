@@ -6,10 +6,16 @@ import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import FormHelperText from "@mui/material/FormHelperText";
 import Typography from "@mui/material/Typography";
-import { getGmailStatus, getJevSettings, saveJevSettings, startGmailLogin } from "../api/client";
+import {
+  getGmailStatus,
+  getJevSettings,
+  saveJevSettings,
+  startGmailLogin,
+  syncGmailResponses,
+} from "../api/client";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { SettingsSection } from "./SettingsModal";
-import type { GmailStatus, JevSettings } from "../api/types";
+import type { GmailStatus, GmailSyncSummary, JevSettings } from "../api/types";
 
 /** Gmail response tracking: reads Gmail for replies to submitted
  * applications and (when Jev confirms a transition) auto-applies it. Locked
@@ -21,6 +27,8 @@ export function GmailSection() {
   const [gmail, setGmail] = useState<GmailStatus | null>(null);
   const [toggling, setToggling] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<GmailSyncSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -85,6 +93,20 @@ export function GmailSection() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't start the Gmail connection.");
       setConnecting(false);
+    }
+  }
+
+  async function handleSync() {
+    setSyncing(true);
+    setError(null);
+    setSyncResult(null);
+    try {
+      const summary = await syncGmailResponses();
+      setSyncResult(summary);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't sync Gmail responses.");
+    } finally {
+      setSyncing(false);
     }
   }
 
@@ -165,6 +187,24 @@ export function GmailSection() {
               ? "Reconnect Gmail"
               : "Connect Gmail"}
       </Button>
+
+      {gmail.connected && (
+        <Button
+          variant="outlined"
+          onClick={handleSync}
+          disabled={!jev.useForEmailTracking || syncing}
+          sx={{ alignSelf: "flex-start" }}
+        >
+          {syncing && <ButtonSpinner />}
+          {syncing ? "Syncing…" : "Sync now"}
+        </Button>
+      )}
+
+      {gmail.connected && syncResult && (
+        <Typography color="text.secondary">
+          Scanned {syncResult.processed} new messages — {syncResult.suggestions} suggestions pending
+        </Typography>
+      )}
     </SettingsSection>
   );
 }

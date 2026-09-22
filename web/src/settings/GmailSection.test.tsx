@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { getGmailStatus, getJevSettings, saveJevSettings, startGmailLogin } from "../api/client";
+import {
+  getGmailStatus,
+  getJevSettings,
+  saveJevSettings,
+  startGmailLogin,
+  syncGmailResponses,
+} from "../api/client";
 import type { GmailStatus, JevSettings } from "../api/types";
 import { GmailSection } from "./GmailSection";
 
@@ -14,6 +20,7 @@ vi.mock("../api/client", () => ({
   getGmailStatus: vi.fn(),
   saveJevSettings: vi.fn(),
   startGmailLogin: vi.fn(),
+  syncGmailResponses: vi.fn(),
 }));
 
 function makeJev(overrides: Partial<JevSettings> = {}): JevSettings {
@@ -141,5 +148,57 @@ describe("GmailSection", () => {
     render(<GmailSection />);
 
     expect(await screen.findByText(/person@example\.com/)).toBeTruthy();
+  });
+
+  it("connected: Sync now button syncs and shows the summary", async () => {
+    vi.mocked(getJevSettings).mockResolvedValueOnce(
+      makeJev({ keySet: true, useForEmailTracking: true }),
+    );
+    vi.mocked(getGmailStatus).mockResolvedValueOnce(
+      makeGmail({ connected: true, email: "person@example.com" }),
+    );
+    vi.mocked(syncGmailResponses).mockResolvedValueOnce({
+      skipped: false,
+      last_synced_at: 1700000000,
+      processed: 3,
+      suggestions: 2,
+    });
+    render(<GmailSection />);
+
+    const button = await screen.findByRole("button", { name: /sync now/i });
+    fireEvent.click(button);
+
+    await vi.waitFor(() => {
+      expect(syncGmailResponses).toHaveBeenCalled();
+    });
+    expect(await screen.findByText(/scanned 3 new messages/i)).toBeTruthy();
+    expect(await screen.findByText(/2 suggestions pending/i)).toBeTruthy();
+  });
+
+  it("not connected: Sync now button is not rendered", async () => {
+    vi.mocked(getJevSettings).mockResolvedValueOnce(
+      makeJev({ keySet: true, useForEmailTracking: true }),
+    );
+    vi.mocked(getGmailStatus).mockResolvedValueOnce(makeGmail({ connected: false }));
+    render(<GmailSection />);
+
+    await screen.findByRole("button", { name: /connect gmail/i });
+    expect(screen.queryByRole("button", { name: /sync now/i })).toBeNull();
+  });
+
+  it("sync failure shows the error alert", async () => {
+    vi.mocked(getJevSettings).mockResolvedValueOnce(
+      makeJev({ keySet: true, useForEmailTracking: true }),
+    );
+    vi.mocked(getGmailStatus).mockResolvedValueOnce(
+      makeGmail({ connected: true, email: "person@example.com" }),
+    );
+    vi.mocked(syncGmailResponses).mockRejectedValueOnce(new Error("Couldn't sync Gmail responses."));
+    render(<GmailSection />);
+
+    const button = await screen.findByRole("button", { name: /sync now/i });
+    fireEvent.click(button);
+
+    expect(await screen.findByText(/couldn't sync gmail responses/i)).toBeTruthy();
   });
 });
