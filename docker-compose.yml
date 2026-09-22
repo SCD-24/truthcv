@@ -30,6 +30,11 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      # Gmail OAuth client credentials (connections/auth/gmail.py) — unset
+      # leaves the Gmail connection reporting "Google OAuth is not
+      # configured on the server."
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
+      - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
       # Bearer token guarding the read-only /mcp/diagnostics endpoint
       # (api/diagnostics_mcp.py) — separate from AGENT_API_TOKEN and never
