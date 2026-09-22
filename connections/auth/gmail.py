@@ -48,6 +48,17 @@ def _client_secret() -> str:
     return os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
 
 
+def redirect_uri_override() -> str:
+    """Explicit redirect URI to use instead of one derived from the request.
+
+    Set GOOGLE_OAUTH_REDIRECT_URI when the app is served behind a reverse
+    proxy uvicorn doesn't trust, so request.url_for can't be relied on to
+    produce the exact URI registered with Google. Blank/unset means "no
+    override" — callers should fall back to the request-derived value.
+    """
+    return os.environ.get("GOOGLE_OAUTH_REDIRECT_URI", "").strip()
+
+
 def _require_client_config() -> tuple[str, str]:
     client_id = _client_id()
     client_secret = _client_secret()

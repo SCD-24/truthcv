@@ -1402,7 +1402,7 @@ def require_gmail_tracking_enabled() -> None:
 def start_gmail_login(request: Request) -> StartLoginResult:
     """Begin the Gmail OAuth flow. Gated on the useForEmailTracking opt-in."""
     require_gmail_tracking_enabled()
-    redirect_uri = str(request.url_for("gmail_callback"))
+    redirect_uri = gmail_auth.redirect_uri_override() or str(request.url_for("gmail_callback"))
     try:
         return StartLoginResult.model_validate(gmail_auth.start_login(redirect_uri))
     except gmail_auth.AuthError as e:

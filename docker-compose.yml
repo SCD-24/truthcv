@@ -35,6 +35,7 @@ services:
       # configured on the server."
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
       - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      - GOOGLE_OAUTH_REDIRECT_URI=${GOOGLE_OAUTH_REDIRECT_URI:-}
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
       # Bearer token guarding the read-only /mcp/diagnostics endpoint
       # (api/diagnostics_mcp.py) — separate from AGENT_API_TOKEN and never

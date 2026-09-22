@@ -286,6 +286,11 @@
                   "desc": "Google OAuth client secret for the Gmail connection",
                   "example": "",
                   "key": "GOOGLE_OAUTH_CLIENT_SECRET"
+                },
+                {
+                  "desc": "Optional. Pins the Gmail OAuth redirect URI sent to Google, overriding the request-derived one. Required when serving behind a reverse proxy; must match the Google console entry exactly.",
+                  "example": "https://truthcv.home.arpa/api/auth/gmail/callback",
+                  "key": "GOOGLE_OAUTH_REDIRECT_URI"
                 }
               ]
             },
