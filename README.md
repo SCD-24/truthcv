@@ -91,7 +91,7 @@ steps are satisfied.
 TruthCV is a multi-page app, not a single linear wizard:
 
 - **Analytics** — the landing page, with side navigation to everything else.
-- **Applications** — the job-application ledger (see below).
+- **Applications** — the job-application ledger (see below), including Gmail-derived employer-reply suggestions when [Gmail response tracking](#gmail-response-tracking-optional) is connected.
 - **Screenings & Approvals** — screened postings awaiting your decision,
   including cover-letter approvals and cooldowns before an already-skipped
   company is reconsidered.
@@ -121,6 +121,80 @@ out with it.
   files (PDF/DOCX).
 
 The button is on the Applications page; the browser downloads the zip directly.
+
+## Jev cross-checking (optional)
+
+TruthCV can optionally cross-check its own screening decisions and Gmail-derived
+status changes against Jev (TypeSafe System One), a third-party verification
+API. It's opt-in and used only as a secondary check on top of TruthCV's own
+judgment — nothing in the app requires it.
+
+Connect it from **Settings → Jev**, which saves the key into the same
+encrypted secret store as your other credentials. There's no `.env` variable
+for it in `.env.example` by design; if you'd rather not put the key through
+the UI, set the `JEV_API_KEY` environment variable instead — it's consulted
+as a fallback wherever the app would otherwise read the saved key. The env
+var supplies only the key: the toggles below live in the settings store, so
+you still enable them from **Settings → Jev**.
+
+Two independent toggles control where Jev is consulted:
+
+- **useForScreening** — cross-checks a posting's hard requirements (role
+  type, salary floor, employment country, EOR, remote model) against Jev
+  before rejecting or passing it during screening.
+- **useForEmailTracking** — required before an employer-reply classification
+  from [Gmail response tracking](#gmail-response-tracking-optional) is
+  allowed to auto-apply a status change; see below.
+
+A Jev answer is only treated as a confirmation at or above a confidence
+(Noul) score of **0.8**; anything lower is treated as inconclusive. Jev
+cross-checking is deliberately **fail-open**: if the key is missing, Jev is
+unreachable, times out, or returns something unexpected, TruthCV proceeds
+without it rather than blocking on it — Jev can only make screening more
+cautious or gate an auto-apply, never make the app fail outright over a bare
+transport error.
+
+## Gmail response tracking (optional)
+
+Connect Gmail from **Settings → Gmail** to have TruthCV watch your inbox for
+employer replies to open applications (status `Applied` or `Waiting`) and
+suggest — or, when confirmed, apply — a status update.
+
+Each sync issues one scoped query per open application, built from that
+application's website/application-URL domains plus the first word of the
+company name, so it only fetches messages that look related to an
+application you're tracking (a broad company name can still match some
+unrelated senders). Any
+match is classified by the LLM as a rejection, interview invite, offer,
+confirmation, or other. Only a **rejection** or **interview** classification
+can auto-apply anything, and even then only after it's cross-checked with
+[Jev](#jev-cross-checking-optional): the classification is put to Jev as a
+yes/no question, and the application's status is only moved to **Rejected**
+or **Interviewing** if Jev confirms it. When it does, an evidence note
+(message id, sender, subject, date) is appended to the application's notes.
+Every other case — Jev declines to confirm, or the classification is offer,
+confirmation, or other — is left as a pending suggestion for you to review
+and apply by hand; nothing is auto-applied without a confirmed
+rejection/interview.
+
+Connecting Gmail itself requires a saved Jev key with **useForEmailTracking**
+enabled — the connect button is blocked until that's set, since a Gmail
+connection is only useful here for auto-applying Jev-confirmed transitions.
+
+### Setting it up in Google Cloud Console
+
+1. Create (or pick) a project in the [Google Cloud Console](https://console.cloud.google.com/).
+2. Enable the **Gmail API** for that project.
+3. Configure the **OAuth consent screen**, adding the
+   `https://www.googleapis.com/auth/gmail.readonly` scope — the only scope
+   TruthCV requests; it can only read your mail, never send or modify it.
+4. Create an OAuth client of type **Web application**, with an authorized
+   redirect URI of `http://localhost:<APP_PORT>/api/auth/gmail/callback`
+   (substitute your actual `APP_PORT`; TruthCV derives this same URI from the
+   request host at runtime, so it must match exactly).
+5. Set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in `.env` to
+   the client's id and secret.
+6. Connect from **Settings → Gmail** in the app.
 
 ## Unattended application agent
 
@@ -285,7 +359,8 @@ precedence once configured.
 | `OLLAMA_HOST` | Ollama endpoint (compose sets this automatically). |
 | `RUN_AT` / `RUN_DAYS` | Fallback agent schedule, used only when the Agents page's schedule is unreachable. |
 | `TZ` | Fallback timezone the agent's schedule and logs are interpreted in (default `UTC`). The Agents page's schedule timezone takes precedence. |
-| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Optional — Google OAuth client credentials backing the Gmail connection. Unset, connecting Gmail reports "Google OAuth is not configured on the server." |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Optional — Google OAuth client credentials backing the Gmail connection. See [Gmail response tracking](#gmail-response-tracking-optional) above for full setup steps. Unset, connecting Gmail reports "Google OAuth is not configured on the server." |
+| `JEV_API_KEY` | Optional — fallback credential for [Jev cross-checking](#jev-cross-checking-optional), consulted only when no key is saved via Settings → Jev. Not present in `.env.example` by design. Supplies the key only — the use-for toggles are still set from Settings → Jev. |
 | `DIAGNOSTICS_MCP_TOKEN` | Optional — bearer token guarding the read-only `/mcp/diagnostics` endpoint. Unset/empty (the default) disables the endpoint entirely: every request to it returns 404. See "Diagnostics MCP (read-only)" below. |
 
 Generate `ENCRYPTION_KEY` or `AGENT_API_TOKEN` with either of the following:
