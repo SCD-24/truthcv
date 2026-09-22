@@ -1,15 +1,24 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
       # tests/test_daily_apply_session_probe.py runs the real node snippet out
       # of agent/daily-apply.sh. The runner already ships a node, so this is
       # not about availability: it pins the same major the agent container
@@ -25,11 +34,14 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - name: Install dependencies
         working-directory: web
         run: npm ci
@@ -63,8 +75,15 @@ jobs:
       # would create it root-owned. Make it first so the bind mount lines up.
       - name: Create the data volume directory
         run: mkdir -p data
+      - uses: docker/setup-buildx-action@v3
+      # The type=gha cache backend needs ACTIONS_RUNTIME_TOKEN and the cache
+      # URL in the step environment; plain `run:` steps don't receive them
+      # (only docker/build-push-action injects them), so expose them here.
+      - uses: crazy-max/ghaction-github-runtime@v3
       - name: Build images
-        run: docker compose build app browser agent
+        env:
+          COMPOSE_BAKE: "true"
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml build app browser agent
       # `docker compose run` honours depends_on, so this starts `app` and waits
       # on the `browser` healthcheck before the script runs — the same gate the
       # real agent service goes through. The script's TRUTHCV_MCP_URL and

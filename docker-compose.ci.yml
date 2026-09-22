@@ -1,0 +1,32 @@
+# CI-only override: adds GitHub Actions build cache config to the three
+# built services. Applied via `-f docker-compose.yml -f docker-compose.ci.yml`
+# in .github/workflows/ci.yml — never used for local development. Local
+# `docker compose build` (docker-compose.yml alone) must stay untouched: the
+# `type=gha` cache backend errors outside GitHub Actions runners, where no
+# ACTIONS_RUNTIME_TOKEN is available.
+services:
+  app:
+    build:
+      context: .
+      cache_from:
+        - type=gha,scope=app
+      cache_to:
+        - type=gha,scope=app,mode=max,ignore-error=true
+
+  browser:
+    build:
+      context: .
+      dockerfile: browser/Dockerfile
+      cache_from:
+        - type=gha,scope=browser
+      cache_to:
+        - type=gha,scope=browser,mode=max,ignore-error=true
+
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+      cache_from:
+        - type=gha,scope=agent
+      cache_to:
+        - type=gha,scope=agent,mode=max,ignore-error=true
