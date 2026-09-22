@@ -32,29 +32,36 @@
  * once the page loads is reported `blocked` with `blockKind: 'login'`, never
  * `empty` and never carrying a raw snapshot.
  *
- * Several boards are harvested CONCURRENTLY, each in its own browser tab
- * sharing the one Chromium profile, but ONLY once this invocation has
- * confirmed, at runtime, that it can actually parse the browser server's tab
- * listing (harvestTabs.ts's `probeTabListing`) — the upstream
- * `@playwright/mcp` server's exact tab-list text format is not vendored in
- * this workspace and was never a verified fact, only a guess, so resting
- * live behaviour on it being right was the wrong default. When the probe
- * fails (an errored call, or text this build cannot parse at all), every
- * board is instead harvested SERIALLY, one at a time, in the single shared
- * tab — same per-board classification and result shape, just no concurrency
- * and no tab tool calls — and the result names why it degraded rather than
- * reporting every board blocked. The same serial fallback is also taken
- * outright when `tabToolsAvailable` is false (the tab-management tools are
- * not advertised at all). A single board's failure — thrown, not just
- * returned as an error result — is confined to that board; it never
- * discards every other board's already-harvested results.
+ * Boards are harvested with the FIRST usable strategy of three, tried in this
+ * order of preference:
+ *  1. One independent MCP session per board (harvestSessions.ts), when the
+ *     browser session pool (agent/harness/mcp/sessionPool.ts) has at least
+ *     two sessions available. No tab tools at all in this path — each
+ *     session already has its own "current tab".
+ *  2. Failing that, one browser tab per board, all sharing the one Chromium
+ *     profile and MCP connection, but ONLY once this invocation has
+ *     confirmed, at runtime, that it can actually parse the browser server's
+ *     tab listing (harvestTabs.ts's `probeTabListing`) — the upstream
+ *     `@playwright/mcp` server's exact tab-list text format is not vendored
+ *     in this workspace and was never a verified fact, only a guess, so
+ *     resting live behaviour on it being right was the wrong default.
+ *  3. Failing that too — the probe fails, or `tabToolsAvailable` is false
+ *     because the tab-management tools are not advertised at all — every
+ *     board is harvested SERIALLY, one at a time, in the single shared tab.
+ *
+ * All three report the same per-board classification and result shape; the
+ * degraded (2→3) path names why it degraded rather than reporting every
+ * board blocked. A single board's failure — thrown, not just returned as an
+ * error result — is confined to that board in every path; it never discards
+ * every other board's already-harvested results.
  *
  * Split across sibling modules in this directory: harvestTypes.ts (shared
  * types), harvestClassify.ts (extraction/classification), harvestNavigate.ts
  * (sign-in refusal, navigation-failure classification, search-box typing),
  * harvestTabs.ts (tab lifecycle: the async lock, tab-list parsing/probing,
- * create/select/close), and harvestBoard.ts (per-board orchestration, serial
- * and concurrent). This module is the public entry point: the tool
+ * create/select/close), harvestBoard.ts (per-board orchestration, serial and
+ * tab-per-board), and harvestSessions.ts (per-board orchestration over
+ * leased sessions). This module is the public entry point: the tool
  * definition and {@link harvestPostings} itself.
  *
  * This is dispatched exactly like `screen_posting` and `read_runbook_section`
@@ -65,9 +72,11 @@
  */
 
 import type { ToolDefinition } from '../providers/types.js';
-import { errorMessage, harvestBounded, harvestSerial } from './harvestBoard.js';
+import { errorMessage, harvestBounded, harvestOneBoardSafely, harvestSerial } from './harvestBoard.js';
+import { harvestWithSessions } from './harvestSessions.js';
 import { probeTabListing } from './harvestTabs.js';
-import type { BrowserToolCall, HarvestBoardRequest, HarvestPostingsResult } from './harvestTypes.js';
+import type { BrowserToolCall, BrowserToolPermissionCheck, HarvestBoardRequest, HarvestBoardResult, HarvestPostingsResult } from './harvestTypes.js';
+import { MIN_SESSIONS_FOR_PARALLEL_HARVEST, type BrowserSessionPool } from '../mcp/sessionPool.js';
 
 export type {
   BlockKind,
@@ -133,10 +142,10 @@ export const harvestPostingsTool: ToolDefinition = {
  *
  * @param mode Which harvesting mode ran.
  * @param boardCount How many boards were harvested.
- * @param reason Present only when the concurrent path was abandoned for the
- *   serial fallback after a failed tab-listing probe.
+ * @param reason Present only when the concurrent-tabs path was abandoned for
+ *   the serial fallback after a failed tab-listing probe.
  */
-function logHarvestMode(mode: 'concurrent-tabs' | 'serial', boardCount: number, reason?: string): void {
+function logHarvestMode(mode: 'sessions' | 'concurrent-tabs' | 'serial', boardCount: number, reason?: string): void {
   const line = { event: 'harvest_postings.mode', mode, boards: boardCount, ...(reason ? { reason } : {}) };
   process.stderr.write(`${JSON.stringify(line)}\n`);
 }
@@ -148,13 +157,46 @@ const TAB_LIST_UNPARSEABLE_REASON =
   "the browser server's tab-listing text did not match any recognised format; harvested every board serially in the single shared tab instead of concurrently";
 
 /**
- * Decide the harvesting mode and run it: concurrent tab-per-board when
- * `tabToolsAvailable` AND a live probe confirms the tab listing can be
- * parsed; serial otherwise — either because the tools are not advertised at
- * all, or because the probe failed. See this module's own doc for why the
- * probe exists.
+ * Fill every board index the session-per-worker path left unclaimed —
+ * `undefined` in `sessionResults`, because a worker either could not lease
+ * even its first session or lost its session mid-harvest with no
+ * replacement available (see harvestSessions.ts's own doc) — by harvesting
+ * that board SERIALLY on the shared `call`, in request order. A dead session
+ * this way costs at most its own board's failure; every other board is
+ * still genuinely harvested, by a surviving worker or this fallback.
  */
-async function runHarvest(call: BrowserToolCall, boards: HarvestBoardRequest[], tabToolsAvailable: boolean): Promise<HarvestPostingsResult> {
+async function fillUnclaimedBoards(
+  call: BrowserToolCall,
+  boards: HarvestBoardRequest[],
+  sessionResults: (HarvestBoardResult | undefined)[],
+): Promise<HarvestBoardResult[]> {
+  const results: HarvestBoardResult[] = new Array(boards.length);
+  for (let i = 0; i < boards.length; i++) {
+    results[i] = sessionResults[i] ?? (await harvestOneBoardSafely(call, boards[i]));
+  }
+  return results;
+}
+
+/**
+ * Decide the harvesting mode and run it, in the precedence this module's own
+ * doc names: session-per-worker when the pool yields at least two sessions;
+ * else concurrent tab-per-board when `tabToolsAvailable` AND a live probe
+ * confirms the tab listing can be parsed; else serial.
+ */
+async function runHarvest(
+  call: BrowserToolCall,
+  boards: HarvestBoardRequest[],
+  tabToolsAvailable: boolean,
+  sessionPool?: BrowserSessionPool,
+  isSessionToolPermitted?: BrowserToolPermissionCheck,
+): Promise<HarvestPostingsResult> {
+  const sessionCount = sessionPool ? await sessionPool.availableSessionCount() : 0;
+  if (sessionPool && sessionCount >= MIN_SESSIONS_FOR_PARALLEL_HARVEST) {
+    logHarvestMode('sessions', boards.length);
+    const sessionResults = await harvestWithSessions(sessionPool, boards, sessionCount, isSessionToolPermitted);
+    const results = await fillUnclaimedBoards(call, boards, sessionResults);
+    return { content: JSON.stringify({ results }), isError: false };
+  }
   if (!tabToolsAvailable) {
     logHarvestMode('serial', boards.length);
     return { content: JSON.stringify({ results: await harvestSerial(call, boards) }), isError: false };
@@ -206,19 +248,29 @@ function coerceBoards(raw: unknown): HarvestBoardRequest[] {
  *   tab-management tools, as decided by tools.ts's `browserTabToolsAvailable`.
  *   Defaults to true so every existing caller/test keeps today's concurrent
  *   behaviour unless it says otherwise.
+ * @param sessionPool The browser session pool for the session-per-worker
+ *   path, supplied by tools.ts. `undefined` (every existing caller/test)
+ *   skips straight to the tab-per-board/serial fallbacks, unchanged.
+ * @param isSessionToolPermitted The allow-list check the session-per-worker
+ *   path consults before every leased-session call — tools.ts's
+ *   `isBrowserToolCallPermitted` in production. `undefined` falls back to
+ *   permitting everything (see harvestSessions.ts's `harvestWithSessions`),
+ *   so an existing caller/test keeps working unchanged.
  * @returns The per-board results as JSON, or an error message, with `isError` set.
  */
 export async function harvestPostings(
   rawArgs: Record<string, unknown>,
   call: BrowserToolCall,
   tabToolsAvailable = true,
+  sessionPool?: BrowserSessionPool,
+  isSessionToolPermitted?: BrowserToolPermissionCheck,
 ): Promise<HarvestPostingsResult> {
   const boards = coerceBoards(rawArgs.boards);
   if (boards.length === 0) {
     return { content: 'harvest_postings requires a non-empty boards array, each with board and url.', isError: true };
   }
   try {
-    return await runHarvest(call, boards, tabToolsAvailable);
+    return await runHarvest(call, boards, tabToolsAvailable, sessionPool, isSessionToolPermitted);
   } catch (err) {
     return { content: `harvest_postings failed: ${errorMessage(err)}`, isError: true };
   }

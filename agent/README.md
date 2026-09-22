@@ -164,6 +164,7 @@ flag that takes precedence; `daily-apply.sh` passes the flags explicitly):
 | `AGENT_MAX_TOOL_RESULT_CHARS` | Caps a single MCP tool result's character length at the moment it is inserted into the conversation. Defaults to `24000`. An over-long result — a full-page browser snapshot, a long file read — is truncated with an explicit marker naming how many characters were cut and instructing the model to re-request a narrower view, so it never receives silently partial data. Must be a positive integer. |
 | `AGENT_PROMPT_CACHE` | Toggles Anthropic prompt-cache `cache_control` breakpoints (the tools block plus the first and last message) on the **Anthropic wire only**. Defaults to `true`. Set to `false` to disable caching entirely if runs are spaced further apart than the cache's 5-minute TTL, where the cache-write cost (1.25x) could exceed the savings. Has no effect on the OpenAI-compatible wire, which relies on automatic prefix caching instead. |
 | `AGENT_MAX_TOOL_CONCURRENCY` | Max non-browser tool calls one turn dispatches concurrently against the shared truthcv MCP server. Defaults to `4`. Browser tool calls always run one at a time regardless of this value, because the browser server drives a single Chromium profile with one holder. Must be a positive integer. |
+| `AGENT_BROWSER_SESSIONS` | Max EXTRA MCP sessions `harvest_postings`' session-per-worker path (`agent/harness/mcp/sessionPool.ts`) may open to the `browser` service, beyond the harness's own single shared browser connection. Defaults to `3`. Every session shares the one signed-in browser profile — this is concurrency within one profile, not multiple profiles. `1` disables parallel harvest (falls back to the tab path). An unset/empty/non-numeric/negative value falls back to `3`; a well-formed value above `8` is clamped down to `8` rather than opening that many connections against one profile. |
 | `AGENT_SCREENING_MODEL` | Model identifier for the `screen_posting` built-in tool's own, separate provider adapter — an isolated, typically-cheaper subagent call that screens one discovered posting against a job profile's criteria instead of reasoning through every hard filter in the main loop's own context (see `RUNBOOK.md` §5). **Defaults to `AGENT_LLM_MODEL`** (the main model) when unset, so an operator who configures nothing keeps today's behaviour exactly: one model doing both jobs. |
 | `AGENT_SCREENING_PROVIDER` | Logical provider for the screening adapter: `claude`, `codex`, `openrouter`, or `ollama`. Defaults to `AGENT_LLM_PROVIDER` when unset. |
 | `AGENT_SCREENING_WIRE` | Wire protocol for the screening adapter. Defaults to `AGENT_LLM_WIRE` when unset. |
@@ -263,10 +264,12 @@ names are this workspace's best guess at what the pinned `@playwright/mcp`
 calls its tab tools — the package is installed into the `browser` image at
 build time and is not vendored here, so the names could not be verified
 against it. When the `browser` server does not advertise them,
-`harvest_postings` degrades to harvesting boards serially, one at a time, in
-the single shared tab, instead of concurrently — same per-board result shape
-and outcome classification, just no concurrency; which mode ran is logged
-(never page content). The harness has no MCP-backed built-in tools of its
+`harvest_postings` — unless its preferred session-per-worker path already ran
+(see `AGENT_BROWSER_SESSIONS` above, which needs no tab tools at all) —
+degrades to harvesting boards serially, one at a time, in the single shared
+tab, instead of concurrently — same per-board result shape and outcome
+classification, just no concurrency; which mode ran is logged (never page
+content). The harness has no MCP-backed built-in tools of its
 own beyond one narrow exception: `read_runbook_section`, which returns a named
 section of `RUNBOOK.md` from the image and takes no path argument, so it opens
 no general filesystem read. It has no tool for approving an inference: the approve/deny gate

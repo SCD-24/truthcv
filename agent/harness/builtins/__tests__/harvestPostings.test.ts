@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { harvestPostings, harvestPostingsTool, type BrowserToolCall, type BrowserToolResult } from '../harvestPostings.js';
+import { McpClientPool, type ClientConnector } from '../../mcp/client.js';
+import { BrowserSessionPool } from '../../mcp/sessionPool.js';
 
 /** A greenhouse-shaped posting link line, as `browser_snapshot` might render it. */
 const GREENHOUSE_LINK =
@@ -804,5 +806,106 @@ describe('harvestPostings: argument validation and error handling', () => {
     const { results } = JSON.parse(result.content);
     expect(results[0].outcome).toBe('blocked');
     expect(results[0].note).toContain('mcp connection lost');
+  });
+});
+
+describe('harvestPostings: dispatch precedence (sessions > tabs > serial)', () => {
+  /** A `BrowserSessionPool` of `sessionCount` fake sessions, every board on
+   * every session resolving to the same GREENHOUSE_LINK snapshot — these
+   * tests only care WHICH path ran, not per-board content. */
+  function fakeSessionPool(sessionCount: number): BrowserSessionPool {
+    const connector: ClientConnector = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async (params) => {
+        if (params.name === 'browser_snapshot') {
+          return { content: [{ type: 'text', text: GREENHOUSE_LINK }], isError: false };
+        }
+        return { content: [{ type: 'text', text: 'ok' }], isError: false };
+      },
+      close: async () => {},
+    });
+    const mcpPool = new McpClientPool([{ name: 'browser', url: 'http://browser' }], connector);
+    return new BrowserSessionPool(mcpPool, { AGENT_BROWSER_SESSIONS: String(sessionCount) });
+  }
+
+  it('prefers the session-per-worker path when at least two sessions are available, never touching the tab/serial call', async () => {
+    const boards = [board('One', 'https://one.example'), board('Two', 'https://two.example')];
+    const call = vi.fn();
+    const sessionPool = fakeSessionPool(2);
+
+    const result = await harvestPostings({ boards }, call as unknown as BrowserToolCall, true, sessionPool);
+
+    expect(result.isError).toBe(false);
+    const { results } = JSON.parse(result.content);
+    expect(results).toHaveLength(2);
+    expect(results.every((r: { outcome: string }) => r.outcome === 'searched')).toBe(true);
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the existing tab-per-board path when fewer than two sessions are available', async () => {
+    const boards = [board('One', 'https://one.example')];
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    const call = stubBrowserCall(singleTabHandlers(GREENHOUSE_LINK), calls);
+    const sessionPool = fakeSessionPool(1);
+
+    const result = await harvestPostings({ boards }, call, true, sessionPool);
+
+    expect(result.isError).toBe(false);
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    // The tab path ran via `call`, not the session pool.
+    expect(calls.some((c) => c.toolName === 'browser_tab_new')).toBe(true);
+  });
+
+  it('fills boards a dead session pool never claimed via a serial fallback on the shared call, after the sessions each attempted have their own failure result', async () => {
+    // Every session's first navigate throws, so both workers die on the
+    // very first board each claims and neither can lease a replacement —
+    // with 2 sessions and 3 boards, the third board is never claimed by
+    // the sessions path at all.
+    const boardsReq = [board('One', 'https://one.example'), board('Two', 'https://two.example'), board('Three', 'https://three.example')];
+    const deadConnector: ClientConnector = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async (params) => {
+        if (params.name === 'browser_navigate') throw new Error('transport exploded');
+        return { content: [{ type: 'text', text: 'ok' }], isError: false };
+      },
+      close: async () => {},
+    });
+    const mcpPool = new McpClientPool([{ name: 'browser', url: 'http://browser' }], deadConnector);
+    const sessionPool = new BrowserSessionPool(mcpPool, { AGENT_BROWSER_SESSIONS: '2' });
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    const call = stubBrowserCall(
+      { browser_navigate: { content: 'ok', isError: false }, browser_snapshot: { content: GREENHOUSE_LINK, isError: false } },
+      calls,
+    );
+
+    const result = await harvestPostings({ boards: boardsReq }, call, true, sessionPool);
+
+    expect(result.isError).toBe(false);
+    const { results } = JSON.parse(result.content);
+    expect(results).toHaveLength(3);
+    const blocked = results.filter((r: { outcome: string }) => r.outcome === 'blocked');
+    const searched = results.filter((r: { outcome: string }) => r.outcome === 'searched');
+    // The two boards the dead sessions actually attempted carry their own
+    // failure result; the never-attempted remainder came back genuinely
+    // harvested via the serial fallback on the shared `call`.
+    expect(blocked).toHaveLength(2);
+    expect(searched).toHaveLength(1);
+    expect(calls.some((c) => c.toolName === 'browser_navigate')).toBe(true);
+  });
+
+  it('falls back to serial when zero sessions are available and tab tools are unavailable', async () => {
+    const boards = [board('One', 'https://one.example')];
+    const call = stubBrowserCall({
+      browser_navigate: { content: 'ok', isError: false },
+      browser_snapshot: { content: GREENHOUSE_LINK, isError: false },
+    });
+    const sessionPool = fakeSessionPool(0);
+
+    const result = await harvestPostings({ boards }, call, false, sessionPool);
+
+    expect(result.isError).toBe(false);
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
   });
 });

@@ -87,3 +87,15 @@ export interface BrowserToolResult {
  * call — this module never talks to the pool directly.
  */
 export type BrowserToolCall = (toolName: string, args: Record<string, unknown>) => Promise<BrowserToolResult>;
+
+/**
+ * Check whether a bare browser tool name may be called at all — tools.ts's
+ * `isBrowserToolCallPermitted` in production, reused by harvestSessions.ts's
+ * session-per-worker path (which dispatches on each leased session's own MCP
+ * client directly, never through the `BrowserToolCall` closure above, so it
+ * needs its OWN allow-list check rather than inheriting one).
+ *
+ * @returns The refusal message when the tool is not permitted; `undefined`
+ *   when it is.
+ */
+export type BrowserToolPermissionCheck = (toolName: string) => string | undefined;
