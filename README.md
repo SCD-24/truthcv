@@ -285,6 +285,7 @@ precedence once configured.
 | `OLLAMA_HOST` | Ollama endpoint (compose sets this automatically). |
 | `RUN_AT` / `RUN_DAYS` | Fallback agent schedule, used only when the Agents page's schedule is unreachable. |
 | `TZ` | Fallback timezone the agent's schedule and logs are interpreted in (default `UTC`). The Agents page's schedule timezone takes precedence. |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Optional — Google OAuth client credentials backing the Gmail connection. Unset, connecting Gmail reports "Google OAuth is not configured on the server." |
 | `DIAGNOSTICS_MCP_TOKEN` | Optional — bearer token guarding the read-only `/mcp/diagnostics` endpoint. Unset/empty (the default) disables the endpoint entirely: every request to it returns 404. See "Diagnostics MCP (read-only)" below. |
 
 Generate `ENCRYPTION_KEY` or `AGENT_API_TOKEN` with either of the following:
