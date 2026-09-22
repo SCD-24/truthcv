@@ -4,13 +4,22 @@ from __future__ import annotations
 
 import pytest
 
+from agentconfig.store import JobProfile
 from screening.criteria import (
+    EOR_STATED_VALUES,
     REMOTE_ARRANGEMENT_VALUES,
+    country_compatible,
+    eor_compatible,
     evaluate,
+    evaluate_hard_requirements,
     language_compatible,
     remote_compatible,
+    role_type_compatible,
+    salary_compatible,
+    validate_eor_stated,
     validate_language_requirement,
     validate_remote_arrangement,
+    validate_stated_text,
 )
 
 
@@ -165,3 +174,220 @@ class TestEvaluate:
     def test_remote_checked_before_language_when_both_fail(self):
         criterion, _ = evaluate("remote", "german", "on_site", "french")
         assert criterion == "remote_model"
+
+
+class TestValidateEorStated:
+    @pytest.mark.parametrize("value", EOR_STATED_VALUES)
+    def test_accepts_every_known_value(self, value):
+        assert validate_eor_stated(value) == value
+
+    def test_normalizes_case_and_whitespace(self):
+        assert validate_eor_stated(" Yes ") == "yes"
+
+    def test_unknown_value_is_rejected(self):
+        with pytest.raises(ValueError, match="Unknown EOR-stated value"):
+            validate_eor_stated("maybe")
+
+    def test_non_string_yields_empty(self):
+        assert validate_eor_stated(None) == ""
+
+
+class TestValidateStatedText:
+    def test_collapses_whitespace_and_casefolds(self):
+        assert validate_stated_text("  Berlin,   Germany ") == "berlin, germany"
+
+    @pytest.mark.parametrize(
+        "value", ["", "unstated", "Not Stated", "n/a", "N/A", "any", "none"]
+    )
+    def test_no_value_family_normalizes_to_empty(self, value):
+        assert validate_stated_text(value) == ""
+
+    def test_non_string_yields_empty(self):
+        assert validate_stated_text(None) == ""
+
+
+class TestSalaryCompatible:
+    def test_plain_number_at_or_above_floor(self):
+        assert salary_compatible(80000, "90000") is True
+
+    def test_plain_number_below_floor(self):
+        assert salary_compatible(80000, "70000") is False
+
+    def test_k_suffix_is_scaled(self):
+        assert salary_compatible(100000, "80k") is False
+        assert salary_compatible(70000, "80k") is True
+
+    def test_comma_grouped_thousands(self):
+        assert salary_compatible(80000, "80,000") is True
+        assert salary_compatible(90000, "80,000") is False
+
+    def test_range_compares_its_maximum(self):
+        assert salary_compatible(80000, "€70,000–90,000") is True
+        assert salary_compatible(95000, "€70,000–90,000") is False
+
+    def test_unparseable_text_is_compatible(self):
+        assert salary_compatible(80000, "competitive") is True
+
+    @pytest.mark.parametrize("stated", ["", "unstated", "n/a"])
+    def test_unstated_is_compatible(self, stated):
+        assert salary_compatible(80000, stated) is True
+
+    @pytest.mark.parametrize("floor", [None, 0])
+    def test_unset_floor_is_compatible(self, floor):
+        assert salary_compatible(floor, "1") is True
+
+
+class TestCountryCompatible:
+    def test_exact_match(self):
+        assert country_compatible("Germany", "germany") is True
+
+    def test_containment_either_direction(self):
+        assert country_compatible("Germany", "Berlin, Germany") is True
+        assert country_compatible("Berlin, Germany", "Germany") is True
+
+    def test_mismatch_is_incompatible(self):
+        assert country_compatible("Germany", "France") is False
+
+    @pytest.mark.parametrize("stated", ["", "unstated"])
+    def test_unstated_is_compatible(self, stated):
+        assert country_compatible("Germany", stated) is True
+
+    @pytest.mark.parametrize("country", [None, ""])
+    def test_unset_profile_country_is_compatible(self, country):
+        assert country_compatible(country, "France") is True
+
+
+class TestRoleTypeCompatible:
+    def test_stated_matching_rejected_entry_is_incompatible(self):
+        assert role_type_compatible(["internship"], "Internship") is False
+
+    def test_substring_matches_either_direction(self):
+        assert role_type_compatible(["contract"], "6-month contract role") is False
+        assert role_type_compatible(["short-term contract"], "contract") is False
+
+    def test_unrelated_type_is_compatible(self):
+        assert role_type_compatible(["internship"], "permanent") is True
+
+    @pytest.mark.parametrize("rejected", [None, []])
+    def test_no_rejected_types_is_compatible(self, rejected):
+        assert role_type_compatible(rejected, "internship") is True
+
+    @pytest.mark.parametrize("stated", ["", "unstated"])
+    def test_unstated_is_compatible(self, stated):
+        assert role_type_compatible(["internship"], stated) is True
+
+
+class TestEorCompatible:
+    def test_disallowed_and_stated_yes_is_incompatible(self):
+        assert eor_compatible(False, "yes") is False
+
+    @pytest.mark.parametrize("stated", ["no", "unstated", ""])
+    def test_disallowed_but_not_stated_yes_is_compatible(self, stated):
+        assert eor_compatible(False, stated) is True
+
+    @pytest.mark.parametrize("allowed", [True, None])
+    def test_allowing_profile_accepts_yes(self, allowed):
+        assert eor_compatible(allowed, "yes") is True
+
+
+def _full_profile(**overrides):
+    """A JobProfile with all six hard requirements set; overridable per test."""
+    fields = dict(
+        name="p",
+        enabled=True,
+        keywords=["backend"],
+        remote_model="remote",
+        working_language="german",
+        salary_floor=100000,
+        currency="EUR",
+        employment_country="Germany",
+        rejected_role_types=["internship"],
+        eor_allowed=False,
+    )
+    fields.update(overrides)
+    return JobProfile(**fields)
+
+
+class TestEvaluateHardRequirements:
+    def test_all_unstated_evidence_is_compatible(self):
+        assert evaluate_hard_requirements(_full_profile(), {}) == ("", "")
+
+    def test_fully_compatible_evidence(self):
+        evidence = {
+            "remote_arrangement": "remote",
+            "language_requirement": "german",
+            "salary_stated": "120,000",
+            "employment_country_stated": "germany",
+            "role_type_stated": "permanent",
+            "eor_stated": "no",
+        }
+        assert evaluate_hard_requirements(_full_profile(), evidence) == ("", "")
+
+    def test_remote_violation(self):
+        criterion, reason = evaluate_hard_requirements(
+            _full_profile(), {"remote_arrangement": "on_site"}
+        )
+        assert criterion == "remote_model"
+        assert "on_site" in reason
+
+    def test_language_violation(self):
+        criterion, _ = evaluate_hard_requirements(
+            _full_profile(), {"language_requirement": "french"}
+        )
+        assert criterion == "working_language"
+
+    def test_salary_violation(self):
+        criterion, reason = evaluate_hard_requirements(
+            _full_profile(), {"salary_stated": "80k"}
+        )
+        assert criterion == "salary_floor"
+        assert "80k" in reason
+
+    def test_country_violation(self):
+        criterion, _ = evaluate_hard_requirements(
+            _full_profile(), {"employment_country_stated": "France"}
+        )
+        assert criterion == "employment_country"
+
+    def test_role_type_violation(self):
+        criterion, _ = evaluate_hard_requirements(
+            _full_profile(), {"role_type_stated": "internship"}
+        )
+        assert criterion == "rejected_role_types"
+
+    def test_eor_violation(self):
+        criterion, reason = evaluate_hard_requirements(
+            _full_profile(), {"eor_stated": "yes"}
+        )
+        assert criterion == "eor_allowed"
+        assert "EOR" in reason
+
+    def test_eor_evidence_is_normalized(self):
+        criterion, _ = evaluate_hard_requirements(
+            _full_profile(), {"eor_stated": " Yes "}
+        )
+        assert criterion == "eor_allowed"
+
+    def test_remote_failure_wins_over_salary(self):
+        evidence = {"remote_arrangement": "on_site", "salary_stated": "50000"}
+        criterion, _ = evaluate_hard_requirements(_full_profile(), evidence)
+        assert criterion == "remote_model"
+
+    def test_unset_profile_requirements_never_fail(self):
+        profile = _full_profile(
+            remote_model="",
+            working_language="",
+            salary_floor=None,
+            employment_country="",
+            rejected_role_types=[],
+            eor_allowed=None,
+        )
+        evidence = {
+            "remote_arrangement": "on_site",
+            "language_requirement": "french",
+            "salary_stated": "1",
+            "employment_country_stated": "France",
+            "role_type_stated": "internship",
+            "eor_stated": "yes",
+        }
+        assert evaluate_hard_requirements(profile, evidence) == ("", "")

@@ -43,6 +43,57 @@ def test_create_rejects_unknown_remote_arrangement(data_dir):
         create({"company": "Acme", "role": "Engineer", "remote_arrangement": "moon-base"})
 
 
+def test_create_normalizes_new_evidence_fields(data_dir):
+    created = create(
+        {
+            "company": "Acme",
+            "role": "Engineer",
+            "salary_stated": "  80k  ",
+            "employment_country_stated": "  Berlin,   Germany ",
+            "role_type_stated": " Contract ",
+            "eor_stated": "Yes",
+        }
+    )
+    assert created.salary_stated == "80k"
+    assert created.employment_country_stated == "berlin, germany"
+    assert created.role_type_stated == "contract"
+    assert created.eor_stated == "yes"
+
+    reloaded = load_all()
+    assert reloaded[0].salary_stated == "80k"
+    assert reloaded[0].employment_country_stated == "berlin, germany"
+    assert reloaded[0].role_type_stated == "contract"
+    assert reloaded[0].eor_stated == "yes"
+
+
+def test_create_leaves_empty_evidence_fields_untouched(data_dir):
+    created = create({"company": "Acme", "role": "Engineer"})
+    assert created.salary_stated == ""
+    assert created.employment_country_stated == ""
+    assert created.role_type_stated == ""
+    assert created.eor_stated == ""
+
+
+def test_create_maps_unstated_evidence_text_to_empty(data_dir):
+    created = create(
+        {
+            "company": "Acme",
+            "role": "Engineer",
+            "salary_stated": "Not Stated",
+            "employment_country_stated": "unstated",
+            "role_type_stated": "n/a",
+        }
+    )
+    assert created.salary_stated == ""
+    assert created.employment_country_stated == ""
+    assert created.role_type_stated == ""
+
+
+def test_create_rejects_unknown_eor_stated(data_dir):
+    with pytest.raises(ValueError, match="Unknown EOR-stated value"):
+        create({"company": "Acme", "role": "Engineer", "eor_stated": "maybe"})
+
+
 def test_atomic_write_leaves_no_tmp(data_dir):
     create({"company": "Acme", "verdict": "passed"})
     tmp = screenings_path().with_suffix(".json.tmp")

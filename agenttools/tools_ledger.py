@@ -422,6 +422,10 @@ def record_screening(
     profile: str = "",
     remote_arrangement: str = "",
     language_requirement: str = "",
+    salary_stated: str = "",
+    employment_country_stated: str = "",
+    role_type_stated: str = "",
+    eor_stated: str = "",
     **fields,
 ) -> dict:
     """Persist one screening verdict via ``screening.store.create``.
@@ -561,6 +565,10 @@ def record_screening(
         "profile": profile,
         "remote_arrangement": remote_arrangement,
         "language_requirement": language_requirement,
+        "salary_stated": salary_stated,
+        "employment_country_stated": employment_country_stated,
+        "role_type_stated": role_type_stated,
+        "eor_stated": eor_stated,
     }
     return _finalize_screening(fields, named)
 

@@ -418,6 +418,24 @@ class JobBoardKeyUpdate(_Camel):
     api_key: str
 
 
+class JevSettingsStatus(_Camel):
+    """Jev cross-check settings — never returns the key itself."""
+
+    key_set: bool = False
+    use_for_screening: bool = False
+    encryption_available: bool = True
+
+
+class JevSettingsUpdate(_Camel):
+    """PUT body for Jev settings. An empty ``api_key`` string clears it;
+    omitting a field leaves it unchanged."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, alias_generator=to_camel)
+
+    api_key: str | None = None
+    use_for_screening: bool | None = None
+
+
 class CompanyBoardModel(_Camel):
     """Resolved company board entry (response-only)."""
 

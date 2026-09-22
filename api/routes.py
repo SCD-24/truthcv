@@ -117,6 +117,8 @@ from .schemas import (
     CoverLetterRequest,
     CooldownResult,
     CoverLetterResult,
+    JevSettingsStatus,
+    JevSettingsUpdate,
     JobBoardKeyStatus,
     JobBoardKeyUpdate,
     ModelInfo,
@@ -1325,6 +1327,50 @@ def test_job_board_key(source: str) -> TestResult:
     if not boards.is_api_source(source):
         raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board.")
     ok, detail = remoterocketship.check_key(remoterocketship.api_key())
+    return TestResult(ok=ok, detail=detail)
+
+
+@router.get("/settings/jev", response_model=JevSettingsStatus)
+def get_jev_settings() -> JevSettingsStatus:
+    """Whether Jev cross-checking is configured. The key itself is never returned."""
+    conn = secretstore.get_connection("jev")
+    return JevSettingsStatus(
+        key_set=bool(conn.get("apiKey")),
+        use_for_screening=conn.get("useForScreening") is True,
+        encryption_available=secretstore.encryption_available(),
+    )
+
+
+@router.put("/settings/jev", response_model=JevSettingsStatus)
+def put_jev_settings(body: JevSettingsUpdate) -> JevSettingsStatus:
+    """Save (or, with an empty string, clear) the Jev API key and/or the
+    useForScreening toggle. Saving a non-empty key requires encryption."""
+    updates: dict = {}
+    if body.api_key is not None:
+        updates["apiKey"] = body.api_key.strip() or None
+    if body.use_for_screening is not None:
+        updates["useForScreening"] = body.use_for_screening
+    # Any persisted field — including the toggle — is written through the
+    # same encrypted store as the key, so a write of either kind needs a
+    # valid ENCRYPTION_KEY, not just a non-empty api_key.
+    if updates and not secretstore.encryption_available():
+        raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
+    if updates:
+        secretstore.set_connection("jev", updates)
+    conn = secretstore.get_connection("jev")
+    return JevSettingsStatus(
+        key_set=bool(conn.get("apiKey")),
+        use_for_screening=conn.get("useForScreening") is True,
+        encryption_available=secretstore.encryption_available(),
+    )
+
+
+@router.post("/settings/jev/test", response_model=TestResult)
+def test_jev_settings() -> TestResult:
+    """Verify the saved Jev key with one live request."""
+    from screening import jev
+
+    ok, detail = jev.check_key(secretstore.get_connection("jev").get("apiKey", ""))
     return TestResult(ok=ok, detail=detail)
 
 
