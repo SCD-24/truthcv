@@ -12,6 +12,7 @@ graph TD
     connections["Connections <br/> <small>(BACKEND)</small>"]
     cover-letter-engine["Cover Letter Engine <br/> <small>(BACKEND)</small>"]
     gmail-api["Gmail / Google OAuth API <br/> <small>(CUSTOM)</small>"]
+    gmail-response-sync["Gmail Response Sync <br/> <small>(BACKEND)</small>"]
     guardrail-validator["Guardrail Validator <br/> <small>(BACKEND)</small>"]
     jev-api["Jev (TypeSafe System One) API <br/> <small>(CUSTOM)</small>"]
     job-feeds["Job Feeds <br/> <small>(BACKEND)</small>"]
@@ -40,6 +41,7 @@ graph TD
     api -->|in-process| connections
     api -->|in-process| cover-letter-engine
     api -->|HTTPS| gmail-api
+    api -->|in-process| gmail-response-sync
     api -->|in-process| guardrail-validator
     api -->|in-process| job-feeds
     api -->|in-process| onboarding-store
@@ -71,6 +73,11 @@ graph TD
     cover-letter-engine -->|in-process| renderer
     cover-letter-engine -->|in-process| storage-leaf
     cover-letter-engine -->|in-process| truth-store
+    gmail-response-sync -->|in-process| application-tracker
+    gmail-response-sync -->|in-process| connections
+    gmail-response-sync -->|HTTPS| gmail-api
+    gmail-response-sync -->|in-process| llm-provider-layer
+    gmail-response-sync -->|file I/O| truth-data-volume
     guardrail-validator -->|in-process| keyword-vocabulary
     guardrail-validator -->|in-process| storage-leaf
     guardrail-validator -->|in-process| truth-store
@@ -135,6 +142,7 @@ graph TD
 - [Connections](overview.md) (`connections`, backend)
 - [Cover Letter Engine](overview.md) (`cover-letter-engine`, backend)
 - [Gmail / Google OAuth API](overview.md) (`gmail-api`, custom)
+- [Gmail Response Sync](overview.md) (`gmail-response-sync`, backend)
 - [Guardrail Validator](overview.md) (`guardrail-validator`, backend)
 - [Jev (TypeSafe System One) API](overview.md) (`jev-api`, custom)
 - [Job Feeds](overview.md) (`job-feeds`, backend)
@@ -166,6 +174,7 @@ graph TD
 - [api → connections](interactions/api--connections.md) via `in-process`
 - [api → cover-letter-engine](interactions/api--cover-letter-engine.md) via `in-process`
 - [api → gmail-api](interactions/api--gmail-api.md) via `HTTPS`
+- [api → gmail-response-sync](interactions/api--gmail-response-sync.md) via `in-process`
 - [api → guardrail-validator](interactions/api--guardrail-validator.md) via `in-process`
 - [api → job-feeds](interactions/api--job-feeds.md) via `in-process`
 - [api → onboarding-store](interactions/api--onboarding-store.md) via `in-process`
@@ -197,6 +206,11 @@ graph TD
 - [cover-letter-engine → renderer](interactions/cover-letter-engine--renderer.md) via `in-process`
 - [cover-letter-engine → storage-leaf](interactions/cover-letter-engine--storage-leaf.md) via `in-process`
 - [cover-letter-engine → truth-store](interactions/cover-letter-engine--truth-store.md) via `in-process`
+- [gmail-response-sync → application-tracker](interactions/gmail-response-sync--application-tracker.md) via `in-process`
+- [gmail-response-sync → connections](interactions/gmail-response-sync--connections.md) via `in-process`
+- [gmail-response-sync → gmail-api](interactions/gmail-response-sync--gmail-api.md) via `HTTPS`
+- [gmail-response-sync → llm-provider-layer](interactions/gmail-response-sync--llm-provider-layer.md) via `in-process`
+- [gmail-response-sync → truth-data-volume](interactions/gmail-response-sync--truth-data-volume.md) via `file I/O`
 - [guardrail-validator → keyword-vocabulary](interactions/guardrail-validator--keyword-vocabulary.md) via `in-process`
 - [guardrail-validator → storage-leaf](interactions/guardrail-validator--storage-leaf.md) via `in-process`
 - [guardrail-validator → truth-store](interactions/guardrail-validator--truth-store.md) via `in-process`
@@ -251,5 +265,5 @@ graph TD
 
 ## Groups
 
-- [TruthCV Container (single Docker image)](groups/truthcv-container-single-docker-image.md) (`truthcv-container-single-docker-image`, 16 member(s))
+- [TruthCV Container (single Docker image)](groups/truthcv-container-single-docker-image.md) (`truthcv-container-single-docker-image`, 17 member(s))
 <!-- generated:end file:system-map -->

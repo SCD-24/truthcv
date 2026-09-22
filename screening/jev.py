@@ -126,6 +126,46 @@ def check_key(key: str) -> tuple[bool, str]:
     return True, "Jev accepted the key."
 
 
+def _email_tracking_enabled() -> bool:
+    """Whether Jev should be consulted for Gmail response-tracking decisions.
+
+    True only when a key is available AND the operator has opted in via the
+    ``useForEmailTracking`` toggle — distinct from ``useForScreening``, and
+    defaults to False/off when the flag is absent.
+    """
+    import secretstore
+
+    if not _saved_key():
+        return False
+    return secretstore.get_connection("jev").get("useForEmailTracking") is True
+
+
+def confirm(statement: str, state: str) -> bool:
+    """Ask Jev a single yes/no Noul question about ``state``.
+
+    Used to gate an automatic decision (e.g. "this email is a rejection") on
+    a Jev cross-check rather than acting on the classifier alone. Keys the
+    one question by a stable name so the request shape never depends on the
+    caller's statement text. Fails open to False (no confirmation) when
+    email-tracking isn't enabled, or on ANY transport/shape failure. Never
+    logs the key or ``state``.
+    """
+    if not _email_tracking_enabled():
+        return False
+    result = _post(_saved_key(), state, {"decision": {"type": "noul", "instructions": statement}})
+    if result is None:
+        return False
+    answers = result.get("answers")
+    if not isinstance(answers, dict):
+        logger.warning("Jev returned an unexpected response shape.")
+        return False
+    answer = answers.get("decision")
+    score = answer.get("noul") if isinstance(answer, dict) else None
+    if not isinstance(score, (int, float)) or isinstance(score, bool):
+        return False
+    return score >= JEV_REJECT_THRESHOLD
+
+
 def _hard_requirement_questions(profile: JobProfile) -> dict[str, str]:
     """Build one Noul question per hard requirement the profile actually sets.
 

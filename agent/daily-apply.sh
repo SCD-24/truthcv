@@ -676,13 +676,14 @@ esac
 
 # The tool allow-list is NOT passed on the command line any more: it is
 # hardcoded inside the harness (agent/harness/tools.ts), which enforces the
-# tool allow-list itself — the same 17 named truthcv tools granted
+# tool allow-list itself — the same 19 named truthcv tools granted
 # individually (generate_cover_letter, record_application, record_screening,
 # check_cooldown, get_canonical_cv, get_profile_answers, record_company_board,
 # get_job_profiles, recommend_salary, get_approved_applications,
 # report_apply_failure, record_company_finding, get_company_findings, start_run,
-# finish_run, record_run_note, record_postings_seen), plus an enumerated
-# allow-list of browser server tools (BROWSER_ALLOWED_TOOL_NAMES in
+# finish_run, record_run_note, record_postings_seen, record_discovery_coverage,
+# check_gmail_responses),
+# plus an enumerated allow-list of browser server tools (BROWSER_ALLOWED_TOOL_NAMES in
 # agent/harness/tools.ts, mirrored in mcp.json's browser.allowedTools) — only
 # the tool names this RUNBOOK actually calls, not the whole upstream
 # @playwright/mcp server; the harness fails loudly at startup if one of those
