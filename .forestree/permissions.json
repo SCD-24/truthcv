@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__truthcv_diagnostics__get_status",
+      "mcp__truthcv_diagnostics__*"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
