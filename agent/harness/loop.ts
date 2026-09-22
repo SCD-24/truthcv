@@ -48,7 +48,7 @@ type DoneEvent = Extract<HarnessEvent, { type: 'done' }>;
 const DEFAULT_MAX_REFLECTIONS = 3;
 
 /** Default ceiling on a single retry backoff, so a "retry in hours" fails fast. */
-const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
+export const DEFAULT_MAX_RETRY_DELAY_MS = 300_000;
 
 /**
  * Default cap on consecutive retryable-error retries within one turn. Capping
@@ -56,7 +56,7 @@ const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
  * error (e.g. a sustained rate limit) would otherwise retry forever without
  * ever advancing a turn or a reflection, defeating the loop's own turn cap.
  */
-const DEFAULT_MAX_RETRIES = 8;
+export const DEFAULT_MAX_RETRIES = 12;
 
 /**
  * Default cap on CONSECUTIVE compactions forced by a provider context-overflow

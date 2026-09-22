@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import type { McpClientPool, NamespacedTool } from '../mcp/client.js';
 import type { HarnessEvent, ProviderAdapter, ToolCall } from '../providers/types.js';
-import { ExitCode, runCli, resolveCompactionConfig, type CliDeps, type CliConfig } from '../cli.js';
+import { ExitCode, runCli, resolveCompactionConfig, resolveConfig, parseArgs, type CliDeps, type CliConfig } from '../cli.js';
 import { DEFAULT_FALLBACK_CONTEXT_WINDOW } from '../compaction.js';
 
 /** A tool call referencing the fake pool's one allowed tool. */
@@ -590,6 +590,79 @@ describe('the tool-concurrency cap reaches the loop config', () => {
 
     expect(code).toBe(ExitCode.BadConfig);
     expect(stderr.join('\n')).toContain('--max-tool-concurrency');
+  });
+});
+
+describe('the retry-patience caps reach the resolved config', () => {
+  const noopIo = { readFileText: async () => '', readStdin: async () => '' };
+
+  it('defaults maxConsecutiveRetries and maxRetryDelayMs when neither flag nor env is set', async () => {
+    const config = await resolveConfig(parseArgs([...BASE_ARGS, 'go']), {}, noopIo);
+
+    expect(config.maxConsecutiveRetries).toBe(12);
+    expect(config.maxRetryDelayMs).toBe(300_000);
+  });
+
+  it('accepts AGENT_MAX_RETRIES and AGENT_MAX_RETRY_DELAY_MS from the environment', async () => {
+    const config = await resolveConfig(
+      parseArgs([...BASE_ARGS, 'go']),
+      { AGENT_MAX_RETRIES: '5', AGENT_MAX_RETRY_DELAY_MS: '10000' },
+      noopIo,
+    );
+
+    expect(config.maxConsecutiveRetries).toBe(5);
+    expect(config.maxRetryDelayMs).toBe(10000);
+  });
+
+  it('lets --max-retries and --max-retry-delay-ms override the environment', async () => {
+    const config = await resolveConfig(
+      parseArgs([...BASE_ARGS, '--max-retries', '3', '--max-retry-delay-ms', '2000', 'go']),
+      { AGENT_MAX_RETRIES: '5', AGENT_MAX_RETRY_DELAY_MS: '10000' },
+      noopIo,
+    );
+
+    expect(config.maxConsecutiveRetries).toBe(3);
+    expect(config.maxRetryDelayMs).toBe(2000);
+  });
+
+  it.each(['0', '-1', 'abc', '1.5'])('refuses %s as --max-retries with a BadConfig exit', async (raw) => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, stderr } = harness(adapter, fakePool());
+
+    const code = await runCli([...BASE_ARGS, '--max-retries', raw, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.BadConfig);
+    expect(stderr.join('\n')).toContain('--max-retries');
+  });
+
+  it('refuses a bad AGENT_MAX_RETRIES with a BadConfig exit', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, stderr } = harness(adapter, fakePool());
+
+    const code = await runCli([...BASE_ARGS, 'go'], { AGENT_MAX_RETRIES: '0' }, deps);
+
+    expect(code).toBe(ExitCode.BadConfig);
+    expect(stderr.join('\n')).toContain('--max-retries');
+  });
+
+  it.each(['0', '-1', 'abc', '1.5'])('refuses %s as --max-retry-delay-ms with a BadConfig exit', async (raw) => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, stderr } = harness(adapter, fakePool());
+
+    const code = await runCli([...BASE_ARGS, '--max-retry-delay-ms', raw, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.BadConfig);
+    expect(stderr.join('\n')).toContain('--max-retry-delay-ms');
+  });
+
+  it('refuses a bad AGENT_MAX_RETRY_DELAY_MS with a BadConfig exit', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, stderr } = harness(adapter, fakePool());
+
+    const code = await runCli([...BASE_ARGS, 'go'], { AGENT_MAX_RETRY_DELAY_MS: '0' }, deps);
+
+    expect(code).toBe(ExitCode.BadConfig);
+    expect(stderr.join('\n')).toContain('--max-retry-delay-ms');
   });
 });
 

@@ -68,6 +68,8 @@ import {
   EMPTY_TURN_STOP_DETAIL,
   runLoop,
   DEFAULT_TOOL_CONCURRENCY,
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_MAX_RETRY_DELAY_MS,
   type LoopEvent,
   type LoopOutcome,
   type LoopResult,
@@ -162,6 +164,17 @@ export interface CliConfig {
    * when unset.
    */
   maxToolConcurrency: number;
+  /**
+   * Cap on consecutive retryable-error retries within one turn, before the
+   * loop gives up. Defaults to loop.ts's `DEFAULT_MAX_RETRIES` when unset.
+   */
+  maxConsecutiveRetries: number;
+  /**
+   * Ceiling on a single retry backoff delay, in ms, so a "retry in hours"
+   * response fails fast instead of parking an unattended run. Defaults to
+   * loop.ts's `DEFAULT_MAX_RETRY_DELAY_MS` when unset.
+   */
+  maxRetryDelayMs: number;
   /**
    * Whether Anthropic prompt-cache `cache_control` breakpoints are placed on
    * the wire. An escape hatch: false fully disables caching (Anthropic wire
@@ -358,6 +371,30 @@ function resolveMaxToolConcurrency(flag: string | undefined, envVal: string | un
 }
 
 /**
+ * Parse `--max-retries`/`AGENT_MAX_RETRIES`, defaulting to loop.ts's
+ * `DEFAULT_MAX_RETRIES` when unset; NaN if invalid. CLI flag wins over env var
+ * wins over the default, matching resolveMaxTurns.
+ */
+function resolveMaxRetries(flag: string | undefined, envVal: string | undefined): number {
+  const raw = (flag || envVal || '').trim();
+  if (!raw) return DEFAULT_MAX_RETRIES;
+  if (!/^\d+$/.test(raw)) return Number.NaN;
+  return Number.parseInt(raw, 10);
+}
+
+/**
+ * Parse `--max-retry-delay-ms`/`AGENT_MAX_RETRY_DELAY_MS`, defaulting to
+ * loop.ts's `DEFAULT_MAX_RETRY_DELAY_MS` when unset; NaN if invalid. CLI flag
+ * wins over env var wins over the default, matching resolveMaxTurns.
+ */
+function resolveMaxRetryDelayMs(flag: string | undefined, envVal: string | undefined): number {
+  const raw = (flag || envVal || '').trim();
+  if (!raw) return DEFAULT_MAX_RETRY_DELAY_MS;
+  if (!/^\d+$/.test(raw)) return Number.NaN;
+  return Number.parseInt(raw, 10);
+}
+
+/**
  * Parse `--prompt-cache`/`AGENT_PROMPT_CACHE` as a default-true escape hatch:
  * any value other than the literal string `'false'` leaves caching on. CLI flag
  * wins over env var wins over the default (on), matching resolveMaxTurns.
@@ -432,6 +469,8 @@ export async function resolveConfig(
     contextWindow: resolveContextWindow(f['context-window'], env.AGENT_CONTEXT_WINDOW),
     maxToolResultChars: resolveMaxToolResultChars(f['max-tool-result-chars'], env.AGENT_MAX_TOOL_RESULT_CHARS),
     maxToolConcurrency: resolveMaxToolConcurrency(f['max-tool-concurrency'], env.AGENT_MAX_TOOL_CONCURRENCY),
+    maxConsecutiveRetries: resolveMaxRetries(f['max-retries'], env.AGENT_MAX_RETRIES),
+    maxRetryDelayMs: resolveMaxRetryDelayMs(f['max-retry-delay-ms'], env.AGENT_MAX_RETRY_DELAY_MS),
     promptCache: resolvePromptCache(f['prompt-cache'], env.AGENT_PROMPT_CACHE),
     outputFile: f['output-file'] || undefined,
     reasonFile: f['reason-file'] || undefined,
@@ -487,6 +526,10 @@ export function validateConfig(config: CliConfig): string[] {
     errors.push('--max-tool-result-chars must be a positive integer');
   if (!Number.isInteger(config.maxToolConcurrency) || config.maxToolConcurrency <= 0)
     errors.push('--max-tool-concurrency must be a positive integer');
+  if (!Number.isInteger(config.maxConsecutiveRetries) || config.maxConsecutiveRetries <= 0)
+    errors.push('--max-retries must be a positive integer');
+  if (!Number.isInteger(config.maxRetryDelayMs) || config.maxRetryDelayMs <= 0)
+    errors.push('--max-retry-delay-ms must be a positive integer');
   if (!Number.isInteger(config.contextWindow) || config.contextWindow < 0)
     errors.push(
       '--context-window must be a whole number of tokens, digits only (0 or unset applies a conservative fallback)',
@@ -747,6 +790,8 @@ async function runAgent(
         maxTurns: config.maxTurns,
         maxToolResultChars: config.maxToolResultChars,
         maxToolConcurrency: config.maxToolConcurrency,
+        maxConsecutiveRetries: config.maxConsecutiveRetries,
+        maxRetryDelayMs: config.maxRetryDelayMs,
       },
       compactionConfig,
       screeningAdapter,
