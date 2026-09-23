@@ -1004,6 +1004,49 @@ describe('executeTurnToolCalls concurrency (via runLoop)', () => {
     stderrSpy.mockRestore();
   });
 
+  it('serializes two whole multi-board harvests and model browser calls even with tab tools advertised', async () => {
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const click = toolAndCall('browser', 'browser_click', 'c1');
+    const navigate = toolAndCall('browser', 'browser_navigate', 'c3');
+    const harvest = (id: string, prefix: string): ToolCall => ({
+      id, name: 'harvest_postings', arguments: { boards: [
+        { board: `${prefix}1`, url: `https://example.com/${prefix}1` },
+        { board: `${prefix}2`, url: `https://example.com/${prefix}2` },
+      ] },
+    });
+    const tools = ['browser_navigate', 'browser_snapshot', 'browser_click',
+      'browser_tab_list', 'browser_tab_new', 'browser_tab_select', 'browser_tab_close',
+    ].map((name) => toolAndCall('browser', name, name).tool);
+    const { pool, callTool, release, peak } = controllablePool(tools);
+    const { adapter } = scriptedAdapter(turnRequesting([harvest('c0', 'a'), click.call, harvest('c2', 'b'), navigate.call]));
+    const expected = [
+      'browser__browser_navigate', 'browser__browser_snapshot',
+      'browser__browser_navigate', 'browser__browser_snapshot',
+      'browser__browser_click',
+      'browser__browser_navigate', 'browser__browser_snapshot',
+      'browser__browser_navigate', 'browser__browser_snapshot',
+      'browser__browser_navigate',
+    ];
+    try {
+      const resultPromise = run(adapter, pool, { maxTurns: 5 });
+      for (let i = 0; i < expected.length; i++) {
+        await waitUntilCalled(callTool, i + 1);
+        expect(callTool.mock.calls.map(([name]) => name)).toEqual(expected.slice(0, i + 1));
+        expect(peak.get('browser')).toBe(1);
+        release(expected[i], { content: expected[i].endsWith('snapshot')
+          ? '- link "Engineer" [ref=e1]: https://jobs.lever.co/acme/role-1' : 'ok', isError: false });
+      }
+      const result = await resultPromise;
+      const outputs = result.messages.find((m) => m.role === 'tool')?.toolResults ?? [];
+      expect(outputs.map((r) => r.toolCallId)).toEqual(['c0', 'c1', 'c2', 'c3']);
+      expect(JSON.parse(outputs[0].content).results.map((r: { board: string }) => r.board)).toEqual(['a1', 'a2']);
+      expect(JSON.parse(outputs[2].content).results.map((r: { board: string }) => r.board)).toEqual(['b1', 'b2']);
+      expect(callTool.mock.calls.some(([name]) => String(name).includes('browser_tab_'))).toBe(false);
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+
   it('still returns results for the other calls when one call rejects', async () => {
     const pairs = ['check_cooldown', 'get_job_profiles'].map((n, i) => toolAndCall('truthcv', n, `c${i}`));
     const callTool = vi.fn((namespacedName: string) =>

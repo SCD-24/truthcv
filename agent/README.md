@@ -166,7 +166,7 @@ flag that takes precedence; `daily-apply.sh` passes the flags explicitly):
 | `AGENT_MAX_TOOL_RESULT_CHARS` | Caps a single MCP tool result's character length at the moment it is inserted into the conversation. Defaults to `24000`. An over-long result — a full-page browser snapshot, a long file read — is truncated with an explicit marker naming how many characters were cut and instructing the model to re-request a narrower view, so it never receives silently partial data. Must be a positive integer. |
 | `AGENT_PROMPT_CACHE` | Toggles Anthropic prompt-cache `cache_control` breakpoints (the tools block plus the first and last message) on the **Anthropic wire only**. Defaults to `true`. Set to `false` to disable caching entirely if runs are spaced further apart than the cache's 5-minute TTL, where the cache-write cost (1.25x) could exceed the savings. Has no effect on the OpenAI-compatible wire, which relies on automatic prefix caching instead. |
 | `AGENT_MAX_TOOL_CONCURRENCY` | Max non-browser tool calls one turn dispatches concurrently against the shared truthcv MCP server. Defaults to `4`. Browser tool calls always run one at a time regardless of this value, because the browser server drives a single Chromium profile with one holder. Must be a positive integer. |
-| `AGENT_BROWSER_SESSIONS` | Max EXTRA MCP sessions `harvest_postings`' session-per-worker path (`agent/harness/mcp/sessionPool.ts`) may open to the `browser` service, beyond the harness's own single shared browser connection. Defaults to `3`. Every session shares the one signed-in browser profile — this is concurrency within one profile, not multiple profiles. `1` disables parallel harvest (falls back to the tab path). An unset/empty/non-numeric/negative value falls back to `3`; a well-formed value above `8` is clamped down to `8` rather than opening that many connections against one profile. |
+| `AGENT_BROWSER_SESSIONS` | Retired for production harvest: ignored, not forwarded by Compose. `harvest_postings` always works boards serially through the primary browser MCP connection and persistent signed-in profile; setting this value cannot re-enable concurrent sessions or tabs. The old session-per-worker and tab modes remain dormant helper code only. |
 | `AGENT_SCREENING_MODEL` | Model identifier for the `screen_posting` built-in tool's own, separate provider adapter — an isolated, typically-cheaper subagent call that screens one discovered posting against a job profile's criteria instead of reasoning through every hard filter in the main loop's own context (see `RUNBOOK.md` §5). **Defaults to `AGENT_LLM_MODEL`** (the main model) when unset, so an operator who configures nothing keeps today's behaviour exactly: one model doing both jobs. |
 | `AGENT_SCREENING_PROVIDER` | Logical provider for the screening adapter: `claude`, `codex`, `openrouter`, or `ollama`. Defaults to `AGENT_LLM_PROVIDER` when unset. |
 | `AGENT_SCREENING_WIRE` | Wire protocol for the screening adapter. Defaults to `AGENT_LLM_WIRE` when unset. |
@@ -184,12 +184,13 @@ connection failure, `5` bad configuration, `6` the loop ended cleanly but
 `finish_run` was never executed, so the run was abandoned without reporting an
 outcome.
 
-**Almost no built-in tools.** The harness ships with one narrow built-in tool,
-`read_runbook_section` — it returns one named section of `RUNBOOK.md` from the
-image and takes no path argument, so it opens no general filesystem read. There
-is no `Read`, `Write`, `WebSearch`, or `WebFetch`. Every other capability the
-agent has comes from the MCP servers declared in [`mcp.json`](mcp.json); if a
-server is not in that config, the agent cannot reach it.
+**Narrow built-in tools.** `read_runbook_section` returns one named section of
+`RUNBOOK.md` from the image and takes no path argument, so it opens no general
+filesystem read. `screen_posting` screens via its configured provider adapter;
+`harvest_postings` uses only allow-listed browser tools on the primary MCP
+connection, serially. There is no `Read`, `Write`, `WebSearch`, or `WebFetch`.
+Other capabilities come from the MCP servers declared in [`mcp.json`](mcp.json);
+if a server is not in that config, the agent cannot reach it.
 
 ## Agents page: the schedule and enable switch
 
@@ -257,24 +258,21 @@ only the tool names this RUNBOOK actually calls are granted, not the whole
 upstream `@playwright/mcp` server. That browser allow-list is itself split
 into a REQUIRED set (the ten tools the RUNBOOK's step-by-step browser
 instructions call directly) and an OPTIONAL set (the four `browser_tab_*`
-tools the `harvest_postings` built-in uses to harvest several boards
-concurrently, each in its own tab). The harness fails loudly at startup,
+tools retained in the allow-list for model-issued calls, not used by
+production `harvest_postings`). The harness fails loudly at startup,
 before any run turn, if a REQUIRED name is missing from what the `browser`
 server actually advertises — an upstream rename must never silently disable a
 tool mid-run. A missing OPTIONAL tab tool does **not** fail startup: those
 names are this workspace's best guess at what the pinned `@playwright/mcp`
 calls its tab tools — the package is installed into the `browser` image at
 build time and is not vendored here, so the names could not be verified
-against it. When the `browser` server does not advertise them,
-`harvest_postings` — unless its preferred session-per-worker path already ran
-(see `AGENT_BROWSER_SESSIONS` above, which needs no tab tools at all) —
-degrades to harvesting boards serially, one at a time, in the single shared
-tab, instead of concurrently — same per-board result shape and outcome
-classification, just no concurrency; which mode ran is logged (never page
-content). The harness has no MCP-backed built-in tools of its
-own beyond one narrow exception: `read_runbook_section`, which returns a named
-section of `RUNBOOK.md` from the image and takes no path argument, so it opens
-no general filesystem read. It has no tool for approving an inference: the approve/deny gate
+against it. Whether or not the `browser` server advertises them,
+production `harvest_postings` harvests boards serially, one at a time, on the
+primary MCP connection and persistent signed-in profile — same per-board
+result shape and outcome classification; its serial mode is logged (never
+page content). The tab-per-board and session-per-worker helper modes remain
+in code for direct callers/tests, but production dispatch cannot reach them.
+The harness has no tool for approving an inference: the approve/deny gate
 is the product, and the agent never stands on both sides of it. The RUNBOOK's core rules still hold —
 the truthfulness rules, the cooldowns, and the rule that an application counts
 as submitted only when the confirmation page says so — but its search filters
