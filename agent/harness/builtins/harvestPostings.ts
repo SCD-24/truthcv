@@ -32,8 +32,11 @@
  * once the page loads is reported `blocked` with `blockKind: 'login'`, never
  * `empty` and never carrying a raw snapshot.
  *
- * Boards are harvested with the FIRST usable strategy of three, tried in this
- * order of preference:
+ * Production dispatch in tools.ts passes `false` with no session pool, so
+ * boards run serially through the primary MCP connection and saved profile,
+ * with no tab management. The optional helper modes below remain dormant in
+ * production, retaining their signatures and tests. Direct helper callers
+ * can select the FIRST usable strategy of three, tried in this order:
  *  1. One independent MCP session per board (harvestSessions.ts), when the
  *     browser session pool (agent/harness/mcp/sessionPool.ts) has at least
  *     two sessions available. No tab tools at all in this path — each
@@ -109,15 +112,15 @@ export const harvestPostingsTool: ToolDefinition = {
     'and never navigated — harvest never drives a sign-in flow through a tab. ' +
     "A board's result carries a raw snapshot ONLY when its page had content but extraction " +
     'matched nothing (including a consent/bot-check phrase seen alongside real content) — read ' +
-    'that yourself as the last resort. Boards harvest concurrently, each in its own browser tab, ' +
-    'when the browser server’s tab listing can be parsed; otherwise every board is harvested ' +
-    'serially instead, one at a time, with the same result shape.',
+    'that yourself as the last resort. Production harvests boards serially, one at a time, ' +
+    'through the primary browser MCP connection and saved signed-in profile; it never opens ' +
+    'extra sessions or manages tabs, regardless of advertised tab tools.',
   inputSchema: {
     type: 'object',
     properties: {
       boards: {
         type: 'array',
-        description: 'One or more boards to harvest, each opened and searched in its own tab.',
+        description: 'One or more boards to harvest in order, serially on the primary browser connection.',
         items: {
           type: 'object',
           properties: {
@@ -235,25 +238,21 @@ function coerceBoards(raw: unknown): HarvestBoardRequest[] {
 }
 
 /**
- * Harvest one or more boards. Each in its own browser tab, bounded
- * concurrently, when `tabToolsAvailable` is true AND this invocation's own
- * tab-listing probe succeeds; serially in the single shared tab otherwise
- * (see the module doc). Never throws: a missing/invalid `boards` argument,
+ * Harvest one or more boards. Production passes `false` without a session
+ * pool, forcing serial work in the primary tab; direct helper callers may
+ * still exercise the optional tab/session paths (see the module doc).
+ * Never throws: a missing/invalid `boards` argument,
  * or any failure raised while harvesting, is returned as an `isError`
  * result.
  *
  * @param rawArgs The raw tool-call arguments.
  * @param call Drives the allow-listed browser tools, supplied by tools.ts.
- * @param tabToolsAvailable Whether the browser server advertises its
- *   tab-management tools, as decided by tools.ts's `browserTabToolsAvailable`.
- *   Defaults to true so every existing caller/test keeps today's concurrent
- *   behaviour unless it says otherwise.
- * @param sessionPool The browser session pool for the session-per-worker
- *   path, supplied by tools.ts. `undefined` (every existing caller/test)
- *   skips straight to the tab-per-board/serial fallbacks, unchanged.
- * @param isSessionToolPermitted The allow-list check the session-per-worker
- *   path consults before every leased-session call — tools.ts's
- *   `isBrowserToolCallPermitted` in production. `undefined` falls back to
+ * @param tabToolsAvailable Whether to try the dormant tab-management path;
+ *   production explicitly passes false. The default retains helper behavior.
+ * @param sessionPool Optional pool for dormant session-per-worker helpers;
+ *   production never supplies one.
+ * @param isSessionToolPermitted The allow-list check used only by the dormant
+ *   session-per-worker path. `undefined` falls back to
  *   permitting everything (see harvestSessions.ts's `harvestWithSessions`),
  *   so an existing caller/test keeps working unchanged.
  * @returns The per-board results as JSON, or an error message, with `isError` set.

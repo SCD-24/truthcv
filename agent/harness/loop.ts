@@ -822,15 +822,10 @@ function maybeWarnWrapUp(state: LoopState, ctx: LoopContext): void {
  * server: browser-owned calls (and `harvest_postings`, which drives the
  * browser internally — see {@link partitionByServer}) still run strictly one
  * at a time AT THIS TURN LEVEL, while every other call may overlap up to
- * `concurrency` at once. The premise here used to be "one Chromium profile,
- * one holder" — that is no longer the whole picture: a single
- * `harvest_postings` call may now itself parallelize its own board-by-board
- * work across several independent browser sessions (see
- * agent/harness/mcp/sessionPool.ts). This partition is about something
- * narrower and still true: never letting two SEPARATE tool calls in the same
- * turn — two model-issued `browser__*` calls, or two `harvest_postings`
- * calls — interleave with each other. Results land at each call's own
- * original index, so
+ * `concurrency` at once. Each `harvest_postings` call also works its boards
+ * serially on the same primary browser connection, so neither its boards nor
+ * separate browser-driving tool calls in the turn can interleave. Results
+ * land at each call's original index, so
  * the returned array matches REQUEST order regardless of completion order —
  * that is what keeps {@link executedFinishRun} and the tool-results message
  * sent back to the provider correct even when calls finish out of order.
@@ -878,12 +873,9 @@ async function runToolCall(
  * server and falls into the concurrent group — executeToolCall reports
  * "unknown tool" for it regardless of grouping. `harvest_postings` is routed
  * into the SAME serial group as `browser__*` calls even though it is a
- * `builtin`-server tool: its execution drives the browser internally — over
- * the harness's own single shared MCP connection for model-issued
- * `browser__*` calls, and, INTERNALLY to one `harvest_postings` call, over its
- * own independent per-board sessions when enough are available (see
- * agent/harness/mcp/sessionPool.ts) — so at this TURN level it must still
- * never overlap a model-issued browser call or another harvest_postings call
+ * `builtin`-server tool: its execution drives the browser internally over
+ * the same primary MCP connection used by model-issued `browser__*` calls,
+ * so it must never overlap a model-issued browser call or another harvest call
  * in the same turn — see tools.ts's `HARVEST_POSTINGS_TOOL_NAME` doc. */
 function partitionByServer(calls: ToolCall[], registry: RegisteredTool[]): { browser: number[]; other: number[] } {
   const browser: number[] = [];

@@ -10,6 +10,7 @@ import {
   type RegisteredTool,
 } from '../tools.js';
 import type { BrowserToolResult } from '../builtins/harvestPostings.js';
+import { McpClientPool as LiveMcpClientPool } from '../mcp/client.js';
 
 /** A stub {@link ProviderAdapter} that yields exactly the given script once. */
 function stubScreeningAdapter(script: HarnessEvent[]): ProviderAdapter {
@@ -346,30 +347,76 @@ describe('executeToolCall dispatching harvest_postings', () => {
     return buildToolRegistry(browserTools as ReturnType<McpClientPool['listTools']>);
   }
 
-  it('drives allow-listed browser tools through pool.callTool and returns structured results', async () => {
-    const callTool = vi.fn(async (name: string): Promise<BrowserToolResult> => {
-      if (name === 'browser__browser_tab_new') return { content: '[0]', isError: false };
-      if (name === 'browser__browser_tab_list') return { content: '[0]', isError: false };
-      if (name === 'browser__browser_navigate') return { content: 'ok', isError: false };
+  it.each([{ omit: [] as string[] }, { omit: ['browser_tab_close'] }])('serializes full board sequences with optional tab tools omitted: $omit', async ({ omit }) => {
+    const previous = process.env.AGENT_BROWSER_SESSIONS;
+    process.env.AGENT_BROWSER_SESSIONS = '8';
+    // Any attempt to add a connection must fail the test, not silently fall back.
+    const extraClient = vi.spyOn(LiveMcpClientPool.prototype, 'connectExtra').mockImplementation(() => {
+      throw new Error('extra browser client forbidden');
+    });
+    let releaseFirst: (() => void) | undefined;
+    const firstSnapshot = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const calls: string[] = [];
+    let board = '';
+    let snapshots = 0;
+    const callTool = vi.fn(async (name: string, args: Record<string, unknown>): Promise<BrowserToolResult> => {
+      expect(name).not.toContain('browser_tab_');
+      calls.push(`${name}:${args.url ?? args.text ?? board}`);
+      if (name === 'browser__browser_navigate') {
+        board = String(args.url);
+        snapshots = 0;
+        return { content: 'ok', isError: false };
+      }
+      if (name === 'browser__browser_snapshot' && snapshots++ === 0) {
+        if (board.endsWith('/first')) await firstSnapshot;
+        return { content: '- searchbox "Search" [ref=s1]', isError: false };
+      }
       if (name === 'browser__browser_snapshot') {
         return { content: '- link "Role" [ref=e1]: https://boards.greenhouse.io/acme/jobs/1', isError: false };
       }
       return { content: 'ok', isError: false };
     });
-    const pool = { callTool } as unknown as McpClientPool;
-    const registry = registryWithBrowserTools();
+    const pool = { callTool, connectExtra: vi.fn(() => { throw new Error('extra client'); }) } as unknown as McpClientPool;
     const call: ToolCall = {
-      id: 'call-1',
-      name: 'harvest_postings',
-      arguments: { boards: [{ board: 'Acme', url: 'https://acme.example/jobs' }] },
+      id: 'call-1', name: 'harvest_postings',
+      arguments: { boards: [
+        { board: 'First', url: 'https://example.com/first', keywords: 'first' },
+        { board: 'Second', url: 'https://example.com/second', keywords: 'second' },
+      ] },
     };
-
-    const result = await executeToolCall(pool, call, registry);
-
-    expect(result.isError).toBe(false);
-    expect(callTool).toHaveBeenCalledWith('browser__browser_navigate', expect.anything());
-    const parsed = JSON.parse(result.content);
-    expect(parsed.results[0].outcome).toBe('searched');
+    try {
+      const resultPromise = executeToolCall(pool, call, registryWithBrowserTools(omit));
+      // The first snapshot is held: no navigation, tab switch, or second board
+      // may begin until the first board's type + final snapshot have finished.
+      for (let i = 0; i < 100 && callTool.mock.calls.length < 2; i++) await Promise.resolve();
+      expect(callTool).toHaveBeenCalledTimes(2);
+      expect(calls).toEqual([
+        'browser__browser_navigate:https://example.com/first',
+        'browser__browser_snapshot:https://example.com/first',
+      ]);
+      releaseFirst?.();
+      const result = await resultPromise;
+      expect(result.isError).toBe(false);
+      expect(JSON.parse(result.content).results.map((r: { board: string; outcome: string }) => [r.board, r.outcome]))
+        .toEqual([['First', 'searched'], ['Second', 'searched']]);
+      expect(calls).toEqual([
+        'browser__browser_navigate:https://example.com/first',
+        'browser__browser_snapshot:https://example.com/first',
+        'browser__browser_type:first',
+        'browser__browser_snapshot:https://example.com/first',
+        'browser__browser_navigate:https://example.com/second',
+        'browser__browser_snapshot:https://example.com/second',
+        'browser__browser_type:second',
+        'browser__browser_snapshot:https://example.com/second',
+      ]);
+      expect(extraClient).not.toHaveBeenCalled();
+      expect((pool as unknown as { connectExtra: ReturnType<typeof vi.fn> }).connectExtra).not.toHaveBeenCalled();
+    } finally {
+      releaseFirst?.();
+      if (previous === undefined) delete process.env.AGENT_BROWSER_SESSIONS;
+      else process.env.AGENT_BROWSER_SESSIONS = previous;
+      extraClient.mockRestore();
+    }
   });
 
   it('refuses harvest_postings\' own internal browser calls, without touching pool.callTool, when NOTHING is advertised', async () => {
@@ -394,12 +441,8 @@ describe('executeToolCall dispatching harvest_postings', () => {
     expect(callTool).not.toHaveBeenCalled();
   });
 
-  it('denies tab-tool name resolution when only ONE tab-management tool is unadvertised, falling back to serial rather than a partial concurrent attempt', async () => {
-    // Only browser_tab_close is missing; every REQUIRED tool plus the other
-    // three tab tools are advertised. tabToolsAvailable requires ALL FOUR, so
-    // this must still take the degraded serial path — no tab-tool call is
-    // ever attempted, denied or otherwise, proving the all-or-nothing gate
-    // works rather than a partially-resolved concurrent harvest.
+  it('does not attempt tab tools even when some are advertised', async () => {
+    // Optional tab availability never controls production harvest dispatch.
     const callTool = vi.fn(async (name: string): Promise<BrowserToolResult> => {
       if (name === 'browser__browser_navigate') return { content: 'ok', isError: false };
       if (name === 'browser__browser_snapshot') {
@@ -423,33 +466,49 @@ describe('executeToolCall dispatching harvest_postings', () => {
     expect(parsed.results[0].outcome).toBe('searched');
   });
 
-  it('resolves a real tab-tool name to its namespaced call and confines that board when it errors', async () => {
-    // The concurrent path IS taken (every tab tool advertised), and
-    // browser_tab_new resolves to the real namespaced 'browser__browser_tab_new'
-    // — proving tab-tool name resolution succeeds when the name is genuinely
-    // available, complementing the denial case above.
-    const callTool = vi.fn(async (name: string): Promise<BrowserToolResult> => {
-      // The upfront tab-listing probe must see a parseable listing so the
-      // concurrent path is actually taken — see harvestTabs.ts's
-      // `probeTabListing`.
-      if (name === 'browser__browser_tab_list') return { content: '[0] about:blank', isError: false };
-      if (name === 'browser__browser_tab_new') return { content: 'no more tabs', isError: true };
-      return { content: 'ok', isError: false };
+  it('contains a thrown board failure and preserves ordered classification and raw snapshot', async () => {
+    let current = '';
+    const raw = '- link "Other role" [ref=e2]: https://example.com/careers/role';
+    const callTool = vi.fn(async (name: string, args: Record<string, unknown>): Promise<BrowserToolResult> => {
+      expect(name).not.toContain('browser_tab_');
+      if (name === 'browser__browser_navigate') {
+        current = String(args.url);
+        if (current.endsWith('/failure')) throw new Error('connection lost');
+        return { content: 'ok', isError: false };
+      }
+      if (name === 'browser__browser_snapshot') {
+        const content = current.endsWith('/found')
+          ? '- link "Engineer" [ref=e1]: https://jobs.lever.co/acme/role-1\nComplete the CAPTCHA'
+          : current.endsWith('/raw') ? raw : 'sign in to continue';
+        return { content, isError: false };
+      }
+      return { content: 'unexpected tool', isError: true };
     });
     const pool = { callTool } as unknown as McpClientPool;
-    const registry = registryWithBrowserTools();
-    const call: ToolCall = {
-      id: 'call-1',
-      name: 'harvest_postings',
-      arguments: { boards: [{ board: 'Acme', url: 'https://acme.example/jobs' }] },
-    };
-
-    const result = await executeToolCall(pool, call, registry);
-
+    const boards = ['failure', 'found', 'raw', 'login'].map((name) => ({ board: name, url: `https://example.com/${name}` }));
+    const result = await executeToolCall(pool, {
+      id: 'call-1', name: 'harvest_postings', arguments: { boards },
+    }, registryWithBrowserTools());
     expect(result.isError).toBe(false);
-    expect(callTool).toHaveBeenCalledWith('browser__browser_tab_new', expect.anything());
-    const parsed = JSON.parse(result.content);
-    expect(parsed.results[0].outcome).toBe('blocked');
+    const parsed = JSON.parse(result.content).results;
+    expect(parsed.map((r: { board: string; outcome: string }) => [r.board, r.outcome])).toEqual([
+      ['failure', 'blocked'], ['found', 'searched'], ['raw', 'empty'], ['login', 'blocked'],
+    ]);
+    expect(parsed[0]).toMatchObject({ note: expect.stringContaining('connection lost'), postings: [] });
+    expect(parsed[0].blockKind).toBeUndefined();
+    expect(parsed[1]).toMatchObject({ tier: 'harvest', postings: [{ ats: 'lever', title: 'Engineer' }] });
+    expect(parsed[2]).toMatchObject({ rawSnapshot: raw });
+    expect(parsed[3]).toMatchObject({ blockKind: 'login', postings: [] });
+    expect(parsed[3].rawSnapshot).toBeUndefined();
+    expect(callTool.mock.calls.map(([name, args]) => [name, args.url ?? ''])).toEqual([
+      ['browser__browser_navigate', 'https://example.com/failure'],
+      ['browser__browser_navigate', 'https://example.com/found'],
+      ['browser__browser_snapshot', ''],
+      ['browser__browser_navigate', 'https://example.com/raw'],
+      ['browser__browser_snapshot', ''],
+      // Sign-in URLs are refused before any browser navigation.
+
+    ]);
   });
 });
 

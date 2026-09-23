@@ -386,20 +386,18 @@ LAST-RESORT fallback (an LLM-extraction tier 3 step) only in that one
 ambiguous case; do not fall back to a manual `browser_navigate`/
 `browser_snapshot` pass otherwise, and never for a board `harvest_postings`
 already reported `blocked` — a blocked result never carries a raw snapshot.
-Several boards may be harvested in the same call: when enough extra browser
-sessions are available (`AGENT_BROWSER_SESSIONS`, default 3), each board is
-worked on its own independent browser session concurrently — all sessions
-still share the one signed-in Chromium profile; failing that, when the
-browser server's tab listing can actually be parsed, `harvest_postings`
-opens each board in its own browser tab, sharing the one Chromium profile,
-and works them concurrently, bounded conservatively; when it cannot, every
-board is instead harvested serially, one at a time, in the single shared
-tab — same per-board result shape in every mode, and the result names when
-it degraded to serial so you can see why. Either way its own execution is serialized against every
-other browser-driving tool call so it never interleaves with one you issue
-yourself. It never drives a sign-in flow through a tab, and an attended
-session the operator opens still takes the browser back from the whole set,
-exactly as it does from a single run (see browser/session-server.js).
+Several boards may be harvested in the same call, but production
+`harvest_postings` works them serially, in order, through the existing primary
+browser MCP connection and persistent signed-in profile. It makes no extra
+session or tab-management calls, even if tab tools are advertised or the old
+`AGENT_BROWSER_SESSIONS` setting is present. The session-per-worker and
+tab-per-board modes remain dormant helper code, not available through this
+tool's production dispatch. Each board keeps the same per-board result shape,
+outcome classification and raw-snapshot fallback described above. The whole
+harvest call is serialized against other browser-driving tool calls, so it
+does not interleave with browser actions you issue yourself. It never drives
+a sign-in flow, and an attended session the operator opens still takes the
+browser back from the run (see browser/session-server.js).
 
 If the board puts up a login wall before you can search or apply — including
 a direct board `harvest_postings` reported `blocked` with `blockKind:

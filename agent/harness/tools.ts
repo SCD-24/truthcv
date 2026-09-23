@@ -26,7 +26,6 @@ import type { ProviderAdapter } from './providers/types.js';
 import { readRunbookSection, readRunbookSectionTool } from './builtins/readRunbook.js';
 import { screenPosting, screenPostingTool } from './builtins/screenPosting.js';
 import { harvestPostings, harvestPostingsTool, type BrowserToolCall } from './builtins/harvestPostings.js';
-import { BrowserSessionPool } from './mcp/sessionPool.js';
 
 /**
  * The 19 truthcv tools granted individually by `daily-apply.sh`, as their bare
@@ -109,23 +108,13 @@ const BROWSER_REQUIRED_TOOL_NAMES = [
 ] as const;
 
 /**
- * Tab-management tool names, granted so the harvest_postings built-in can
- * harvest several boards concurrently, each in its own browser tab, when the
- * server advertises them — see ./builtins/harvestPostings.ts. Allow-listed
- * but OPTIONAL, UNLIKE {@link BROWSER_REQUIRED_TOOL_NAMES}: these names are
- * this workspace's best guess at what upstream `@playwright/mcp` calls its
- * tab tools, NOT a checked fact — the pinned package is `npm install -g`'d
- * into the `browser` image at build time (browser/Dockerfile) and is not
- * vendored anywhere in this workspace, so there was nothing to verify the
- * names against. A wrong guess must never hard-fail every run, so
- * {@link checkAdvertisedBrowserTools} does not require these; when the
- * `browser` server does not advertise them, harvestPostings.ts degrades to
- * harvesting boards serially, one at a time, in the single shared tab,
- * instead of concurrently. These names being ADVERTISED is only half the
- * gate: even when all four are present, harvestPostings.ts additionally
- * probes the tab-listing TEXT it actually gets back at runtime (its exact
- * rendering is likewise unverified) before committing to the concurrent
- * path — see harvestTabs.ts's `probeTabListing`.
+ * Tab-management tool names remain optionally allow-listed for model-issued
+ * calls, but production harvest_postings never uses them: boards run serially
+ * through the primary browser connection regardless of their advertisement.
+ * Unlike {@link BROWSER_REQUIRED_TOOL_NAMES}, their absence cannot fail
+ * startup. The pinned upstream package is not vendored here, so these names
+ * are not a checked fact; dormant tab-per-board helpers remain available for
+ * their own tests, not for production dispatch.
  */
 const BROWSER_OPTIONAL_TOOL_NAMES = ['browser_tab_list', 'browser_tab_new', 'browser_tab_select', 'browser_tab_close'] as const;
 
@@ -285,40 +274,11 @@ const HARVEST_POSTINGS_TOOL: RegisteredTool = {
  * another concurrent harvest_postings call's own calls — exactly the
  * cross-call race the browser partition exists to prevent. Routing it into
  * the browser partition instead means only one of {browser__* call,
- * harvest_postings call} is ever in flight at a time, harness-wide. (That is
- * about not letting two SEPARATE tool calls interleave; it says nothing
- * about how many browser CONNECTIONS exist — one harvest_postings call may
- * itself drive several independent sessions in parallel internally, via
- * {@link getSessionPool}/harvestSessions.ts.)
+ * harvest_postings call} is ever in flight at a time within a turn. Each
+ * harvest_postings call itself harvests boards serially on that same primary
+ * connection.
  */
 export const HARVEST_POSTINGS_TOOL_NAME = HARVEST_POSTINGS_TOOL.toolName;
-
-/**
- * One {@link BrowserSessionPool} per `McpClientPool` instance, lazily built
- * and cached so repeated {@link executeToolCall} calls across a run's many
- * turns reuse the same extra browser sessions instead of reconnecting every
- * turn. Keyed by the pool object itself (a `WeakMap`) rather than passed
- * through `RunLoopOptions`, so loop.ts needs no new parameter to thread this
- * through — it stays entirely internal to dispatching `harvest_postings`.
- */
-const sessionPools = new WeakMap<McpClientPool, BrowserSessionPool>();
-
-/**
- * Get (or lazily create) the {@link BrowserSessionPool} for `pool`. Reads
- * `AGENT_BROWSER_SESSIONS` from `process.env` directly — the one place in
- * this harness that does, since the pool never needs to be configured from
- * anywhere else.
- *
- * @param pool The harness's own MCP client pool, already connected.
- * @returns The cached pool for `pool`, creating it on first use.
- */
-function getSessionPool(pool: McpClientPool): BrowserSessionPool {
-  const cached = sessionPools.get(pool);
-  if (cached) return cached;
-  const created = new BrowserSessionPool(pool, process.env);
-  sessionPools.set(pool, created);
-  return created;
-}
 
 /**
  * Default path to the RUNBOOK the built-in reads, resolved relative to THIS
@@ -422,10 +382,8 @@ export function isToolAllowed(serverName: string, toolName: string): boolean {
 /**
  * Whether a bare BROWSER tool name may be called at all, reproducing the
  * exact {@link isToolAllowed} decision and refusal wording {@link browserToolCall}
- * uses for the tab/serial harvest paths - exported so harvest_postings' own
- * session-per-worker path (harvestSessions.ts) can consult the SAME
- * allow-list decision for calls it dispatches on a leased session's own MCP
- * client directly, never through `browserToolCall` itself.
+ * uses. Exported for the dormant session-per-worker helper's tests; production
+ * harvest only calls through {@link browserToolCall} on the primary connection.
  *
  * @param toolName The tool's own (un-namespaced) name.
  * @returns The refusal message when the tool is not permitted; `undefined`
@@ -433,22 +391,6 @@ export function isToolAllowed(serverName: string, toolName: string): boolean {
  */
 export function isBrowserToolCallPermitted(toolName: string): string | undefined {
   return isToolAllowed(BROWSER_SERVER_NAME, toolName) ? undefined : `Tool '${toolName}' is not permitted by the allow-list.`;
-}
-
-/**
- * Whether every {@link BROWSER_OPTIONAL_TOOL_NAMES} tab tool is currently
- * advertised (and so present in `registry`). Decides whether harvest_postings
- * drives several boards concurrently, each in its own tab, or degrades to
- * harvesting them serially in the single shared tab — see
- * ./builtins/harvestPostings.ts.
- *
- * @param registry The current tool registry, from {@link buildToolRegistry}.
- * @returns True when every tab-management tool is available to call.
- */
-function browserTabToolsAvailable(registry: RegisteredTool[]): boolean {
-  return BROWSER_OPTIONAL_TOOL_NAMES.every((name) =>
-    registry.some((t) => t.serverName === BROWSER_SERVER_NAME && t.toolName === name),
-  );
 }
 
 /**
@@ -557,25 +499,12 @@ export async function executeToolCall(
   }
   // Likewise dispatched here, BEFORE the allow-list and without going through
   // isToolAllowed itself directly - but UNLIKE screen_posting, harvest_postings
-  // DOES reach pool.callTool, via one of TWO paths depending which harvest
-  // mode it picks internally: the tab/serial paths call the browserToolCall
-  // closure below, which re-checks isToolAllowed and resolves the live
-  // namespaced name for every underlying browser__* call; the
-  // session-per-worker path instead dispatches on each leased session's OWN
-  // MCP client directly (no `pool`, no namespaced name to resolve), so it is
-  // handed isBrowserToolCallPermitted below instead - harvestSessions.ts's
-  // toolCallFor consults it before every call, reusing the exact same
-  // isToolAllowed decision and refusal wording - so the allow-list still
-  // governs every one of them individually, just via two call sites of the
-  // same underlying check.
+  // DOES reach pool.callTool via the primary browser connection. Passing false
+  // forces serial boards regardless of advertised tab tools or legacy session
+  // settings. The browserToolCall closure re-checks the allow-list and resolves
+  // the current namespaced name on every underlying browser call.
   if (tool.namespacedName === HARVEST_POSTINGS_TOOL.namespacedName) {
-    const result = await harvestPostings(
-      call.arguments,
-      browserToolCall(pool, registry),
-      browserTabToolsAvailable(registry),
-      getSessionPool(pool),
-      isBrowserToolCallPermitted,
-    );
+    const result = await harvestPostings(call.arguments, browserToolCall(pool, registry), false);
     return {
       toolCallId: call.id,
       content: capToolResultContent(result.content, maxContentChars),
