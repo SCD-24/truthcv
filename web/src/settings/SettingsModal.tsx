@@ -15,6 +15,7 @@ import { AccountsSection } from "./AccountsSection";
 import { DefaultModelSection } from "./DefaultModelSection";
 import { TaskModelsSection } from "./TaskModelsSection";
 import { JobSearchPolicySection } from "./JobSearchPolicySection";
+import { SettingsAutosaveProvider, useSettingsAutosaveCoordinator } from "./SettingsAutosave";
 import { JevSection } from "./JevSection";
 import { GmailSection } from "./GmailSection";
 import { useWizard } from "../wizard/store";
@@ -55,25 +56,42 @@ export function SettingsSection({
  * and renders the Accounts section (connect/disconnect providers) and the
  * Default model section (pick and save the default routing).
  */
-export function SettingsModal({
-  onClose,
-  initialSection,
-}: {
+type ModalProps = {
   onClose: () => void;
-  /** When "job-search-policy", scroll the Job search policy section into view
-   * on open (deep link from the Agents page's cooldown summary). */
+  /** Deep link from the Agents page's cooldown summary. */
   initialSection?: "job-search-policy";
-}) {
+};
+
+export function SettingsModal(props: ModalProps) {
+  return <SettingsAutosaveProvider><SettingsModalContent {...props} /></SettingsAutosaveProvider>;
+}
+
+function SettingsModalContent({ onClose, initialSection }: ModalProps) {
+  const autosave = useSettingsAutosaveCoordinator();
+  const [closeBlocked, setCloseBlocked] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const closing = useRef(false);
+
+  async function requestClose(afterFlush?: () => Promise<void>) {
+    if (closing.current) return;
+    closing.current = true;
+    try {
+      if (!(await autosave.flushAndWait())) { setCloseBlocked(true); return; }
+      if (afterFlush) await afterFlush();
+      onClose();
+    } finally { closing.current = false; }
+  }
   const rootRef = useRef<HTMLDivElement | null>(null);
   const { setOnboarding } = useWizard();
 
-  async function replayTour() {
-    try {
-      setOnboarding(await updateOnboarding({ tourSeenAt: null }));
-    } catch (err) {
-      console.error("Failed to reset tour state", err);
-    }
-    onClose();
+  function replayTour() {
+    void requestClose(async () => {
+      try {
+        setOnboarding(await updateOnboarding({ tourSeenAt: null }));
+      } catch (err) {
+        console.error("Failed to reset tour state", err);
+      }
+    });
   }
 
   useEffect(() => {
@@ -116,18 +134,19 @@ export function SettingsModal({
   const encryptionOff = connections ? !connections.encryptionAvailable : false;
 
   return (
-    <Dialog open onClose={onClose} maxWidth="md" fullWidth aria-labelledby="settings-title">
+    <Dialog open onClose={() => { void requestClose(); }} maxWidth="md" fullWidth aria-labelledby="settings-title">
       <DialogTitle
         id="settings-title"
         sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}
       >
         Settings
-        <IconButton onClick={onClose} aria-label="Close settings" edge="end">
+        <IconButton onClick={() => { void requestClose(); }} aria-label="Close settings" edge="end">
           <CloseIcon />
         </IconButton>
       </DialogTitle>
 
       <DialogContent dividers ref={rootRef}>
+        <fieldset disabled={discarding} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
         {loading ? (
           <Typography color="text.secondary" sx={{ py: 2 }}>
             Loading settings…
@@ -152,6 +171,7 @@ export function SettingsModal({
                 connections={connections.connections}
                 routing={routing}
                 onSaved={setRouting}
+                autosave
               />
             )}
 
@@ -179,10 +199,23 @@ export function SettingsModal({
             </SettingsSection>
           </Stack>
         )}
+        </fieldset>
       </DialogContent>
 
       <DialogActions>
-        <Button onClick={onClose}>Close</Button>
+        {closeBlocked && (
+          <Alert severity="error" role="alert">
+            Unsaved or invalid changes remain. Fix them or discard changes to close.
+          </Alert>
+        )}
+        {closeBlocked && <Button disabled={discarding} onClick={async () => {
+          if (closing.current) return;
+          closing.current = true;
+          setDiscarding(true);
+          await autosave.discardAndWait();
+          onClose();
+        }}>Discard changes</Button>}
+        <Button disabled={discarding} onClick={() => { void requestClose(); }}>Close</Button>
       </DialogActions>
     </Dialog>
   );

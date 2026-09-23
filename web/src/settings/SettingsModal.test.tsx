@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   getProfileAnswers,
+  getAgentConfig,
+  updateAgentConfig,
   getRouting,
   listConnections,
+  listConnectionModels,
+  updateRouting,
   saveProfileAnswers,
 } from "../api/client";
-import type { ConnectionList, ProfileAnswers, Routing } from "../api/types";
+import type { AgentConfig, ConnectionList, ProfileAnswers, Routing } from "../api/types";
 import { SettingsModal } from "./SettingsModal";
 import { WizardProvider } from "../wizard/store";
 
@@ -27,6 +31,10 @@ vi.mock("../api/client", async (importOriginal) => {
     ...actual,
     listConnections: vi.fn(),
     getRouting: vi.fn(),
+    getAgentConfig: vi.fn(),
+    updateAgentConfig: vi.fn(),
+    listConnectionModels: vi.fn(),
+    updateRouting: vi.fn(),
   };
 });
 
@@ -48,6 +56,8 @@ beforeEach(() => {
   originalFetch = globalThis.fetch;
   fetchMock = vi.fn<typeof fetch>();
   globalThis.fetch = fetchMock;
+  vi.mocked(getAgentConfig).mockResolvedValue({ cooldownDays: 90, cooldownDaysSameRole: null,
+    cooldownDaysSameCompany: null } as AgentConfig);
 });
 
 afterEach(() => {
@@ -160,6 +170,7 @@ describe("SettingsModal", () => {
     const routing: Routing = { tasks: {}, agent: null, default: null };
     vi.mocked(listConnections).mockResolvedValueOnce(list);
     vi.mocked(getRouting).mockResolvedValueOnce(routing);
+    vi.mocked(listConnectionModels).mockResolvedValue([]);
 
     render(
       <WizardProvider>
@@ -171,5 +182,71 @@ describe("SettingsModal", () => {
     expect(screen.getByText("Default model")).toBeTruthy();
     expect(screen.getByText("Task models")).toBeTruthy();
     expect(screen.getAllByText("Claude").length).toBeGreaterThan(0);
+  });
+
+  it("Close flushes only edited cooldown keys and waits for policy writes", async () => {
+    vi.mocked(listConnections).mockResolvedValue({ encryptionAvailable: true, connections: [] });
+    vi.mocked(getRouting).mockResolvedValue({ tasks: {}, agent: null, default: null });
+    vi.mocked(getAgentConfig).mockResolvedValue({ cooldownDays: 90, cooldownDaysSameRole: null,
+      cooldownDaysSameCompany: null } as AgentConfig);
+    let finish!: (config: AgentConfig) => void;
+    vi.mocked(updateAgentConfig).mockImplementationOnce(() => new Promise((ok) => { finish = ok; }));
+    const onClose = vi.fn();
+    render(<WizardProvider><SettingsModal onClose={onClose} /></WizardProvider>);
+    const field = await screen.findByLabelText(/same role cooldown/i);
+    expect(updateAgentConfig).not.toHaveBeenCalled();
+    fireEvent.change(field, { target: { value: "4" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await vi.waitFor(() => expect(updateAgentConfig).toHaveBeenCalledWith({ cooldownDaysSameRole: 4 }));
+    expect(onClose).not.toHaveBeenCalled();
+    finish({ cooldownDays: 90, cooldownDaysSameRole: 4 } as AgentConfig);
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("Close waits for routing writes and failed drafts require retry or explicit discard", async () => {
+    const list: ConnectionList = { encryptionAvailable: true, connections: [{
+      provider: "claude", label: "Claude", modes: ["subscription"], subscriptionConnected: true,
+      apiKeyConnected: false, authMode: "subscription", expiresAt: null, connectedAt: null,
+    }] };
+    const routing: Routing = { tasks: {}, agent: null, default: null };
+    vi.mocked(listConnections).mockResolvedValue(list);
+    vi.mocked(getRouting).mockResolvedValue(routing);
+    vi.mocked(listConnectionModels).mockResolvedValue([{ id: "m", label: "Model M" }]);
+    let reject!: (error: Error) => void;
+    vi.mocked(updateRouting).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const onClose = vi.fn();
+    render(<WizardProvider><SettingsModal onClose={onClose} /></WizardProvider>);
+    expect(await screen.findByText("Default model")).toBeTruthy();
+    fireEvent.mouseDown(screen.getAllByLabelText(/^model$/i)[0]);
+    fireEvent.click(await screen.findByRole("option", { name: "Model M" }));
+    await vi.waitFor(() => expect(updateRouting).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(onClose).not.toHaveBeenCalled();
+    reject(new Error("offline"));
+    expect(await screen.findByText(/Unsaved or invalid changes remain/)).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("Discard cancels an invalid draft without writing it and a reopened modal starts clean", async () => {
+    vi.mocked(listConnections).mockResolvedValue({ encryptionAvailable: true, connections: [] });
+    vi.mocked(getRouting).mockResolvedValue({ tasks: {}, agent: null, default: null });
+    const onClose = vi.fn();
+    const view = render(<WizardProvider><SettingsModal onClose={onClose} /></WizardProvider>);
+    const field = await screen.findByLabelText(/same role cooldown/i);
+    fireEvent.change(field, { target: { value: "9999999999999999999999" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(await screen.findByText(/Unsaved or invalid changes remain/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(updateAgentConfig).not.toHaveBeenCalled();
+    view.unmount();
+    const reopened = vi.fn();
+    render(<WizardProvider><SettingsModal onClose={reopened} /></WizardProvider>);
+    await screen.findByLabelText(/same role cooldown/i);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await vi.waitFor(() => expect(reopened).toHaveBeenCalledTimes(1));
+    expect(updateAgentConfig).not.toHaveBeenCalled();
   });
 });

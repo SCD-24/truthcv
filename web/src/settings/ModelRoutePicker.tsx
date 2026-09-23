@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Stack from "@mui/material/Stack";
 import Button from "@mui/material/Button";
 import Alert from "@mui/material/Alert";
@@ -8,6 +8,7 @@ import { listConnectionModels, testConnectionProvider } from "../api/client";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { SettingsSection } from "./SettingsModal";
 import { ModelSelect } from "./ModelSelect";
+import { useSettingsAutosave } from "./SettingsAutosave";
 import type { ConnectionStatus, ModelInfo, RouteChoice } from "../api/types";
 
 type TestState =
@@ -36,6 +37,8 @@ export function ModelRoutePicker({
   filterCards,
   allowClear = false,
   showTest = false,
+  autosaveKey,
+  allowDefaultCommit = false,
 }: {
   connections: ConnectionStatus[];
   route: RouteChoice | null;
@@ -47,6 +50,10 @@ export function ModelRoutePicker({
   filterCards?: string[];
   allowClear?: boolean;
   showTest?: boolean;
+  /** Opt-in only: Agents' shared picker keeps its manual Save button. */
+  autosaveKey?: string;
+  /** Expose a deliberate commit for the modal's initial provider fallback. */
+  allowDefaultCommit?: boolean;
 }) {
   const connectedConnections = connections
     .filter(isConnected)
@@ -63,10 +70,28 @@ export function ModelRoutePicker({
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [needsCommit, setNeedsCommit] = useState(
+    route === null || !connectedConnections.some((c) => c.provider === route.connection),
+  );
   const [error, setError] = useState<string | null>(null);
   const [test, setTest] = useState<TestState>({ kind: "idle" });
   const [effort, setEffort] = useState(route?.effort ?? "");
-  const [contextWindow, setContextWindow] = useState(route?.contextWindow ?? 0);
+  const [contextWindow, setContextWindow] = useState(String(route?.contextWindow ?? 0));
+  const autosave = useSettingsAutosave(autosaveKey ?? `manual:${title}`);
+  const requestId = useRef(0);
+  const draftModel = useRef(route?.model ?? "");
+
+  function queueChoice(next: { connection: string; model: string; custom: boolean; effort: string; context: string }, debounce = false) {
+    if (!autosaveKey) return;
+    const window = Number(next.context);
+    const validWindow = next.context.trim() !== "" && Number.isSafeInteger(window) && (window === 0 || window >= 8192);
+    const choice: RouteChoice = { connection: next.connection, model: next.model };
+    if (next.effort) choice.effort = next.effort;
+    if (window > 0) choice.contextWindow = window;
+    const valid = !!next.connection && (!next.custom || !!next.model.trim()) && validWindow;
+    if (valid) setNeedsCommit(false);
+    autosave.edit(choice, onSave, { valid, debounce });
+  }
 
   /** Effort levels advertised by the currently selected listed model.
    * Empty when the model is a custom id, blank, or has no effort support. */
@@ -78,6 +103,7 @@ export function ModelRoutePicker({
   // Pull the connection's model list live. Returns the list so callers can
   // decide whether the current model is a known option or a custom id.
   async function loadModels(conn: string): Promise<ModelInfo[]> {
+    const id = ++requestId.current;
     if (!conn) {
       setModels([]);
       return [];
@@ -86,14 +112,16 @@ export function ModelRoutePicker({
     setModelsError(null);
     try {
       const list = (await listConnectionModels(conn)) ?? [];
-      setModels(list);
+      if (id === requestId.current) setModels(list);
       return list;
     } catch (e) {
-      setModels([]);
-      setModelsError(e instanceof Error ? e.message : "Couldn't load models.");
+      if (id === requestId.current) {
+        setModels([]);
+        setModelsError(e instanceof Error ? e.message : "Couldn't load models.");
+      }
       return [];
     } finally {
-      setModelsLoading(false);
+      if (id === requestId.current) setModelsLoading(false);
     }
   }
 
@@ -111,9 +139,13 @@ export function ModelRoutePicker({
     if (next === connection) return;
     setConnection(next);
     setModel("");
+    draftModel.current = "";
     setCustomModel(false);
+    setEffort("");
     setModels([]);
     setTest({ kind: "idle" });
+    setNeedsCommit(true);
+    if (autosaveKey) autosave.cancel();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectedKey]);
 
@@ -130,12 +162,16 @@ export function ModelRoutePicker({
       return;
     }
     let alive = true;
+    const initialModel = draftModel.current;
+    const id = requestId.current + 1;
     loadModels(connection).then((list) => {
-      if (!alive) return;
-      setCustomModel(!!model && !list.some((m) => m.id === model));
+      if (alive && id === requestId.current && initialModel && draftModel.current === initialModel) {
+        setCustomModel(!list.some((m) => m.id === initialModel));
+      }
     });
     return () => {
       alive = false;
+      requestId.current++;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection, connectedKey]);
@@ -147,7 +183,7 @@ export function ModelRoutePicker({
     try {
       const routeChoice: RouteChoice = { connection, model };
       if (effort) routeChoice.effort = effort;
-      if (contextWindow > 0) routeChoice.contextWindow = contextWindow;
+      if (Number(contextWindow) > 0) routeChoice.contextWindow = Number(contextWindow);
       await onSave(routeChoice);
       setSaved(true);
     } catch (e) {
@@ -158,6 +194,15 @@ export function ModelRoutePicker({
   }
 
   async function handleClear() {
+    if (autosaveKey) {
+      setModel("");
+      draftModel.current = "";
+      setCustomModel(false);
+      setEffort("");
+      setNeedsCommit(true);
+      autosave.edit(null, onSave);
+      return;
+    }
     setSaving(true);
     setError(null);
     setSaved(false);
@@ -198,9 +243,11 @@ export function ModelRoutePicker({
           const next = e.target.value;
           setConnection(next);
           setModel("");
+          draftModel.current = "";
           setCustomModel(false);
           setEffort("");
           setTest({ kind: "idle" });
+          queueChoice({ connection: next, model: "", custom: false, effort: "", context: contextWindow });
         }}
       >
         {connectedConnections.map((c) => (
@@ -210,25 +257,30 @@ export function ModelRoutePicker({
         ))}
       </TextField>
 
+      <div onBlur={() => autosaveKey && autosave.flush()}>
       <ModelSelect
         models={models}
         model={model}
         customModel={customModel}
         onChange={({ model: v, customModel: isCustom }) => {
+          draftModel.current = v;
           if (isCustom && !customModel) {
             // Picking "Custom…" from the list.
             setCustomModel(true);
             setModel("");
             setEffort("");
+            queueChoice({ connection, model: "", custom: true, effort: "", context: contextWindow });
           } else if (isCustom) {
             // Typing in the free-text field.
             setModel(v);
+            queueChoice({ connection, model: v, custom: true, effort: "", context: contextWindow }, true);
           } else {
             setCustomModel(false);
             setModel(v);
             // Reset effort when switching to a model whose capability set differs.
             const newLevels = models.find((m) => m.id === v)?.effortLevels ?? [];
             if (effort && !newLevels.includes(effort)) setEffort("");
+            queueChoice({ connection, model: v, custom: false, effort: newLevels.includes(effort) ? effort : "", context: contextWindow });
           }
         }}
         onReload={() => loadModels(connection)}
@@ -236,6 +288,7 @@ export function ModelRoutePicker({
         modelsError={modelsError}
         connection={connection}
       />
+      </div>
 
       {activeEffortLevels.length > 0 && (
         <TextField
@@ -243,7 +296,10 @@ export function ModelRoutePicker({
           fullWidth
           label="Effort level"
           value={effort}
-          onChange={(e) => setEffort(e.target.value)}
+          onChange={(e) => {
+            setEffort(e.target.value);
+            queueChoice({ connection, model, custom: customModel, effort: e.target.value, context: contextWindow });
+          }}
           helperText="Controls the model's reasoning depth. Provider default leaves it unset."
         >
           <MenuItem value="">Provider default</MenuItem>
@@ -260,14 +316,27 @@ export function ModelRoutePicker({
         type="number"
         label="Context window (tokens)"
         value={contextWindow}
-        onChange={(e) => setContextWindow(Number(e.target.value))}
+        onChange={(e) => {
+          setContextWindow(e.target.value);
+          queueChoice({ connection, model, custom: customModel, effort, context: e.target.value }, true);
+        }}
+        onBlur={() => autosaveKey && autosave.flush()}
         helperText="Model input capacity; 0 = unknown, minimum 8192"
       />
 
       {test.kind === "ok" && <Alert severity="success">{test.detail}</Alert>}
       {test.kind === "fail" && <Alert severity="error">{test.detail}</Alert>}
-      {error && <Alert severity="error">{error}</Alert>}
-      {saved && !error && <Alert severity="success">{savedLabel}</Alert>}
+      {autosaveKey && autosave.status !== "idle" && !(needsCommit && autosave.status === "saved") && (
+        <div role="status" aria-live="polite">
+          {autosave.status === "invalid" ? "Complete a valid model and context window before closing." :
+            autosave.status === "error" ? `Save failed: ${autosave.error}` :
+            autosave.status === "pending" ? "Changes pending…" :
+            autosave.status === "saving" ? "Saving…" : savedLabel}
+        </div>
+      )}
+      {autosaveKey && autosave.status === "error" && <Button onClick={autosave.retry}>Retry save</Button>}
+      {!autosaveKey && error && <Alert severity="error">{error}</Alert>}
+      {!autosaveKey && saved && !error && <Alert severity="success">{savedLabel}</Alert>}
 
       <Stack direction="row" spacing={2}>
         {showTest && (
@@ -281,13 +350,23 @@ export function ModelRoutePicker({
           </Button>
         )}
         {allowClear && (
-          <Button variant="outlined" onClick={handleClear} disabled={saving}>
+          <Button variant="outlined" onClick={handleClear} disabled={!autosaveKey && saving}>
             Clear
           </Button>
         )}
-        <Button variant="contained" onClick={handleSave} disabled={!connection || saving}>
-          {saving ? "Saving…" : saveLabel}
-        </Button>
+        {autosaveKey && allowDefaultCommit && needsCommit && (
+          <Button variant="outlined" disabled={!connection || (customModel && !model.trim()) || !contextWindow.trim() ||
+            !Number.isSafeInteger(Number(contextWindow)) ||
+            !(Number(contextWindow) === 0 || Number(contextWindow) >= 8192)}
+            onClick={() => queueChoice({ connection, model, custom: customModel, effort, context: contextWindow })}>
+            Use this provider default
+          </Button>
+        )}
+        {!autosaveKey && (
+          <Button variant="contained" onClick={handleSave} disabled={!connection || saving}>
+            {saving ? "Saving…" : saveLabel}
+          </Button>
+        )}
       </Stack>
     </SettingsSection>
   );

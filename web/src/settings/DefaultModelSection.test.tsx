@@ -90,7 +90,7 @@ describe("DefaultModelSection", () => {
     expect(await screen.findByRole("option", { name: "Sonnet 5" })).toBeTruthy();
   });
 
-  it("Save calls updateRouting with {default: {connection, model}}", async () => {
+  it("committed choice autosaves {default: {connection, model}}", async () => {
     vi.mocked(listConnectionModels).mockResolvedValueOnce(models);
     vi.mocked(updateRouting).mockResolvedValueOnce(
       makeRouting({ default: { connection: "claude", model: "claude-opus-5" } }),
@@ -100,7 +100,7 @@ describe("DefaultModelSection", () => {
       makeStatus({ provider: "claude", label: "Claude", subscriptionConnected: true }),
     ];
     render(
-      <DefaultModelSection connections={connections} routing={makeRouting()} onSaved={onSaved} />,
+      <DefaultModelSection connections={connections} routing={makeRouting()} onSaved={onSaved} autosave />,
     );
 
     await vi.waitFor(() => {
@@ -109,7 +109,7 @@ describe("DefaultModelSection", () => {
     fireEvent.mouseDown(screen.getByLabelText(/^model$/i));
     fireEvent.click(await screen.findByRole("option", { name: "Opus 5" }));
 
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
 
     await vi.waitFor(() => {
       expect(updateRouting).toHaveBeenCalledWith({
@@ -154,15 +154,15 @@ describe("DefaultModelSection", () => {
         connections={connections}
         routing={makeRouting({ default: { connection: "claude", model: "claude-opus-5" } })}
         onSaved={vi.fn()}
+        autosave
       />,
     );
 
     // No connected cards to fall back to, so the selection resets to empty
     // and the stale "claude" pick is dropped — Save must not be able to
     // re-persist it, and no model fetch is made for a disconnected card.
-    expect((screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
+    expect(updateRouting).not.toHaveBeenCalled();
     expect(listConnectionModels).not.toHaveBeenCalled();
   });
 
@@ -172,25 +172,21 @@ describe("DefaultModelSection", () => {
       makeStatus({ provider: "claude", label: "Claude", subscriptionConnected: true }),
     ];
     const { rerender } = render(
-      <DefaultModelSection connections={connections} routing={makeRouting()} onSaved={vi.fn()} />,
+      <DefaultModelSection connections={connections} routing={makeRouting()} onSaved={vi.fn()} autosave />,
     );
 
     await vi.waitFor(() => {
       expect(listConnectionModels).toHaveBeenCalledWith("claude");
     });
-    expect(
-      (screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement).disabled,
-    ).toBe(false);
+    expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
 
     const disconnected = [
       makeStatus({ provider: "claude", label: "Claude", subscriptionConnected: false }),
     ];
     rerender(
-      <DefaultModelSection connections={disconnected} routing={makeRouting()} onSaved={vi.fn()} />,
+      <DefaultModelSection connections={disconnected} routing={makeRouting()} onSaved={vi.fn()} autosave />,
     );
 
-    expect(
-      (screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement).disabled,
-    ).toBe(true);
+    expect(updateRouting).not.toHaveBeenCalled();
   });
 });
