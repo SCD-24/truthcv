@@ -8,15 +8,20 @@ export function DefaultModelSection({
   connections,
   routing,
   onSaved,
+  autosave = false,
 }: {
   connections: ConnectionStatus[];
   routing: Routing;
   onSaved: (r: Routing) => void;
+  /** Settings modal opts in; onboarding retains manual Save. */
+  autosave?: boolean;
 }) {
   return (
     <ModelRoutePicker
       connections={connections}
       route={routing.default}
+      autosaveKey={autosave ? "routing:default" : undefined}
+      allowDefaultCommit={autosave}
       onSave={async (route) => {
         const fresh = await updateRouting({ default: route });
         onSaved(fresh);

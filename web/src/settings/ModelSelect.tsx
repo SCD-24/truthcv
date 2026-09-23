@@ -136,7 +136,7 @@ export function ModelSelect({
           autoFocus
           onChange={(e) => onChange({ model: e.target.value, customModel: true })}
           placeholder="Exact model id"
-          aria-label="Custom model id"
+          slotProps={{ htmlInput: { "aria-label": "Custom model id" } }}
           sx={{ mt: 1.5 }}
         />
       )}

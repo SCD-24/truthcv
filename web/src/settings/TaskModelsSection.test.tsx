@@ -95,7 +95,7 @@ describe("TaskModelsSection", () => {
     fireEvent.mouseDown(screen.getAllByLabelText(/^model$/i)[0]);
     fireEvent.click(await screen.findAllByRole("option", { name: "Opus 5" }).then((o) => o[0]));
 
-    fireEvent.click(screen.getAllByRole("button", { name: /^save$/i })[0]);
+    expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
 
     await vi.waitFor(() => {
       expect(updateRouting).toHaveBeenCalledWith({

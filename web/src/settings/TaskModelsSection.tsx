@@ -1,6 +1,7 @@
 import { updateRouting } from "../api/client";
 import { ModelRoutePicker } from "./ModelRoutePicker";
 import { SettingsSection } from "./SettingsModal";
+import { SettingsAutosaveProvider, useHasSettingsAutosaveProvider } from "./SettingsAutosave";
 import type { ConnectionStatus, Routing } from "../api/types";
 
 /** The task keys the backend routes independently, paired with the label each
@@ -25,7 +26,8 @@ export function TaskModelsSection({
   routing: Routing;
   onSaved: (r: Routing) => void;
 }) {
-  return (
+  const hasProvider = useHasSettingsAutosaveProvider();
+  const rows = (
     <SettingsSection
       title="Task models"
       description="Overrides the default model per task; cleared tasks use the default."
@@ -35,6 +37,7 @@ export function TaskModelsSection({
           key={key}
           connections={connections}
           route={routing.tasks[key] ?? null}
+          autosaveKey={`routing:${key}`}
           onSave={async (route) => {
             const fresh = await updateRouting({ tasks: { [key]: route } });
             onSaved(fresh);
@@ -46,4 +49,5 @@ export function TaskModelsSection({
       ))}
     </SettingsSection>
   );
+  return hasProvider ? rows : <SettingsAutosaveProvider>{rows}</SettingsAutosaveProvider>;
 }
