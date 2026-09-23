@@ -1068,6 +1068,44 @@ describe('executeTurnToolCalls concurrency (via runLoop)', () => {
     expect(toolMessage?.toolResults?.[1]).toMatchObject({ toolCallId: 'c1', isError: false });
   });
 
+  it('saves a feed posting before same-turn browser work and keeps it after a later failure', async () => {
+    const feed = { title: 'Engineer', company: 'Acme', url: 'https://jobs.example/123', source: 'api' };
+    const postingText = 'Engineer at Acme. Fully remote role. English required.';
+    const compound: ToolCall = { id: 'feed1', name: 'screen_and_record_posting', arguments: {
+      url: feed.url, role: feed.title, company: feed.company, postingText,
+      profile: 'Backend', criteria: 'fully remote, English', run_id: 'run-1', source: feed.source,
+    } };
+    const browser: ToolCall = { id: 'browser1', name: 'browser__browser_navigate', arguments: { url: 'https://boards.example/' } };
+    const sequence: string[] = [];
+    const callTool = vi.fn(async (name: string, args: Record<string, unknown>) => {
+      sequence.push(name);
+      if (name === 'truthcv__record_screening') {
+        expect(args).toMatchObject({ url: feed.url, role: feed.title, posting_text: postingText, run_id: 'run-1' });
+        return { content: JSON.stringify({ id: 'saved-1', created: true, verdict: 'passed' }), isError: false };
+      }
+      return { content: 'browser failed', isError: true };
+    });
+    const pool = { callTool, refreshTools: vi.fn(async () => {}), listTools: () => [
+      toolAndCall('truthcv', 'record_screening', 'rs').tool,
+      toolAndCall('browser', 'browser_navigate', 'bn').tool,
+    ] } as unknown as McpClientPool;
+    const screeningAdapter: ProviderAdapter = { async *sendMessage() {
+      yield { type: 'done', stopReason: 'end', message: { role: 'assistant', content: JSON.stringify({
+        verdict: 'passed', screeningBlocker: '', reason: 'fits', remoteArrangement: 'remote',
+      }) } };
+    } };
+    const { adapter } = scriptedAdapter([turnRequesting([browser, compound])[0], [fatalError]]);
+    const result = await runLoop({ adapter, pool, screeningAdapter, systemPrompt: 's',
+      initialMessages: [{ role: 'user', content: 'feed first' }], config: { maxTurns: 5 }, sleep: noSleep });
+    expect(sequence).toEqual(['truthcv__record_screening', 'browser__browser_navigate']);
+    expect(result.stopReason).toBe('error');
+    const outputs = result.messages.find((m) => m.role === 'tool')?.toolResults ?? [];
+    expect(outputs.map((r) => r.toolCallId)).toEqual(['browser1', 'feed1']);
+    expect(outputs[0]).toMatchObject({ isError: true, content: 'browser failed' });
+    expect(JSON.parse(outputs[1].content)).toMatchObject({ id: 'saved-1', verdict: 'passed', created: true, actionable: true });
+    expect(callTool).toHaveBeenCalledTimes(2);
+  });
+
   it('still latches finish_run when its result arrives after another call completes', async () => {
     const other = toolAndCall('truthcv', 'check_cooldown', 'c0');
     const finish = toolAndCall('truthcv', 'finish_run', 'c1');

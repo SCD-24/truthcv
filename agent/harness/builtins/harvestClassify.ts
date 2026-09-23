@@ -191,5 +191,5 @@ export function classifySnapshot(board: HarvestBoardRequest, snapshot: string): 
   const note = wallKind === 'wall'
     ? 'a consent/bot-check phrase was seen, but the page also shows substantive content of its own; raw snapshot attached for manual review'
     : 'no recognised posting URLs found; raw snapshot attached for manual review';
-  return { ...base, outcome: 'empty', tier: '', postings: [], note, rawSnapshot: snapshot };
+  return { ...base, outcome: 'needs_review', tier: '', postings: [], note, rawSnapshot: snapshot };
 }

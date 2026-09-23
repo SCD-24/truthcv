@@ -202,8 +202,8 @@ describe('harvestPostings: blocked vs empty, reported distinctly', () => {
     const result = await harvestPostings({ boards: [board('Odd Board', 'https://board.example/search')] }, call);
 
     const { results } = JSON.parse(result.content);
-    // Ambiguous, not blocked: the tier-3 last resort, with the raw snapshot attached.
-    expect(results[0].outcome).toBe('empty');
+    // Ambiguous, not blocked or empty: the tier-3 last resort, with the raw snapshot attached.
+    expect(results[0].outcome).toBe('needs_review');
     expect(results[0].blockKind).toBeUndefined();
     expect(results[0].rawSnapshot).toContain('reCAPTCHA');
   });
@@ -262,23 +262,23 @@ describe('harvestPostings: blocked vs empty, reported distinctly', () => {
     const result = await harvestPostings({ boards: [board('Busy Board', 'https://board.example/search')] }, call);
 
     const { results } = JSON.parse(result.content);
-    expect(results[0].outcome).toBe('empty');
+    expect(results[0].outcome).toBe('needs_review');
     expect(results[0].rawSnapshot).toContain('30 results');
   });
 
-  it('reports empty with the raw snapshot attached (tier-3 last resort) when content exists but nothing matched', async () => {
+  it('reports needs_review with the raw snapshot attached (tier-3 last resort) when content exists but nothing matched', async () => {
     const call = stubBrowserCall(singleTabHandlers('A page full of content but no known ATS links.'));
 
     const result = await harvestPostings({ boards: [board('Odd Board', 'https://board.example/search')] }, call);
 
     const { results } = JSON.parse(result.content);
-    expect(results[0].outcome).toBe('empty');
+    expect(results[0].outcome).toBe('needs_review');
     expect(results[0].rawSnapshot).toContain('no known ATS links');
   });
 });
 
 describe('harvestPostings: a consent/bot-check phrase over real content is never data loss', () => {
-  it('attaches the raw snapshot and reports empty (never blocked) for a consent banner sitting over 20 non-ATS job links', async () => {
+  it('attaches the raw snapshot and reports needs_review (never blocked) for a consent banner sitting over 20 non-ATS job links', async () => {
     // An employer's own careers site — the common case for a direct board —
     // whose links are never ATS-shaped, with a cookie-consent banner on top.
     const links = Array.from(
@@ -291,7 +291,7 @@ describe('harvestPostings: a consent/bot-check phrase over real content is never
     const result = await harvestPostings({ boards: [board('Employer Careers', 'https://employer.example/careers')] }, call);
 
     const { results } = JSON.parse(result.content);
-    expect(results[0].outcome).toBe('empty');
+    expect(results[0].outcome).toBe('needs_review');
     expect(results[0].blockKind).toBeUndefined();
     expect(results[0].postings).toEqual([]);
     expect(results[0].rawSnapshot).toBeDefined();

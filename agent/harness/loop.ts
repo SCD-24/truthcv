@@ -822,8 +822,9 @@ function maybeWarnWrapUp(state: LoopState, ctx: LoopContext): void {
  * server: browser-owned calls (and `harvest_postings`, which drives the
  * browser internally — see {@link partitionByServer}) still run strictly one
  * at a time AT THIS TURN LEVEL, while every other call may overlap up to
- * `concurrency` at once. Each `harvest_postings` call also works its boards
- * serially on the same primary browser connection, so neither its boards nor
+ * `concurrency` at once. Compound screening/recording calls finish first,
+ * before any browser work in the same turn begins. Each `harvest_postings`
+ * call also works its boards serially on the same primary browser connection, so neither its boards nor
  * separate browser-driving tool calls in the turn can interleave. Results
  * land at each call's original index, so
  * the returned array matches REQUEST order regardless of completion order —
@@ -840,9 +841,14 @@ async function executeTurnToolCalls(
 ): Promise<ToolResult[]> {
   const results: ToolResult[] = new Array(calls.length);
   const { browser, other } = partitionByServer(calls, registry);
+  const compound = other.filter((i) => calls[i].name === 'screen_and_record_posting');
+  const remaining = other.filter((i) => calls[i].name !== 'screen_and_record_posting');
   const runOne = (i: number): Promise<void> =>
     runToolCall(pool, calls, registry, maxContentChars, results, i, screeningAdapter);
-  await Promise.all([runPool(browser, 1, runOne), runPool(other, concurrency, runOne)]);
+  // A saved feed screening must not wait behind a later browser harvest in the
+  // same model turn. Errors remain per-call results; they cannot erase saves.
+  await runPool(compound, concurrency, runOne);
+  await Promise.all([runPool(browser, 1, runOne), runPool(remaining, concurrency, runOne)]);
   return results;
 }
 

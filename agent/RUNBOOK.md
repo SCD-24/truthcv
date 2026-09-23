@@ -309,10 +309,14 @@ nothing.
 
 The **feed** channel is postings pulled from API-backed job boards — boards
 that expose a real search API rather than requiring a browser session at all.
-Your run prompt may carry a feed block listing these postings directly,
-already fetched; there is no browser step for this channel; work the list it
-gives you the same way you would work a dorked or direct-board result, into
-the normal Applying flow below.
+Your run prompt may carry a feed block listing URLs and metadata already
+fetched. Metadata is NOT full posting text: open the URL and retrieve its
+actual text (serial browser retrieval is allowed), then screen and persist
+that posting with `screen_and_record_posting` before any direct-board/dork
+discovery or application to a newly found role. Finish the feed pass and save
+each result as you go; do not defer recording until later discovery. Phase 0
+approved applications still run first, and the same freshness, profile,
+cooldown, autonomy and application cap rules govern feed postings.
 
 Your run prompt may also carry a list of composed search queries, built
 deterministically from each enabled profile's `keywords` and `locations`,
@@ -347,8 +351,9 @@ Personio) against the accessibility tree `browser_snapshot` returns — never a
 hand-written CSS selector, since boards restyle. It reports, per board, an
 `outcome`: `"searched"` (postings found — this value matches
 `record_discovery_coverage`'s own status vocabulary on purpose, so pass it
-straight through as `status`) plus `tier: "harvest"`; `"empty"` (the search
-ran and genuinely matched nothing); or `"blocked"` (the board was reachable
+straight through as `status`) plus `tier: "harvest"`; `"empty"` (explicit
+zero-result evidence); `"needs_review"` (internal only: content exists but
+extraction found no known URLs); or `"blocked"` (the board was reachable
 but unreadable), which USUALLY also carries a `blockKind`:
 
 - `blockKind: "login"` — a sign-in wall, OR a board whose `url` was itself an
@@ -382,9 +387,13 @@ When a board's page plainly had content but the URL-shape extraction matched
 nothing — including a consent/cookie-banner or bot-check phrase seen
 alongside real content, which never on its own discards that content — the
 result also carries the raw snapshot text — read that yourself as the
-LAST-RESORT fallback (an LLM-extraction tier 3 step) only in that one
-ambiguous case; do not fall back to a manual `browser_navigate`/
-`browser_snapshot` pass otherwise, and never for a board `harvest_postings`
+LAST-RESORT fallback (an LLM-extraction tier 3 step) only for that
+`needs_review` result. Resolve it before coverage: recovered postings map to
+`searched`/`llm`; explicit zero-result evidence maps to `empty`; unresolved
+extraction maps to `blocked` with a reason naming extraction failure.
+`needs_review` is NEVER a `record_discovery_coverage` status. Do not fall
+back to a manual `browser_navigate`/`browser_snapshot` pass otherwise, and
+never for a board `harvest_postings`
 already reported `blocked` — a blocked result never carries a raw snapshot.
 Several boards may be harvested in the same call, but production
 `harvest_postings` works them serially, in order, through the existing primary
@@ -431,9 +440,28 @@ were found or a tier does not apply.
 
 ### Screening a discovered posting
 
-Once you have a posting's URL, role, company, and full text, screen it with
-the `screen_posting` built-in tool instead of reasoning through every hard
-filter yourself in this conversation. Pass it the posting's `url`, `role`,
+Once you have a posting's URL, role, company, and full text, use the
+`screen_and_record_posting` built-in tool with required `run_id` and optional
+`source` and stated `posted_date` to screen and SAVE in a single tool call.
+It evaluates against the matched profile and awaits the existing
+`record_screening` ledger. Its compact returned outcome (id, verdict,
+screening_blocker, created, actionable) is authoritative, including server
+downgrades: only `actionable:true` (newly stored `passed` with no blocker) may
+drive an application; `created:false` is a skip even if an unread placeholder
+was replaced, not a retry or a reason to change the URL. The posting text stays
+in the ledger, not in this tool result. Never call `record_screening` again
+after a successful compound call. On any error, do not assume a new pass:
+stop acting on that posting, not the entire run; continue other work and
+coverage. Ask the operator to open `GET /api/screenings` on the TruthCV app
+origin (navigate to `/api/screenings` in their browser), inspect the returned
+JSON array's `url` fields for the posting URL, and confirm whether a record
+exists. The `/screenings` UI does not display the URL; no agent screening lookup
+tool exists. Do not retry or rescreen automatically; use `record_screening`
+manually only after the operator confirms no record exists.
+
+The read-only `screen_posting` tool remains available when you need separate
+screening; then call `record_screening` yourself before any application.
+Pass it the posting's `url`, `role`,
 `company`, `postingText`, the matched enabled profile's `profile` name, and
 its `criteria` (the hard filters from §2, rendered as text). It runs the
 screening in an isolated subagent conversation, backed by its own (often
@@ -447,8 +475,8 @@ profile's (`eor_stated` is `""`/`"yes"`/`"no"`/`"unstated"`, reflecting
 whether the posting states hiring is through an EOR / employer-of-record
 arrangement, where `"unstated"` means you looked and the posting did not
 say).
-Continue into the Applying steps below only for a posting `screen_posting`
-reports as `passed`.
+Continue into the Applying steps below only for a newly stored `passed`
+verdict without a blocker, not a model's unpersisted proposal.
 
 **`screen_posting` does not replace `record_screening`.** It has no access to
 the screening ledger and writes nothing. You must still call `record_screening`

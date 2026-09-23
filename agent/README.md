@@ -184,6 +184,28 @@ connection failure, `5` bad configuration, `6` the loop ended cleanly but
 `finish_run` was never executed, so the run was abandoned without reporting an
 outcome.
 
+**Feed-first saved screening.** After the approved Phase 0 queue, the feed
+lists metadata and URLs, not guaranteed posting bodies. Retrieve full posting
+text (serial browser access if needed), then call `screen_and_record_posting`
+for each feed role before direct-board/dork discovery or new applications.
+It screens and persists through the allow-listed `record_screening` MCP tool in
+one call: its compact stored outcome (id, verdict, screening_blocker, created,
+actionable) omits the full posting text; only `actionable:true` permits a new
+application. `created:false` means skip, even when an unread placeholder was
+replaced, and success must not be recorded again. On an error, stop acting on
+that posting, not the entire run; continue other work and coverage. Ask the
+operator to open `GET /api/screenings` on the TruthCV app origin (navigate to
+`/api/screenings` in their browser) and inspect the returned JSON array's `url`
+fields for the posting URL to confirm whether a record exists. The `/screenings`
+UI does not display the URL; there is no agent screening lookup tool. Do not
+retry or rescreen automatically; use `record_screening` manually only after
+the operator confirms no record exists. The read-only `screen_posting` remains
+available for manual screening followed by a separate `record_screening`.
+A raw-snapshot harvest `needs_review` is internal only: recover postings as
+`searched`/`llm`, mark `empty` only on explicit zero-result evidence, otherwise
+record `blocked` with an extraction-failure reason. Phase 0, filters, caps and
+autonomy are unchanged.
+
 **Narrow built-in tools.** `read_runbook_section` returns one named section of
 `RUNBOOK.md` from the image and takes no path argument, so it opens no general
 filesystem read. `screen_posting` screens via its configured provider adapter;
