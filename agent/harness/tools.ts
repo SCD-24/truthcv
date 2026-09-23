@@ -25,6 +25,7 @@ import type { ToolCall, ToolDefinition, ToolResult } from './providers/types.js'
 import type { ProviderAdapter } from './providers/types.js';
 import { readRunbookSection, readRunbookSectionTool } from './builtins/readRunbook.js';
 import { screenPosting, screenPostingTool } from './builtins/screenPosting.js';
+import { screenAndRecordPosting, screenAndRecordPostingTool } from './builtins/screenAndRecordPosting.js';
 import { harvestPostings, harvestPostingsTool, type BrowserToolCall } from './builtins/harvestPostings.js';
 
 /**
@@ -247,6 +248,13 @@ const SCREEN_POSTING_TOOL: RegisteredTool = {
   definition: screenPostingTool,
 };
 
+const SCREEN_AND_RECORD_POSTING_TOOL: RegisteredTool = {
+  namespacedName: screenAndRecordPostingTool.name,
+  serverName: BUILTIN_SERVER_NAME,
+  toolName: screenAndRecordPostingTool.name,
+  definition: screenAndRecordPostingTool,
+};
+
 /**
  * The registry entry for the built-in {@link harvestPostingsTool}. Not
  * MCP-backed, exactly like {@link SCREEN_POSTING_TOOL}, but its dispatch in
@@ -329,7 +337,7 @@ export function buildToolRegistry(mcpTools: ReturnType<McpClientPool['listTools'
   // MCP-derived tools. Both are appended AFTER the allow-list filter (which
   // would deny their synthetic server) and before the sort, so the advertised
   // block stays byte-stable.
-  return [...mcp, READ_RUNBOOK_SECTION_TOOL, SCREEN_POSTING_TOOL, HARVEST_POSTINGS_TOOL].sort((a, b) =>
+  return [...mcp, READ_RUNBOOK_SECTION_TOOL, SCREEN_POSTING_TOOL, SCREEN_AND_RECORD_POSTING_TOOL, HARVEST_POSTINGS_TOOL].sort((a, b) =>
     a.namespacedName.localeCompare(b.namespacedName),
   );
 }
@@ -491,6 +499,18 @@ export async function executeToolCall(
       };
     }
     const result = await screenPosting(call.arguments, screeningAdapter);
+    return {
+      toolCallId: call.id,
+      content: capToolResultContent(result.content, maxContentChars),
+      isError: result.isError,
+    };
+  }
+  if (tool.namespacedName === SCREEN_AND_RECORD_POSTING_TOOL.namespacedName) {
+    const recorder = registry.find((t) => t.serverName === TRUTHCV_SERVER_NAME && t.toolName === 'record_screening');
+    const record = recorder && isToolAllowed(recorder.serverName, recorder.toolName)
+      ? (args: Record<string, unknown>) => pool.callTool(recorder.namespacedName, args)
+      : undefined;
+    const result = await screenAndRecordPosting(call.arguments, screeningAdapter, record);
     return {
       toolCallId: call.id,
       content: capToolResultContent(result.content, maxContentChars),

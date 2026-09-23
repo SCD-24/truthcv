@@ -102,7 +102,11 @@ export const harvestPostingsTool: ToolDefinition = {
     'never a CSS selector. Returns, per board, an outcome: "searched" (postings found — this ' +
     'value matches record_discovery_coverage\'s own status vocabulary, so pass it straight ' +
     'through as status) plus tier "harvest"; "empty" (the search ran and genuinely matched ' +
-    'nothing); or "blocked" (the page was reachable but unreadable), which usually also carries ' +
+    'nothing, with explicit zero-result evidence); "needs_review" (internal only: extraction ' +
+    'matched nothing without zero-result evidence; inspect rawSnapshot to recover postings and ' +
+    'record coverage searched/tier llm, or empty only if explicit zero results are found; if ' +
+    'unresolved record blocked with an extraction-failure reason — never persist needs_review); ' +
+    'or "blocked" (the page was reachable but unreadable), which usually also carries ' +
     'a blockKind — "login" means call report_apply_failure with blocker="login_required" then ' +
     'record status "login_walled", never "blocked"; "wall" (a CAPTCHA/consent interstitial with ' +
     'no substantive content of its own) or "unreachable" (a confirmed DNS/connection failure, ' +

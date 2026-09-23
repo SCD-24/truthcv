@@ -258,6 +258,62 @@ describe('executeToolCall content cap', () => {
   });
 });
 
+describe('buildToolRegistry with screen_and_record_posting', () => {
+  it('advertises the compound tool independently of the read-only screen_posting', () => {
+    const registry = buildToolRegistry([]);
+    expect(registry.find((t) => t.namespacedName === 'screen_and_record_posting')).toMatchObject({
+      serverName: 'builtin', toolName: 'screen_and_record_posting',
+    });
+    expect(registry.find((t) => t.namespacedName === 'screen_posting')).toBeDefined();
+  });
+
+  it('requires a live, allow-listed record_screening tool before model work', async () => {
+    const pool = { callTool: vi.fn() } as unknown as McpClientPool;
+    const adapter = stubScreeningAdapter([doneWithPassingVerdict()]);
+    const call: ToolCall = { id: 'save-1', name: 'screen_and_record_posting', arguments: { ...SCREEN_POSTING_ARGS, run_id: 'run-1' } };
+    const missing = await executeToolCall(pool, call, buildToolRegistry([]), undefined, undefined, adapter);
+    expect(missing.isError).toBe(true);
+    expect(missing.content).toContain('not currently available');
+    expect(pool.callTool).not.toHaveBeenCalled();
+  });
+
+  it('keeps a producer-sized stored outcome parseable under the default cap, including duplicates', async () => {
+    const postingText = 'Full posting responsibilities and requirements. '.repeat(1200);
+    const producer = (created: boolean) => ({ content: JSON.stringify({
+      id: 'persisted-1', url: SCREEN_POSTING_ARGS.url, role: SCREEN_POSTING_ARGS.role,
+      company: SCREEN_POSTING_ARGS.company, profile: SCREEN_POSTING_ARGS.profile,
+      posting_text: postingText, verdict: 'passed', screening_blocker: '', created,
+    }), isError: false });
+    const callTool = vi.fn().mockResolvedValueOnce(producer(true)).mockResolvedValueOnce(producer(false));
+    const pool = { callTool } as unknown as McpClientPool;
+    const call: ToolCall = { id: 'save-1', name: 'screen_and_record_posting',
+      arguments: { ...SCREEN_POSTING_ARGS, run_id: 'run-1', postingText } };
+    for (const [created, actionable] of [[true, true], [false, false]]) {
+      const result = await executeToolCall(pool, call, registryFor('truthcv', 'record_screening'),
+        undefined, undefined, stubScreeningAdapter([doneWithPassingVerdict()]));
+      expect(result.isError).toBe(false);
+      expect(result.content.length).toBeLessThan(DEFAULT_MAX_TOOL_RESULT_CHARS);
+      expect(JSON.parse(result.content)).toEqual({ id: 'persisted-1', verdict: 'passed',
+        screening_blocker: '', created, actionable });
+      expect(result.content).not.toContain('posting_text');
+      expect(result.content).not.toContain('omitted');
+    }
+    expect(callTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('resolves the live namespaced recorder and returns the stored verdict, not the proposal', async () => {
+    const callTool = vi.fn(async (_name: string, _args: Record<string, unknown>) => ({ content: JSON.stringify({ id: 'id-1', created: true, verdict: 'rejected', failing_criterion: 'remote_model' }), isError: false }));
+    const pool = { callTool } as unknown as McpClientPool;
+    const call: ToolCall = { id: 'save-1', name: 'screen_and_record_posting', arguments: { ...SCREEN_POSTING_ARGS, run_id: 'run-1' } };
+    const result = await executeToolCall(pool, call, registryFor('truthcv', 'record_screening'), undefined, undefined, stubScreeningAdapter([doneWithPassingVerdict()]));
+    expect(result.toolCallId).toBe('save-1');
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.content)).toMatchObject({ verdict: 'rejected', actionable: false });
+    expect(callTool).toHaveBeenCalledTimes(1);
+    expect(callTool.mock.calls[0][0]).toBe('truthcv__record_screening');
+  });
+});
+
 describe('buildToolRegistry with screen_posting', () => {
   it('advertises screen_posting as a built-in, bare-named tool', () => {
     const registry = buildToolRegistry([]);
@@ -492,7 +548,7 @@ describe('executeToolCall dispatching harvest_postings', () => {
     expect(result.isError).toBe(false);
     const parsed = JSON.parse(result.content).results;
     expect(parsed.map((r: { board: string; outcome: string }) => [r.board, r.outcome])).toEqual([
-      ['failure', 'blocked'], ['found', 'searched'], ['raw', 'empty'], ['login', 'blocked'],
+      ['failure', 'blocked'], ['found', 'searched'], ['raw', 'needs_review'], ['login', 'blocked'],
     ]);
     expect(parsed[0]).toMatchObject({ note: expect.stringContaining('connection lost'), postings: [] });
     expect(parsed[0].blockKind).toBeUndefined();

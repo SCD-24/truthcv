@@ -453,9 +453,10 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     # Postings pulled from API-backed job boards by the app. Unlike the
     # composed queries below these are already-matched postings, not entry
     # points to search from — each line is a URL the agent can open and
-    # screen directly. The feed is a discovery channel like any other: a
-    # posting still passes the full profile criteria before it drives an
-    # application.
+    # fetch full posting text (metadata/URL alone is not the posting) and
+    # screen-and-record each feed result before direct boards, dorks or new
+    # applications. Phase 0 approved work still comes first; normal criteria,
+    # freshness, cooldown, autonomy and budgets still bind.
     #
     # Two distinct groups share this response and must NOT share one claim:
     # Remote Rocketship postings (jobfeeds.remoterocketship) are matched
@@ -481,7 +482,7 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     # app image serving no source).
     FEED_PROFILE_MATCHED="$(jq -r '.feedPostings[]? | select((.profile // "") != "") | "  - [\(.profile)] \(.title)\(if (.company // "") != "" then " — " + .company else "" end)\(if (.salaryRange // "") != "" then " (" + .salaryRange + ")" else "" end)\(if ((.source // "") != "" or (.tier // "") != "") then " [" + ([(.source // ""), (.tier // "")] | map(select(. != "")) | join("/")) + "]" else "" end)\n    \(.url)"' <<<"$JOB_CONFIG")"
     if [[ -n "$FEED_PROFILE_MATCHED" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Postings pulled from your API-backed job boards (pre-filtered by the board's own keyword and location matching, where the board supports it; a posting naming no salary can still appear even with a salary floor set — open and screen these directly, they are still subject to every profile criterion below):"$'\n'
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Postings pulled from your API-backed job boards (metadata and URLs, not guaranteed full text; pre-filtered by the board's own keyword and location matching, where the board supports it; a posting naming no salary can still appear even with a salary floor set — open each URL for full text and screen-and-record before direct-board/dork discovery or new applications; postings are still subject to every profile criterion):"$'\n'
       PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$FEED_PROFILE_MATCHED"$'\n'
     fi
 
