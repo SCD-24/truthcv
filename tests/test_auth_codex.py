@@ -3,6 +3,7 @@
 import base64
 import json as _json
 import time
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -28,6 +29,17 @@ def _jwt(account_id: str = "acc-1234") -> str:
         .rstrip(b"=").decode()
     )
     return f"header.{payload_b64}.sig"
+
+
+def _use_transport(monkeypatch, handler):
+    """Route the module's top-level httpx.post calls through a real encoder."""
+    transport = httpx.MockTransport(handler)
+
+    def post(url, **kwargs):
+        with httpx.Client(transport=transport) as client:
+            return client.post(url, **kwargs)
+
+    monkeypatch.setattr(httpx, "post", post)
 
 
 def test_constants_match_openai_device_flow():
@@ -132,42 +144,43 @@ def test_poll_login_slow_down_bumps_interval_by_5(enc):
     assert out == {"status": "pending", "intervalSeconds": 10}
 
 
-@respx.mock
-def test_poll_login_successful_exchanges_token_form_encoded(enc):
-    respx.post(codex.USERCODE_URL).mock(
-        return_value=Response(200, json={"device_auth_id": "dev-7", "user_code": "T", "interval": 5})
-    )
-    respx.post(codex.DEVICE_TOKEN_URL).mock(
-        return_value=Response(200, json={
-            "authorization_code": "auth-code-xyz",
-            "code_verifier": "verifier-123",
+def test_poll_login_successful_exchanges_token_form_encoded(enc, monkeypatch):
+    auth_code = "auth+code/&= ?%"
+    verifier = "verifier+/&= ?%"
+    token_requests = []
+
+    def handler(request):
+        if str(request.url) == codex.USERCODE_URL:
+            return Response(200, json={"device_auth_id": "dev-7", "user_code": "T", "interval": 5})
+        if str(request.url) == codex.DEVICE_TOKEN_URL:
+            return Response(200, json={"authorization_code": auth_code, "code_verifier": verifier})
+        assert str(request.url) == codex.TOKEN_URL
+        token_requests.append(request)
+        return Response(200, json={
+            "access_token": "at-new", "refresh_token": "rt-new",
+            "expires_in": 3600, "scope": "openid profile",
         })
-    )
-    token_route = respx.post(codex.TOKEN_URL).mock(
-        return_value=Response(200, json={
-            "access_token": "at-new",
-            "refresh_token": "rt-new",
-            "expires_in": 3600,
-            "scope": "openid profile",
-        })
-    )
+
+    _use_transport(monkeypatch, handler)
     codex.start_login()
     out = codex.poll_login()
     assert out["status"] == "complete"
-    # Verify form-encoded body (URL-encoded)
-    request = token_route.calls.last.request
-    body = request.read().decode()
-    assert "grant_type=authorization_code" in body
-    assert "code=auth-code-xyz" in body
-    assert "code_verifier=verifier-123" in body
-    # redirect_uri is URL-encoded
-    assert "redirect_uri=https%3A%2F%2Fauth.openai.com%2Fdeviceauth%2Fcallback" in body
-    assert f"client_id={codex.CLIENT_ID}" in body
-    # oauth record stored with subscription authMode
+    assert len(token_requests) == 1
+    request = token_requests[0]
+    assert request.headers["content-type"] == "application/x-www-form-urlencoded"
+    assert parse_qs(request.content.decode()) == {
+        "grant_type": ["authorization_code"],
+        "client_id": [codex.CLIENT_ID],
+        "code": [auth_code],
+        "code_verifier": [verifier],
+        "redirect_uri": [codex.DEVICE_REDIRECT_URI],
+    }
+    # Subscription credentials are persisted encrypted, not leaked as plaintext.
     rec = secretstore.get_connection("codex")["oauth"]
     assert rec["accessToken"] == "at-new"
     assert rec["refreshToken"] == "rt-new"
     assert secretstore.get_connection("codex")["authMode"] == "subscription"
+    assert b"at-new" not in (enc / "secrets.enc").read_bytes()
 
 
 @respx.mock
@@ -197,23 +210,77 @@ def test_get_valid_access_token_returns_cached_when_fresh(enc):
     assert codex.get_valid_access_token() == "cached"
 
 
-@respx.mock
-def test_get_valid_access_token_refreshes_when_near_expiry(enc):
+def test_get_valid_access_token_refreshes_when_near_expiry(enc, monkeypatch):
+    refresh_token = "rt+keep/&= ?%"
     secretstore.set_connection("codex", {"oauth": {
-        "accessToken": "old", "refreshToken": "rt-keep",
+        "accessToken": "old", "refreshToken": refresh_token,
         "expiresAt": time.time() + 10, "scope": "", "connectedAt": 0,
     }})
-    refresh_route = respx.post(codex.TOKEN_URL).mock(
-        return_value=Response(200, json={"access_token": "new-at", "expires_in": 3600})
-    )
+    requests = []
+
+    def handler(request):
+        assert str(request.url) == codex.TOKEN_URL
+        requests.append(request)
+        return Response(200, json={"access_token": "new-at", "expires_in": 3600})
+
+    _use_transport(monkeypatch, handler)
     assert codex.get_valid_access_token() == "new-at"
-    body = refresh_route.calls.last.request.read().decode()
-    assert "grant_type=refresh_token" in body
-    assert "refresh_token=rt-keep" in body
-    assert f"client_id={codex.CLIENT_ID}" in body
-    # refresh_token preserved when absent from response
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.headers["content-type"] == "application/x-www-form-urlencoded"
+    assert parse_qs(request.content.decode()) == {
+        "grant_type": ["refresh_token"],
+        "refresh_token": [refresh_token],
+        "client_id": [codex.CLIENT_ID],
+    }
+    # refresh_token preserved when absent from response, still encrypted on disk
     rec = secretstore.get_connection("codex")["oauth"]
-    assert rec["refreshToken"] == "rt-keep"
+    assert rec["refreshToken"] == refresh_token
+    assert rec["accessToken"] == "new-at"
+    assert b"new-at" not in (enc / "secrets.enc").read_bytes()
+
+
+def test_failed_code_exchange_preserves_stored_credentials(enc, monkeypatch):
+    existing = {"oauth": {
+        "accessToken": "existing", "refreshToken": "existing-refresh",
+        "expiresAt": time.time() + 3600, "scope": "old", "connectedAt": 0,
+    }, "authMode": "subscription"}
+    secretstore.set_connection("codex", existing)
+    encrypted = (enc / "secrets.enc").read_bytes()
+
+    def handler(request):
+        if str(request.url) == codex.USERCODE_URL:
+            return Response(200, json={"device_auth_id": "dev-fail", "user_code": "F"})
+        if str(request.url) == codex.DEVICE_TOKEN_URL:
+            return Response(200, json={"authorization_code": "code", "code_verifier": "verifier"})
+        assert str(request.url) == codex.TOKEN_URL
+        return Response(400, json={"error": "invalid_grant"})
+
+    _use_transport(monkeypatch, handler)
+    codex.start_login()
+    with pytest.raises(codex.AuthError, match=r"Token exchange failed \(400\)"):
+        codex.poll_login()
+    assert secretstore.get_connection("codex") == existing
+    assert (enc / "secrets.enc").read_bytes() == encrypted
+
+
+def test_failed_refresh_preserves_stored_credentials(enc, monkeypatch):
+    existing = {"oauth": {
+        "accessToken": "existing", "refreshToken": "existing-refresh",
+        "expiresAt": time.time() + 10, "scope": "old", "connectedAt": 0,
+    }, "authMode": "subscription"}
+    secretstore.set_connection("codex", existing)
+    encrypted = (enc / "secrets.enc").read_bytes()
+
+    def handler(request):
+        assert str(request.url) == codex.TOKEN_URL
+        return Response(400, json={"error": "invalid_grant"})
+
+    _use_transport(monkeypatch, handler)
+    with pytest.raises(codex.AuthError, match="ChatGPT token refresh failed"):
+        codex.get_valid_access_token()
+    assert secretstore.get_connection("codex") == existing
+    assert (enc / "secrets.enc").read_bytes() == encrypted
 
 
 def test_account_id_decodes_jwt_payload():
