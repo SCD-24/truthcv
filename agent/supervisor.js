@@ -20,6 +20,8 @@ import path from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import { secondsUntilNextSlot } from "./schedule.mjs";
+import { readRunDiagnostics } from "./diagnostics.mjs";
+import { createDiagnosticsAvailability } from "./diagnostics-availability.mjs";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -79,6 +81,8 @@ function signalExitCode(signal) {
 
 /** The daily-apply child of the run in progress, or null when idle. */
 let currentChild = null;
+/** In-memory only, bound to the currently executing child. */
+let currentHealth = null;
 
 /** SIGKILL escalation timer for a cancel in progress, so it can be cleared. */
 let killTimer = null;
@@ -308,6 +312,8 @@ function doRun(trigger = "manual", onSettled) {
   runState.currentRunId = runId;
   runState.lastRunId = runId;
   runOutcomePosted = false;
+  currentHealth?.invalidate();
+  currentHealth = null;
 
   // Create the run record before the child does anything, so a run that dies
   // in its preconditions or on its very first model call is still accounted
@@ -331,11 +337,13 @@ function doRun(trigger = "manual", onSettled) {
   // cancel therefore drops the MCP session without closing it, and that
   // container's page state survives until it restarts.
   const child = spawn(DAILY_APPLY, [], {
-    stdio: "inherit",
-    env: { ...process.env, TRUTHCV_RUN_ID: runId },
+    stdio: ["inherit", "inherit", "inherit", "pipe"],
+    env: { ...process.env, TRUTHCV_RUN_ID: runId, TRUTHCV_DIAGNOSTICS_FD: "3" },
     detached: true,
   });
   currentChild = child;
+  const health = createDiagnosticsAvailability(child.stdio[3]);
+  currentHealth = health;
 
   /** Common teardown for both exit paths: never leave state mid-cancel. */
   function settle(rc) {
@@ -344,6 +352,8 @@ function doRun(trigger = "manual", onSettled) {
       killTimer = null;
     }
     const cancelled = runState.cancelling;
+    health.invalidate();
+    if (currentHealth === health) currentHealth = null;
     currentChild = null;
     runState.running = false;
     runState.lastCancelled = cancelled;
@@ -427,6 +437,7 @@ function cancelRun() {
     // reporting it as cancelled hid its real exit code behind "Last run
     // cancelled" in the UI.
     runState.cancelling = true;
+    currentHealth?.invalidate();
   } catch (err) {
     // ESRCH here means the run exited between the status check and the signal
     // — or, far less likely, that the pid was recycled. Either way nothing of
@@ -501,6 +512,7 @@ function handleShutdownSignal(signal) {
   }
 
   log(`${signal} received — run ${runId} is active; signalling it and recording a shutdown finish`);
+  currentHealth?.invalidate();
 
   if (currentChild && currentChild.pid) {
     try {
@@ -682,6 +694,32 @@ const server = http.createServer((req, res) => {
     // scheduleEnabled is the scheduler's gate, reported so an operator (and
     // agent/smoke-test.sh) can see which way it is set without reading logs.
     return jsonReply(res, 200, { ...runState, scheduleEnabled });
+  }
+
+  if (req.method === "GET" && req.url?.startsWith("/diagnostics/runs/")) {
+    // Never infer diagnostics from raw run logs, even for legacy runs.
+    if (req.url.length > 512) return jsonReply(res, 400, { detail: "Invalid diagnostics request" });
+    const url = new URL(req.url, "http://localhost");
+    const match = /^\/diagnostics\/runs\/([a-zA-Z0-9_-]{1,80})\/events$/.exec(url.pathname);
+    if (!match || [...url.searchParams.keys()].some((key) => !["limit", "before_sequence"].includes(key))
+      || [...url.searchParams.keys()].length !== new Set(url.searchParams.keys()).size) {
+      return jsonReply(res, 400, { detail: "Invalid diagnostics request" });
+    }
+    const integer = (key, fallback) => {
+      const value = url.searchParams.get(key);
+      return value === null ? fallback : /^(?:0|[1-9][0-9]*)$/.test(value) ? Number(value) : NaN;
+    };
+    try {
+      const body = readRunDiagnostics(RUN_LOG_DIR, match[1], {
+        limit: integer("limit", 50), beforeSequence: integer("before_sequence", undefined),
+        running: runState.running, currentRunId: runState.currentRunId,
+        health: () => runState.running && currentChild && currentHealth ? currentHealth.snapshot() : null,
+      });
+      return jsonReply(res, 200, body);
+    } catch (err) {
+      if (err instanceof RangeError) return jsonReply(res, 400, { detail: "Invalid diagnostics request" });
+      throw err;
+    }
   }
 
   if (req.method === "POST" && req.url === "/run") {

@@ -21,6 +21,7 @@ import type {
   ToolResult,
 } from './providers/types.js';
 import type { McpClientPool } from './mcp/client.js';
+import type { DiagnosticBoundary, DiagnosticPhase } from './diagnostics.js';
 import {
   buildToolRegistry,
   executeToolCall,
@@ -241,6 +242,8 @@ export interface RunLoopOptions {
   screeningAdapter?: ProviderAdapter;
   /** Optional per-event hook so a CLI can stream progress. Never required. */
   onEvent?: (event: HarnessEvent | LoopEvent) => void;
+  /** Separate metadata-only execution boundary; failures are ignored. */
+  onDiagnostic?: (event: DiagnosticBoundary) => void;
   /** Injectable sleep so tests need not wait on real timers. Defaults to setTimeout. */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -316,6 +319,7 @@ interface LoopContext {
    * {@link RunLoopOptions.screeningAdapter}. */
   screeningAdapter?: ProviderAdapter;
   onEvent?: (event: HarnessEvent | LoopEvent) => void;
+  diagnostic: DiagnosticTimer;
   sleep: (ms: number) => Promise<void>;
 }
 
@@ -391,6 +395,31 @@ export function backoffDelay(attempt: number, maxRetryDelayMs: number): number {
   return Math.min(base + jitter, maxRetryDelayMs);
 }
 
+/** Own operation IDs locally; never pass provider strings through telemetry. */
+class DiagnosticTimer {
+  private nextId = 0;
+  constructor(private readonly callback?: (event: DiagnosticBoundary) => void) {}
+
+  private send(event: DiagnosticBoundary): void {
+    try { this.callback?.(event); } catch { /* telemetry must not affect the run */ }
+  }
+
+  async time<T>(phase: DiagnosticPhase, work: () => Promise<T>, metadata: Partial<DiagnosticBoundary> = {},
+    failed: (result: T) => boolean = () => false): Promise<T> {
+    const operationId = `op_${++this.nextId}`;
+    const base = { operationId, phase, ...metadata };
+    this.send({ ...base, status: 'start' });
+    let status: 'success' | 'error' = 'error';
+    try {
+      const result = await work();
+      status = failed(result) ? 'error' : 'success';
+      return result;
+    } finally {
+      this.send({ ...base, status });
+    }
+  }
+}
+
 /**
  * Run the agent loop to termination.
  *
@@ -402,6 +431,7 @@ export function backoffDelay(attempt: number, maxRetryDelayMs: number): number {
 export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
   const { adapter, pool, systemPrompt, initialMessages, config, compactionConfig, onEvent, screeningAdapter } = opts;
   const sleep = opts.sleep ?? defaultSleep;
+  const diagnostic = new DiagnosticTimer(opts.onDiagnostic);
   const state: LoopState = {
     messages: [...initialMessages],
     turns: 0,
@@ -414,12 +444,13 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
     finishRunExecuted: false,
   };
   while (true) {
-    const registry = await refreshRegistry(pool);
-    state.messages = await maybeCompact(state, compactionConfig, adapter, onEvent);
+    const registry = await diagnostic.time('registry_refresh', () => refreshRegistry(pool), { turn: state.turns });
+    state.messages = await maybeCompact(state, compactionConfig, adapter, onEvent, diagnostic);
     const tools = registry.map((r) => r.definition);
     const request: ModelRequest = { systemPrompt, messages: state.messages, tools };
     const sentMessageCount = state.messages.length;
-    const { outcome, usage } = await runOneTurn(adapter, request, onEvent);
+    const { outcome, usage } = await diagnostic.time('model', () => runOneTurn(adapter, request, onEvent),
+      { turn: state.turns, retryAttempt: state.retries }, (reply) => reply.outcome.kind === 'error');
     if (usage) {
       // Anchor the next estimate: this count describes exactly the messages
       // that were sent, so only what is appended after it needs estimating.
@@ -433,6 +464,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
       compactionConfig,
       screeningAdapter,
       onEvent,
+      diagnostic,
       sleep,
     });
     if (result) return result;
@@ -465,12 +497,13 @@ async function maybeCompact(
   state: LoopState,
   config: CompactionConfig | undefined,
   adapter: ProviderAdapter,
-  onEvent?: (event: HarnessEvent | LoopEvent) => void,
+  onEvent: ((event: HarnessEvent | LoopEvent) => void) | undefined,
+  diagnostic: DiagnosticTimer,
 ): Promise<ConversationMessage[]> {
   if (!config || !config.contextWindow) return state.messages;
   const untracked = state.messages.slice(state.usageCoveredMessages);
   if (!shouldCompact(untracked, state.usage, config)) return state.messages;
-  return applyCompaction(state, config, adapter, onEvent, 'approaching the context window');
+  return diagnostic.time('compaction', () => applyCompaction(state, config, adapter, onEvent, 'approaching the context window'), { turn: state.turns });
 }
 
 /**
@@ -617,7 +650,8 @@ async function compactAndRetry(state: LoopState, ctx: LoopContext): Promise<Loop
     return finish('error', state, ctx, 'context overflow persisted after compaction');
   }
   const before = state.messages.length;
-  const { messages: compacted, record } = compact(state.messages, ctx.compactionConfig ?? { contextWindow: 0 });
+  const { messages: compacted, record } = await ctx.diagnostic.time('compaction',
+    async () => compact(state.messages, ctx.compactionConfig ?? { contextWindow: 0 }), { turn: state.turns });
   // Checked before anything is reported or reset: a compaction that removed
   // nothing must not appear in the run log, and must not clear the usage
   // anchor on its way out.
@@ -663,7 +697,8 @@ async function backoff(state: LoopState, ctx: LoopContext, error: ErrorEvent): P
   const source = asked === undefined ? '' : ' (provider Retry-After)';
   state.retries += 1;
   ctx.onEvent?.(loopEvent('retry', state.turns, `retrying after ${Math.round(delay)}ms${source}`));
-  await ctx.sleep(delay);
+  await ctx.diagnostic.time('backoff', () => ctx.sleep(delay),
+    { turn: state.turns, retryAttempt: state.retries, delayMs: Math.round(delay) });
 }
 
 /** Handle a `done` event by advancing the turn and dispatching its stop reason. */
@@ -749,6 +784,8 @@ async function continueWithTools(done: DoneEvent, state: LoopState, ctx: LoopCon
     ctx.config.maxToolResultChars ?? DEFAULT_MAX_TOOL_RESULT_CHARS,
     ctx.config.maxToolConcurrency ?? DEFAULT_TOOL_CONCURRENCY,
     ctx.screeningAdapter,
+    ctx.diagnostic,
+    state.turns,
   );
   state.messages.push(toolResultsMessage(results));
   // Latch the run's outcome-reporting call here, at the only place a tool is
@@ -838,13 +875,15 @@ async function executeTurnToolCalls(
   maxContentChars: number,
   concurrency: number = DEFAULT_TOOL_CONCURRENCY,
   screeningAdapter?: ProviderAdapter,
+  diagnostic?: DiagnosticTimer,
+  turn?: number,
 ): Promise<ToolResult[]> {
   const results: ToolResult[] = new Array(calls.length);
   const { browser, other } = partitionByServer(calls, registry);
   const compound = other.filter((i) => calls[i].name === 'screen_and_record_posting');
   const remaining = other.filter((i) => calls[i].name !== 'screen_and_record_posting');
   const runOne = (i: number): Promise<void> =>
-    runToolCall(pool, calls, registry, maxContentChars, results, i, screeningAdapter);
+    runToolCall(pool, calls, registry, maxContentChars, results, i, screeningAdapter, diagnostic, turn);
   // A saved feed screening must not wait behind a later browser harvest in the
   // same model turn. Errors remain per-call results; they cannot erase saves.
   await runPool(compound, concurrency, runOne);
@@ -866,12 +905,19 @@ async function runToolCall(
   results: ToolResult[],
   i: number,
   screeningAdapter?: ProviderAdapter,
+  diagnostic?: DiagnosticTimer,
+  turn?: number,
 ): Promise<void> {
-  try {
-    results[i] = await executeToolCall(pool, calls[i], registry, maxContentChars, undefined, screeningAdapter);
-  } catch (err) {
-    results[i] = { toolCallId: calls[i].id, content: err instanceof Error ? err.message : String(err), isError: true };
-  }
+  const registered = registry.find((tool) => tool.namespacedName === calls[i].name);
+  const toolName = registered?.namespacedName ?? 'unknown';
+  await diagnostic!.time('tool', async () => {
+    try {
+      results[i] = await executeToolCall(pool, calls[i], registry, maxContentChars, undefined, screeningAdapter);
+    } catch (err) {
+      results[i] = { toolCallId: calls[i].id, content: err instanceof Error ? err.message : String(err), isError: true };
+    }
+    return results[i];
+  }, { toolName, turn }, (result) => Boolean(result.isError));
 }
 
 /** Split call indices into the browser-server group (must stay serial) and

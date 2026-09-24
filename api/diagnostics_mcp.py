@@ -15,7 +15,9 @@ route and lifespan; this module has no FastAPI route of its own.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
+import inspect
 import json
 import os
 from datetime import datetime
@@ -31,6 +33,7 @@ import runs.store as _runs_store
 import screening.store as _screening_store
 import secretstore
 from agenttools.mcp_app import _input_schema
+from api.agent_diagnostics import get_agent_status, get_run_events
 
 # A diagnostics summary line only needs enough of a posting to identify it,
 # not the whole body (which can run to several KB and is not itself
@@ -213,7 +216,7 @@ def list_gmail_suggestions(limit: int = 50, offset: int = 0) -> dict:
     return {"total": total, "suggestions": [s.to_dict() for s in records]}
 
 
-# Exactly seven read-only tools. Nothing here writes to a store, starts a
+# Exactly nine read-only tools. Nothing here writes to a store, starts a
 # run, or generates a document — this registry is deliberately smaller than
 # agenttools.mcp_app._TOOL_REGISTRY, not a superset of it.
 _DIAG_TOOL_REGISTRY = {
@@ -254,6 +257,15 @@ _DIAG_TOOL_REGISTRY = {
         "Lists Gmail response-sync suggestions, newest-first by date. "
         "Read-only. limit defaults to 50, capped at 200; limit<=0 means "
         "the default.",
+    ),
+    "get_agent_status": (
+        get_agent_status,
+        "Reads bounded supervisor status, including live run ownership. Read-only.",
+    ),
+    "get_run_events": (
+        get_run_events,
+        "Reads bounded metadata-only execution events for a stored run. Read-only. "
+        "limit defaults to 50, maximum 200; before_sequence pages backward.",
     ),
 }
 
@@ -315,7 +327,10 @@ async def _handle_diag_call_tool(ctx, params) -> types.CallToolResult:
 
     fn, _ = _DIAG_TOOL_REGISTRY[params.name]
     try:
-        result = fn(**(params.arguments or {}))
+        if inspect.iscoroutinefunction(fn):
+            result = await fn(**(params.arguments or {}))
+        else:
+            result = await asyncio.to_thread(fn, **(params.arguments or {}))
         return types.CallToolResult(
             content=[
                 types.TextContent(
@@ -324,12 +339,12 @@ async def _handle_diag_call_tool(ctx, params) -> types.CallToolResult:
                 )
             ]
         )
-    except Exception as e:
+    except Exception:
         return types.CallToolResult(
             content=[
                 types.TextContent(
                     type="text",
-                    text=str(e),
+                    text="Diagnostics tool failed.",
                 )
             ],
             isError=True,

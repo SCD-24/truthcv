@@ -54,6 +54,8 @@
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
+import { basename } from 'node:path';
+import { createDiagnostics, createDiagnosticsHealth, SAFE_RUN_ID, type DiagnosticsHealth } from './diagnostics.js';
 
 import { createMcpClientPool, type McpClientPool } from './mcp/client.js';
 import { loadMcpConfig, type McpServerConfig } from './mcp/config.js';
@@ -185,6 +187,9 @@ export interface CliConfig {
   outputFile?: string;
   /** Where to write the failure detail on a non-zero exit; omitted to write nothing. */
   reasonFile?: string;
+  /** Dedicated metadata-only run stream, disabled if the safe run ID is absent. */
+  diagnosticsFile?: string;
+  runId?: string;
   /**
    * Model identifier for the `screen_posting` built-in's own provider adapter
    * (see `agent/harness/builtins/screenPosting.ts`). Defaults to {@link
@@ -233,10 +238,13 @@ export interface CliDeps {
   readStdin?: () => Promise<string>;
   /** Write the final assistant text to a file. Defaults to `writeFile`. */
   writeOutput?: (path: string, text: string) => Promise<void>;
+  /** Optional private health transport, independently injectable for CLI tests. */
+  healthWriter?: (fd: number) => DiagnosticsHealth;
 }
 
 /** The same dependency set with every field resolved to a concrete function. */
 interface ResolvedDeps {
+  healthWriter?: (fd: number) => DiagnosticsHealth;
   createAdapter: (opts: ProviderAdapterOptions) => ProviderAdapter;
   createPool: (servers: McpServerConfig[]) => Promise<McpClientPool>;
   loadConfig: (path: string, env: NodeJS.ProcessEnv) => McpServerConfig[];
@@ -474,6 +482,8 @@ export async function resolveConfig(
     promptCache: resolvePromptCache(f['prompt-cache'], env.AGENT_PROMPT_CACHE),
     outputFile: f['output-file'] || undefined,
     reasonFile: f['reason-file'] || undefined,
+    diagnosticsFile: f['diagnostics-file'] || undefined,
+    runId: f['run-id'] || undefined,
   };
 }
 
@@ -697,7 +707,7 @@ async function runOnce(
   // call dispatches to never depends on load order or leaks into a later run
   // in the same process.
   const screeningAdapter = d.createAdapter(screeningAdapterOptions(config));
-  const outcome = await runAgent(adapter, screeningAdapter, pool, config, d, emit, tokens);
+  const outcome = await runAgent(adapter, screeningAdapter, pool, config, env, d, emit, tokens);
   if (typeof outcome === 'number') return outcome;
   return report(outcome.result, config, d, emit, tokens, outcome.getFailureDetail);
 }
@@ -769,11 +779,20 @@ async function runAgent(
   screeningAdapter: ProviderAdapter,
   pool: McpClientPool,
   config: CliConfig,
+  env: NodeJS.ProcessEnv,
   d: ResolvedDeps,
   emit: Emitter,
   tokens: readonly string[],
 ): Promise<{ result: LoopResult; getFailureDetail: () => string | undefined } | number> {
   const stream = createEventStream(emit.json);
+  let health: DiagnosticsHealth | undefined;
+  const diagnosticsEnabled = config.runId && SAFE_RUN_ID.test(config.runId) && config.diagnosticsFile &&
+    basename(config.diagnosticsFile) === `diagnostics_${config.runId}.ndjson`;
+  if (diagnosticsEnabled && env.TRUTHCV_DIAGNOSTICS_FD === '3') {
+    try { health = (d.healthWriter ?? createDiagnosticsHealth)(3); } catch { /* optional channel */ }
+  }
+  const diagnostics = diagnosticsEnabled
+    ? createDiagnostics(config.diagnosticsFile!, config.runId!, { health }) : undefined;
   const { compactionConfig, usedFallback } = resolveCompactionConfig(config);
   if (usedFallback) {
     emit.err(
@@ -796,12 +815,15 @@ async function runAgent(
       compactionConfig,
       screeningAdapter,
       onEvent: stream.onEvent,
+      onDiagnostic: diagnostics?.onDiagnostic,
     });
     return { result, getFailureDetail: stream.getFailureDetail };
   } catch (err) {
     emit.err(`provider error: ${errorMessage(err)}`);
     await writeReason(config, d, tokens, `provider error: ${errorMessage(err)}`);
     return ExitCode.ProviderError;
+  } finally {
+    try { health?.close(); } catch { /* diagnostics never change the exit code */ }
   }
 }
 
@@ -1156,6 +1178,7 @@ function tokenFrom(flags: Record<string, string>, env: NodeJS.ProcessEnv): strin
 /** Fill in every unset dependency with its real default implementation. */
 function withDefaults(deps: CliDeps): ResolvedDeps {
   return {
+    healthWriter: deps.healthWriter,
     createAdapter: deps.createAdapter ?? createProviderAdapter,
     createPool: deps.createPool ?? ((servers) => createMcpClientPool(servers)),
     loadConfig: deps.loadConfig ?? loadMcpConfig,

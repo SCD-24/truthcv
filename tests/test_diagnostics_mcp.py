@@ -4,7 +4,7 @@
 These pin down the two things that matter about a second, bearer-token-only
 MCP surface: that it is unreachable without the right token (404, never a
 hint-carrying 401/403), and that once authenticated it exposes only the
-seven read-only diagnostics tools — never any tool from the operational
+nine read-only diagnostics tools — never any tool from the operational
 registry that can write.
 
 The 404-gate tests use a bare ``TestClient(app)`` (no lifespan): the auth
@@ -23,15 +23,17 @@ anywhere else (this file included) would raise and take that file's
 existing, passing tests down with it. Calling the handlers directly
 exercises exactly the same dispatch logic (registry lookup, schema, tool
 invocation, error wrapping) without needing the streamable-HTTP transport's
-task group at all. Both handlers are `async def` but perform no actual
-awaiting, so `_run_sync` below drives them to completion without an event
-loop — sidestepping this test session's already-active one rather than
-fighting it with a second `asyncio.run()`.
+task group at all. Handler tests run in an event loop because synchronous
+store reads are now offloaded to a thread and supervisor reads are async.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
@@ -58,19 +60,16 @@ class _ToolCallParams:
         self.arguments = arguments or {}
 
 
-def _run_sync(coro):
-    """Drive a coroutine that awaits nothing to completion, synchronously.
+def stub_agent_open(monkeypatch, open_url):
+    import api.agent_diagnostics as diag
 
-    Both `_handle_diag_list_tools` and `_handle_diag_call_tool` are
-    `async def` only because the SDK's dispatch protocol requires it; neither
-    body actually awaits anything. Stepping the coroutine once therefore
-    always finishes it, without needing (or fighting) a live event loop.
-    """
-    try:
-        coro.send(None)
-    except StopIteration as e:
-        return e.value
-    raise RuntimeError("coroutine awaited something; cannot drive it synchronously")
+    monkeypatch.setattr(diag.urllib.request, "build_opener",
+                        lambda *handlers: SimpleNamespace(open=open_url))
+
+
+def _run_sync(coro):
+    """Run a handler on a real loop so threaded store access is exercised."""
+    return asyncio.run(coro)
 
 
 def _rpc(client: TestClient, method: str, params: dict | None = None, headers: dict | None = None):
@@ -147,7 +146,7 @@ def test_existing_operational_mcp_endpoint_has_no_auth_gate(data_dir, monkeypatc
     assert r.status_code != 404
 
 
-def test_registry_holds_exactly_the_seven_read_only_tools():
+def test_registry_holds_exactly_the_nine_read_only_tools():
     assert set(_DIAG_TOOL_REGISTRY) == {
         "list_runs",
         "get_run",
@@ -156,10 +155,12 @@ def test_registry_holds_exactly_the_seven_read_only_tools():
         "get_status",
         "get_gmail_sync_status",
         "list_gmail_suggestions",
+        "get_agent_status",
+        "get_run_events",
     }
 
 
-def test_tools_list_handler_advertises_exactly_the_seven_diagnostics_tools():
+def test_tools_list_handler_advertises_exactly_the_nine_diagnostics_tools():
     result = _run_sync(_handle_diag_list_tools(None, None))
     names = {tool.name for tool in result.tools}
     assert names == {
@@ -170,6 +171,8 @@ def test_tools_list_handler_advertises_exactly_the_seven_diagnostics_tools():
         "get_status",
         "get_gmail_sync_status",
         "list_gmail_suggestions",
+        "get_agent_status",
+        "get_run_events",
     }
     # None of the operational, write-capable tools are reachable here.
     assert "record_application" not in names
@@ -338,3 +341,152 @@ def test_list_gmail_suggestions_non_positive_limit_is_clamped_to_the_default_not
     payload = json.loads(text)
     assert payload["total"] == 3
     assert len(payload["suggestions"]) == 2
+
+
+def test_producer_shaped_metadata_consumed_through_mcp(data_dir, monkeypatch):
+    """Contract fixture follows harness/diagnostics.ts -> agent/diagnostics.mjs.
+
+    One model start and terminal boundary, then an outer tool start, with
+    the producer's camelCase supervisor ownership alongside snake_case
+    event metadata. Only the explicit metadata fields may be returned.
+    """
+    import api.agent_diagnostics as diag
+    import runs.store as runs_store
+
+    run_id = "producer_run"
+    runs_store.start(run_id, trigger="scheduled")
+    at = "2023-11-14T22:13:20.000Z"
+    active = {"operation_id": "op_2", "phase": "tool", "started_at": at,
+              "tool_name": "screen_and_record_posting", "turn": 4}
+    common = {"schema_version": 1, "run_id": run_id, "at": at,
+              "active_truncated": False, "truncated": False}
+    events = [
+        {**common, "sequence": 1, "operation_id": "op_1", "phase": "model",
+         "status": "start", "active_operations": [
+             {"operation_id": "op_1", "phase": "model", "started_at": at}]},
+        {**common, "sequence": 2, "operation_id": "op_1", "phase": "model",
+         "status": "success", "duration_ms": 23, "active_operations": []},
+        {**common, "sequence": 3, "operation_id": "op_2", "phase": "tool",
+         "status": "start", "tool_name": "screen_and_record_posting", "turn": 4,
+         "active_operations": [active]},
+    ]
+    page = {"schema_version": 1, "run_id": run_id, "running": True,
+            "currentRunId": run_id, "observed_at": at, "availability": "available",
+            "reason": None, "events": events, "next_before_sequence": None,
+            "truncated": False, "last_activity_at": at, "active_operations": [active],
+            "active_truncated": False}
+
+    def open_url(req, timeout):
+        assert req.get_method() == "GET"
+        assert req.full_url == f"http://agent:9099/diagnostics/runs/{run_id}/events?limit=50"
+        reply = MagicMock()
+        reply.read.return_value = json.dumps(page).encode()
+        reply.__enter__.return_value = reply
+        return reply
+
+    monkeypatch.setenv("AGENT_API_TOKEN", "agent-only-token")
+    monkeypatch.setenv("AGENT_CONTROL_PORT", "9099")
+    stub_agent_open(monkeypatch, open_url)
+    result = _run_sync(_handle_diag_call_tool(None, _ToolCallParams("get_run_events", {"run_id": run_id})))
+    assert not result.is_error
+    payload = json.loads(result.content[0].text)
+    assert payload["ownership"] == "active" and payload["reachability"] == "reachable"
+    assert [event["status"] for event in payload["events"]] == ["start", "success", "start"]
+    assert payload["events"][1]["duration_ms"] == 23
+    assert payload["active_operations"] == [active]
+    assert payload["active_truncated"] is False
+    assert "agent-only-token" not in result.content[0].text
+
+
+def test_untrusted_live_telemetry_round_trips_through_mcp(data_dir, monkeypatch):
+    import runs.store as runs_store
+
+    run_id = 'untrusted_run'
+    runs_store.start(run_id, trigger='scheduled')
+    at = '2023-11-14T22:13:20.000Z'
+    # Produced by the supervisor when a valid persisted active snapshot cannot
+    # be trusted after write+unlink failure or a lost health lease.
+    page = {'schema_version': 1, 'run_id': run_id, 'running': True,
+            'currentRunId': run_id, 'observed_at': at, 'availability': 'unavailable',
+            'reason': 'telemetry_unavailable', 'events': [], 'next_before_sequence': None,
+            'truncated': False, 'last_activity_at': None, 'active_operations': [],
+            'active_truncated': False}
+
+    def open_url(req, timeout):
+        reply = MagicMock()
+        reply.read.return_value = json.dumps(page).encode()
+        reply.__enter__.return_value = reply
+        return reply
+
+    monkeypatch.setenv('AGENT_API_TOKEN', 'agent-only-token')
+    stub_agent_open(monkeypatch, open_url)
+    result = _run_sync(_handle_diag_call_tool(None, _ToolCallParams('get_run_events', {'run_id': run_id})))
+    assert not result.is_error
+    payload = json.loads(result.content[0].text)
+    assert payload['reason'] == 'telemetry_unavailable' and payload['ownership'] == 'active'
+    assert payload['running'] is True and payload['currentRunId'] == run_id
+    assert payload['events'] == payload['active_operations'] == []
+
+
+def test_run_events_discovery_schema():
+    schema = next(t.input_schema for t in _run_sync(_handle_diag_list_tools(None, None)).tools
+                  if t.name == "get_run_events")
+    assert set(schema["properties"]) == {"run_id", "limit", "before_sequence"}
+    assert schema["required"] == ["run_id"]
+
+
+def test_sync_tools_do_not_block_async_handler(monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    def slow_read():
+        entered.set()
+        release.wait(2)
+        return {"ok": True}
+    monkeypatch.setitem(_DIAG_TOOL_REGISTRY, "get_status", (slow_read, "read-only"))
+
+    async def scenario():
+        task = asyncio.create_task(_handle_diag_call_tool(None, _ToolCallParams("get_status")))
+        try:
+            assert await asyncio.to_thread(entered.wait, 1)
+            # This coroutine must run while the store read is still blocked.
+            assert not task.done()
+        finally:
+            release.set()
+        return await task
+
+    result = asyncio.run(asyncio.wait_for(scenario(), 3))
+    assert json.loads(result.content[0].text) == {"ok": True}
+
+
+def test_agent_network_probe_does_not_block_async_handler(data_dir, monkeypatch):
+    import api.agent_diagnostics as diag
+
+    entered, release = threading.Event(), threading.Event()
+    def slow_probe(req, timeout):
+        entered.set()
+        release.wait(2)
+        reply = MagicMock()
+        reply.read.return_value = b'{"running":false,"currentRunId":null}'
+        reply.__enter__.return_value = reply
+        return reply
+    monkeypatch.setenv("AGENT_API_TOKEN", "private-token")
+    stub_agent_open(monkeypatch, slow_probe)
+
+    async def scenario():
+        task = asyncio.create_task(_handle_diag_call_tool(None, _ToolCallParams("get_agent_status")))
+        try:
+            assert await asyncio.to_thread(entered.wait, 1)
+            assert not task.done()
+        finally:
+            release.set()
+        return await task
+
+    result = asyncio.run(asyncio.wait_for(scenario(), 3))
+    assert json.loads(result.content[0].text)["running"] is False
+
+
+def test_tool_errors_do_not_echo_secret_exception(monkeypatch):
+    def fails():
+        raise RuntimeError("secret: do not expose")
+    monkeypatch.setitem(_DIAG_TOOL_REGISTRY, "get_status", (fails, "read-only"))
+    result = _run_sync(_handle_diag_call_tool(None, _ToolCallParams("get_status")))
+    assert result.is_error and "secret" not in result.content[0].text
