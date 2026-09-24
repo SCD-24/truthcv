@@ -145,11 +145,9 @@ function buildBody(
   if (request.tools.length > 0) {
     body.tools = request.tools.map((tool) => ({
       type: "function",
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.inputSchema,
-      },
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema,
     }));
   }
   // NOTE: no max_output_tokens is sent — the backend rejects it.
