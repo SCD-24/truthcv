@@ -21,6 +21,7 @@ import { spawnSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import { secondsUntilNextSlot } from "./schedule.mjs";
 import { readRunDiagnostics } from "./diagnostics.mjs";
+import { readRunLogExcerpts } from "./run-log-excerpts.mjs";
 import { createDiagnosticsAvailability } from "./diagnostics-availability.mjs";
 
 // ---------------------------------------------------------------------------
@@ -697,9 +698,30 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === "GET" && req.url?.startsWith("/diagnostics/runs/")) {
-    // Never infer diagnostics from raw run logs, even for legacy runs.
     if (req.url.length > 512) return jsonReply(res, 400, { detail: "Invalid diagnostics request" });
     const url = new URL(req.url, "http://localhost");
+    const logs = /^\/diagnostics\/runs\/([a-zA-Z0-9_-]{1,80})\/logs$/.exec(url.pathname);
+    if (logs) {
+      const keys = [...url.searchParams.keys()];
+      if (keys.some((key) => !["limit", "before_offset"].includes(key)) ||
+        keys.length !== new Set(keys).size) {
+        return jsonReply(res, 400, { detail: "Invalid diagnostics request" });
+      }
+      const integer = (key, fallback) => {
+        const value = url.searchParams.get(key);
+        return value === null ? fallback : /^(?:0|[1-9][0-9]*)$/.test(value) ? Number(value) : NaN;
+      };
+      try {
+        return jsonReply(res, 200, readRunLogExcerpts(RUN_LOG_DIR, logs[1], {
+          limit: integer("limit", 50), beforeOffset: integer("before_offset", undefined),
+        }));
+      } catch (err) {
+        if (err instanceof RangeError) return jsonReply(res, 400, { detail: "Invalid diagnostics request" });
+        return jsonReply(res, 200, { schema_version: 1, run_id: logs[1], availability: "unavailable",
+          reason: "unreadable", excerpts: [], next_before_offset: null, truncated: false, omitted: false });
+      }
+    }
+    // Never infer diagnostics from raw run logs, even for legacy runs.
     const match = /^\/diagnostics\/runs\/([a-zA-Z0-9_-]{1,80})\/events$/.exec(url.pathname);
     if (!match || [...url.searchParams.keys()].some((key) => !["limit", "before_sequence"].includes(key))
       || [...url.searchParams.keys()].length !== new Set(url.searchParams.keys()).size) {

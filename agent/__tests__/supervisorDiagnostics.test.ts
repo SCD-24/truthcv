@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import fs, { mkdtempSync, readFileSync, writeFileSync, symlinkSync, rmSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import net from 'node:net';
 import { EventEmitter, once } from 'node:events';
 // @ts-expect-error no declaration file for the standalone .mjs lease
@@ -23,12 +23,22 @@ function port(): Promise<number> {
 }
 
 describe('supervisor diagnostics route', () => {
+  it('passes Node syntax validation before serving diagnostics', () => {
+    execFileSync(process.execPath, ['--check', 'agent/supervisor.js'], { cwd: resolve(__dirname, '../..') });
+  });
+
   it('reads only bounded, validated metadata and serves it after the token gate', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'supervisor-diagnostics-'));
     const runId = 'run_test1';
     const file = join(dir, `diagnostics_${runId}.ndjson`);
     const fakeConfig = join(dir, 'config.cjs');
     writeFileSync(fakeConfig, 'process.stdout.write(process.argv[2] === "enabled" ? "false" : "");');
+    const secret = 'private@example.com https://private.example/?token=secret';
+    writeFileSync(join(dir, `run_2025-01-02_0304_${runId}.log`), [
+      JSON.stringify({ type: 'error', message: `OpenAI request failed with status 429: ${secret}`,
+        retryable: true, retryAfterMs: 1200, body: secret }),
+      `12:00:00  ABORT: ${secret}`, '{"type":"error","message":"partial',
+    ].join('\n'));
     const sink = createDiagnostics(file, runId, { wall: () => 1_700_000_000_000, monotonic: () => 17 });
     sink.onDiagnostic({ operationId: 'op_1', phase: 'model', status: 'start' });
     sink.onDiagnostic({ operationId: 'op_1', phase: 'model', status: 'success' });
@@ -94,6 +104,32 @@ describe('supervisor diagnostics route', () => {
       expect(body.events.map((e: { sequence: number }) => e.sequence)).toEqual([3]);
       expect(body.active_operations).toEqual([]);
       expect(response.headers.get('content-length')).toBeTruthy();
+      const logs = `/diagnostics/runs/${runId}/logs`;
+      expect((await request(logs, 'wrong')).status).toBe(403);
+      const logResponse = await request(logs + '?limit=1');
+      expect(logResponse.status).toBe(200);
+      expect(logResponse.headers.get('content-length')).toBeTruthy();
+      const logPage = await logResponse.json();
+      expect(logPage).toMatchObject({ schema_version: 1, run_id: runId, availability: 'available',
+        omitted: true, truncated: true, excerpts: [{ category: 'precondition' }] });
+      expect(logPage.excerpts[0].observed_at).toMatch(/^\d{4}-\d\d-\d\dT/);
+      expect(JSON.stringify(logPage)).not.toContain(secret);
+      const older = await request(logs + '?before_offset=' + logPage.next_before_offset).then((r) => r.json());
+      expect(older).toMatchObject({ availability: 'available', omitted: false, truncated: false,
+        excerpts: [{ category: 'provider_http', provider: 'openai', http_status: 429,
+          retryable: true, retry_after_ms: 1200 }] });
+      expect(JSON.stringify(older)).not.toContain(secret);
+      expect(await request('/diagnostics/runs/legacy/logs').then((r) => r.json()))
+        .toMatchObject({ availability: 'unavailable', reason: 'missing', omitted: false,
+          truncated: false, excerpts: [], next_before_offset: null });
+      expect((await fetch(base + logs, { method: 'POST', headers: { 'X-Agent-Token': 'test-secret' } })).status)
+        .toBe(404);
+      for (const url of [logs + '?limit=0', logs + '?limit=201', logs + '?limit=1.5',
+        logs + '?before_offset=Infinity', logs + '?before_offset=-1', logs + '?before_offset=9999999',
+        logs + '?limit=1&limit=2', logs + '?unknown=1', logs + '?limit=1&before_sequence=1',
+        logs + '?limit=' + '1'.repeat(513), '/diagnostics/runs/..%2Fescape/logs']) {
+        expect((await request(url)).status).toBe(400);
+      }
       expect((await request('/diagnostics/runs/legacy/events')).status).toBe(200);
       expect((await request('/diagnostics/runs/legacy/events').then((r) => r.json())).reason).toBe('missing');
       for (const url of [endpoint + '?limit=0', endpoint + '?limit=201', endpoint + '?limit=1.5',

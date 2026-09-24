@@ -4,7 +4,7 @@
 These pin down the two things that matter about a second, bearer-token-only
 MCP surface: that it is unreachable without the right token (404, never a
 hint-carrying 401/403), and that once authenticated it exposes only the
-nine read-only diagnostics tools — never any tool from the operational
+ten read-only diagnostics tools — never any tool from the operational
 registry that can write.
 
 The 404-gate tests use a bare ``TestClient(app)`` (no lifespan): the auth
@@ -146,7 +146,7 @@ def test_existing_operational_mcp_endpoint_has_no_auth_gate(data_dir, monkeypatc
     assert r.status_code != 404
 
 
-def test_registry_holds_exactly_the_nine_read_only_tools():
+def test_registry_holds_exactly_the_ten_read_only_tools():
     assert set(_DIAG_TOOL_REGISTRY) == {
         "list_runs",
         "get_run",
@@ -157,10 +157,11 @@ def test_registry_holds_exactly_the_nine_read_only_tools():
         "list_gmail_suggestions",
         "get_agent_status",
         "get_run_events",
+        "get_run_logs",
     }
 
 
-def test_tools_list_handler_advertises_exactly_the_nine_diagnostics_tools():
+def test_tools_list_handler_advertises_exactly_the_ten_diagnostics_tools():
     result = _run_sync(_handle_diag_list_tools(None, None))
     names = {tool.name for tool in result.tools}
     assert names == {
@@ -173,6 +174,7 @@ def test_tools_list_handler_advertises_exactly_the_nine_diagnostics_tools():
         "list_gmail_suggestions",
         "get_agent_status",
         "get_run_events",
+        "get_run_logs",
     }
     # None of the operational, write-capable tools are reachable here.
     assert "record_application" not in names
@@ -433,6 +435,47 @@ def test_run_events_discovery_schema():
                   if t.name == "get_run_events")
     assert set(schema["properties"]) == {"run_id", "limit", "before_sequence"}
     assert schema["required"] == ["run_id"]
+
+
+def test_run_logs_discovery_and_call(data_dir, monkeypatch):
+    import api.agent_run_logs as logs
+    import runs.store as runs_store
+
+    run_id = "log_run"
+    runs_store.start(run_id, trigger="scheduled")
+    schema = next(tool.input_schema for tool in _run_sync(_handle_diag_list_tools(None, None)).tools
+                  if tool.name == "get_run_logs")
+    assert set(schema["properties"]) == {"run_id", "limit", "before_offset"}
+    assert schema["required"] == ["run_id"]
+    assert schema["properties"]["limit"]["type"] == "integer"
+    assert logs.get_run_logs.__defaults__ == (50, None)
+    observed_at = "2023-11-14T22:13:20.000Z"
+    page = {"schema_version": 1, "run_id": run_id, "availability": "available", "reason": None,
+            "excerpts": [{"offset": 12, "observed_at": observed_at, "category": "provider_http",
+                          "summary": "Provider HTTP error", "provider": "openai", "http_status": 429,
+                          "retryable": True, "retry_after_ms": 1000}],
+            "next_before_offset": 12, "truncated": True, "omitted": True}
+
+    def open_url(req, timeout):
+        assert req.full_url == f"http://agent:9099/diagnostics/runs/{run_id}/logs?limit=1&before_offset=20"
+        assert req.get_method() == "GET" and req.get_header("X-agent-token") == "internal-token"
+        reply = MagicMock()
+        reply.read.return_value = json.dumps(page).encode()
+        reply.__enter__.return_value = reply
+        return reply
+
+    monkeypatch.setenv("AGENT_API_TOKEN", "internal-token")
+    monkeypatch.setenv("DIAGNOSTICS_MCP_TOKEN", "different-bearer")
+    stub_agent_open(monkeypatch, open_url)
+    result = _run_sync(_handle_diag_call_tool(None, _ToolCallParams("get_run_logs",
+                                    {"run_id": run_id, "limit": 1, "before_offset": 20})))
+    assert not result.is_error
+    payload = json.loads(result.content[0].text)
+    assert payload["excerpts"] == [page["excerpts"][0]]
+    assert payload["reachability"] == "reachable" and payload["truncated"] is True
+    assert "internal-token" not in result.content[0].text
+    assert "different-bearer" not in result.content[0].text
+    assert logs.get_run_logs is _DIAG_TOOL_REGISTRY["get_run_logs"][0]
 
 
 def test_sync_tools_do_not_block_async_handler(monkeypatch):

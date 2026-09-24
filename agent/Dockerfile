@@ -101,6 +101,7 @@ COPY --chown=node:node agent/supervisor.js   /app/agent/supervisor.js
 COPY --chown=node:node agent/schedule.mjs    /app/agent/schedule.mjs
 COPY --chown=node:node agent/diagnostics.mjs /app/agent/diagnostics.mjs
 COPY --chown=node:node agent/diagnostics-availability.mjs /app/agent/diagnostics-availability.mjs
+COPY --chown=node:node agent/run-log-excerpts.mjs /app/agent/run-log-excerpts.mjs
 # The smoke test is shipped IN the image, not just kept in the repo: it is run
 # via `--entrypoint /app/agent/smoke-test.sh` against the built container, and
 # its whole point is to test the image as shipped (agent/README.md).
