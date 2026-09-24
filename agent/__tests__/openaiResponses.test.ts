@@ -133,6 +133,48 @@ describe("createOpenAiResponsesAdapter — request correctness", () => {
     expect(body.store).toBe(false);
     expect(body.stream).toBe(true);
     expect(body).not.toHaveProperty("max_output_tokens");
+    expect(body).not.toHaveProperty("tools");
+  });
+
+  it("sends multiple tools as flat Responses function definitions in order", async () => {
+    const fetchMock = mockStreamResponse(["data: [DONE]\n"]);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const tools = [
+      {
+        name: "search_jobs",
+        description: "Find jobs matching criteria",
+        inputSchema: {
+          type: "object",
+          properties: { query: { type: "string", minLength: 1 } },
+          required: ["query"],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: "record_application",
+        description: "Record an application",
+        inputSchema: {
+          type: "object",
+          properties: {
+            job: { type: "object", properties: { id: { type: "integer" } }, required: ["id"] },
+          },
+          required: ["job"],
+        },
+      },
+    ];
+    const adapter = createOpenAiResponsesAdapter({ token: makeJwt("a"), model: "gpt-5.4" });
+    await adapter.sendMessage(makeRequest({ tools })).next();
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    const body = JSON.parse(init.body as string);
+    expect(body.tools).toEqual(tools.map((tool) => ({
+      type: "function",
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema,
+    })));
+    for (const tool of body.tools) expect(tool).not.toHaveProperty("function");
   });
 });
 
