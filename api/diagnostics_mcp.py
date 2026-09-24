@@ -34,6 +34,7 @@ import screening.store as _screening_store
 import secretstore
 from agenttools.mcp_app import _input_schema
 from api.agent_diagnostics import get_agent_status, get_run_events
+from api.agent_run_logs import get_run_logs
 
 # A diagnostics summary line only needs enough of a posting to identify it,
 # not the whole body (which can run to several KB and is not itself
@@ -216,7 +217,7 @@ def list_gmail_suggestions(limit: int = 50, offset: int = 0) -> dict:
     return {"total": total, "suggestions": [s.to_dict() for s in records]}
 
 
-# Exactly nine read-only tools. Nothing here writes to a store, starts a
+# Exactly ten read-only tools. Nothing here writes to a store, starts a
 # run, or generates a document — this registry is deliberately smaller than
 # agenttools.mcp_app._TOOL_REGISTRY, not a superset of it.
 _DIAG_TOOL_REGISTRY = {
@@ -266,6 +267,11 @@ _DIAG_TOOL_REGISTRY = {
         get_run_events,
         "Reads bounded metadata-only execution events for a stored run. Read-only. "
         "limit defaults to 50, maximum 200; before_sequence pages backward.",
+    ),
+    "get_run_logs": (
+        get_run_logs,
+        "Reads sanitized log excerpts for a stored run, never raw log text. Read-only. "
+        "limit defaults to 50, maximum 200; before_offset pages backward.",
     ),
 }
 

@@ -271,19 +271,24 @@ filesystem route to your data and should not acquire one.
 
 ## Read-only run diagnostics over MCP
 
-The app's bearer-gated `/mcp/diagnostics` surface now offers two additional
-**read-only** tools: `get_agent_status()` and
-`get_run_events(run_id, limit=50, before_sequence=null)` (limits 1–200).
+The app's bearer-gated `/mcp/diagnostics` surface offers three additional
+**read-only** tools: `get_agent_status()`,
+`get_run_events(run_id, limit=50, before_sequence=null)`, and
+`get_run_logs(run_id, limit=50, before_offset=null)` (both page limits 1–200;
+`run_id` is a retained run id of 1–80 ASCII letters/digits/underscores/hyphens).
 Use `list_runs` to find a stored run id, then `get_agent_status` for current
-supervisor state and `get_run_events` for its latest metadata-only event page.
-Page backward by passing the returned `next_before_sequence` as
-`before_sequence`; a null cursor means no older page. No tool starts/cancels
-runs or reads raw logs. This surface requires `DIAGNOSTICS_MCP_TOKEN` as the
+supervisor state, `get_run_events` for metadata-only execution boundaries, and
+`get_run_logs` for classified, sanitized excerpts of the agent's run log.
+Page events backward using `next_before_sequence` as `before_sequence` and
+log excerpts using `next_before_offset` as `before_offset`; null cursors mean
+no older page. No tool starts/cancels runs or returns raw logs. This surface
+requires `DIAGNOSTICS_MCP_TOKEN` as the
 remote client's Bearer token; it is **not** the supervisor's `AGENT_API_TOKEN`.
 The app uses its existing `AGENT_API_TOKEN` to make GET-only requests to the
 agent at `agent:AGENT_CONTROL_PORT` (default 9099), on the private Compose
 network. Use the existing shared agent token in app and agent; no additional
-port exposure, shared volume mount, or control-server route is required.
+port exposure or shared volume mount is required. Rebuild both services to
+include the new internal logs route before using `get_run_logs`.
 
 `get_agent_status` reports `observed_at`, `reachability`, `availability`, a
 sanitized `reason` on failure, and allowlisted `/status` fields (`running`,
@@ -296,11 +301,59 @@ the pagination cursor. Each event holds only sequence, timestamp, operation id,
 phase (`registry_refresh`, `compaction`, `model`, `tool`, `backoff`), boundary status
 (`start`, `success`, `error`), and optional elapsed milliseconds, safe tool
 name, turn/retry/backoff numbers, and active-operation/truncation metadata.
+`get_run_logs` returns `schema_version: 1`, `run_id`, `availability`
+(`available` or `unavailable`), sanitized `reason` (or null), `reachability`
+(`unknown`, `reachable`, or `unreachable`), `excerpts` (newest offsets first),
+`next_before_offset`, `truncated`, and `omitted`. Each excerpt has a byte
+`offset`, `observed_at` (canonical UTC millisecond timestamp of **reading** the
+log, not the event's occurrence), a finite `category`, and a summary
+reconstructed from a fixed local template. Categories are `precondition`,
+`configuration`, `mcp_connection`, `provider_error`, `fatal`, `harness_exit`,
+`harness_error`, `provider_http`, `provider_network`, `loop_event`, `done`, and
+`tool_failure`. Only category-appropriate fields may appear: `exit_code`
+(0–255) for harness exits or done; `provider` (`anthropic`, `openai`,
+`openai_responses`, `openrouter`, `ollama`) for provider HTTP/network errors;
+`http_status` (100–599) for provider HTTP errors; `retryable` (boolean) and
+`retry_after_ms` (0–3,600,000) for provider HTTP/network or harness errors;
+`kind` (`compaction`, `retry`, `reflection`, `emptyTurn`, `turnCapReached`,
+`wrapUp`, `stop`) and `turn` (0–1,000,000) for loop events; `stop_reason`
+(`toolCalls`, `end`, `length`, `error`, `aborted`, `turnCapReached`) and `turns`
+(0–1,000,000) for done. All numeric values are integers, not booleans.
+Optional fields can be absent; do not infer their values. An available page
+can have zero excerpts even when scanning encountered only filtered-out or
+incomplete records. `omitted: true` means some source records were skipped
+(e.g. unrecognized lines, oversized records or a partial append); it does
+not count them. `truncated` is exactly whether `next_before_offset` is
+non-null: a scan can advance its cursor through **empty filtered pages**;
+continue paging while a cursor is returned. Neither empty excerpts nor a null
+cursor establish that the run had no errors.
+
+A missing log yields `availability: unavailable`, `reason: missing`; a log
+that cannot be trusted/read yields `reason: unreadable` (including ambiguous
+multiple matching filenames, symlinks/nonregular files, or a directory with
+more than 1024 entries). The directory cap fails closed even if a matching
+file exists; it does not change retention. Runs retained by the app may lack
+an agent log (e.g. a historical file removed from the agent's own volume).
+An invalid request or unknown stored run returns `invalid_request` or
+`unknown_run` before contacting the agent. Transport and validation failures
+use sanitized reasons including `missing_token`, `token_mismatch`,
+`unreachable`, `timeout`, `old_endpoint`, `upstream_error`, and
+`malformed_response`; no upstream body or exception is returned. Unlike
+`get_run_events`, log excerpts **do not establish live ownership**: use
+`get_agent_status` / `get_run_events` separately for current supervisor state.
+The projection cannot recover an error that was never recorded; a historical
+run may still yield only a generic classification or nothing at all.
+
 No model prompt/response, tool arguments/results, URLs, secrets, raw exception
-text, HTTP body, or raw run log crosses this boundary. The agent retains at
-most 2 MiB per new run in its existing `agent-runs` volume; its reader caps
-replies at 256 KiB, and the app caps received bytes before parsing. Older
-runs have no backfilled telemetry. Top-level `active_truncated` reports
+text, HTTP body, or raw run log crosses this boundary. Diagnostic telemetry
+alone is capped at 2 MiB per new run in the existing `agent-runs` volume;
+raw run logs do not inherit that retention cap. Both readers cap replies at
+256 KiB, and the app caps received bytes before parsing. Log projection reads
+backward in 64 KiB windows, scanning at most 512 KiB plus 8 KiB per request,
+and discards records over 8 KiB. These bounds limit work, not filesystem
+latency: like the metadata reader, the log reader uses synchronous filesystem
+calls, so a stalled agent volume can delay other supervisor requests.
+Older runs have no backfilled telemetry. Top-level `active_truncated` reports
 whether the latest live active snapshot omitted operations (more than 128),
 even when `before_sequence` selects an empty/older event page; it is false
 for historical or unavailable telemetry. `truncated` separately describes
@@ -338,10 +391,14 @@ its nested network/model/persistence steps. A long elapsed time or missing
 terminal event is evidence to investigate, **not** an automatic stall
 diagnosis; check ownership and later events before drawing conclusions.
 
-After upgrading, **redeploy both app and agent** with matching tokens and
-refresh/reconnect the remote MCP client so tool discovery lists all nine
-read-only tools. For a smoke check, start a **new** run (a run started before
-upgrade will not have these events). Call `get_agent_status` while it runs and
+After upgrading, **rebuild and redeploy both app and agent images** with
+matching internal `AGENT_API_TOKEN` values and refresh/reconnect the remote MCP
+client so tool discovery lists all ten read-only tools (including `get_run_logs`).
+The diagnostics client's bearer `DIAGNOSTICS_MCP_TOKEN` remains separate; no
+new port or shared volume mount is needed. The new internal
+`GET /diagnostics/runs/{run_id}/logs` route uses the existing token gate.
+For a smoke check, start a **new** run (a run started before upgrade will not
+have these events). Call `get_agent_status` while it runs and
 confirm `running: true` and `currentRunId` equals the new run id. Poll
 `get_run_events` for that id: while the model or a tool waits, expect a
 `model` or `tool` `start` boundary and an active operation; after completion,
