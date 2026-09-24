@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createDiagnostics } from '../diagnostics.js';
 
 import type { McpClientPool, NamespacedTool } from '../mcp/client.js';
 import type { HarnessEvent, ProviderAdapter, ToolCall } from '../providers/types.js';
@@ -913,6 +914,63 @@ describe('runCli unfinished runs', () => {
 
   // The other direction: the guard must not fail a run that did report its
   // outcome, or every healthy night turns red.
+  it('writes separate run-attributed diagnostics without changing stdout or the exit code', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-diagnostics-'));
+    try {
+      const file = join(dir, 'diagnostics_run1.ndjson');
+      const { deps, stdout } = harness(scriptedAdapter([finishRunTurn, [doneEnd]]), fakePool());
+      const code = await runCli([...BASE_ARGS, '--run-id', 'run1', '--diagnostics-file', file, 'go'], {}, deps);
+      expect(code).toBe(ExitCode.Success);
+      const data = await readFile(file, 'utf8');
+      expect(data).toContain('"run_id":"run1"');
+      expect(data).not.toContain('"content"');
+      expect(stdout.some((line) => line.includes('"type":"done"'))).toBe(true);
+      expect(createDiagnostics(file, '../bad').available()).toBe(false);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it('keeps the optional channel open across a model wait and closes it on exit', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-health-'));
+    const updates: Array<[string, number]> = [];
+    const close = vi.fn();
+    let release = () => {};
+    const waiting: ProviderAdapter = { async *sendMessage() {
+      await new Promise<void>((resolve) => { release = resolve; });
+      yield { type: 'error', retryable: false, message: 'provider failure' } as HarnessEvent;
+    } };
+    try {
+      const { deps, stdout } = harness(waiting, fakePool(), {
+        healthWriter: () => ({ update: (state, sequence) => { updates.push([state, sequence]); }, close }),
+      });
+      const file = join(dir, 'diagnostics_run1.ndjson');
+      const result = runCli([...BASE_ARGS, '--run-id', 'run1', '--diagnostics-file', file, 'go'],
+        { TRUTHCV_DIAGNOSTICS_FD: '3' }, deps);
+      // A model start is persisted before the transport's long wait resolves.
+      for (let i = 0; i < 100 && updates.length === 0; i++) await new Promise((done) => setTimeout(done, 1));
+      expect(updates[0]).toEqual(['healthy', 1]);
+      expect(close).not.toHaveBeenCalled();
+      release();
+      expect(await result).toBe(ExitCode.ProviderError);
+      expect(close).toHaveBeenCalledOnce();
+      expect(stdout.at(-1)).toContain('"type":"done"');
+    } finally { release(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it('does not create a channel for a standalone CLI invocation', async () => {
+    const healthWriter = vi.fn();
+    const { deps } = harness(scriptedAdapter([finishRunTurn, [doneEnd]]), fakePool(), { healthWriter });
+    expect(await runCli([...BASE_ARGS, 'go'], {}, deps)).toBe(ExitCode.Success);
+    expect(healthWriter).not.toHaveBeenCalled();
+  });
+
+  it('ignores a diagnostic write failure while preserving reason and stdout', async () => {
+    const { deps, stdout } = harness(scriptedAdapter([[{ type: 'error', retryable: false, message: 'bad' }]]), fakePool());
+    const code = await runCli([...BASE_ARGS, '--run-id', 'run1',
+      '--diagnostics-file', '/nonexistent/diagnostics_run1.ndjson', 'go'], {}, deps);
+    expect(code).toBe(ExitCode.ProviderError);
+    expect(stdout.some((line) => line.includes('"type":"done"'))).toBe(true);
+  });
+
   it('still exits 0 when the run called finish_run before ending', async () => {
     const adapter = scriptedAdapter([
       [{ type: 'toolCall', toolCall: A_TOOL_CALL }, doneToolCalls('')],

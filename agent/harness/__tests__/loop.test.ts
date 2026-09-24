@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { McpClientPool, NamespacedTool } from '../mcp/client.js';
 import type { ConversationMessage, HarnessEvent, ModelRequest, ProviderAdapter, ToolCall } from '../providers/types.js';
 import { backoffDelay, classifyError, isRetryable, runLoop } from '../loop.js';
+import type { DiagnosticBoundary } from '../diagnostics.js';
 
 /**
  * Like {@link scriptedAdapter}, but also records every request handed to
@@ -1104,6 +1105,57 @@ describe('executeTurnToolCalls concurrency (via runLoop)', () => {
     expect(outputs[0]).toMatchObject({ isError: true, content: 'browser failed' });
     expect(JSON.parse(outputs[1].content)).toMatchObject({ id: 'saved-1', verdict: 'passed', created: true, actionable: true });
     expect(callTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('emits a model start before the first response and a terminal boundary on failure', async () => {
+    const boundaries: DiagnosticBoundary[] = [];
+    let resume: (() => void) | undefined;
+    const adapter: ProviderAdapter = { async *sendMessage() {
+      await new Promise<void>((resolve) => { resume = resolve; });
+      yield { type: 'error', message: 'secret https://example.test', retryable: false };
+    } };
+    const { pool } = fakePool();
+    const result = runLoop({ adapter, pool, systemPrompt: '', initialMessages: [], config: { maxTurns: 2 },
+      onDiagnostic: (boundary) => boundaries.push(boundary) });
+    for (let i = 0; i < 20 && !resume; i++) await Promise.resolve();
+    expect(boundaries.map((b) => `${b.phase}:${b.status}`)).toEqual([
+      'registry_refresh:start', 'registry_refresh:success', 'model:start',
+    ]);
+    resume?.();
+    expect((await result).stopReason).toBe('error');
+    expect(boundaries.at(-1)).toMatchObject({ phase: 'model', status: 'error' });
+    expect(JSON.stringify(boundaries)).not.toContain('secret');
+  });
+
+  it('records independent overlapping tool boundaries with registered names only', async () => {
+    const pairs = ['check_cooldown', 'get_job_profiles'].map((n, i) => toolAndCall('truthcv', n, `c${i}`));
+    const { pool, callTool, release } = controllablePool(pairs.map((p) => p.tool));
+    const { adapter } = scriptedAdapter(turnRequesting(pairs.map((p) => p.call)));
+    const boundaries: DiagnosticBoundary[] = [];
+    const result = runLoop({ adapter, pool, systemPrompt: '', initialMessages: [], config: { maxTurns: 5 },
+      onDiagnostic: (boundary) => boundaries.push(boundary) });
+    await waitUntilCalled(callTool, 2);
+    const starts = boundaries.filter((b) => b.phase === 'tool');
+    expect(starts).toHaveLength(2);
+    expect(starts.map((b) => b.toolName)).toEqual(pairs.map((p) => p.call.name));
+    expect(new Set(starts.map((b) => b.operationId)).size).toBe(2);
+    release(pairs[1].call.name);
+    release(pairs[0].call.name);
+    await result;
+    expect(boundaries.filter((b) => b.phase === 'tool' && b.status === 'success')).toHaveLength(2);
+  });
+
+  it('records numeric retries/backoff and reactive compaction without provider text', async () => {
+    const overflow: HarnessEvent = { type: 'error', retryable: false, message: 'prompt is too long: secret' };
+    const { adapter } = scriptedAdapter([[retryableError], [overflow], [doneEnd]]);
+    const { pool } = fakePool();
+    const boundaries: DiagnosticBoundary[] = [];
+    await runLoop({ adapter, pool, systemPrompt: '',
+      initialMessages: Array.from({ length: 40 }, (_, i) => ({ role: 'user', content: `secret${i}` })),
+      config: { maxTurns: 5 }, sleep: noSleep, onDiagnostic: (boundary) => boundaries.push(boundary) });
+    expect(boundaries).toContainEqual(expect.objectContaining({ phase: 'backoff', status: 'start', retryAttempt: 1 }));
+    expect(boundaries).toContainEqual(expect.objectContaining({ phase: 'compaction', status: 'success' }));
+    expect(JSON.stringify(boundaries)).not.toContain('secret');
   });
 
   it('still latches finish_run when its result arrives after another call completes', async () => {

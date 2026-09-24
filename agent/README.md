@@ -269,6 +269,90 @@ agent has arrives through the MCP tool surface — cover letters, the canonical
 CV, the form answers, cooldowns, and the records it writes back. It has no
 filesystem route to your data and should not acquire one.
 
+## Read-only run diagnostics over MCP
+
+The app's bearer-gated `/mcp/diagnostics` surface now offers two additional
+**read-only** tools: `get_agent_status()` and
+`get_run_events(run_id, limit=50, before_sequence=null)` (limits 1–200).
+Use `list_runs` to find a stored run id, then `get_agent_status` for current
+supervisor state and `get_run_events` for its latest metadata-only event page.
+Page backward by passing the returned `next_before_sequence` as
+`before_sequence`; a null cursor means no older page. No tool starts/cancels
+runs or reads raw logs. This surface requires `DIAGNOSTICS_MCP_TOKEN` as the
+remote client's Bearer token; it is **not** the supervisor's `AGENT_API_TOKEN`.
+The app uses its existing `AGENT_API_TOKEN` to make GET-only requests to the
+agent at `agent:AGENT_CONTROL_PORT` (default 9099), on the private Compose
+network. Use the existing shared agent token in app and agent; no additional
+port exposure, shared volume mount, or control-server route is required.
+
+`get_agent_status` reports `observed_at`, `reachability`, `availability`, a
+sanitized `reason` on failure, and allowlisted `/status` fields (`running`,
+`cancelling`, `currentRunId`, `lastRunId`, last start/finish/exit/cancellation,
+`scheduleEnabled`). `get_run_events` validates the id against stored runs and
+returns schema version 1, run id, timestamps, availability/reason, reachability,
+`ownership`, `running`, `currentRunId`, bounded chronological `events`,
+`last_activity_at`, `active_operations`, `active_truncated`, `truncated`, and
+the pagination cursor. Each event holds only sequence, timestamp, operation id,
+phase (`registry_refresh`, `compaction`, `model`, `tool`, `backoff`), boundary status
+(`start`, `success`, `error`), and optional elapsed milliseconds, safe tool
+name, turn/retry/backoff numbers, and active-operation/truncation metadata.
+No model prompt/response, tool arguments/results, URLs, secrets, raw exception
+text, HTTP body, or raw run log crosses this boundary. The agent retains at
+most 2 MiB per new run in its existing `agent-runs` volume; its reader caps
+replies at 256 KiB, and the app caps received bytes before parsing. Older
+runs have no backfilled telemetry. Top-level `active_truncated` reports
+whether the latest live active snapshot omitted operations (more than 128),
+even when `before_sequence` selects an empty/older event page; it is false
+for historical or unavailable telemetry. `truncated` separately describes
+event retention/pagination. Truncation and an absent page are not proof of
+inactivity.
+
+Live telemetry also requires the current child's private inherited fd 3 health
+pipe: the harness sends only version, health, and latest *persisted* sequence,
+with a 1-second heartbeat; the supervisor trusts it for at most 5 seconds of
+monotonic time. The pipe is not an endpoint, port, mount, or durable artifact.
+A disk write failure invalidates the live snapshot even if removing a previously
+valid NDJSON file also fails. A missing, closed, malformed, oversized, expired,
+or cancelled channel returns `telemetry_unavailable` with empty events and
+active operations for the current run, while retaining its `running` and
+`currentRunId`. Detection is bounded by the lease, **not instantaneous**; an
+elapsed boundary or unavailable telemetry is not itself a stall diagnosis.
+Historical retained events remain readable without live active snapshots;
+standalone CLI runs without the private channel retain their normal execution
+and diagnostic-file behaviour, but the supervisor never trusts their file as
+live telemetry. A supervisor restart cannot reconstruct a health lease from
+persisted files.
+
+Only `running: true` **and** a matching `currentRunId` establish live
+`ownership: active`. Historical events, a run-store `running` counter, or a
+failed/unreachable supervisor probe do not establish a live process;
+`ownership: unknown` on a failed probe is not an idle verdict. A valid
+supervisor response with missing/malformed telemetry still reports its
+`running`, `currentRunId`, and live ownership, without claiming an active
+snapshot. Reasons such as `missing_token`, `token_mismatch`, `unreachable`,
+`timeout`, `old_endpoint`, `unknown_run`, `malformed_response`, and `absent_telemetry`
+name distinct remediation paths without exposing upstream details. Events
+mark *outer* tool execution boundaries: a long compound built-in (for
+example `screen_and_record_posting`) is timed as one outer tool call, not
+its nested network/model/persistence steps. A long elapsed time or missing
+terminal event is evidence to investigate, **not** an automatic stall
+diagnosis; check ownership and later events before drawing conclusions.
+
+After upgrading, **redeploy both app and agent** with matching tokens and
+refresh/reconnect the remote MCP client so tool discovery lists all nine
+read-only tools. For a smoke check, start a **new** run (a run started before
+upgrade will not have these events). Call `get_agent_status` while it runs and
+confirm `running: true` and `currentRunId` equals the new run id. Poll
+`get_run_events` for that id: while the model or a tool waits, expect a
+`model` or `tool` `start` boundary and an active operation; after completion,
+expect a matching `success` or `error` terminal boundary with `duration_ms`.
+When the process exits, status should stop reporting that run as current and
+subsequent event reads should show `ownership: inactive`, with no live active
+operations. If telemetry is `absent_telemetry`, check that the run really
+started on the redeployed agent; if the supervisor is unreachable, investigate
+the network/token first rather than inferring the run has stopped. A live
+run can apply for real — follow the `RUN_ONCE=1` warning above.
+
 ## What the agent may and may not do
 
 Its allow-list is hardcoded in the harness (`agent/harness/tools.ts`) and is the

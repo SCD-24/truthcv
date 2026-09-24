@@ -99,6 +99,8 @@ COPY --chown=node:node agent/supervisor.js   /app/agent/supervisor.js
 # Zone-aware slot maths, imported by supervisor.js at load time. Without it
 # the supervisor dies with ERR_MODULE_NOT_FOUND and no run ever fires.
 COPY --chown=node:node agent/schedule.mjs    /app/agent/schedule.mjs
+COPY --chown=node:node agent/diagnostics.mjs /app/agent/diagnostics.mjs
+COPY --chown=node:node agent/diagnostics-availability.mjs /app/agent/diagnostics-availability.mjs
 # The smoke test is shipped IN the image, not just kept in the repo: it is run
 # via `--entrypoint /app/agent/smoke-test.sh` against the built container, and
 # its whole point is to test the image as shipped (agent/README.md).

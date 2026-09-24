@@ -706,6 +706,11 @@ printf '%s' "$PROMPT" >"$HARNESS_PROMPT_FILE"
 # The harness writes its final assistant message here; named alongside RUN_LOG
 # so a run's artifacts share one stamp+id prefix.
 RUN_OUTPUT="$RUN_LOG_DIR/run_${STAMP}_${TRUTHCV_RUN_ID}.output"
+# Dedicated metadata-only stream; never interpolate an unsafe id into its path.
+DIAGNOSTIC_FILE=""
+if [[ "$TRUTHCV_RUN_ID" =~ ^[a-zA-Z0-9_-]{1,80}$ ]]; then
+  DIAGNOSTIC_FILE="$RUN_LOG_DIR/diagnostics_${TRUTHCV_RUN_ID}.ndjson"
+fi
 
 # Exit codes are the harness's machine contract: 0 success, 2 turn cap, 3
 # provider error, 4 MCP connection failure, 5 bad configuration, 6 the agent
@@ -720,6 +725,7 @@ RUN_OUTPUT="$RUN_LOG_DIR/run_${STAMP}_${TRUTHCV_RUN_ID}.output"
 # gets today's exact behaviour: one model doing both jobs. Set the
 # AGENT_SCREENING_* env vars to point screening at a separate, cheaper model
 # instead.
+run_harness() {
 node "$HARNESS_CLI" \
   --prompt-file "$HARNESS_PROMPT_FILE" \
   --model "$AGENT_MODEL" \
@@ -743,9 +749,24 @@ node "$HARNESS_CLI" \
   --screening-auth-type "${AGENT_SCREENING_AUTH_TYPE:-$AGENT_LLM_AUTH_TYPE}" \
   --output-file "$RUN_OUTPUT" \
   --reason-file "$REASON_FILE" \
+  --diagnostics-file "$DIAGNOSTIC_FILE" \
+  --run-id "$TRUTHCV_RUN_ID" \
   </dev/null >>"$RUN_LOG" 2>&1
+}
 
-RC=$?
+# Only the harness gets fd 3. All precondition helpers above are synchronous;
+# neither shell nor later cleanup may keep the pipe open after the harness exits.
+if [[ "${TRUTHCV_DIAGNOSTICS_FD:-}" == 3 && -e /dev/fd/3 ]]; then
+  run_harness &
+  HARNESS_PID=$!
+  exec 3>&-
+  wait "$HARNESS_PID"
+  RC=$?
+else
+  unset TRUTHCV_DIAGNOSTICS_FD
+  run_harness
+  RC=$?
+fi
 rm -f "$HARNESS_PROMPT_FILE"
 log "agent harness exited rc=$RC"
 
