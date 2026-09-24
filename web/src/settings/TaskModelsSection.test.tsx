@@ -72,6 +72,17 @@ describe("TaskModelsSection", () => {
     expect(screen.getByText("CV tailoring")).toBeTruthy();
     expect(screen.getByText("Inference detection")).toBeTruthy();
     expect(screen.getByText("Cover letter")).toBeTruthy();
+    const descriptions = [
+      "Extracts factual career information from your uploaded profile.",
+      "Identifies relevant skills and keywords in the job posting.",
+      "Selects and rephrases your verified experience for the target role.",
+      "Suggests claims not yet in your verified profile for you to review.",
+      "Drafts a cover letter tailored to the job posting.",
+    ];
+    TASKS.forEach((task, index) => {
+      const heading = screen.getByText(task.label);
+      expect(heading.parentElement?.textContent).toContain(descriptions[index]);
+    });
   });
 
   it("saving the first row calls updateRouting with {tasks: {truth_extract: route}}", async () => {

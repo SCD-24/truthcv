@@ -13,7 +13,7 @@ const props = {
 };
 
 describe("SideNav", () => {
-  it("renders all eleven buttons", () => {
+  it("renders the model routing destination", () => {
     render(<SideNav {...props} />);
     const labels = [
       "Upload CV",
@@ -23,6 +23,7 @@ describe("SideNav", () => {
       "Applications",
       "Analytics",
       "Agents",
+      "Model routing",
       "Screenings",
       "Company Research",
       "Approvals",

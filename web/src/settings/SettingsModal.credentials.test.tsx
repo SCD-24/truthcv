@@ -23,7 +23,7 @@ const accounts: ConnectionList = { encryptionAvailable: true, connections: [{
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe("Settings modal credential boundary", () => {
-  it("typing keys remains manual while existing Jev and Gmail toggles persist immediately", async () => {
+  it("Jev credentials stay manual and Gmail/Jev toggles persist immediately without account controls", async () => {
     vi.mocked(getOnboarding).mockResolvedValue({ providerDone: true, hasProfile: false,
       cvReviewedAt: null, tourSeenAt: null, complete: false });
     vi.mocked(listConnections).mockResolvedValue(accounts);
@@ -35,10 +35,11 @@ describe("Settings modal credential boundary", () => {
     vi.mocked(saveJevSettings).mockImplementation(async (patch) => ({ ...jev, ...patch }));
     vi.mocked(saveConnectionKey).mockResolvedValue([]);
     render(<WizardProvider><SettingsModal onClose={vi.fn()} /></WizardProvider>);
-    const key = await screen.findByLabelText("API key");
-    fireEvent.change(key, { target: { value: "not-a-real-key" } });
     const jevKey = await screen.findByLabelText("Jev API key");
     fireEvent.change(jevKey, { target: { value: "not-a-real-key" } });
+    expect(screen.queryByLabelText("API key")).toBeNull();
+    expect(listConnections).not.toHaveBeenCalled();
+    expect(getRouting).not.toHaveBeenCalled();
     expect(saveConnectionKey).not.toHaveBeenCalled();
     expect(saveJevSettings).not.toHaveBeenCalled();
     expect(updateRouting).not.toHaveBeenCalled();
@@ -49,7 +50,6 @@ describe("Settings modal credential boundary", () => {
     await vi.waitFor(() => expect(saveJevSettings).toHaveBeenCalledWith({ useForEmailTracking: true }));
     fireEvent.click(screen.getByRole("button", { name: "Save key" }));
     await vi.waitFor(() => expect(saveJevSettings).toHaveBeenCalledWith({ apiKey: "not-a-real-key" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await vi.waitFor(() => expect(saveConnectionKey).toHaveBeenCalledWith("claude", { apiKey: "not-a-real-key" }));
+    expect(saveConnectionKey).not.toHaveBeenCalled();
   });
 });
