@@ -9,6 +9,8 @@ import "./styles/settings.css";
 import { useWizard } from "./wizard/store";
 import { SideNav } from "./nav/SideNav";
 import { SettingsModal } from "./settings/SettingsModal";
+import { ModelRoutingSession } from "./modelRouting/ModelRoutingSession";
+import { ModelRoutingPage } from "./modelRouting/ModelRoutingPage";
 import { ApplicationsPage } from "./applications/ApplicationsPage";
 import { FilledFormPage } from "./applications/FilledFormPage";
 import { AnalyticsPage } from "./analytics/AnalyticsPage";
@@ -153,6 +155,7 @@ function TopLevelRoutes({ onOnboardingComplete }: { onOnboardingComplete: () => 
         element={<FilledFormPage onBack={() => navigate(ROUTES.applications)} />}
       />
       <Route path={ROUTES.agents} element={<AgentsPage onBack={onBack} />} />
+      <Route path={ROUTES.modelRouting} element={<ModelRoutingPage />} />
       <Route path={ROUTES.jobBoards} element={<JobBoardsPage />} />
       <Route path={ROUTES.screenings} element={<ScreeningsPage onBack={onBack} />} />
       <Route
@@ -246,11 +249,13 @@ export function App() {
       />
       <main className="stage">
         <div className="stage__inner stage__inner--wide">
-          {showOnboardingGate ? (
-            <Navigate to={ROUTES.onboarding} replace />
-          ) : (
-            <TopLevelRoutes onOnboardingComplete={finishOnboarding} />
-          )}
+          <ModelRoutingSession>
+            {showOnboardingGate ? (
+              <Navigate to={ROUTES.onboarding} replace />
+            ) : (
+              <TopLevelRoutes onOnboardingComplete={finishOnboarding} />
+            )}
+          </ModelRoutingSession>
         </div>
       </main>
 

@@ -9,7 +9,6 @@ import {
   getRouting,
   listConnections,
   listConnectionModels,
-  updateRouting,
   saveProfileAnswers,
 } from "../api/client";
 import type { AgentConfig, ConnectionList, ProfileAnswers, Routing } from "../api/types";
@@ -151,7 +150,7 @@ describe("SettingsModal", () => {
     vi.clearAllMocks();
   });
 
-  it("loads connections + routing on open and renders both sections", async () => {
+  it("keeps policy but no longer loads accounts or routing", async () => {
     const list: ConnectionList = {
       encryptionAvailable: true,
       connections: [
@@ -178,10 +177,11 @@ describe("SettingsModal", () => {
       </WizardProvider>,
     );
 
-    expect(await screen.findByText("Accounts")).toBeTruthy();
-    expect(screen.getByText("Default model")).toBeTruthy();
-    expect(screen.getByText("Task models")).toBeTruthy();
-    expect(screen.getAllByText("Claude").length).toBeGreaterThan(0);
+    expect(await screen.findByText("Job search policy")).toBeTruthy();
+    expect(screen.queryByText("Accounts")).toBeNull();
+    expect(screen.queryByText("Default model")).toBeNull();
+    expect(getRouting).not.toHaveBeenCalled();
+    expect(listConnections).not.toHaveBeenCalled();
   });
 
   it("Close flushes only edited cooldown keys and waits for policy writes", async () => {
@@ -203,24 +203,16 @@ describe("SettingsModal", () => {
     await vi.waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
-  it("Close waits for routing writes and failed drafts require retry or explicit discard", async () => {
-    const list: ConnectionList = { encryptionAvailable: true, connections: [{
-      provider: "claude", label: "Claude", modes: ["subscription"], subscriptionConnected: true,
-      apiKeyConnected: false, authMode: "subscription", expiresAt: null, connectedAt: null,
-    }] };
-    const routing: Routing = { tasks: {}, agent: null, default: null };
-    vi.mocked(listConnections).mockResolvedValue(list);
-    vi.mocked(getRouting).mockResolvedValue(routing);
-    vi.mocked(listConnectionModels).mockResolvedValue([{ id: "m", label: "Model M" }]);
+  it("Close waits for failed policy drafts to be explicitly discarded", async () => {
+    vi.mocked(getAgentConfig).mockResolvedValue({ cooldownDays: 90, cooldownDaysSameRole: null,
+      cooldownDaysSameCompany: null } as AgentConfig);
     let reject!: (error: Error) => void;
-    vi.mocked(updateRouting).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    vi.mocked(updateAgentConfig).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
     const onClose = vi.fn();
     render(<WizardProvider><SettingsModal onClose={onClose} /></WizardProvider>);
-    expect(await screen.findByText("Default model")).toBeTruthy();
-    fireEvent.mouseDown(screen.getAllByLabelText(/^model$/i)[0]);
-    fireEvent.click(await screen.findByRole("option", { name: "Model M" }));
-    await vi.waitFor(() => expect(updateRouting).toHaveBeenCalledTimes(1));
+    fireEvent.change(await screen.findByLabelText(/same role cooldown/i), { target: { value: "4" } });
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await vi.waitFor(() => expect(updateAgentConfig).toHaveBeenCalledTimes(1));
     expect(onClose).not.toHaveBeenCalled();
     reject(new Error("offline"));
     expect(await screen.findByText(/Unsaved or invalid changes remain/)).toBeTruthy();

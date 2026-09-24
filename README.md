@@ -59,24 +59,36 @@ stays in `./data` either way.
 ## Connecting a model provider
 
 TruthCV needs an LLM provider to extract, tailor and guardrail your CV, but it
-does not require you to bring your own API key. Connect one from **Settings →
+does not require you to bring your own API key. Connect one from **Model routing →
 Accounts** (or during onboarding, see below) — TruthCV supports four:
 
 - **Claude (Anthropic)** — sign in with a Claude Pro/Max subscription (OAuth,
   no API key needed), or paste an Anthropic API key.
-- **ChatGPT (OpenAI)** — an OpenAI API key.
+- **ChatGPT (OpenAI)** — sign in with a ChatGPT subscription using a device code, or paste an OpenAI API key.
 - **OpenRouter** — an OpenRouter API key.
 - **Ollama** — no credential; point it at a local (or remote) Ollama URL.
 
-Connected credentials are encrypted at rest into `./data/secrets.enc`. The
-`LLM_PROVIDER` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` variables in `.env`
-are a **fallback only**, used when no connection has been made — whatever is
-connected in the app always takes precedence.
+Connecting an account supplies credentials; it does **not** select the provider
+used for CV tasks. Choose a **Default model** separately under **Model routing**;
+optional per-task overrides for truth extraction, keywords, tailoring,
+inference and cover letter generation take priority, and cleared tasks use the
+default. Without a saved route, provider selection preserves any migrated
+provider choice from an older installation, then falls back to `LLM_PROVIDER`
+in `.env`. Save a new Default model to override that migrated choice.
+Credentials for a selected connection come from the saved sign-in or
+API key (encrypted at rest in `./data/secrets.enc`), with the corresponding
+environment credential as fallback when no saved credential is available.
 
-Per-task model routing is available in **Settings → Task models**, where you
-can override the default provider and model for specific operations: truth
-extraction, keywords, tailoring, inference, and cover letter generation.
-Cleared tasks use the default model.
+Routing choices autosave when you change them; account sign-ins, API keys and
+Ollama URLs still require their explicit Connect/Save action. Incomplete custom
+models or invalid context windows stay as unsaved drafts, and failed saves show
+an error with Retry. Leaving the page keeps drafts and flushes pending edits;
+a warning protects unresolved changes before closing the tab. To abandon them,
+use **Discard routing changes**; an in-flight write finishes before a fresh
+routing reload, and routing edits remain locked until that reload succeeds.
+The independent **Application agent** route governs unattended browser
+applications on the next run; clearing it uses Claude, not the default task
+model, with saved Claude sign-in/API key and environment credential fallback.
 
 ### Onboarding
 
@@ -99,6 +111,8 @@ TruthCV is a multi-page app, not a single linear wizard:
   its source recorded alongside each fact.
 - **Agents** — the unattended agent's run history, schedule, target companies
   and job boards, and site sign-ins.
+- **Model routing** — provider accounts, the default and task model routes, and
+  the independent application-agent model route.
 
 Documents are checked twice: the guardrail approves the *content* before
 rendering, and a separate verification pass (`render/verify.py`) extracts text
@@ -218,7 +232,7 @@ writes the result back into the ledger.
 
 The agent holds no provider credential of its own: when `AGENT_API_TOKEN` is
 set, it fetches the routed LLM credentials from the app at run start over a
-guarded endpoint, so it always uses whatever provider you've connected.
+guarded endpoint, using the independent Application agent route (or its Claude fallback), not simply whichever account was connected last.
 
 Job boards, target companies and search profiles are configured on the
 **Agents page** (`companyboards/`, `agentconfig/`), not in a file you edit by
@@ -342,7 +356,7 @@ This version needs two things an older setup may not have:
 ### Run fully offline with Ollama
 
 No cloud API key required — TruthCV talks to a local Ollama container instead.
-Select **Ollama** in **Settings → Accounts** (or set `LLM_PROVIDER=ollama` in
+Connect **Ollama** in **Model routing → Accounts** and choose it as the Default model (or set `LLM_PROVIDER=ollama` in
 `.env` as a fallback), then:
 
 ```bash
@@ -355,8 +369,8 @@ docker compose exec ollama ollama pull llama3.1
 ## Configuration
 
 All settings live in `.env` (copied from [`.env.example`](.env.example)). Most
-of these are fallback defaults — the app-side connections above take
-precedence once configured.
+of these are fallback defaults — routing choices select providers; saved
+credentials take precedence over environment credentials for the chosen provider.
 
 | Variable | What it does |
 |---|---|
@@ -364,9 +378,9 @@ precedence once configured.
 | `ENCRYPTION_KEY` | Required — encrypts saved provider credentials at rest (`./data/secrets.enc`). The launcher generates it for you. |
 | `AGENT_API_TOKEN` | Required, non-empty — shared secret the agent, app and browser containers authenticate to each other with. The launcher generates it for you. |
 | `DATA_DIR` | Host path for persisted data (default `./data`). |
-| `LLM_PROVIDER` | `anthropic` \| `openai` \| `ollama` — fallback only; overridden by whatever is connected in Settings → Accounts. |
-| `LLM_MODEL` | Optional model id override; blank uses each provider's default — fallback only, also settable in Settings → Task models. |
-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Fallback credential for the selected provider, used only when nothing is connected in the app. |
+| `LLM_PROVIDER` | `anthropic` \| `openai` \| `ollama` — provider fallback when neither a default/task route nor a migrated provider choice is saved; connecting an account alone does not override it. |
+| `LLM_MODEL` | Optional model id fallback after saved routes and any migrated model choice; blank uses the provider's default. Set a route on Model routing to override it. |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Fallback credential for the selected provider when its saved credential is unavailable. |
 | `OLLAMA_HOST` | Ollama endpoint (compose sets this automatically). |
 | `RUN_AT` / `RUN_DAYS` | Fallback agent schedule, used only when the Agents page's schedule is unreachable. |
 | `TZ` | Fallback timezone the agent's schedule and logs are interpreted in (default `UTC`). The Agents page's schedule timezone takes precedence. |
@@ -462,7 +476,7 @@ Backend:
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env        # then set your provider + key, or connect one in Settings
+cp .env.example .env        # then set your provider + key, or connect one in Model routing
 python -m api.main          # serves on http://localhost:8080
 ```
 

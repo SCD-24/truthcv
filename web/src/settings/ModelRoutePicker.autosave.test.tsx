@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { listConnectionModels } from "../api/client";
 import type { ConnectionStatus, ModelInfo } from "../api/types";
 import { ModelRoutePicker } from "./ModelRoutePicker";
+import { SettingsAutosaveProvider } from "./SettingsAutosave";
 
 vi.mock("../api/client", () => ({ listConnectionModels: vi.fn(), testConnectionProvider: vi.fn() }));
 const connected = (provider: string): ConnectionStatus => ({
@@ -14,6 +16,51 @@ const models: ModelInfo[] = [{ id: "m", label: "Model M", effortLevels: ["high"]
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe("opt-in picker autosave", () => {
+  it("restores a custom invalid UI draft when a route unmounts, without writing on remount", async () => {
+    vi.mocked(listConnectionModels).mockResolvedValue(models);
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    function Host() {
+      const [shown, setShown] = useState(true);
+      return <SettingsAutosaveProvider>
+        <button onClick={() => setShown((value) => !value)}>Toggle route</button>
+        {shown && <ModelRoutePicker title="Task" autosaveKey="task" connections={[connected("a")]}
+          route={null} onSave={onSave} />}
+      </SettingsAutosaveProvider>;
+    }
+    render(<Host />);
+    await screen.findByRole("button", { name: "Reload" });
+    fireEvent.mouseDown(screen.getByLabelText(/^model$/i));
+    fireEvent.click(screen.getByRole("option", { name: /custom/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Custom model id" }), { target: { value: "draft-model" } });
+    fireEvent.change(screen.getByLabelText(/context window/i), { target: { value: "-1" } });
+    fireEvent.click(screen.getByText("Toggle route"));
+    fireEvent.click(screen.getByText("Toggle route"));
+    expect((screen.getByRole("textbox", { name: "Custom model id" }) as HTMLInputElement).value).toBe("draft-model");
+    expect((screen.getByLabelText(/context window/i) as HTMLInputElement).value).toBe("-1");
+    expect(screen.getByRole("status").textContent).toMatch(/valid/i);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+  it("reconciles a restored unlisted model into Custom without saving or losing invalid text", async () => {
+    vi.mocked(listConnectionModels).mockResolvedValue(models);
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    function Host() {
+      const [shown, setShown] = useState(true);
+      return <SettingsAutosaveProvider>
+        <button onClick={() => setShown((value) => !value)}>Toggle route</button>
+        {shown && <ModelRoutePicker title="Task" autosaveKey="task" connections={[connected("a")]}
+          route={{ connection: "a", model: "retained" }} onSave={onSave} />}
+      </SettingsAutosaveProvider>;
+    }
+    render(<Host />);
+    await screen.findByRole("button", { name: "Reload" });
+    fireEvent.change(screen.getByLabelText(/context window/i), { target: { value: "-1" } });
+    fireEvent.click(screen.getByText("Toggle route"));
+    fireEvent.click(screen.getByText("Toggle route"));
+    expect((await screen.findByRole("textbox", { name: "Custom model id" }) as HTMLInputElement).value).toBe("retained");
+    expect((screen.getByLabelText(/context window/i) as HTMLInputElement).value).toBe("-1");
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
   it("never saves hydration or reload, but saves committed provider default, model and effort", async () => {
     vi.mocked(listConnectionModels).mockResolvedValue(models);
     const onSave = vi.fn().mockResolvedValue(undefined);

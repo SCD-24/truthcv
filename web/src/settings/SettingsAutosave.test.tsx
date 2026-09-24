@@ -52,6 +52,17 @@ describe("Settings autosave coordinator", () => {
     expect(await coordinator.flushAndWait()).toBe(true);
   });
 
+  it("keeps invalid UI snapshots through remount and discards them explicitly", () => {
+    const coordinator = new SettingsAutosaveCoordinator();
+    coordinator.edit("routing:default", { connection: "claude" }, vi.fn(), {
+      valid: false, draft: { custom: true, model: "", context: "bad" },
+    });
+    expect(coordinator.draft("routing:default")).toEqual({ custom: true, model: "", context: "bad" });
+    expect(coordinator.outstanding()).toEqual([{ key: "routing:default", status: "invalid", error: null }]);
+    coordinator.discard();
+    expect(coordinator.draft("routing:default")).toBeUndefined();
+  });
+
   it("discard cancels queued edits before waiting for an active write", async () => {
     const coordinator = new SettingsAutosaveCoordinator();
     const active = deferred();

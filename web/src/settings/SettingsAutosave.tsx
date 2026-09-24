@@ -7,9 +7,11 @@ export type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error" | "in
 type Entry = {
   revision: number;
   value: unknown;
+  draft: unknown;
   write: (value: never) => Promise<void>;
   status: SaveStatus;
   error: string | null;
+  savedAt?: number;
   timer?: ReturnType<typeof setTimeout>;
 };
 
@@ -19,8 +21,10 @@ export class SettingsAutosaveCoordinator {
   private entries = new Map<string, Entry>();
   private listeners = new Set<() => void>();
   private active: Promise<void> | null = null;
+  private activeKey: string | null = null;
   private disposed = false;
   private discarding = false;
+  private discardedActive: { key: string; status: SaveStatus; error: string | null } | null = null;
   private nextRevision = 0;
 
   subscribe = (listener: () => void) => {
@@ -31,13 +35,44 @@ export class SettingsAutosaveCoordinator {
 
   private notify() { if (!this.disposed) this.listeners.forEach((listener) => listener()); }
 
+  isDiscarding() { return this.discarding; }
+
+  /** A GET may replace only drafts whose successful write predates its request. */
+  beginRoutingRead() { return ++this.nextRevision; }
+
+  acceptRoutingRead(startedAt: number) {
+    for (const [key, entry] of this.entries) {
+      if (entry.status === "saved" && entry.savedAt !== undefined && entry.savedAt < startedAt) {
+        this.entries.delete(key);
+      }
+    }
+    this.notify();
+  }
+
+  endDiscard() {
+    this.discarding = false;
+    this.notify();
+  }
+
   status(key: string): { status: SaveStatus; error: string | null } {
     const entry = this.entries.get(key);
     return { status: entry?.status ?? "idle", error: entry?.error ?? null };
   }
 
+  /** Retain complete picker UI state, including invalid text, across route unmounts. */
+  draft<T>(key: string): T | undefined {
+    return this.entries.get(key)?.draft as T | undefined;
+  }
+
+  outstanding() {
+    const entries = [...this.entries].filter(([, entry]) =>
+      entry.status !== "saved" && entry.status !== "idle",
+    ).map(([key, entry]) => ({ key, status: entry.status, error: entry.error }));
+    return this.discardedActive ? [...entries, this.discardedActive] : entries;
+  }
+
   edit<T>(key: string, value: T, write: (value: T) => Promise<void>, options: {
-    valid?: boolean; debounce?: boolean;
+    valid?: boolean; debounce?: boolean; draft?: unknown;
   } = {}) {
     if (this.disposed || this.discarding) return;
     const previous = this.entries.get(key);
@@ -45,6 +80,7 @@ export class SettingsAutosaveCoordinator {
     const entry: Entry = {
       revision: ++this.nextRevision,
       value,
+      draft: options.draft ?? value,
       write: write as (value: never) => Promise<void>,
       status: options.valid === false ? "invalid" : "pending",
       error: null,
@@ -79,6 +115,9 @@ export class SettingsAutosaveCoordinator {
   /** Discard queued drafts before waiting: an active server write cannot be undone. */
   discard() {
     this.discarding = true;
+    this.discardedActive = this.activeKey
+      ? { key: this.activeKey, status: "saving", error: null }
+      : null;
     for (const entry of this.entries.values()) if (entry.timer) clearTimeout(entry.timer);
     this.entries.clear();
     this.notify();
@@ -111,11 +150,15 @@ export class SettingsAutosaveCoordinator {
     const [key, entry] = next;
     const revision = entry.revision;
     entry.status = "saving";
+    this.activeKey = key;
     this.notify();
     this.active = Promise.resolve().then(() => entry.write(entry.value as never))
       .then(() => {
         const current = this.entries.get(key);
-        if (current?.revision === revision) current.status = "saved";
+        if (current?.revision === revision) {
+          current.status = "saved";
+          current.savedAt = ++this.nextRevision;
+        }
       }, (error: unknown) => {
         const current = this.entries.get(key);
         if (current?.revision === revision) {
@@ -124,6 +167,8 @@ export class SettingsAutosaveCoordinator {
         }
       }).finally(() => {
         this.active = null;
+        this.activeKey = null;
+        this.discardedActive = null;
         this.notify();
         this.pump();
       });
@@ -132,13 +177,13 @@ export class SettingsAutosaveCoordinator {
   /** React StrictMode replays effect cleanup/setup on the same coordinator. */
   revive() {
     this.disposed = false;
-    this.discarding = false;
   }
 
   dispose() {
     this.disposed = true;
     this.entries.forEach((entry) => { if (entry.timer) clearTimeout(entry.timer); });
     this.entries.clear();
+    this.discardedActive = null;
     this.listeners.clear();
   }
 }
@@ -170,11 +215,12 @@ export function useSettingsAutosaveCoordinator() {
 /** Only edit() represents a user action: subscribing or mounting never writes. */
 export function useSettingsAutosave(key: string) {
   const coordinator = useSettingsAutosaveCoordinator();
-  const [state, setState] = useState(() => coordinator.status(key));
-  useEffect(() => coordinator.subscribe(() => setState(coordinator.status(key))), [coordinator, key]);
+  const [state, setState] = useState(() => ({ ...coordinator.status(key), locked: coordinator.isDiscarding() }));
+  useEffect(() => coordinator.subscribe(() => setState({ ...coordinator.status(key), locked: coordinator.isDiscarding() })), [coordinator, key]);
   return { ...state, edit: <T,>(value: T, write: (v: T) => Promise<void>, options?: {
-    valid?: boolean; debounce?: boolean;
+    valid?: boolean; debounce?: boolean; draft?: unknown;
   }) => coordinator.edit(key, value, write, options),
   flush: () => coordinator.flush(key), retry: () => coordinator.retry(key),
+  draft: <T,>() => coordinator.draft<T>(key),
   cancel: () => coordinator.cancel(key) };
 }

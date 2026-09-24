@@ -27,7 +27,7 @@ export function DefaultModelSection({
         onSaved(fresh);
       }}
       title="Default model"
-      description="The model used when a task has no more specific routing."
+      description="Used when a task has no override; application agent routing is independent."
       savedLabel="Default model saved."
       showTest
     />
