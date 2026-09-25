@@ -81,7 +81,7 @@ environment credential as fallback when no saved credential is available.
 
 Routing choices autosave when you change them; account sign-ins, API keys and
 Ollama URLs still require their explicit Connect/Save action. Incomplete custom
-models or invalid context windows stay as unsaved drafts, and failed saves show
+models stay as unsaved drafts, and failed saves show
 an error with Retry. Leaving the page keeps drafts and flushes pending edits;
 a warning protects unresolved changes before closing the tab. To abandon them,
 use **Discard routing changes**; an in-flight write finishes before a fresh

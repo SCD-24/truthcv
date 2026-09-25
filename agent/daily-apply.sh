@@ -606,17 +606,16 @@ fi
 AGENT_MODEL=""
 if [[ -n "${AGENT_API_TOKEN:-}" ]]; then
   if CREDS="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" llm_credentials 2>/dev/null)"; then
-    # Seven lines, in order: authType, token, model, baseUrl, provider, wire,
-    # contextWindow. An older agent-config.js emitting fewer lines yields
-    # empty values for the missing ones here (sed on a missing line prints
-    # nothing), which the final gate rejects for the required fields.
+    # Six lines, in order: authType, token, model, baseUrl, provider, wire.
+    # An older agent-config.js emitting fewer lines yields empty values for
+    # the missing ones here (sed on a missing line prints nothing), which the
+    # final gate rejects for the required fields.
     AUTH_TYPE="$(sed -n 1p <<<"$CREDS")"
     AUTH_TOKEN="$(sed -n 2p <<<"$CREDS")"
     AGENT_MODEL="$(sed -n 3p <<<"$CREDS")"
     AGENT_BASE_URL="$(sed -n 4p <<<"$CREDS")"
     AGENT_PROVIDER="$(sed -n 5p <<<"$CREDS")"
     AGENT_WIRE="$(sed -n 6p <<<"$CREDS")"
-    AGENT_ROUTE_CONTEXT_WINDOW="$(sed -n 7p <<<"$CREDS")"
 
     export AGENT_LLM_PROVIDER="$AGENT_PROVIDER"
     export AGENT_LLM_MODEL="$AGENT_MODEL"
@@ -738,7 +737,6 @@ node "$HARNESS_CLI" \
   --max-turns "${AGENT_MAX_TURNS:-400}" \
   --max-retries "${AGENT_MAX_RETRIES:-12}" \
   --max-retry-delay-ms "${AGENT_MAX_RETRY_DELAY_MS:-300000}" \
-  --context-window "${AGENT_ROUTE_CONTEXT_WINDOW:-${AGENT_CONTEXT_WINDOW:-0}}" \
   --max-tool-result-chars "${AGENT_MAX_TOOL_RESULT_CHARS:-24000}" \
   --prompt-cache "${AGENT_PROMPT_CACHE:-true}" \
   --screening-model "${AGENT_SCREENING_MODEL:-$AGENT_MODEL}" \

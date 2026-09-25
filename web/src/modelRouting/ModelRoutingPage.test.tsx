@@ -99,10 +99,7 @@ describe("Model routing page", () => {
     const modelInput = screen.getAllByLabelText(/^model$/i)[0];
     expect((modelInput.closest("fieldset") as HTMLFieldSetElement).disabled).toBe(true);
     expect((screen.getAllByRole("button", { name: "Clear" })[0] as HTMLButtonElement).disabled).toBe(true);
-    const context = screen.getAllByLabelText(/context window/i)[0] as HTMLInputElement;
-    fireEvent.change(context, { target: { value: "8192" } });
-    expect(context.value).toBe("0");
-    expect((screen.getAllByRole("button", { name: "Save" })[0] as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryAllByLabelText(/context window/i)).toHaveLength(0);
     vi.mocked(getRouting).mockReturnValueOnce(reloadRead.promise);
     await act(async () => { write.resolve(routing); });
     expect(screen.queryByText(/default: saving/)).toBeNull();

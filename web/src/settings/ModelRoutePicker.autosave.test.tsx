@@ -31,12 +31,10 @@ describe("opt-in picker autosave", () => {
     await screen.findByRole("button", { name: "Reload" });
     fireEvent.mouseDown(screen.getByLabelText(/^model$/i));
     fireEvent.click(screen.getByRole("option", { name: /custom/i }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Custom model id" }), { target: { value: "draft-model" } });
-    fireEvent.change(screen.getByLabelText(/context window/i), { target: { value: "-1" } });
     fireEvent.click(screen.getByText("Toggle route"));
     fireEvent.click(screen.getByText("Toggle route"));
-    expect((screen.getByRole("textbox", { name: "Custom model id" }) as HTMLInputElement).value).toBe("draft-model");
-    expect((screen.getByLabelText(/context window/i) as HTMLInputElement).value).toBe("-1");
+    expect((screen.getByRole("textbox", { name: "Custom model id" }) as HTMLInputElement).value).toBe("");
+    expect(screen.queryByLabelText(/context window/i)).toBeNull();
     expect(screen.getByRole("status").textContent).toMatch(/valid/i);
     expect(onSave).not.toHaveBeenCalled();
   });
@@ -53,11 +51,10 @@ describe("opt-in picker autosave", () => {
     }
     render(<Host />);
     await screen.findByRole("button", { name: "Reload" });
-    fireEvent.change(screen.getByLabelText(/context window/i), { target: { value: "-1" } });
     fireEvent.click(screen.getByText("Toggle route"));
     fireEvent.click(screen.getByText("Toggle route"));
     expect((await screen.findByRole("textbox", { name: "Custom model id" }) as HTMLInputElement).value).toBe("retained");
-    expect((screen.getByLabelText(/context window/i) as HTMLInputElement).value).toBe("-1");
+    expect(screen.queryByLabelText(/context window/i)).toBeNull();
     expect(onSave).not.toHaveBeenCalled();
   });
 
@@ -84,7 +81,7 @@ describe("opt-in picker autosave", () => {
     await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith({ connection: "b", model: "" }));
   });
 
-  it("rejects incomplete custom and invalid context, flushes context on blur and clears null", async () => {
+  it("rejects incomplete custom, saves on blur and clears null", async () => {
     vi.mocked(listConnectionModels).mockResolvedValue(models);
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<ModelRoutePicker title="Task" autosaveKey="task" allowClear connections={[connected("a")]}
@@ -94,13 +91,10 @@ describe("opt-in picker autosave", () => {
     fireEvent.click(screen.getByRole("option", { name: /custom/i }));
     expect(screen.getByRole("status").textContent).toMatch(/complete a valid/i);
     expect(onSave).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText(/context window/i)).toBeNull();
     fireEvent.change(screen.getByRole("textbox", { name: "Custom model id" }), { target: { value: "custom-id" } });
     fireEvent.blur(screen.getByRole("textbox", { name: "Custom model id" }));
-    fireEvent.change(screen.getByLabelText(/context window/i), { target: { value: "8191" } });
-    expect(screen.getByRole("status").textContent).toMatch(/complete a valid/i);
-    fireEvent.change(screen.getByLabelText(/context window/i), { target: { value: "8192" } });
-    fireEvent.blur(screen.getByLabelText(/context window/i));
-    await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith({ connection: "a", model: "custom-id", contextWindow: 8192 }));
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith({ connection: "a", model: "custom-id" }));
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     await vi.waitFor(() => expect(onSave).toHaveBeenLastCalledWith(null));
     expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();

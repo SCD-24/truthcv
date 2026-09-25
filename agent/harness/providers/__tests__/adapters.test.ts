@@ -541,6 +541,70 @@ describe('an empty tools list is omitted from the wire, not sent as []', () => {
   });
 });
 
+describe('an unrecognised finish_reason', () => {
+  /** Drive the OpenAI adapter over one canned 200 body. */
+  async function openaiFinishReasonEvents(choice: Record<string, unknown>): Promise<HarnessEvent[]> {
+    stubFetch(200, { choices: [choice], usage: { prompt_tokens: 1, completion_tokens: 1 } });
+    return collect(createOpenAiChatCompletionsAdapter({ apiKey: 'k', baseUrl: 'http://x', model: 'gpt' }));
+  }
+
+  it('reports a retryable error naming the reason and the choice-level detail', async () => {
+    const events = await openaiFinishReasonEvents({
+      message: { content: 'partial' },
+      finish_reason: 'error',
+      error: { message: 'upstream timed out' },
+    });
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toMatchObject({ type: 'error', retryable: true });
+    expect(error?.type === 'error' && error.message).toContain('"error"');
+    expect(error?.type === 'error' && error.message).toContain('upstream timed out');
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+  });
+
+  it('reports a retryable error for a null finish_reason with text but no detail', async () => {
+    const events = await openaiFinishReasonEvents({ message: { content: 'hi' }, finish_reason: null });
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toMatchObject({ type: 'error', retryable: true });
+    expect(error?.type === 'error' && error.message).toContain('null');
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+  });
+
+  it('reports content_filter as non-retryable', async () => {
+    const events = await openaiFinishReasonEvents({ message: { content: '' }, finish_reason: 'content_filter' });
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toMatchObject({ type: 'error', retryable: false });
+  });
+
+  it('reports content_filter as non-retryable even when tool_calls were parsed', async () => {
+    const events = await openaiFinishReasonEvents({
+      message: { tool_calls: [{ id: 'a', function: { name: 'foo', arguments: '{}' } }] },
+      finish_reason: 'content_filter',
+    });
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toMatchObject({ type: 'error', retryable: false });
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+  });
+
+  it('yields done with the parsed tool calls when the reason is unknown but tools were requested', async () => {
+    const events = await openaiFinishReasonEvents({
+      message: { tool_calls: [{ id: 'a', function: { name: 'foo', arguments: '{}' } }] },
+      finish_reason: 'weird_reason',
+    });
+
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+    const done = events.find((e) => e.type === 'done');
+    expect(done).toMatchObject({
+      type: 'done',
+      stopReason: 'toolCalls',
+      message: { toolCalls: [{ id: 'a', name: 'foo', arguments: {} }] },
+    });
+  });
+});
+
 describe('a 200 response that carries no completion', () => {
   // A run died on turn 5 with `stop reason: error` and nothing else in the log.
   // OpenRouter had answered HTTP 200 with an `{"error": ...}` body, so the

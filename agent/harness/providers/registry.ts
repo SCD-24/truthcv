@@ -79,7 +79,9 @@ function buildOpenAi(opts: ProviderAdapterOptions): ProviderAdapter {
     model: opts.model,
     baseUrl,
     apiKey: opts.token,
-    contextWindow: opts.contextWindow,
+    // Only ollama honours `options.num_ctx`; forwarding it to OpenRouter or
+    // Codex would add a stray options field to their request bodies.
+    ...(opts.provider === 'ollama' ? { contextWindow: opts.contextWindow } : {}),
     vendorLabel: OPENAI_WIRE_VENDOR_LABELS[opts.provider] ?? 'OpenAI',
   });
 }
