@@ -77,6 +77,13 @@ class RunRecord:
     # applicable; a record stored before "tier" existed loads with it absent
     # from the dict, which callers must treat the same as "".
     discovery_coverage: list[dict] = field(default_factory=list)
+    # Set when finish_run was refused once because discovery coverage looked
+    # incomplete (see agenttools/tools_runs.py's shortfall check), so a
+    # second finish_run call is allowed through unconditionally rather than
+    # refusing forever. Defaults False and is absent from records written
+    # before this field existed, which from_dict's known-field filter loads
+    # the same as False.
+    finish_refused: bool = False
 
     @classmethod
     def from_dict(cls, raw: dict) -> "RunRecord":

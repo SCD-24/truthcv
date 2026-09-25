@@ -104,6 +104,7 @@ Projected from `schema` widgets on the architecture canvas.
 | Field | Type | Flags | Notes |
 |---|---|---|---|
 | `jobBoards` | JobBoardModel[] |  | On GET/PUT /api/agent/config. Each entry: source, signinUrl, plus response-only domain, effectiveSigninUrl and isDefault resolved server-side. GET returns the resolved list, defaults first. |
+| `feedAlreadyScreened` | int |  | GET /agent/config?include_feed=true: count of feed postings omitted because the ledger already screened them |
 <!-- generated:end comp:api -->
 
 <!-- generated:start comp:run-store -->
@@ -116,6 +117,7 @@ Projected from `schema` widgets on the architecture canvas.
 | `boardBreakdown` | BoardBreakdown[] | derived on read | Per job board (from screening URL host): postingsSeen, forReview, rejected |
 | `discovery_coverage[].tier` | string |  | Which extraction tier produced the postings: api, harvest, llm, or empty when not applicable. |
 | `discovery_coverage[].status` | string |  | searched \| empty \| blocked \| login_walled \| skipped. 'blocked' means the page was unreadable (CAPTCHA/consent/bot wall), distinct from 'empty'. |
+| `finish_refused` | bool |  | Set when finish_run was refused once for incomplete direct/dork discovery coverage; the second call always records. |
 <!-- generated:end comp:run-store -->
 
 <!-- generated:start comp:job-runner -->

@@ -492,6 +492,11 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
       PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$FEED_COMPANY_BOARDS"$'\n'
     fi
 
+    FEED_ALREADY_SCREENED="$(jq -r '.feedAlreadyScreened // 0' <<<"$JOB_CONFIG")"
+    if [[ "$FEED_ALREADY_SCREENED" -gt 0 ]]; then
+      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"${FEED_ALREADY_SCREENED} feed posting(s) already screened in earlier runs were omitted from the list above; do not look for them. The feed is only the first of three channels: after it, always work every direct-search board and composed query below."$'\n'
+    fi
+
     # A feed failure is rendered rather than swallowed: an empty feed and a
     # rejected API key look identical in the prompt otherwise, and the agent
     # would silently apply to fewer jobs with nothing in the run log saying why.

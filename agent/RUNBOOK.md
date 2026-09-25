@@ -305,7 +305,16 @@ over every board or query in a channel before starting a second pass on any
 channel — do not dork a query twice while a direct board in the same run has
 never been touched. Skipping a board or query is never acceptable: work it
 and call `record_discovery_coverage`, described below, even when it turns up
-nothing.
+nothing. The feed channel is a single pass; a feed posting whose
+`screen_and_record_posting` call returns `created:false` means it was already
+screened in an earlier run — a normal outcome, never a reason to stop or to
+skip direct boards or dork queries. Recording `skipped` coverage for a board
+you simply never got to, while turns remain, is not acceptable either.
+`finish_run` enforces this directly: the first `status: "completed"` call is
+refused while direct-board or dork-query coverage is short of the configured
+count or has `skipped` entries, with a message to go back and finish it; call
+it again only if you genuinely cannot continue (turn limit, browser down),
+with an honest `stopped_reason` — the second call always closes the run.
 
 The **feed** channel is postings pulled from API-backed job boards — boards
 that expose a real search API rather than requiring a browser session at all.

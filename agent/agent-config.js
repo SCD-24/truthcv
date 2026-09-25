@@ -37,6 +37,8 @@ if (process.env.FAKE_AGENT_CONFIG && field !== "llm_credentials") {
         searchQueries: cfg.searchQueries || [],
         feedPostings: cfg.feedPostings || [],
         feedError: cfg.feedError || "",
+        // Count of feed postings dropped because already screened in an earlier run.
+        feedAlreadyScreened: cfg.feedAlreadyScreened || 0,
         // One entry per direct-mode board, searched on-site rather than via
         // a dork. Defaults to [] so an older fixture/API build omitting the
         // key still produces a valid, empty-but-present payload.
@@ -144,6 +146,9 @@ const req = http.get(u, { timeout }, (res) => {
           // outbound call, so the parameter is opt-in per caller.
           feedPostings: cfg.feedPostings || [],
           feedError: cfg.feedError || "",
+          // Count of feed postings the server dropped because they were
+          // already screened in an earlier run; 0 from an older API build.
+          feedAlreadyScreened: cfg.feedAlreadyScreened || 0,
           // One entry per direct-mode board, searched on-site rather than
           // via a dork. Defaults to [] so an older API build that omits the
           // key still produces a valid, empty-but-present payload.

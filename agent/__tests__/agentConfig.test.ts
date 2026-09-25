@@ -72,6 +72,7 @@ describe('agent-config.js — stdout is drained before exit', () => {
       searchQueries: [],
       feedPostings: [],
       feedError: '',
+      feedAlreadyScreened: 0,
       directBoards: [],
     };
     const expected = JSON.stringify(expectedPayload);

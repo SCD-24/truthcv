@@ -158,6 +158,39 @@ class TestStoreRefusesASecondRecord:
         assert len(store.load_all()) == 1
 
 
+class TestScreenedDedupeKeys:
+    """Feed filtering support: which postings the agent has already screened."""
+
+    def test_a_normal_screenings_key_is_included(self):
+        url = "https://x.example.com/j/abc"
+        store.create_or_get(_fields(url))
+        assert posting_dedupe_key(url) in store.screened_dedupe_keys()
+
+    def test_an_unread_placeholder_is_excluded(self):
+        """It may be superseded by a real screening, so the agent must still
+        see it in the feed rather than have it look already screened."""
+        store.create_or_get(
+            {
+                "company": "Acme",
+                "role": "Backend Engineer",
+                "url": "https://x.example.com/j/abc",
+                "verdict": "",
+                "screening_blocker": "not_found",
+            }
+        )
+        assert store.screened_dedupe_keys() == set()
+
+    def test_a_blank_url_contributes_no_key(self):
+        store.create_or_get(_fields(""))
+        assert store.screened_dedupe_keys() == set()
+
+    def test_url_variants_sharing_a_dedupe_key_match(self):
+        url = "https://job-boards.greenhouse.io/grafanalabs/jobs/6117334004"
+        store.create_or_get(_fields(url))
+        variant_key = posting_dedupe_key(url + "/apply?utm_source=alert")
+        assert variant_key in store.screened_dedupe_keys()
+
+
 class TestAgentToolReportsTheDuplicate:
     def test_record_screening_reports_created_false_and_persists_nothing(self):
         url = "https://job-boards.greenhouse.io/grafanalabs/jobs/6117334004"

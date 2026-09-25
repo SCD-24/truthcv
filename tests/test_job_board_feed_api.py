@@ -220,6 +220,72 @@ def test_include_feed_without_the_board_configured_calls_nothing(client, data_di
     assert client.get("/api/agent/config?include_feed=true").json()["feedPostings"] == []
 
 
+def test_an_already_screened_posting_is_omitted_and_counted(client, data_dir, mock_http, monkeypatch):
+    """The agent stops re-screening postings that come back created:false: a
+    posting the ledger already has a screening for is dropped from the feed,
+    and the drop is reported so it is visible rather than a silently shorter
+    feed."""
+    from screening import store as screening_store
+
+    _configure(client, monkeypatch)
+    screened_url = "https://acme.example/jobs/1"
+    screening_store.create_or_get(
+        {"company": "Acme", "role": "Backend Engineer", "url": screened_url, "verdict": "rejected"}
+    )
+    mock_http(
+        lambda r: httpx.Response(
+            200,
+            json={
+                "jobOpenings": [
+                    {"roleTitle": "Backend Engineer", "url": screened_url},
+                    {"roleTitle": "Other Role", "url": "https://acme.example/jobs/2"},
+                ]
+            },
+        )
+    )
+    got = client.get("/api/agent/config?include_feed=true").json()
+    assert [p["url"] for p in got["feedPostings"]] == ["https://acme.example/jobs/2"]
+    assert got["feedAlreadyScreened"] == 1
+
+
+def test_an_unread_placeholder_screening_does_not_hide_its_posting(client, data_dir, mock_http, monkeypatch):
+    """A placeholder holds no judgement (see screened_dedupe_keys), so the
+    posting it stands in for must still reach the agent to be screened for
+    real."""
+    from screening import store as screening_store
+
+    _configure(client, monkeypatch)
+    placeholder_url = "https://acme.example/jobs/1"
+    screening_store.create_or_get(
+        {
+            "company": "Acme",
+            "role": "Backend Engineer",
+            "url": placeholder_url,
+            "verdict": "",
+            "screening_blocker": "not_found",
+        }
+    )
+    mock_http(
+        lambda r: httpx.Response(
+            200, json={"jobOpenings": [{"roleTitle": "Backend Engineer", "url": placeholder_url}]}
+        )
+    )
+    got = client.get("/api/agent/config?include_feed=true").json()
+    assert [p["url"] for p in got["feedPostings"]] == [placeholder_url]
+    assert got["feedAlreadyScreened"] == 0
+
+
+def test_feed_already_screened_is_zero_without_include_feed(client, data_dir, mock_http, monkeypatch):
+    _configure(client, monkeypatch)
+
+    def handler(request):  # pragma: no cover — must never run
+        raise AssertionError("GET /agent/config called the feed without include_feed")
+
+    mock_http(handler)
+    got = client.get("/api/agent/config").json()
+    assert got["feedAlreadyScreened"] == 0
+
+
 def test_a_feed_failure_does_not_break_the_config_response(client, data_dir, mock_http, monkeypatch):
     """The agent fetches its whole configuration from this route. A Remote
     Rocketship outage must cost the feed, not the run."""

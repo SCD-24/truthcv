@@ -137,6 +137,22 @@ def _is_unread_placeholder(screening: Screening) -> bool:
     )
 
 
+def screened_dedupe_keys() -> set[str]:
+    """Dedupe keys of every posting already screened, for filtering a feed.
+
+    Excludes unread placeholders (`_is_unread_placeholder`): those hold no
+    judgement and `create_or_get` overwrites them in place, so a posting
+    behind one has not actually been screened and the agent should still see
+    it in the feed rather than have it silently dropped as "already done".
+    A screening whose url has no resolvable dedupe key contributes nothing.
+    """
+    return {
+        posting_dedupe_key(s.url)
+        for s in load_all()
+        if posting_dedupe_key(s.url) and not _is_unread_placeholder(s)
+    }
+
+
 def create_or_get(fields: dict) -> tuple[Screening, bool]:
     """Create a screening, or return the one this posting already has.
 

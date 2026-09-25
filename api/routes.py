@@ -74,6 +74,7 @@ from runs.derive import board_breakdown_by_run, counters_by_run
 from screening.company import company_identity_key
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
+from screening.url import posting_dedupe_key
 
 import coverletter.store as letter_store
 from agenttools.letter_operator import generate_cover_letter_for_operator as _generate_letter_for_operator
@@ -1540,8 +1541,15 @@ def get_agent_config(include_feed: bool = False) -> AgentConfigModel:
     # config it always carried rather than failing the agent's config fetch.
     if include_feed:
         feed = _fetch_feed_postings(cfg, target_boards)
-        data["feed_postings"] = [p.to_dict() for p in feed.postings]
+        # Drop postings the ledger already screened, so the agent stops
+        # re-screening postings that only come back created:false. An
+        # unread-placeholder screening is not in `keys` (screened_dedupe_keys
+        # excludes it), so that posting stays in the feed for a real screen.
+        keys = screening_store.screened_dedupe_keys()
+        kept = [p for p in feed.postings if posting_dedupe_key(p.url) not in keys]
+        data["feed_postings"] = [p.to_dict() for p in kept]
         data["feed_error"] = feed.error
+        data["feed_already_screened"] = len(feed.postings) - len(kept)
 
     return AgentConfigModel.model_validate(data)
 

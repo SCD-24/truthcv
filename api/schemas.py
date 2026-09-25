@@ -490,6 +490,11 @@ class AgentConfigModel(_Camel):
     # is empty instead of implying there are no matching jobs.
     feed_postings: list[FeedPostingModel] = Field(default_factory=list)
     feed_error: str = ""
+    # Count of feed postings dropped because the ledger already has a
+    # screening for them (see screening.store.screened_dedupe_keys), so the
+    # agent can see it stopped re-screening postings that return
+    # created:false instead of silently getting a shorter feed.
+    feed_already_screened: int = 0
 
 
 class AgentConfigUpdate(_Camel):

@@ -405,6 +405,76 @@ describe('wrap-up window', () => {
   });
 });
 
+describe('finish_run grace turn', () => {
+  /** A pool that also allows `finish_run`, so the loop can latch its execution. */
+  function poolWithFinishRun() {
+    const { pool } = fakePool();
+    // Typed with the pool's real (namespacedName, args) signature, so a mock
+    // implementation can tell finish_run apart from the other allowed tool.
+    const callTool = vi.fn(async (_name: string, _args: Record<string, unknown>) => ({ content: 'ok', isError: false }));
+    const tools: NamespacedTool[] = [
+      ...pool.listTools(),
+      { namespacedName: 'truthcv__finish_run', serverName: 'truthcv', toolName: 'finish_run', description: 'd', inputSchema: { type: 'object' } },
+    ];
+    return { pool: { ...pool, callTool, listTools: () => tools } as unknown as McpClientPool, callTool };
+  }
+
+  const FINISH_RUN_CALL: ToolCall = { id: 'f1', name: 'truthcv__finish_run', arguments: {} };
+
+  /** A `done` event whose single tool call is the run-closing one. */
+  function doneFinishRun(): HarnessEvent {
+    return {
+      type: 'done',
+      stopReason: 'toolCalls',
+      message: { role: 'assistant', content: '', toolCalls: [FINISH_RUN_CALL] },
+    };
+  }
+
+  it('grants one extra turn when finish_run is refused on the cap turn, then succeeds', async () => {
+    const { adapter, calls } = scriptedAdapter([[doneToolCalls()], [doneToolCalls()], [doneFinishRun()], [doneFinishRun()]]);
+    const { pool, callTool } = poolWithFinishRun();
+    callTool.mockImplementation(async (name: string) =>
+      name === FINISH_RUN_CALL.name && callTool.mock.calls.filter((c) => c[0] === FINISH_RUN_CALL.name).length === 1
+        ? { content: 'refused', isError: true }
+        : { content: 'ok', isError: false },
+    );
+    const result = await run(adapter, pool, { maxTurns: 3 });
+    expect(result.turns).toBe(4);
+    expect(result.finishRunExecuted).toBe(true);
+    expect(calls()).toBe(4);
+  });
+
+  it('does not grant a second grace when every finish_run errors', async () => {
+    const { adapter, calls } = scriptedAdapter([[doneToolCalls()], [doneToolCalls()], [doneFinishRun()], [doneFinishRun()]]);
+    const { pool, callTool } = poolWithFinishRun();
+    callTool.mockImplementation(async () => ({ content: 'refused', isError: true }));
+    const result = await run(adapter, pool, { maxTurns: 3 });
+    expect(result.stopReason).toBe('turnCapReached');
+    expect(result.turns).toBe(4);
+    expect(calls()).toBe(4);
+  });
+
+  it('does not grant grace when finish_run errors before the cap turn', async () => {
+    const { adapter, calls } = scriptedAdapter([[doneFinishRun()], [doneToolCalls()], [doneToolCalls()]]);
+    const { pool, callTool } = poolWithFinishRun();
+    callTool.mockImplementation(async (name: string) =>
+      name === FINISH_RUN_CALL.name ? { content: 'refused', isError: true } : { content: 'ok', isError: false },
+    );
+    const result = await run(adapter, pool, { maxTurns: 3 });
+    expect(result.turns).toBe(3);
+    expect(calls()).toBe(3);
+  });
+
+  it('grants no extra turn when finish_run succeeds on the cap turn', async () => {
+    const { adapter, calls } = scriptedAdapter([[doneToolCalls()], [doneToolCalls()], [doneFinishRun()]]);
+    const { pool, callTool } = poolWithFinishRun();
+    callTool.mockImplementation(async () => ({ content: 'ok', isError: false }));
+    const result = await run(adapter, pool, { maxTurns: 3 });
+    expect(result.turns).toBe(3);
+    expect(calls()).toBe(3);
+  });
+});
+
 describe('a turn that produced nothing at all', () => {
   // The 2026-08-30 incident: a router swapped in a reasoning model, which
   // answered with an empty `content`, no tool calls and finish_reason 'stop'.

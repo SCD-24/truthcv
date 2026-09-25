@@ -546,3 +546,29 @@ def test_list_page_with_no_limit_returns_everything(data_dir):
 
     assert len(page) == 7
     assert total == 7
+
+
+def test_finish_refused_defaults_false(data_dir):
+    record = store.start("run-fr-1", trigger="scheduled", apply_cap=0)
+    assert record.finish_refused is False
+
+
+def test_mark_finish_refused_persists(data_dir):
+    store.start("run-fr-2", trigger="scheduled", apply_cap=0)
+
+    marked = store.mark_finish_refused("run-fr-2")
+    assert marked.finish_refused is True
+
+    fetched = store.get("run-fr-2")
+    assert fetched.finish_refused is True
+
+
+def test_old_record_without_finish_refused_key_loads_as_false(data_dir):
+    from runs.model import RunRecord
+
+    record = RunRecord.from_dict({"id": "run-fr-3", "status": "running"})
+    assert record.finish_refused is False
+
+
+def test_mark_finish_refused_unknown_run_id_returns_none(data_dir):
+    assert store.mark_finish_refused("no-such-run") is None
