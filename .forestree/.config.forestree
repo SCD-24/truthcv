@@ -554,6 +554,12 @@
                   "name": "jobBoards",
                   "notes": "On GET/PUT /api/agent/config. Each entry: source, signinUrl, plus response-only domain, effectiveSigninUrl and isDefault resolved server-side. GET returns the resolved list, defaults first.",
                   "type": "JobBoardModel[]"
+                },
+                {
+                  "flags": "",
+                  "name": "feedAlreadyScreened",
+                  "notes": "GET /agent/config?include_feed=true: count of feed postings omitted because the ledger already screened them",
+                  "type": "int"
                 }
               ]
             },
@@ -2040,6 +2046,12 @@
                   "name": "discovery_coverage[].status",
                   "notes": "searched | empty | blocked | login_walled | skipped. 'blocked' means the page was unreadable (CAPTCHA/consent/bot wall), distinct from 'empty'.",
                   "type": "string"
+                },
+                {
+                  "flags": "",
+                  "name": "finish_refused",
+                  "notes": "Set when finish_run was refused once for incomplete direct/dork discovery coverage; the second call always records.",
+                  "type": "bool"
                 }
               ]
             },
