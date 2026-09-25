@@ -1241,7 +1241,6 @@ class RouteModel(_Camel):
     connection: str
     model: str = ""
     effort: str = ""
-    context_window: int = 0
 
 
 class RoutingModel(_Camel):
@@ -1274,9 +1273,6 @@ class AgentLlmCredentials(_Camel):
     # The wire dialect to speak: "anthropic-messages", "openai-chat-completions",
     # or "openai-responses" (ChatGPT subscription).
     wire: str = ""
-    # The model's input context capacity in tokens, from the routed connection's
-    # stored route. 0 means unknown.
-    context_window: int = 0
 
 
 class AgentStatus(_Camel):

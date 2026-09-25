@@ -35,7 +35,9 @@ import {
   shouldCompact,
   planCompaction,
   renderDroppedTranscript,
+  estimateConversationTokens,
   type CompactionConfig,
+  type CompactionRecord,
   type TokenUsage,
 } from './compaction.js';
 
@@ -149,6 +151,33 @@ const EMPTY_TURN_MESSAGE =
   'of your task and make the tool call it needs.';
 
 /**
+ * Default cap on CONSECUTIVE turns that produced content but still ended the
+ * run (`stopReason: 'end'`) without calling `finish_run`, each of which is
+ * nudged instead of ended on — matching {@link DEFAULT_MAX_EMPTY_TURNS}'s
+ * shape for a model that stops producing usable output. Distinct from that
+ * counter because this only fires when there IS a `finish_run` tool the model
+ * could have called and did not.
+ */
+export const DEFAULT_MAX_UNFINISHED_NUDGES = 2;
+
+/**
+ * The stop detail recorded when the unfinished-turn nudge cap is what ended
+ * the run: the model kept ending turns without calling `finish_run` even
+ * after being reminded to. Exported so cli.ts can name it as a distinct cause
+ * from {@link EMPTY_TURN_STOP_DETAIL}.
+ */
+export const UNFINISHED_STOP_DETAIL = 'model ended the run without calling finish_run, even after being reminded';
+
+/**
+ * What the model is told after an "end" turn that left `finish_run`
+ * uncalled, while the run still has a `finish_run` tool available.
+ */
+const UNFINISHED_TURN_MESSAGE =
+  'Your last turn ended the run without calling finish_run. If work remains, make the next tool ' +
+  'call. If you are finished, or unable to continue, call finish_run now with an honest ' +
+  'stopped_reason describing what you did and what you left undone.';
+
+/**
  * Loop tuning. `maxTurns` is REQUIRED and is the hard cap: there is deliberately
  * no unbounded default, because this loop runs unattended overnight and must
  * stop on its own.
@@ -167,6 +196,10 @@ export interface LoopConfig {
   /** Cap on CONSECUTIVE turns that returned no content and no tool calls,
    * each of which is nudged rather than ended on. Defaults to 3. */
   maxConsecutiveEmptyTurns?: number;
+  /** Cap on CONSECUTIVE "end" turns that left `finish_run` uncalled while a
+   * `finish_run` tool is registered, each of which is nudged rather than
+   * ended on. Defaults to {@link DEFAULT_MAX_UNFINISHED_NUDGES}. */
+  maxUnfinishedNudges?: number;
   /**
    * Turns reserved at the end of `maxTurns` for the model to wind up in.
    * Defaults to 2. Zero disables the warning entirely — the loop then stops
@@ -212,7 +245,16 @@ export interface LoopEvent {
   /** Discriminant marking this as a loop event to an `onEvent` consumer. */
   type: 'loopEvent';
   /** What happened. */
-  kind: 'compaction' | 'retry' | 'reflection' | 'emptyTurn' | 'turnCapReached' | 'wrapUp' | 'stop';
+  kind:
+    | 'compaction'
+    | 'retry'
+    | 'reflection'
+    | 'emptyTurn'
+    | 'unfinishedTurn'
+    | 'compactionFloor'
+    | 'turnCapReached'
+    | 'wrapUp'
+    | 'stop';
   /** The turn number this event relates to, when applicable. */
   turn?: number;
   /** Human-readable detail for a log line. */
@@ -305,6 +347,18 @@ interface LoopState {
    * {@link LoopResult.finishRunExecuted}. Latched at the execution choke point
    * rather than derived from the transcript afterwards. */
   finishRunExecuted: boolean;
+  /** CONSECUTIVE "end" turns that left `finish_run` uncalled while a
+   * `finish_run` tool is registered. Reset whenever tools actually execute
+   * (see {@link continueWithTools}), mirroring `emptyTurns`. */
+  unfinishedNudges: number;
+  /** The turn number the last PROACTIVE compaction happened on, if any — used
+   * to detect back-to-back proactive compactions (see {@link applyCompaction}).
+   * Never set by the reactive overflow path in {@link compactAndRetry}. */
+  lastProactiveCompactionTurn?: number;
+  /** Whether the `compactionFloor` event has already been emitted once this
+   * run — a third (or later) back-to-back proactive compaction still falls
+   * back to the mechanical summary, but must not report the floor again. */
+  compactionFloorReported?: boolean;
 }
 
 /** Per-iteration context handed to the outcome handlers. */
@@ -442,6 +496,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
     emptyTurns: 0,
     wrapUpSent: false,
     finishRunExecuted: false,
+    unfinishedNudges: 0,
   };
   while (true) {
     const registry = await diagnostic.time('registry_refresh', () => refreshRegistry(pool), { turn: state.turns });
@@ -569,13 +624,24 @@ async function applyCompaction(
   onEvent: ((event: HarnessEvent | LoopEvent) => void) | undefined,
   why: string,
 ): Promise<ConversationMessage[]> {
+  // Back-to-back proactive compactions mean the last one did not buy enough
+  // headroom to survive a single turn — the conversation is at its floor.
+  // Asking the model to summarize again there is wasted work (another request
+  // against the same tight budget), so fall back straight to the mechanical
+  // summary instead.
+  const atFloor = state.lastProactiveCompactionTurn === state.turns - 1;
   const plan = planCompaction(state.messages);
-  const summaryText = plan ? await summarizeDropped(adapter, plan.dropped) : undefined;
+  const summaryText = plan && !atFloor ? await summarizeDropped(adapter, plan.dropped) : undefined;
   const { messages: compacted, record } = compact(state.messages, config, summaryText);
   if (record) {
     state.usage = undefined;
     state.usageCoveredMessages = 0;
     onEvent?.(loopEvent('compaction', state.turns, `${why}: ${record.summary}`));
+    if (atFloor && !state.compactionFloorReported) {
+      onEvent?.(loopEvent('compactionFloor', state.turns, `context window in use: ${config.contextWindow}`));
+      state.compactionFloorReported = true;
+    }
+    state.lastProactiveCompactionTurn = state.turns;
   }
   return compacted;
 }
@@ -627,6 +693,26 @@ async function applyError(error: ErrorEvent, state: LoopState, ctx: LoopContext)
 }
 
 /**
+ * Whether a reactive compaction actually made the next request smaller.
+ *
+ * Fewer messages or a new elision is progress. So is a same-count compaction
+ * that shrank the estimated size — one long message folded into a short
+ * summary — UNLESS everything it dropped was an earlier `[compaction]`
+ * summary: re-summarising a summary cannot free meaningful room, and
+ * resending that would spin until the overflow budget ran out.
+ */
+function compactionShrank(
+  before: ConversationMessage[],
+  after: ConversationMessage[],
+  record: CompactionRecord,
+): boolean {
+  if (after.length < before.length || (record.elidedToolResultCount ?? 0) > 0) return true;
+  const dropped = planCompaction(before)?.dropped ?? [];
+  const onlySummaries = dropped.every((m) => m.role === 'system' && m.content.startsWith('[compaction]'));
+  return !onlySummaries && estimateConversationTokens(after) < estimateConversationTokens(before);
+}
+
+/**
  * Compact in response to the provider saying the context is too long, and let
  * the loop resend the same turn.
  *
@@ -649,13 +735,18 @@ async function compactAndRetry(state: LoopState, ctx: LoopContext): Promise<Loop
   if (state.overflowCompactions >= max) {
     return finish('error', state, ctx, 'context overflow persisted after compaction');
   }
-  const before = state.messages.length;
   const { messages: compacted, record } = await ctx.diagnostic.time('compaction',
     async () => compact(state.messages, ctx.compactionConfig ?? { contextWindow: 0 }), { turn: state.turns });
   // Checked before anything is reported or reset: a compaction that removed
   // nothing must not appear in the run log, and must not clear the usage
-  // anchor on its way out.
-  if (!record || compacted.length >= before) {
+  // anchor on its way out. A null record means nothing was left to compact
+  // at all. But a non-null record is not automatically progress either: a
+  // second pass over already-elided content, or a pass at the compaction
+  // floor that finds nothing new to drop or elide, can still return a record
+  // whose message count and content are byte-identical to what was just
+  // sent — resending that would spin forever. See compactionShrank for what
+  // counts as progress.
+  if (!record || !compactionShrank(state.messages, compacted, record)) {
     return finish('error', state, ctx, 'context overflow with nothing left to compact');
   }
   state.messages = compacted;
@@ -748,9 +839,35 @@ async function dispatchStopReason(done: DoneEvent, state: LoopState, ctx: LoopCo
  * could restart work that is finished and submit duplicate job applications
  * under a real person's name.
  */
+/** True when `registry` carries a `finish_run` tool the model could call —
+ * the built-in's own or an MCP server's namespaced one. */
+function hasFinishRunTool(registry: RegisteredTool[]): boolean {
+  return registry.some((tool) => tool.toolName === 'finish_run' || tool.namespacedName.endsWith('__finish_run'));
+}
+
 function handleEnd(done: DoneEvent, state: LoopState, ctx: LoopContext): LoopResult | undefined {
-  if (!isEmptyTurn(done.message) || state.finishRunExecuted) {
+  // Once finish_run has executed successfully, any further "end" turn —
+  // empty or not — is a genuine stop: nudging the model to call it again
+  // would be pointless and risks a duplicate action under a real identity.
+  if (state.finishRunExecuted) {
     return finish('end', state, ctx, 'model ended the turn');
+  }
+  if (!isEmptyTurn(done.message)) {
+    // A run with no finish_run tool registered at all has nothing to nudge
+    // it towards.
+    if (!hasFinishRunTool(ctx.registry)) {
+      return finish('end', state, ctx, 'model ended the turn');
+    }
+    state.unfinishedNudges += 1;
+    const maxUnfinished = ctx.config.maxUnfinishedNudges ?? DEFAULT_MAX_UNFINISHED_NUDGES;
+    if (state.unfinishedNudges > maxUnfinished) {
+      return finish('end', state, ctx, UNFINISHED_STOP_DETAIL);
+    }
+    state.messages.push({ role: 'user', content: UNFINISHED_TURN_MESSAGE });
+    ctx.onEvent?.(
+      loopEvent('unfinishedTurn', state.turns, `unfinished turn ${state.unfinishedNudges} of ${maxUnfinished} — nudged the model`),
+    );
+    return capOrContinue(state, ctx);
   }
   state.emptyTurns += 1;
   const max = ctx.config.maxConsecutiveEmptyTurns ?? DEFAULT_MAX_EMPTY_TURNS;
@@ -793,6 +910,10 @@ async function continueWithTools(done: DoneEvent, state: LoopState, ctx: LoopCon
   // truncated response is pushed into the history and then failed unexecuted by
   // handleLength(), and an errored call closed no run either.
   if (!state.finishRunExecuted) state.finishRunExecuted = executedFinishRun(calls, results);
+  // Tools actually ran this turn, so any prior unfinished-turn nudges are
+  // moot — the model is doing work again, not repeatedly ending with nothing
+  // done. Mirrors emptyTurns resetting on the first non-empty turn.
+  state.unfinishedNudges = 0;
   return capOrContinue(state, ctx);
 }
 

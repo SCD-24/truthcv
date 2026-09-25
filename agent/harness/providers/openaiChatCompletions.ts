@@ -116,11 +116,57 @@ interface OpenAiResponse {
   choices?: Array<{
     message?: { content?: string | null; tool_calls?: OpenAiToolCall[] };
     finish_reason?: unknown;
+    /** OpenRouter-style per-choice error, seen alongside an unrecognised
+     * finish_reason rather than a top-level failure. */
+    error?: { message?: unknown };
+    /** OpenRouter's own name for the reason, when it differs from the
+     * normalised `finish_reason` it also sends. */
+    native_finish_reason?: unknown;
   }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
   /** The model that actually answered. A router returns the backing model it
    * chose here, which need not be the id that was requested. */
   model?: string;
+}
+
+/** One entry of {@link OpenAiResponse.choices}. */
+type OpenAiChoice = NonNullable<OpenAiResponse['choices']>[number];
+
+/** finish_reason values {@link mapFinishReason} knows how to translate. */
+const KNOWN_FINISH_REASONS = new Set(['stop', 'tool_calls', 'length']);
+
+/** True when `reason` is one {@link mapFinishReason} recognises. */
+function isKnownFinishReason(reason: unknown): boolean {
+  return typeof reason === 'string' && KNOWN_FINISH_REASONS.has(reason);
+}
+
+/** Extra detail to append to an unknown-finish_reason error message, when the
+ * provider supplied one via a per-choice `error` or `native_finish_reason`. */
+function finishReasonDetail(choice: OpenAiChoice | undefined): string {
+  const message = choice?.error?.message;
+  if (typeof message === 'string' && message) return ` (${message})`;
+  const native = choice?.native_finish_reason;
+  if (typeof native === 'string' && native) return ` (native_finish_reason: ${native})`;
+  return '';
+}
+
+/**
+ * Build the error HarnessEvent for a finish_reason {@link mapFinishReason}
+ * does not recognise and that carried no tool calls.
+ *
+ * `content_filter` is the one such reason known to be a deliberate,
+ * non-transient refusal, so it alone is reported non-retryable; every other
+ * unrecognised reason defaults to retryable, the same asymmetric call
+ * `completionErrorRetryable` makes for an unclassified 2xx-with-no-completion
+ * body — a whole overnight run stopped by one misclassified blip costs far
+ * more than a bounded handful of extra retries.
+ */
+function unknownFinishReasonEvent(reason: unknown, choice: OpenAiChoice | undefined): HarnessEvent {
+  return {
+    type: 'error',
+    message: `provider ended the response with finish_reason ${JSON.stringify(reason)}${finishReasonDetail(choice)}`,
+    retryable: reason !== 'content_filter',
+  };
 }
 
 /** Adapter for the OpenAI Chat Completions API. */
@@ -254,7 +300,21 @@ function* emitOpenAiEvents(payload: unknown): Generator<HarnessEvent, void, unkn
     yield { type: 'toolCall', toolCall };
   }
   yield usageEvent(body.usage, body.model);
-  yield doneEvent(mapFinishReason(choice?.finish_reason), text, toolCalls);
+  const reason = choice?.finish_reason;
+  if (!isKnownFinishReason(reason)) {
+    // An unrecognised finish_reason with parsed tool calls is still an
+    // actionable turn — the model asked for tools, and discarding that as an
+    // error would strand a run that could otherwise continue. A filtered
+    // response is the exception: the provider refused to complete the turn,
+    // so its tool calls must never execute.
+    if (toolCalls.length > 0 && reason !== 'content_filter') {
+      yield doneEvent('toolCalls', text, toolCalls);
+      return;
+    }
+    yield unknownFinishReasonEvent(reason, choice);
+    return;
+  }
+  yield doneEvent(mapFinishReason(reason), text, toolCalls);
 }
 
 /** Build a usage HarnessEvent from OpenAI token counts, naming the model that

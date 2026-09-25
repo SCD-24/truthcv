@@ -6,7 +6,7 @@ import { createDiagnostics } from '../diagnostics.js';
 
 import type { McpClientPool, NamespacedTool } from '../mcp/client.js';
 import type { HarnessEvent, ProviderAdapter, ToolCall } from '../providers/types.js';
-import { ExitCode, runCli, resolveCompactionConfig, resolveConfig, parseArgs, type CliDeps, type CliConfig } from '../cli.js';
+import { ExitCode, runCli, resolveCompactionConfig, resolveConfig, parseArgs, type CliDeps } from '../cli.js';
 import { DEFAULT_FALLBACK_CONTEXT_WINDOW } from '../compaction.js';
 
 /** A tool call referencing the fake pool's one allowed tool. */
@@ -75,6 +75,9 @@ function fakePool(tools?: NamespacedTool[]): McpClientPool {
 }
 
 /** Capture stdout/stderr lines and supply a fake adapter + pool to the CLI. */
+/** Default context window a test's fake `discoverContextWindow` reports, unless overridden. */
+const TEST_DISCOVERED_WINDOW = 128000;
+
 function harness(
   adapter: ProviderAdapter,
   pool: McpClientPool,
@@ -91,6 +94,9 @@ function harness(
     stdout: (line) => stdout.push(line),
     stderr: (line) => stderr.push(line),
     readStdin: async () => '',
+    // Fake by default so no test hits the network; individual tests override
+    // to assert discovery wiring or a fallback scenario.
+    discoverContextWindow: async () => ({ window: TEST_DISCOVERED_WINDOW, source: 'test' }),
     ...overrides,
   };
   return { deps, stdout, stderr, createAdapter, createPool };
@@ -412,99 +418,69 @@ describe('runCli token redaction', () => {
   });
 });
 
-describe('the context window reaches the loop and the adapter', () => {
+describe('the discovered context window reaches the loop and the adapter', () => {
   // The defect this whole change exists to fix was not a broken algorithm: it
   // was a correct one that nothing ever called. These assert the wiring.
-  it('states no window by default, leaving proactive compaction off', async () => {
+  it('passes the discovered window to the adapter, so ollama serves the same one', async () => {
     const adapter = scriptedAdapter([[doneEnd]]);
-    const { deps, createAdapter } = harness(adapter, fakePool());
+    const { deps, createAdapter } = harness(adapter, fakePool(), {
+      discoverContextWindow: async () => ({ window: 200000, source: 'anthropic' }),
+    });
 
     await runCli([...BASE_ARGS, 'go'], {}, deps);
 
-    expect(createAdapter.mock.calls[0][0].contextWindow).toBeUndefined();
+    expect(createAdapter.mock.calls[0][0].contextWindow).toBe(200000);
   });
 
-  it('passes a stated window to the adapter, so ollama serves the same one', async () => {
+  it('resolveCompactionConfig wraps the discovered number unchanged', () => {
+    expect(resolveCompactionConfig(128000).contextWindow).toBe(128000);
+    expect(resolveCompactionConfig(DEFAULT_FALLBACK_CONTEXT_WINDOW).contextWindow).toBe(32768);
+  });
+
+  it('uses the discovered window for compaction and logs it with its source', async () => {
     const adapter = scriptedAdapter([[doneEnd]]);
-    const { deps, createAdapter } = harness(adapter, fakePool());
-
-    await runCli(['--context-window', '128000', ...BASE_ARGS, 'go'], {}, deps);
-
-    expect(createAdapter.mock.calls[0][0].contextWindow).toBe(128000);
-  });
-
-  it('resolveCompactionConfig falls back to DEFAULT_FALLBACK_CONTEXT_WINDOW when unstated', () => {
-    const { compactionConfig, usedFallback } = resolveCompactionConfig({ contextWindow: 0 } as CliConfig);
-
-    expect(compactionConfig.contextWindow).toBe(DEFAULT_FALLBACK_CONTEXT_WINDOW);
-    expect(compactionConfig.contextWindow).toBe(32768);
-    expect(usedFallback).toBe(true);
-  });
-
-  it('resolveCompactionConfig passes a stated window through unchanged', () => {
-    const { compactionConfig, usedFallback } = resolveCompactionConfig({ contextWindow: 128000 } as CliConfig);
-
-    expect(compactionConfig.contextWindow).toBe(128000);
-    expect(usedFallback).toBe(false);
-  });
-
-  it('compacts proactively and logs the fallback when no window is stated', async () => {
-    const adapter = scriptedAdapter([[doneEnd]]);
-    const { deps, stderr } = harness(adapter, fakePool());
+    const { deps, stderr } = harness(adapter, fakePool(), {
+      discoverContextWindow: async () => ({ window: 200000, source: 'anthropic' }),
+    });
 
     await runCli([...BASE_ARGS, 'go'], {}, deps);
 
-    // Not `... 32768 tokens` verbatim: BASE_ARGS's token is the literal 'tok',
-    // and redaction replaces every occurrence of a configured credential —
-    // including as a substring of 'tokens' — with a placeholder.
-    expect(stderr.join('\n')).toContain(`conservative fallback of ${DEFAULT_FALLBACK_CONTEXT_WINDOW}`);
-    expect(stderr.join('\n')).toContain('context window unstated');
+    expect(stderr.join('\n')).toContain('context window 200000 (anthropic)');
   });
 
-  it('does not log a fallback when the operator stated a window', async () => {
+  it('falls back to DEFAULT_FALLBACK_CONTEXT_WINDOW and logs the fallback reason when discovery fails', async () => {
     const adapter = scriptedAdapter([[doneEnd]]);
-    const { deps, stderr } = harness(adapter, fakePool());
+    const { deps, stderr } = harness(adapter, fakePool(), {
+      discoverContextWindow: async () => ({
+        window: DEFAULT_FALLBACK_CONTEXT_WINDOW,
+        source: 'fallback: provider responded with status 401',
+      }),
+    });
 
-    await runCli(['--context-window', '128000', ...BASE_ARGS, 'go'], {}, deps);
+    await runCli([...BASE_ARGS, 'go'], {}, deps);
 
-    expect(stderr.join('\n')).not.toContain('conservative fallback');
+    expect(stderr.join('\n')).toContain(`context window ${DEFAULT_FALLBACK_CONTEXT_WINDOW}`);
+    expect(stderr.join('\n')).toContain('fallback:');
   });
 
-  // parseInt stops at the first non-digit and keeps what it has, so every
-  // natural way of writing a large number becomes a tiny one that validates —
-  // and a tiny window compacts the conversation to its floor every turn,
-  // silently, while the run looks healthy.
-  it.each(['1e6', '128k', '1_000_000', '0x20000', '200000abc', '1.5'])(
-    'refuses %s rather than silently reading a small number out of it',
-    async (raw) => {
-      const adapter = scriptedAdapter([[doneEnd]]);
-      const { deps, stderr } = harness(adapter, fakePool());
+  it('discovers the screening adapter independently of the main adapter', async () => {
+    const adapter = scriptedAdapter([finishRunTurn, [doneEnd]]);
+    const seen: Array<{ model: string }> = [];
+    const { deps, createAdapter } = harness(adapter, fakePool(), {
+      discoverContextWindow: async (opts) => {
+        seen.push({ model: opts.model });
+        return { window: opts.model === 'screen-model' ? 32000 : 200000, source: 'test' };
+      },
+    });
 
-      const code = await runCli(['--context-window', raw, ...BASE_ARGS, 'go'], {}, deps);
+    await runCli([...BASE_ARGS, '--screening-model', 'screen-model', '--screening-token', 'screen-tok', 'go'], {}, deps);
 
-      expect(code).toBe(ExitCode.BadConfig);
-      expect(stderr.join('\n')).toContain('--context-window');
-    },
-  );
-
-  it('refuses a window too small to be anything but a typo', async () => {
-    const adapter = scriptedAdapter([[doneEnd]]);
-    const { deps, stderr } = harness(adapter, fakePool());
-
-    const code = await runCli(['--context-window', '512', ...BASE_ARGS, 'go'], {}, deps);
-
-    expect(code).toBe(ExitCode.BadConfig);
-    expect(stderr.join('\n')).toContain('at least');
-  });
-
-  it('rejects a negative window rather than treating it as unknown', async () => {
-    const adapter = scriptedAdapter([[doneEnd]]);
-    const { deps, stderr } = harness(adapter, fakePool());
-
-    const code = await runCli(['--context-window', '-1', ...BASE_ARGS, 'go'], {}, deps);
-
-    expect(code).toBe(ExitCode.BadConfig);
-    expect(stderr.join('\n')).toContain('--context-window');
+    expect(seen.map((s) => s.model).sort()).toEqual(['m', 'screen-model']);
+    const calls = createAdapter.mock.calls as Array<[{ model: string; contextWindow: number }]>;
+    const main = calls.find((c) => c[0].model === 'm')!;
+    const screening = calls.find((c) => c[0].model === 'screen-model')!;
+    expect(main[0].contextWindow).toBe(200000);
+    expect(screening[0].contextWindow).toBe(32000);
   });
 });
 
@@ -906,9 +882,58 @@ describe('runCli unfinished runs', () => {
     expect(forgotCode).toBe(ExitCode.UnfinishedRun);
     expect(reasonText(wentSilent)).toContain('repeatedly returned no content and no tool calls');
     expect(reasonText(wentSilent)).not.toBe(reasonText(forgotFinishRun));
-    // The run that merely forgot the call still reads exactly as it always has.
+    // A run that merely forgot the call is now reminded first (the script
+    // repeats its last text-only end), so it stops on the nudge cap and says so.
     expect(reasonText(forgotFinishRun)).toBe(
-      'the agent stopped without calling finish_run — the run was abandoned before it reported an outcome, so its counters are incomplete',
+      'the agent stopped without calling finish_run (model ended the run without calling finish_run, even after ' +
+        'being reminded); screenings and applications still count from their records, but postings seen and ' +
+        'discovery coverage are partial',
+    );
+  });
+
+  it('keeps the abandoned-run reason under the reason-file cap for every cause', async () => {
+    const wentSilent = vi.fn(async () => {});
+    const { deps: silentDeps } = harness(scriptedAdapter([[doneEmptyTurn]]), fakePool(), { writeOutput: wentSilent });
+    const doneTextOnlyForCap: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'still going' },
+    };
+    const textOnly = vi.fn(async () => {});
+    const { deps: textOnlyDeps } = harness(
+      scriptedAdapter([[doneTextOnlyForCap], [doneTextOnlyForCap], [doneTextOnlyForCap], [doneTextOnlyForCap]]),
+      fakePool(),
+      { writeOutput: textOnly },
+    );
+
+    await runCli([...BASE_ARGS, '--reason-file', REASON_PATH, 'go'], {}, silentDeps);
+    await runCli([...BASE_ARGS, '--reason-file', REASON_PATH, 'go'], {}, textOnlyDeps);
+
+    for (const spy of [wentSilent, textOnly]) {
+      const text = reasonText(spy) ?? '';
+      expect(text).not.toBe('');
+      expect(text).not.toMatch(/…$/);
+      expect(text.length).toBeLessThanOrEqual(240);
+      expect(text).toContain('discovery coverage are partial');
+    }
+  });
+
+  it('names UNFINISHED_STOP_DETAIL as a cause the same way EMPTY_TURN_STOP_DETAIL is', async () => {
+    const nudgedThenGaveUp = vi.fn(async () => {});
+    const doneTextOnly: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'still going' },
+    };
+    const { deps } = harness(scriptedAdapter([[doneTextOnly], [doneTextOnly], [doneTextOnly], [doneTextOnly]]), fakePool(), {
+      writeOutput: nudgedThenGaveUp,
+    });
+
+    const code = await runCli([...BASE_ARGS, '--reason-file', REASON_PATH, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.UnfinishedRun);
+    expect(reasonText(nudgedThenGaveUp)).toContain(
+      'model ended the run without calling finish_run, even after being reminded',
     );
   });
 

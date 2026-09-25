@@ -98,6 +98,19 @@ describe("RecentRunsSection", () => {
     expect(screen.getByText("Discovery coverage: none recorded")).toBeTruthy();
   });
 
+  it("shows a stopped-before-recording message for a failed run with no coverage", async () => {
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([makeRun({ id: "run-failed-no-coverage", status: "failed", discoveryCoverage: [] })]),
+    );
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("run-failed-no-coverage")).toBeTruthy());
+    expect(
+      screen.getByText("Discovery coverage: none recorded before the run stopped"),
+    ).toBeTruthy();
+  });
+
   it("renders a running run distinctly from a finished one", async () => {
     vi.spyOn(client, "listRuns").mockResolvedValue(
       makePage([makeRun({ id: "run-active", status: "running", finishedAt: "" })]),

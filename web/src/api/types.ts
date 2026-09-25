@@ -792,8 +792,6 @@ export interface RouteChoice {
   model: string;
   /** Chosen effort level for models that support it; omit or "" for provider default. */
   effort?: string;
-  /** Context window size in tokens, when known. */
-  contextWindow?: number;
 }
 
 /** Routing configuration for tasks and defaults. */

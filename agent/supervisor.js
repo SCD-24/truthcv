@@ -274,7 +274,7 @@ function outcomeFor(rc, cancelled, reason) {
     3: "the run could not get a usable answer from the LLM provider — see the run log: \"request failed with status\" is the provider refusing, \"request could not be sent\" is the network never reaching it",
     4: "could not connect to an MCP server (the app's tools, or the browser)",
     5: "the harness was misconfigured — see the run log",
-    6: "the agent stopped without reporting an outcome, so the run was abandoned part-way and its counters are incomplete — see the run log",
+    6: "the agent stopped without reporting an outcome, so the run was abandoned part-way; screenings and applications are still counted from their own records, but postings seen and discovery coverage only reflect what the agent reported before it stopped — see the run log",
   };
   return {
     status: "failed",

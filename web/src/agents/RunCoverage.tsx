@@ -1,5 +1,5 @@
 import Typography from "@mui/material/Typography";
-import type { DiscoveryCoverage } from "../api/types";
+import type { DiscoveryCoverage, RunRecord } from "../api/types";
 
 /** Human-readable label for a discovery-coverage status, e.g. "login_walled"
  * -> "login-walled". Mirrors the values agenttools/tools_runs.py accepts. */
@@ -42,11 +42,13 @@ function channelClause(label: string, channel: DiscoveryCoverage["channel"], ent
  * every channel — feed, direct boards, dork queries — so a board or query
  * the agent never reached (an empty channel) reads visibly differently from
  * one it worked and found nothing on. */
-export function RunCoverage({ coverage }: { coverage: DiscoveryCoverage[] }) {
+export function RunCoverage({ coverage, status }: { coverage: DiscoveryCoverage[]; status?: RunRecord["status"] }) {
   if (coverage.length === 0) {
     return (
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-        Discovery coverage: none recorded
+        {status === "failed" || status === "cancelled"
+          ? "Discovery coverage: none recorded before the run stopped"
+          : "Discovery coverage: none recorded"}
       </Typography>
     );
   }

@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { McpClientPool, NamespacedTool } from '../mcp/client.js';
 import type { ConversationMessage, HarnessEvent, ModelRequest, ProviderAdapter, ToolCall } from '../providers/types.js';
 import { backoffDelay, classifyError, isRetryable, runLoop } from '../loop.js';
+import { KEEP_RECENT, PIN_LEADING, STALE_TOOL_RESULT_CHARS } from '../compaction.js';
 import type { DiagnosticBoundary } from '../diagnostics.js';
 
 /**
@@ -572,6 +573,95 @@ describe('a turn that produced nothing at all', () => {
     expect(calls()).toBe(2);
     expect(userTexts(result.messages).filter((t) => t.includes('no content and no tool calls'))).toHaveLength(0);
   });
+
+  it('nudges an "end" turn that left finish_run uncalled, then lets the run finish normally', async () => {
+    const doneTextOnly: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'partial work done' },
+    };
+    const { adapter, calls } = scriptedAdapter([[doneTextOnly], [doneFinishRun()], [doneEmpty]]);
+    const { pool } = poolWithFinishRun();
+    const kinds: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: [{ role: 'user', content: 'apply to jobs' }],
+      config: { maxTurns: 10 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e) kinds.push(e.kind);
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    expect(result.finishRunExecuted).toBe(true);
+    expect(calls()).toBe(3);
+    expect(kinds).toContain('unfinishedTurn');
+    expect(userTexts(result.messages).some((t) => t.includes('without calling finish_run'))).toBe(true);
+  });
+
+  it('ends the run with UNFINISHED_STOP_DETAIL once unfinished nudges exceed the cap', async () => {
+    const doneTextOnly: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'still going' },
+    };
+    const { adapter, calls } = scriptedAdapter([[doneTextOnly]]);
+    const { pool } = poolWithFinishRun();
+    const stops: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: [{ role: 'user', content: 'apply to jobs' }],
+      config: { maxTurns: 100, maxUnfinishedNudges: 1 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e && e.kind === 'stop') stops.push(e.detail ?? '');
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    expect(result.finishRunExecuted).toBe(false);
+    expect(calls()).toBe(2); // first turn nudged, second exceeds the cap
+    expect(stops).toContain('model ended the run without calling finish_run, even after being reminded');
+  });
+
+  it('does not nudge once finish_run has already executed', async () => {
+    const doneTextOnly: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'wrapping up' },
+    };
+    const { adapter, calls } = scriptedAdapter([[doneFinishRun()], [doneTextOnly]]);
+    const { pool } = poolWithFinishRun();
+
+    const result = await run(adapter, pool, { maxTurns: 10 });
+
+    expect(result.stopReason).toBe('end');
+    expect(calls()).toBe(2);
+    expect(userTexts(result.messages).some((t) => t.includes('without calling finish_run'))).toBe(false);
+  });
+
+  it('does not nudge when no finish_run tool is registered at all', async () => {
+    const doneTextOnly: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'done, no such tool here' },
+    };
+    const { adapter, calls } = scriptedAdapter([[doneTextOnly]]);
+    const { pool } = fakePool();
+
+    const result = await run(adapter, pool, { maxTurns: 10 });
+
+    expect(result.stopReason).toBe('end');
+    expect(calls()).toBe(1);
+    expect(userTexts(result.messages).some((t) => t.includes('without calling finish_run'))).toBe(false);
+  });
 });
 
 describe('a network failure the adapter reports instead of throwing', () => {
@@ -679,6 +769,120 @@ describe('compaction the provider asks for', () => {
     // classified as a plain bad-request and also ended the run after one
     // request, so stopReason alone cannot tell the two apart.
     expect(stops).toContain('context overflow with nothing left to compact');
+  });
+
+  it('elides a stale oversized tool result and retries, rather than erroring, at the keep-minimum', async () => {
+    // History has only PIN_LEADING + KEEP_RECENT + 1 messages, so it is at or
+    // under the floor planCompaction operates on — it finds nothing to DROP
+    // (returns null) — but two oversized, non-latest tool results are still
+    // there to elide, which is progress compact() can make without shrinking
+    // the message count, so the retry must succeed via elision alone.
+    const big = 'x'.repeat(STALE_TOOL_RESULT_CHARS + 500);
+    const messages: ConversationMessage[] = [
+      { role: 'user', content: 'instructions' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c0', name: 'browser', arguments: {} }] },
+      { role: 'user', content: '', toolResults: [{ toolCallId: 'c0', content: big }] },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'browser', arguments: {} }] },
+      { role: 'user', content: '', toolResults: [{ toolCallId: 'c1', content: big }] },
+    ];
+    expect(messages.length).toBeLessThanOrEqual(PIN_LEADING + KEEP_RECENT);
+    const { adapter, calls } = scriptedAdapter([[overflow], [doneEnd]]);
+    const { pool } = fakePool();
+    const stops: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: messages,
+      config: { maxTurns: 5 },
+      sleep: async () => {},
+      onEvent: (e) => {
+        if ('kind' in e && e.kind === 'stop') stops.push(e.detail ?? '');
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    expect(calls()).toBe(2);
+    expect(stops).not.toContain('context overflow with nothing left to compact');
+  });
+
+  it('stops once elision has nothing more to elide, rather than looping forever', async () => {
+    // Same shape as the elision-only-retry case, but the provider ALWAYS
+    // overflows: after the first (real) elision succeeds and the resend also
+    // overflows, the second compaction pass finds every stale result already
+    // elided (idempotent — no new elision, no shrink) and must stop rather
+    // than resending the byte-identical request forever.
+    const big = 'x'.repeat(STALE_TOOL_RESULT_CHARS + 500);
+    const messages: ConversationMessage[] = [
+      { role: 'user', content: 'instructions' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c0', name: 'browser', arguments: {} }] },
+      { role: 'user', content: '', toolResults: [{ toolCallId: 'c0', content: big }] },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'browser', arguments: {} }] },
+      { role: 'user', content: '', toolResults: [{ toolCallId: 'c1', content: big }] },
+    ];
+    expect(messages.length).toBeLessThanOrEqual(PIN_LEADING + KEEP_RECENT);
+    const { adapter, calls } = scriptedAdapter([[overflow]]);
+    const { pool } = fakePool();
+    const stops: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: messages,
+      config: { maxTurns: 5, maxOverflowCompactions: 5 },
+      sleep: async () => {},
+      onEvent: (e) => {
+        if ('kind' in e && e.kind === 'stop') stops.push(e.detail ?? '');
+      },
+    });
+
+    expect(result.stopReason).toBe('error');
+    // Original attempt, one (real, elision-only) compaction and resend, then
+    // stop — not exhausting the maxOverflowCompactions budget of 5.
+    expect(calls()).toBe(2);
+    expect(stops).toContain('context overflow with nothing left to compact');
+  });
+
+  it('retries when compaction shrinks tokens without shrinking the message count', async () => {
+    // PIN_LEADING + KEEP_RECENT + 1 messages, with one long message sitting
+    // right after the pinned head — exactly where planCompaction drops it.
+    // dropped.length === 1 and a one-line summary message replaces it, so the
+    // total message count before and after compaction is identical; progress
+    // must be recognised via the token-estimate/non-summary-only check, not
+    // the message-count shrink.
+    const long = 'turn '.repeat(2000);
+    const messages: ConversationMessage[] = [
+      { role: 'user', content: 'instructions' },
+      { role: 'user', content: long },
+      { role: 'assistant', content: 'ok 1' },
+      { role: 'user', content: 'ok 2' },
+      { role: 'assistant', content: 'ok 3' },
+      { role: 'user', content: 'ok 4' },
+      { role: 'assistant', content: 'ok 5' },
+      { role: 'user', content: 'ok 6' },
+    ];
+    expect(messages.length).toBe(PIN_LEADING + KEEP_RECENT + 1);
+    const { adapter, calls } = scriptedAdapter([[overflow], [doneEnd]]);
+    const { pool } = fakePool();
+    const stops: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: messages,
+      config: { maxTurns: 5 },
+      sleep: async () => {},
+      onEvent: (e) => {
+        if ('kind' in e && e.kind === 'stop') stops.push(e.detail ?? '');
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    expect(calls()).toBe(2);
+    expect(stops).not.toContain('context overflow with nothing left to compact');
   });
 
   it('stops once compacting stops helping, without exhausting the cap', () => {
@@ -819,6 +1023,57 @@ describe('model-generated compaction summaries', () => {
     expect(calls()).toBe(2);
     expect(events).toHaveLength(1);
     expect(events[0]).toContain('Summarized');
+  });
+
+  it('skips the summarizer and reports compactionFloor once, even across three back-to-back proactive compactions', async () => {
+    const summaryDone: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'MODEL SUMMARY: first pass.' },
+    };
+    const { adapter, calls, requests } = scriptedAdapterCapturing([
+      [summaryDone],
+      [doneToolCalls()],
+      [doneToolCalls()],
+      [doneEnd],
+    ]);
+    const { pool } = fakePool();
+    const kinds: string[] = [];
+    const compactionDetails: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: longConversation(),
+      config: { maxTurns: 5 },
+      compactionConfig: { contextWindow: 1000 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e) {
+          kinds.push(e.kind);
+          if (e.kind === 'compaction') compactionDetails.push(e.detail ?? '');
+        }
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    // The summarizer call for the first compaction, then three actual turns —
+    // the back-to-back compactions (second and third) make no adapter call
+    // of their own.
+    expect(calls()).toBe(4);
+    expect(kinds.filter((k) => k === 'compaction')).toHaveLength(3);
+    // Reported once only, on the SECOND compaction — not again on the third.
+    expect(kinds.filter((k) => k === 'compactionFloor')).toHaveLength(1);
+    expect(compactionDetails.some((d) => d.includes('MODEL SUMMARY'))).toBe(true);
+    expect(compactionDetails.some((d) => d.includes('Summarized'))).toBe(true);
+    // Only the first (summarizer-backed) compaction issued a summarizer
+    // request — identified by its shape (no tools, unlike an ordinary turn
+    // request which carries the pool's tools) rather than by raw count,
+    // since scriptedAdapterCapturing records every request (summarizer plus
+    // all three ordinary turns).
+    const summarizerRequests = requests.filter((r) => r.tools.length === 0);
+    expect(summarizerRequests).toHaveLength(1);
   });
 });
 

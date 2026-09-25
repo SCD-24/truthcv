@@ -34,7 +34,13 @@ export interface CompactionConfig {
   triggerRatio?: number;
 }
 
-/** Number of most-recent messages that are never compacted away. */
+/**
+ * Number of most-recent messages that are never compacted away — i.e. never
+ * dropped. A kept message's `content` and pairing (toolCall/toolResult ids,
+ * `isError`) are always preserved, but an oversized `toolResult.content` in a
+ * kept message OTHER than the last one carrying tool results may still be
+ * elided down to {@link STALE_TOOL_RESULT_CHARS}; see {@link compact}.
+ */
 export const KEEP_RECENT = 6;
 
 /**
@@ -116,6 +122,17 @@ function messageTokens(message: ConversationMessage): number {
 }
 
 /**
+ * Estimated token cost of a whole conversation, using the same per-message
+ * estimate {@link shouldCompact} uses.
+ *
+ * @param messages The conversation to estimate.
+ * @returns The summed estimate across every message.
+ */
+export function estimateConversationTokens(messages: ConversationMessage[]): number {
+  return messages.reduce((sum, m) => sum + messageTokens(m), 0);
+}
+
+/**
  * Decide whether the conversation is large enough to warrant compaction.
  *
  * Returns false immediately when `contextWindow` is falsy (the escape hatch —
@@ -162,6 +179,11 @@ export interface CompactionRecord {
    * otherwise the mechanical summary computed here.
    */
   summary: string;
+  /**
+   * How many kept `toolResult.content` values were truncated for being stale
+   * and oversized. Present only when at least one was elided.
+   */
+  elidedToolResultCount?: number;
 }
 
 /** Best-effort list of distinct tool names referenced across messages. */
@@ -174,10 +196,71 @@ function toolNames(messages: ConversationMessage[]): string[] {
 }
 
 /** Build the mechanical, auditable summary text for the dropped turns. */
-function summarise(dropped: ConversationMessage[]): string {
+function summarise(dropped: ConversationMessage[], elidedCount = 0): string {
   const tools = toolNames(dropped);
-  const suffix = tools.length ? ` covering tool calls: ${tools.join(', ')}` : '';
-  return `Summarized ${dropped.length} earlier turns (dropped)${suffix}.`;
+  const toolSuffix = tools.length ? ` covering tool calls: ${tools.join(', ')}` : '';
+  const elisionSuffix =
+    elidedCount > 0 ? `; elided ${elidedCount} stale tool result${elidedCount === 1 ? '' : 's'}` : '';
+  return `Summarized ${dropped.length} earlier turns (dropped)${toolSuffix}${elisionSuffix}.`;
+}
+
+/** Build the mechanical summary text for an elision-only pass (no drops). */
+function elisionSummary(elidedCount: number): string {
+  return `Elided ${elidedCount} stale tool result${elidedCount === 1 ? '' : 's'} (older than the latest tool-results turn).`;
+}
+
+/**
+ * Character budget a kept-but-not-latest `toolResult.content` may keep before
+ * {@link compact} truncates it. Chosen to keep a useful excerpt — enough to
+ * show what a tool returned — while stopping a large stale page snapshot or
+ * posting body from being carried forward turn after turn once it is no
+ * longer the most recent evidence.
+ */
+export const STALE_TOOL_RESULT_CHARS = 1500;
+
+/** Appended to a kept `toolResult.content` truncated for being stale. */
+const STALE_TOOL_RESULT_ELISION_SUFFIX =
+  '…[older tool result elided by compaction — re-request if still needed]';
+
+/** Index of the last message in `messages` that carries tool results, or -1. */
+function lastToolResultsIndex(messages: ConversationMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if ((messages[i]?.toolResults?.length ?? 0) > 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * Truncate oversized `toolResult.content` in every message of `messages`
+ * except the LAST one that carries tool results, without mutating the input.
+ *
+ * Ids, `isError` and call/result pairing are preserved exactly — only the
+ * `content` string of an over-budget result is shortened. The latest
+ * tool-results message is exempt because it is the evidence the model is
+ * most likely to still be acting on.
+ */
+function elideStaleToolResults(
+  messages: ConversationMessage[],
+): { messages: ConversationMessage[]; elidedCount: number } {
+  const latestIndex = lastToolResultsIndex(messages);
+  let elidedCount = 0;
+  const out = messages.map((message, index) => {
+    if (index === latestIndex || !message.toolResults || message.toolResults.length === 0) return message;
+    let changed = false;
+    const toolResults = message.toolResults.map((result) => {
+      if (result.content.length <= STALE_TOOL_RESULT_CHARS) return result;
+      // Idempotent: a result already elided by a prior pass ends with the
+      // elision suffix and must not be re-elided (or counted as progress) —
+      // otherwise a second compact() over its own output would keep
+      // "succeeding" forever with nothing actually changing.
+      if (result.content.endsWith(STALE_TOOL_RESULT_ELISION_SUFFIX)) return result;
+      changed = true;
+      elidedCount += 1;
+      return { ...result, content: result.content.slice(0, STALE_TOOL_RESULT_CHARS) + STALE_TOOL_RESULT_ELISION_SUFFIX };
+    });
+    return changed ? { ...message, toolResults } : message;
+  });
+  return { messages: out, elidedCount };
 }
 
 /** The would-be split of a compaction, without mutating anything or building a summary. */
@@ -255,12 +338,21 @@ export function renderDroppedTranscript(dropped: ConversationMessage[], maxChars
 
 /**
  * Compact the conversation, keeping the first {@link PIN_LEADING} messages and
- * the most recent {@link KEEP_RECENT} byte-identical, and folding everything
+ * the most recent {@link KEEP_RECENT} messages, and folding everything
  * between them into one synthetic `system` summary message.
  *
+ * A kept message's `content`, ids and call/result pairing are always
+ * preserved verbatim, and so is the LAST kept message carrying tool results —
+ * but an oversized `toolResult.content` in an earlier kept message is
+ * truncated to {@link STALE_TOOL_RESULT_CHARS}; see {@link elideStaleToolResults}.
+ * The input array and its messages are never mutated.
+ *
  * Safe to call unconditionally: when there are not more than the keep-minimum
- * messages there is nothing to drop, so it returns the messages unchanged and
- * a null record. Callers are still expected to gate on {@link shouldCompact}.
+ * messages there is nothing to drop, but a stale oversized tool result may
+ * still be elided — in which case this still returns a non-null record. Only
+ * when nothing was dropped AND nothing was elided does it return the input
+ * messages unchanged with a null record. Callers are still expected to gate
+ * on {@link shouldCompact}.
  *
  * `summaryText`, when given and non-blank, replaces the mechanical {@link
  * summarise} text verbatim in the synthetic message and the returned record.
@@ -274,10 +366,33 @@ export function compact(
   summaryText?: string,
 ): { messages: ConversationMessage[]; record: CompactionRecord | null } {
   const plan = planCompaction(messages);
-  if (!plan) return { messages, record: null };
+  if (!plan) {
+    const { messages: elided, elidedCount } = elideStaleToolResults(messages);
+    if (elidedCount === 0) return { messages, record: null };
+    const record: CompactionRecord = {
+      type: 'compaction',
+      droppedMessageCount: 0,
+      summary: elisionSummary(elidedCount),
+      elidedToolResultCount: elidedCount,
+    };
+    return { messages: elided, record };
+  }
   const { pinned, dropped, kept } = plan;
-  const summary = summaryText?.trim() ? summaryText.trim() : summarise(dropped);
+  const { messages: elidedKept, elidedCount } = elideStaleToolResults(kept);
+  // A model-provided summary describes the DROPPED messages only — it knows
+  // nothing about elision, which happens after it is generated — so the
+  // elision note is appended here rather than folded into summarizeDropped().
+  const summary = summaryText?.trim()
+    ? elidedCount > 0
+      ? `${summaryText.trim()} ${elisionSummary(elidedCount)}`
+      : summaryText.trim()
+    : summarise(dropped, elidedCount);
   const summaryMessage: ConversationMessage = { role: 'system', content: `[compaction] ${summary}` };
-  const record: CompactionRecord = { type: 'compaction', droppedMessageCount: dropped.length, summary };
-  return { messages: [...pinned, summaryMessage, ...kept], record };
+  const record: CompactionRecord = {
+    type: 'compaction',
+    droppedMessageCount: dropped.length,
+    summary,
+    ...(elidedCount > 0 ? { elidedToolResultCount: elidedCount } : {}),
+  };
+  return { messages: [...pinned, summaryMessage, ...elidedKept], record };
 }

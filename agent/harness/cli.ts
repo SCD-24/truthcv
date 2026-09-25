@@ -29,9 +29,11 @@
  *                       constructed.
  *   6  unfinished run — the loop ended cleanly but the agent never called
  *                       `finish_run`, so it abandoned the run without reporting
- *                       an outcome and its counters are incomplete. A clean end
- *                       is otherwise indistinguishable from a run that genuinely
- *                       had nothing to do, and the supervisor would record it as
+ *                       an outcome. Screenings and applications are still
+ *                       counted from their own records, but postings seen and
+ *                       discovery coverage are partial. A clean end is otherwise
+ *                       indistinguishable from a run that genuinely had
+ *                       nothing to do, and the supervisor would record it as
  *                       "completed".
  *   1  fatal          — reserved for a truly unexpected crash in the runtime
  *                       guard (should not happen; runCli catches its own paths).
@@ -68,6 +70,7 @@ import {
 import type { ConversationMessage, HarnessEvent, ProviderAdapter } from './providers/types.js';
 import {
   EMPTY_TURN_STOP_DETAIL,
+  UNFINISHED_STOP_DETAIL,
   runLoop,
   DEFAULT_TOOL_CONCURRENCY,
   DEFAULT_MAX_RETRIES,
@@ -77,7 +80,8 @@ import {
   type LoopResult,
 } from './loop.js';
 import { checkAdvertisedBrowserTools } from './tools.js';
-import { DEFAULT_FALLBACK_CONTEXT_WINDOW, type CompactionConfig } from './compaction.js';
+import { type CompactionConfig } from './compaction.js';
+import { discoverContextWindow, type DiscoveredContextWindow } from './contextWindow.js';
 
 /** The CLI's process exit codes; see the module comment for the full contract. */
 export const ExitCode = {
@@ -143,16 +147,6 @@ export interface CliConfig {
   mcpConfigPath: string;
   /** Hard cap on completed loop turns. */
   maxTurns: number;
-  /**
-   * The model's context window in tokens, as stated by the operator, or 0 when
-   * unstated. An operator-stated value always wins. 0/unstated no longer turns
-   * proactive compaction off: `runAgent` falls back to a conservative default
-   * (see `DEFAULT_FALLBACK_CONTEXT_WINDOW` in compaction.ts) rather than let an
-   * unbounded transcript grow with nothing but the reactive path to catch it.
-   * A run is still covered reactively either way, when the provider says the
-   * context is too long.
-   */
-  contextWindow: number;
   /**
    * Maximum characters of a single MCP tool result inserted into the
    * conversation. A larger result is truncated with an explicit marker before
@@ -240,6 +234,16 @@ export interface CliDeps {
   writeOutput?: (path: string, text: string) => Promise<void>;
   /** Optional private health transport, independently injectable for CLI tests. */
   healthWriter?: (fd: number) => DiagnosticsHealth;
+  /** Discover a model's context window from its provider. Defaults to {@link
+   * discoverContextWindow}; tests inject a fake so no network is touched. */
+  discoverContextWindow?: (opts: {
+    provider: Provider;
+    wire: Wire;
+    model: string;
+    baseUrl: string;
+    token: string;
+    authType?: CliConfig['authType'];
+  }) => Promise<DiscoveredContextWindow>;
 }
 
 /** The same dependency set with every field resolved to a concrete function. */
@@ -253,6 +257,14 @@ interface ResolvedDeps {
   readFileText: (path: string) => Promise<string>;
   readStdin: () => Promise<string>;
   writeOutput: (path: string, text: string) => Promise<void>;
+  discoverContextWindow: (opts: {
+    provider: Provider;
+    wire: Wire;
+    model: string;
+    baseUrl: string;
+    token: string;
+    authType?: CliConfig['authType'];
+  }) => Promise<DiscoveredContextWindow>;
 }
 
 /** The redacting stdout (JSON) and stderr (text) writers for a run. */
@@ -301,46 +313,6 @@ async function resolvePrompt(
   return (await io.readStdin()).trim();
 }
 
-/**
- * Parse `--context-window`/`AGENT_CONTEXT_WINDOW`; 0 when unset, NaN if invalid.
- *
- * There is deliberately no per-model table behind this. A table of model ids to
- * window sizes is wrong the day a model ships and wrong again when a provider
- * changes a served window, and being wrong here is worse than knowing nothing:
- * an unstated window still gets proactive compaction, just against
- * `runAgent`'s conservative `DEFAULT_FALLBACK_CONTEXT_WINDOW` rather than a
- * guessed per-model figure, and the reactive path covers the rest using the
- * provider's own verdict either way. So the exact number is stated by whoever
- * deployed the model, or not at all — there is no third, guessed option.
- *
- * State it as the model's INPUT capacity, not its headline total: the two
- * differ by whatever the provider reserves for the response (Anthropic reports
- * the input figure as `max_input_tokens` on its models endpoint), and the
- * difference is large enough to matter at the trigger point. A value here,
- * once it passes `MIN_CONTEXT_WINDOW`, always wins over the fallback.
- */
-function resolveContextWindow(flag: string | undefined, envVal: string | undefined): number {
-  const raw = (flag || envVal || '').trim();
-  if (!raw) return 0;
-  // Digits only, deliberately. parseInt stops at the first non-digit and keeps
-  // what it has, which turns every natural way an operator writes a large
-  // number into a small one: "1e6" -> 1, "128k" -> 128, "1_000_000" -> 1,
-  // "0x20000" -> 0. Each of those validates as a positive integer and then
-  // compacts the conversation to its floor on every single turn, silently.
-  if (!/^\d+$/.test(raw)) return Number.NaN;
-  return Number.parseInt(raw, 10);
-}
-
-/**
- * Smallest window worth acting on.
- *
- * Below this the reserve alone exceeds the trigger, so every turn compacts and
- * the agent runs with no memory beyond the pinned instructions and the last
- * few messages — while looking healthy. A figure this small is an operator
- * typo, not an intent, so it is refused rather than honoured.
- */
-const MIN_CONTEXT_WINDOW = 8192;
-
 /** Parse `--max-turns`/`AGENT_MAX_TURNS`, defaulting when unset; NaN if invalid. */
 function resolveMaxTurns(flag: string | undefined, envVal: string | undefined): number {
   const raw = flag || envVal;
@@ -356,10 +328,9 @@ function resolveMaxTurns(flag: string | undefined, envVal: string | undefined): 
 function resolveMaxToolResultChars(flag: string | undefined, envVal: string | undefined): number {
   const raw = (flag || envVal || '').trim();
   if (!raw) return DEFAULT_MAX_TOOL_RESULT_CHARS;
-  // Digits only, deliberately — see resolveContextWindow's comment. This
-  // rejects "1.5", "24000k", "0x10" etc. as NaN instead of parseInt silently
-  // truncating them into a plausible-looking positive integer that would
-  // then sail through validateConfig's Number.isInteger check.
+  // Digits only, deliberately. parseInt stops at the first non-digit and
+  // keeps what it has, so a stray "24000k" or "0x10" validates as a
+  // plausible-looking positive integer instead of the NaN it should be.
   if (!/^\d+$/.test(raw)) return Number.NaN;
   return Number.parseInt(raw, 10);
 }
@@ -474,7 +445,6 @@ export async function resolveConfig(
     ...resolveScreeningConfig(f, env, { model, provider, wire, token, baseUrl, authType }),
     mcpConfigPath: f['mcp-config'] ?? env.MCP_CONFIG_PATH ?? 'mcp.json',
     maxTurns: resolveMaxTurns(f['max-turns'], env.AGENT_MAX_TURNS),
-    contextWindow: resolveContextWindow(f['context-window'], env.AGENT_CONTEXT_WINDOW),
     maxToolResultChars: resolveMaxToolResultChars(f['max-tool-result-chars'], env.AGENT_MAX_TOOL_RESULT_CHARS),
     maxToolConcurrency: resolveMaxToolConcurrency(f['max-tool-concurrency'], env.AGENT_MAX_TOOL_CONCURRENCY),
     maxConsecutiveRetries: resolveMaxRetries(f['max-retries'], env.AGENT_MAX_RETRIES),
@@ -540,12 +510,6 @@ export function validateConfig(config: CliConfig): string[] {
     errors.push('--max-retries must be a positive integer');
   if (!Number.isInteger(config.maxRetryDelayMs) || config.maxRetryDelayMs <= 0)
     errors.push('--max-retry-delay-ms must be a positive integer');
-  if (!Number.isInteger(config.contextWindow) || config.contextWindow < 0)
-    errors.push(
-      '--context-window must be a whole number of tokens, digits only (0 or unset applies a conservative fallback)',
-    );
-  else if (config.contextWindow > 0 && config.contextWindow < MIN_CONTEXT_WINDOW)
-    errors.push(`--context-window must be at least ${MIN_CONTEXT_WINDOW} tokens, or 0/unset to use the conservative fallback`);
   errors.push(...validateAuth(config));
   if (!PROVIDERS.includes(config.screeningProvider))
     errors.push('a valid --screening-provider (claude|codex|openrouter|ollama) is required');
@@ -698,7 +662,26 @@ async function runOnce(
 ): Promise<number> {
   const pool = await tryBuildPool(config, env, d, emit);
   if (typeof pool === 'number') return pool;
-  const adapter = d.createAdapter(adapterOptions(config));
+  // Discovered once per adapter, directly from its own provider — the main
+  // and screening adapters can target different providers/models, so each
+  // gets its own discovery call rather than sharing one figure.
+  const mainWindow = await d.discoverContextWindow({
+    provider: config.provider,
+    wire: config.wire,
+    model: config.model,
+    baseUrl: config.baseUrl,
+    token: config.token,
+    authType: config.authType,
+  });
+  const screeningWindow = await d.discoverContextWindow({
+    provider: config.screeningProvider,
+    wire: config.screeningWire,
+    model: config.screeningModel,
+    baseUrl: config.screeningBaseUrl,
+    token: config.screeningToken,
+    authType: config.screeningAuthType,
+  });
+  const adapter = d.createAdapter(adapterOptions(config, mainWindow.window));
   // Built via the SAME plain factory as the main adapter, from a separate
   // options object (a separate, cheaper model by default) — createProviderAdapter
   // holds no shared mutable state, so this instance never disturbs the main
@@ -706,8 +689,8 @@ async function runOnce(
   // screen_posting branch (never a module-level setter), so which adapter a
   // call dispatches to never depends on load order or leaks into a later run
   // in the same process.
-  const screeningAdapter = d.createAdapter(screeningAdapterOptions(config));
-  const outcome = await runAgent(adapter, screeningAdapter, pool, config, env, d, emit, tokens);
+  const screeningAdapter = d.createAdapter(screeningAdapterOptions(config, screeningWindow.window));
+  const outcome = await runAgent(adapter, screeningAdapter, pool, config, env, d, emit, tokens, mainWindow);
   if (typeof outcome === 'number') return outcome;
   return report(outcome.result, config, d, emit, tokens, outcome.getFailureDetail);
 }
@@ -739,23 +722,18 @@ async function tryBuildPool(
 }
 
 /**
- * Resolve the `compactionConfig` handed to {@link runLoop}, and whether it is
- * running on the fallback rather than an operator-stated figure.
+ * Build the `compactionConfig` handed to {@link runLoop} from the window
+ * discovered for the main adapter.
  *
- * Always returns a real, truthy `contextWindow`: proactive compaction now runs
- * unconditionally, against whatever the operator stated or, failing that,
- * `DEFAULT_FALLBACK_CONTEXT_WINDOW`. See that constant's doc comment for why
- * generous is the safe direction to err in here.
+ * The discovered figure is always a real, positive number — {@link
+ * discoverContextWindow} itself resolves any failure to
+ * `DEFAULT_FALLBACK_CONTEXT_WINDOW` — so proactive compaction always runs.
  *
- * @param config The resolved configuration.
- * @returns The compaction config to pass to the loop, and whether it used the fallback.
+ * @param window The context window discovered for the main adapter.
+ * @returns The compaction config to pass to the loop.
  */
-export function resolveCompactionConfig(config: CliConfig): { compactionConfig: CompactionConfig; usedFallback: boolean } {
-  const usedFallback = !config.contextWindow;
-  return {
-    compactionConfig: { contextWindow: config.contextWindow || DEFAULT_FALLBACK_CONTEXT_WINDOW },
-    usedFallback,
-  };
+export function resolveCompactionConfig(window: number): CompactionConfig {
+  return { contextWindow: window };
 }
 
 /**
@@ -783,6 +761,7 @@ async function runAgent(
   d: ResolvedDeps,
   emit: Emitter,
   tokens: readonly string[],
+  mainWindow: DiscoveredContextWindow,
 ): Promise<{ result: LoopResult; getFailureDetail: () => string | undefined } | number> {
   const stream = createEventStream(emit.json);
   let health: DiagnosticsHealth | undefined;
@@ -793,12 +772,8 @@ async function runAgent(
   }
   const diagnostics = diagnosticsEnabled
     ? createDiagnostics(config.diagnosticsFile!, config.runId!, { health }) : undefined;
-  const { compactionConfig, usedFallback } = resolveCompactionConfig(config);
-  if (usedFallback) {
-    emit.err(
-      `context window unstated; using conservative fallback of ${DEFAULT_FALLBACK_CONTEXT_WINDOW} tokens for proactive compaction`,
-    );
-  }
+  const compactionConfig = resolveCompactionConfig(mainWindow.window);
+  emit.err(`context window ${mainWindow.window} (${mainWindow.source})`);
   try {
     const result = await runLoop({
       adapter,
@@ -877,8 +852,14 @@ async function report(
  * @returns One operator-readable sentence, well under the reason-file bound.
  */
 function abandonedReason(detail: string | undefined): string {
-  const cause = detail === EMPTY_TURN_STOP_DETAIL ? ` (${detail})` : '';
-  return `the agent stopped without calling finish_run${cause} — the run was abandoned before it reported an outcome, so its counters are incomplete`;
+  const cause =
+    detail === EMPTY_TURN_STOP_DETAIL || detail === UNFINISHED_STOP_DETAIL ? ` (${detail})` : '';
+  // With the longest cause this is ~234 chars; it must fit within MAX_REASON_CHARS (240)
+  // so truncateReason never has to cut it and append an ellipsis.
+  return (
+    `the agent stopped without calling finish_run${cause}; screenings and applications ` +
+    'still count from their records, but postings seen and discovery coverage are partial'
+  );
 }
 
 /**
@@ -1132,8 +1113,9 @@ function exitCodeFor(stopReason: LoopOutcome): number {
   return ExitCode.ProviderError;
 }
 
-/** Project a {@link CliConfig} onto the provider adapter's option shape. */
-function adapterOptions(config: CliConfig): ProviderAdapterOptions {
+/** Project a {@link CliConfig} onto the provider adapter's option shape,
+ * carrying the window discovered for this adapter. */
+function adapterOptions(config: CliConfig, contextWindow: number): ProviderAdapterOptions {
   return {
     provider: config.provider,
     wire: config.wire,
@@ -1141,11 +1123,10 @@ function adapterOptions(config: CliConfig): ProviderAdapterOptions {
     token: config.token,
     baseUrl: config.baseUrl,
     authType: config.authType,
-    // The same number the compaction trigger uses. Ollama needs it stated on
-    // the request (`options.num_ctx`) because a local server otherwise serves
-    // its own default; deriving both from one figure is what stops the harness
-    // compacting against one window while the server enforces another.
-    ...(config.contextWindow ? { contextWindow: config.contextWindow } : {}),
+    // The same number the compaction trigger uses. The registry forwards this
+    // as `options.num_ctx` for ollama only, so it never reaches OpenRouter or
+    // Codex as a stray option field.
+    contextWindow,
     // Anthropic-only escape hatch; the registry ignores it on the OpenAI wire.
     promptCache: config.promptCache,
   };
@@ -1157,7 +1138,7 @@ function adapterOptions(config: CliConfig): ProviderAdapterOptions {
  * fields instead. Built via the same {@link createProviderAdapter} plain
  * factory, so this never disturbs the main adapter built alongside it.
  */
-function screeningAdapterOptions(config: CliConfig): ProviderAdapterOptions {
+function screeningAdapterOptions(config: CliConfig, contextWindow: number): ProviderAdapterOptions {
   return {
     provider: config.screeningProvider,
     wire: config.screeningWire,
@@ -1165,7 +1146,7 @@ function screeningAdapterOptions(config: CliConfig): ProviderAdapterOptions {
     token: config.screeningToken,
     baseUrl: config.screeningBaseUrl,
     authType: config.screeningAuthType,
-    ...(config.contextWindow ? { contextWindow: config.contextWindow } : {}),
+    contextWindow,
     promptCache: config.promptCache,
   };
 }
@@ -1187,6 +1168,7 @@ function withDefaults(deps: CliDeps): ResolvedDeps {
     readFileText: deps.readFileText ?? ((path) => readFile(path, 'utf8')),
     readStdin: deps.readStdin ?? defaultReadStdin,
     writeOutput: deps.writeOutput ?? ((path, text) => writeFile(path, text, 'utf8')),
+    discoverContextWindow: deps.discoverContextWindow ?? discoverContextWindow,
   };
 }
 

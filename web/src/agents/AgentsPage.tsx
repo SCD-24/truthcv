@@ -623,7 +623,7 @@ function RunSummaryRow({
           </Typography>
         )}
       </Stack>
-      <RunCoverage coverage={run.discoveryCoverage} />
+      <RunCoverage coverage={run.discoveryCoverage} status={run.status} />
       {run.stoppedReason && (
         <Typography
           variant="caption"

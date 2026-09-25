@@ -45,14 +45,13 @@ describe("initial and reconciled provider default", () => {
     await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith({ connection: "b", model: "" }));
   });
 
-  it("rejects unsafe integer context before a fallback commit", async () => {
+  it("does not render a context window field", async () => {
     vi.mocked(listConnectionModels).mockResolvedValue([]);
     const onSave = vi.fn();
     render(<ModelRoutePicker title="Default" autosaveKey="default" allowDefaultCommit
       connections={[connected("a")]} route={null} onSave={onSave} />);
-    const context = screen.getByRole("spinbutton", { name: /context window/i });
-    fireEvent.change(context, { target: { value: "9007199254740992" } });
-    expect((screen.getByRole("button", { name: "Use this provider default" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("spinbutton", { name: /context window/i })).toBeNull();
+    expect((screen.getByRole("button", { name: "Use this provider default" }) as HTMLButtonElement).disabled).toBe(false);
     expect(onSave).not.toHaveBeenCalled();
   });
 });
