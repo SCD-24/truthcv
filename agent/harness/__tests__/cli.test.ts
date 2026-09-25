@@ -1009,3 +1009,66 @@ describe('runCli unfinished runs', () => {
     expect(code).toBe(ExitCode.Success);
   });
 });
+
+describe('--finish-tool', () => {
+  /** A pool advertising `finish_phase` alongside the usual allowed tools. */
+  function poolWithFinishPhase(): McpClientPool {
+    return fakePool([
+      { namespacedName: 'truthcv__start_run', serverName: 'truthcv', toolName: 'start_run', description: 'd', inputSchema: { type: 'object' } },
+      { namespacedName: 'truthcv__finish_phase', serverName: 'truthcv', toolName: 'finish_phase', description: 'd', inputSchema: { type: 'object' } },
+      ...BROWSER_TOOLS,
+    ]);
+  }
+
+  const FINISH_PHASE_CALL: ToolCall = { id: 'p1', name: 'truthcv__finish_phase', arguments: {} };
+  const finishPhaseTurn: HarnessEvent[] = [
+    { type: 'toolCall', toolCall: FINISH_PHASE_CALL },
+    { type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [FINISH_PHASE_CALL] } },
+  ];
+
+  it('defaults finishToolName to finish_run', async () => {
+    const config = await resolveConfig(parseArgs([...BASE_ARGS, 'go']), {}, { readFileText: async () => '', readStdin: async () => '' });
+    expect(config.finishToolName).toBe('finish_run');
+  });
+
+  it('accepts AGENT_FINISH_TOOL from the environment, overridden by --finish-tool', async () => {
+    const noopIo = { readFileText: async () => '', readStdin: async () => '' };
+    const fromEnv = await resolveConfig(parseArgs([...BASE_ARGS, 'go']), { AGENT_FINISH_TOOL: 'finish_phase' }, noopIo);
+    expect(fromEnv.finishToolName).toBe('finish_phase');
+    const fromFlag = await resolveConfig(
+      parseArgs([...BASE_ARGS, '--finish-tool', 'finish_phase', 'go']),
+      { AGENT_FINISH_TOOL: 'finish_run' },
+      noopIo,
+    );
+    expect(fromFlag.finishToolName).toBe('finish_phase');
+  });
+
+  it('rejects an unrecognized --finish-tool value as a config error', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, stderr } = harness(adapter, fakePool());
+    const code = await runCli([...BASE_ARGS, '--finish-tool', 'bogus', 'go'], {}, deps);
+    expect(code).toBe(ExitCode.BadConfig);
+    expect(stderr.join('\n')).toContain('--finish-tool');
+  });
+
+  it('exits 0 when --finish-tool finish_phase is executed before a clean end', async () => {
+    const adapter = scriptedAdapter([finishPhaseTurn, [doneEnd]]);
+    const { deps } = harness(adapter, poolWithFinishPhase());
+
+    const code = await runCli([...BASE_ARGS, '--finish-tool', 'finish_phase', 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.Success);
+  });
+
+  it('exits 6 when --finish-tool finish_phase is never called before a clean end', async () => {
+    const adapter = scriptedAdapter([
+      [{ type: 'toolCall', toolCall: A_TOOL_CALL }, doneToolCalls('')],
+      [doneEnd],
+    ]);
+    const { deps } = harness(adapter, poolWithFinishPhase());
+
+    const code = await runCli([...BASE_ARGS, '--finish-tool', 'finish_phase', 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.UnfinishedRun);
+  });
+});

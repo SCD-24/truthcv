@@ -491,6 +491,240 @@ if [[ "$PROMPT" != *"- 5. Applying"* ]] || [[ "$PROMPT" != *"- 2. Hard filters"*
 fi
 echo "PASS: composed prompt inlines RUNBOOK rules + TOC, not full procedural text"
 
+# --- Per-channel sessions: mode default, channel selection, rc aggregation -
+# Mirrors daily-apply.sh's session-mode logic verbatim (see "AGENT_SESSION_MODE"
+# and the per-channel session loop there), so a divergence between this
+# simulation and the real script is a bug in one of the two, not just here.
+
+echo "Testing: AGENT_SESSION_MODE defaults to per-channel in daily-apply.sh..."
+if ! grep -q 'AGENT_SESSION_MODE="\${AGENT_SESSION_MODE:-per-channel}"' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: daily-apply.sh does not default AGENT_SESSION_MODE to per-channel"
+  exit 1
+fi
+echo "PASS: AGENT_SESSION_MODE defaults to per-channel"
+
+echo "Testing: single mode still guards the byte-identical composition path..."
+if ! grep -q 'AGENT_SESSION_MODE" == "single" ]]; then' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: daily-apply.sh lost its single-mode guard around prompt composition"
+  exit 1
+fi
+if ! grep -q '\$PROFILE_BLOCK\$FEED_SECTION\$DIRECT_SECTION\$DORK_SECTION\$PROFILE_TAIL' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: single-mode composition no longer concatenates header+every channel+tail in RUNBOOK order"
+  exit 1
+fi
+echo "PASS: single mode composes header+feed+direct+dork+tail exactly as before per-channel sessions existed"
+
+echo "Testing: run_harness takes a prompt file and finish tool as arguments..."
+if ! grep -q 'local prompt_file="\$1" finish_tool="\$2"' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: run_harness was not refactored to take (prompt_file, finish_tool) arguments"
+  exit 1
+fi
+if ! grep -q -- '--finish-tool "\$finish_tool"' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: run_harness does not pass --finish-tool to the CLI"
+  exit 1
+fi
+echo "PASS: run_harness(prompt_file, finish_tool) refactor present"
+
+# Selects the sessions to run and each one's finish tool, mirroring the real
+# SESSION_CHANNELS/LAST_INDEX logic: 'feed' always runs; 'direct'/'dork' are
+# included only when their section is non-empty; the last present session
+# gets finish_run, every session before it gets finish_phase.
+select_sessions() {
+  local direct_section="$1" dork_section="$2"
+  local channels=(feed)
+  [[ -n "$direct_section" ]] && channels+=(direct)
+  [[ -n "$dork_section" ]] && channels+=(dork)
+  local last=$(( ${#channels[@]} - 1 ))
+  local i out=""
+  for i in "${!channels[@]}"; do
+    if (( i == last )); then
+      out="$out${channels[$i]}=finish_run "
+    else
+      out="$out${channels[$i]}=finish_phase "
+    fi
+  done
+  echo "$out"
+}
+
+echo "Testing: all three channels configured yields three sessions, feed+direct get finish_phase, dork gets finish_run..."
+SESSIONS_ALL="$(select_sessions "has-direct" "has-dork")"
+if [[ "$SESSIONS_ALL" != "feed=finish_phase direct=finish_phase dork=finish_run " ]]; then
+  echo "FAIL: expected feed=finish_phase direct=finish_phase dork=finish_run, got: '$SESSIONS_ALL'"
+  exit 1
+fi
+echo "PASS: three-channel session plan is correct"
+
+echo "Testing: no direct/dork data omits those sessions, feed alone gets finish_run..."
+SESSIONS_FEED_ONLY="$(select_sessions "" "")"
+if [[ "$SESSIONS_FEED_ONLY" != "feed=finish_run " ]]; then
+  echo "FAIL: expected feed=finish_run only, got: '$SESSIONS_FEED_ONLY'"
+  exit 1
+fi
+echo "PASS: channel with no configured data is omitted, remaining session finishes with finish_run"
+
+echo "Testing: dork configured but not direct yields feed+dork, dork finishes the run..."
+SESSIONS_NO_DIRECT="$(select_sessions "" "has-dork")"
+if [[ "$SESSIONS_NO_DIRECT" != "feed=finish_phase dork=finish_run " ]]; then
+  echo "FAIL: expected feed=finish_phase dork=finish_run, got: '$SESSIONS_NO_DIRECT'"
+  exit 1
+fi
+echo "PASS: direct omitted, dork present, dork finishes the run"
+
+# Mirrors daily-apply.sh's FINAL_RC aggregation: rc 3/4/5 aborts remaining
+# sessions and is the final rc; rc 2/6 is recorded but does not stop the
+# next session; final rc is the first non-zero rc seen, else 0.
+aggregate_rc() {
+  local final_rc=0 final_rc_set=0 rc
+  for rc in "$@"; do
+    if (( final_rc_set == 0 )); then
+      final_rc=$rc
+      final_rc_set=1
+    fi
+    if [[ "$rc" == 3 || "$rc" == 4 || "$rc" == 5 ]]; then
+      break
+    fi
+    if (( final_rc == 0 && rc != 0 )); then
+      final_rc=$rc
+    fi
+  done
+  echo "$final_rc"
+}
+
+echo "Testing: rc aggregation - all sessions succeed..."
+AGG1="$(aggregate_rc 0 0 0)"
+[[ "$AGG1" == "0" ]] || { echo "FAIL: expected 0, got $AGG1"; exit 1; }
+echo "PASS: all-success aggregates to 0"
+
+echo "Testing: rc aggregation - turn cap (2) in an early session does not stop the next, is remembered..."
+AGG2="$(aggregate_rc 2 0 0)"
+[[ "$AGG2" == "2" ]] || { echo "FAIL: expected 2, got $AGG2"; exit 1; }
+echo "PASS: rc 2 propagates as final rc while later sessions still ran"
+
+echo "Testing: rc aggregation - no-finish (6) then success keeps 6 as first non-zero..."
+AGG3="$(aggregate_rc 0 6 0)"
+[[ "$AGG3" == "6" ]] || { echo "FAIL: expected 6, got $AGG3"; exit 1; }
+echo "PASS: first non-zero rc (6) wins even when a later session succeeds"
+
+echo "Testing: rc aggregation - provider error (3) aborts remaining sessions immediately..."
+AGG4="$(aggregate_rc 3 0 0)"
+[[ "$AGG4" == "3" ]] || { echo "FAIL: expected 3, got $AGG4"; exit 1; }
+echo "PASS: rc 3 is the final rc"
+
+echo "Testing: rc aggregation - config error (5) after a turn-cap session still reports the earlier non-zero rc..."
+AGG5="$(aggregate_rc 2 5)"
+[[ "$AGG5" == "2" ]] || { echo "FAIL: expected 2 (first non-zero rc wins over a later abort's own rc), got $AGG5"; exit 1; }
+echo "PASS: first non-zero rc wins even when a later session aborts with a different rc"
+
+# --- render_session_block: real function, extracted verbatim from daily-apply.sh ---
+# Sourcing the real function (not a copy) so a change there is exercised here
+# directly, no drift possible.
+RENDER_SESSION_BLOCK_SRC="$(sed -n '/^render_session_block() {/,/^}$/p' "$DAILY_APPLY_SRC")"
+eval "$RENDER_SESSION_BLOCK_SRC"
+
+echo "Testing: finish_phase session (non-final) renders finish_phase call shape, no channel arg..."
+BLOCK_PHASE="$(render_session_block "direct" "finish_phase" 0 "")"
+if [[ "$BLOCK_PHASE" != *'finish_phase(run_id, channel: "direct", note: ...)'* ]]; then
+  echo "FAIL: finish_phase session block missing correct finish_phase call shape"
+  exit 1
+fi
+if [[ "$BLOCK_PHASE" == *"finish_run("* ]]; then
+  echo "FAIL: non-final session block must not tell the model to call finish_run"
+  exit 1
+fi
+echo "PASS: non-final session block renders finish_phase(run_id, channel, note)"
+
+echo "Testing: finish_run session (final) renders finish_run call shape (run_id, status, stopped_reason, note), no channel arg..."
+BLOCK_RUN="$(render_session_block "dork" "finish_run" 0 "")"
+if [[ "$BLOCK_RUN" != *'finish_run(run_id, status: ...,'*'stopped_reason: ...'*'note: ...)'* ]]; then
+  echo "FAIL: finish_run session block missing correct finish_run call shape"
+  exit 1
+fi
+if [[ "$BLOCK_RUN" == *'finish_run(run_id, channel'* ]]; then
+  echo "FAIL: finish_run call must not be told to take a channel argument"
+  exit 1
+fi
+echo "PASS: final session block renders finish_run(run_id, status, stopped_reason, note)"
+
+echo "Testing: direct/dork (non-first) session overrides gmail/Phase 0 instructions..."
+BLOCK_NON_FIRST="$(render_session_block "direct" "finish_phase" 0 "")"
+if [[ "$BLOCK_NON_FIRST" != *"do NOT call"*"get_approved_applications"* ]] || [[ "$BLOCK_NON_FIRST" != *"do NOT call check_gmail_responses"* ]]; then
+  echo "FAIL: non-first session block does not override Phase 0 / check_gmail_responses instructions"
+  exit 1
+fi
+echo "PASS: non-first session block overrides Phase 0 / check_gmail_responses"
+
+echo "Testing: feed (first) session keeps gmail/Phase 0 instructions..."
+BLOCK_FIRST="$(render_session_block "feed" "finish_phase" 1 "")"
+if [[ "$BLOCK_FIRST" != *"call check_gmail_responses once at"* ]] || [[ "$BLOCK_FIRST" != *"work Phase 0"* ]]; then
+  echo "FAIL: first session block does not instruct check_gmail_responses/Phase 0"
+  exit 1
+fi
+echo "PASS: first session block instructs check_gmail_responses/Phase 0"
+
+echo "Testing: every session block states start_run is idempotent..."
+if [[ "$BLOCK_FIRST" != *"start_run is idempotent"* ]] || [[ "$BLOCK_NON_FIRST" != *"start_run is idempotent"* ]]; then
+  echo "FAIL: session block does not state start_run is idempotent"
+  exit 1
+fi
+echo "PASS: session block states start_run is idempotent"
+
+echo "Testing: final session with an earlier rc-2 session states it hit the turn cap and requires an honest non-completed status..."
+PRIOR_ISSUES_RC2=$'\n'"- The feed session hit the turn cap and did not finish its work."
+BLOCK_RECONCILE="$(render_session_block "dork" "finish_run" 0 "$PRIOR_ISSUES_RC2")"
+if [[ "$BLOCK_RECONCILE" != *"feed session hit the turn cap"* ]]; then
+  echo "FAIL: final session block does not name the earlier feed session's turn-cap outcome"
+  exit 1
+fi
+if [[ "$BLOCK_RECONCILE" != *'status: "failed"'* ]]; then
+  echo "FAIL: final session block does not require a non-completed status when an earlier session failed"
+  exit 1
+fi
+echo "PASS: final session block reconciles an earlier turn-cap session with an honest non-completed status"
+
+echo "Testing: single mode does not call render_session_block at all..."
+SINGLE_MODE_BLOCK="$(sed -n '/AGENT_SESSION_MODE" == "single" ]]; then/,/^else$/p' "$DAILY_APPLY_SRC")"
+if [[ "$SINGLE_MODE_BLOCK" == *"render_session_block"* ]]; then
+  echo "FAIL: single mode must stay byte-identical — it must not call render_session_block"
+  exit 1
+fi
+echo "PASS: single mode does not invoke render_session_block, prompt composition unaffected"
+
+echo "Testing: render_remaining_line reads rec.applicationsSubmitted (camelCase) from the runs API..."
+if ! grep -q 'rec.applicationsSubmitted' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: render_remaining_line does not read the camelCase applicationsSubmitted field"
+  exit 1
+fi
+echo "PASS: render_remaining_line reads applicationsSubmitted"
+
+# --- Reason-file preservation: first non-zero session's reason must survive
+# a later session overwriting the shared reason file. Mirrors daily-apply.sh's
+# FIRST_FAILURE_REASON snapshot/restore around the session loop.
+echo "Testing: first non-zero session's reason file content survives a later session's overwrite..."
+REASON_FILE_TEST="$TEST_DIR/reason_test.txt"
+echo "turn cap reached in feed session" > "$REASON_FILE_TEST"
+FIRST_FAILURE_REASON="$(cat "$REASON_FILE_TEST" 2>/dev/null || true)"
+# Simulate a later session overwriting the shared reason file with its own text.
+echo "dork session finished cleanly" > "$REASON_FILE_TEST"
+if [[ -n "$FIRST_FAILURE_REASON" ]]; then
+  printf '%s\n' "$FIRST_FAILURE_REASON" > "$REASON_FILE_TEST"
+fi
+if [[ "$(cat "$REASON_FILE_TEST")" != "turn cap reached in feed session" ]]; then
+  echo "FAIL: first non-zero session's reason was not preserved after a later session overwrote the reason file"
+  exit 1
+fi
+echo "PASS: first non-zero session's reason file content is preserved"
+
+echo "Testing: daily-apply.sh snapshots FIRST_FAILURE_REASON and restores it after the session loop..."
+if ! grep -q 'FIRST_FAILURE_REASON="\$(cat "\$REASON_FILE"' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: daily-apply.sh does not snapshot the reason file on the first non-zero session rc"
+  exit 1
+fi
+if ! grep -q 'printf .%s\\n. "\$FIRST_FAILURE_REASON" >"\$REASON_FILE"' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: daily-apply.sh does not restore FIRST_FAILURE_REASON to REASON_FILE after the session loop"
+  exit 1
+fi
+echo "PASS: daily-apply.sh snapshots and restores the first non-zero session's reason"
+
 echo ""
 echo "All tests passed!"
 exit 0

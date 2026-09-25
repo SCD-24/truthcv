@@ -160,6 +160,10 @@ const EMPTY_TURN_MESSAGE =
  */
 export const DEFAULT_MAX_UNFINISHED_NUDGES = 2;
 
+/** The finish tool the loop nudges/watches for when {@link LoopConfig.finishToolName}
+ * is unset — today's single-session `finish_run`. */
+export const DEFAULT_FINISH_TOOL_NAME = 'finish_run';
+
 /**
  * The stop detail recorded when the unfinished-turn nudge cap is what ended
  * the run: the model kept ending turns without calling `finish_run` even
@@ -217,6 +221,16 @@ export interface LoopConfig {
    * {@link BROWSER_SERVER_NAME}. Defaults to `DEFAULT_TOOL_CONCURRENCY` (4).
    */
   maxToolConcurrency?: number;
+  /**
+   * The tool name the loop treats as the run's outcome-reporting call — the
+   * one it injects `turns_remaining` into before dispatch, nudges the model
+   * to call, and watches for execution/refusal to decide `finishRunExecuted`
+   * and the once-per-run refusal grace turn. Matches a bare or namespaced
+   * (`*__<name>`) tool call. Defaults to {@link DEFAULT_FINISH_TOOL_NAME}
+   * (`finish_run`) — per-channel-session harnesses set this to `finish_phase`
+   * for every non-final session.
+   */
+  finishToolName?: string;
 }
 
 /**
@@ -884,8 +898,15 @@ async function dispatchStopReason(done: DoneEvent, state: LoopState, ctx: LoopCo
  */
 /** True when `registry` carries a `finish_run` tool the model could call —
  * the built-in's own or an MCP server's namespaced one. */
-function hasFinishRunTool(registry: RegisteredTool[]): boolean {
-  return registry.some((tool) => tool.toolName === 'finish_run' || tool.namespacedName.endsWith('__finish_run'));
+function hasFinishRunTool(registry: RegisteredTool[], finishToolName: string): boolean {
+  return registry.some((tool) => tool.toolName === finishToolName || tool.namespacedName.endsWith(`__${finishToolName}`));
+}
+
+/** Whether `call.name` is the configured finish tool, bare or namespaced
+ * (`*__<name>`). Shared by injection, execution-latching and refusal checks
+ * so all three agree on what "the finish tool" means for this run. */
+function isFinishToolCall(name: string, finishToolName: string): boolean {
+  return name === finishToolName || name.endsWith(`__${finishToolName}`);
 }
 
 function handleEnd(done: DoneEvent, state: LoopState, ctx: LoopContext): LoopResult | undefined {
@@ -895,10 +916,11 @@ function handleEnd(done: DoneEvent, state: LoopState, ctx: LoopContext): LoopRes
   if (state.finishRunExecuted) {
     return finish('end', state, ctx, 'model ended the turn');
   }
+  const finishToolName = ctx.config.finishToolName ?? DEFAULT_FINISH_TOOL_NAME;
   if (!isEmptyTurn(done.message)) {
     // A run with no finish_run tool registered at all has nothing to nudge
     // it towards.
-    if (!hasFinishRunTool(ctx.registry)) {
+    if (!hasFinishRunTool(ctx.registry, finishToolName)) {
       return finish('end', state, ctx, 'model ended the turn');
     }
     state.unfinishedNudges += 1;
@@ -937,6 +959,7 @@ function isEmptyTurn(message: ConversationMessage): boolean {
 /** Execute every tool call this turn requested, then continue or hit the cap. */
 async function continueWithTools(done: DoneEvent, state: LoopState, ctx: LoopContext): Promise<LoopResult | undefined> {
   const calls = done.message.toolCalls ?? [];
+  injectTurnsRemaining(calls, state, ctx);
   const results = await executeTurnToolCalls(
     ctx.pool,
     calls,
@@ -952,13 +975,35 @@ async function continueWithTools(done: DoneEvent, state: LoopState, ctx: LoopCon
   // actually run: an emitted call proves nothing, since a call recovered from a
   // truncated response is pushed into the history and then failed unexecuted by
   // handleLength(), and an errored call closed no run either.
-  if (!state.finishRunExecuted) state.finishRunExecuted = executedFinishRun(calls, results);
+  if (!state.finishRunExecuted) state.finishRunExecuted = executedFinishRun(calls, results, ctx.config.finishToolName ?? DEFAULT_FINISH_TOOL_NAME);
   maybeGrantFinishRunGrace(calls, results, state, ctx);
   // Tools actually ran this turn, so any prior unfinished-turn nudges are
   // moot — the model is doing work again, not repeatedly ending with nothing
   // done. Mirrors emptyTurns resetting on the first non-empty turn.
   state.unfinishedNudges = 0;
   return capOrContinue(state, ctx);
+}
+
+/**
+ * Harness-owned: before dispatch, stamp every call to `finish_run` or
+ * `finish_phase` (bare or namespaced `*__<name>`) with how many turns
+ * remain, so the server's coverage guard knows whether it may still hold the
+ * run open. Both are stamped regardless of which one is this session's
+ * *configured* finish tool: a per-channel session's model may legitimately
+ * call the other (e.g. a `finish_phase` session's model calling `finish_run`
+ * because it believes the run is over), and that call still needs an honest
+ * turns_remaining for the guard to reason about. This OVERWRITES any
+ * `turns_remaining` value the model supplied — the model has no reliable way
+ * to know the harness's own turn budget, and a stale or fabricated value
+ * would defeat the guard.
+ */
+function injectTurnsRemaining(calls: ToolCall[], state: LoopState, ctx: LoopContext): void {
+  const turnsRemaining = ctx.config.maxTurns - state.turns;
+  for (const call of calls) {
+    if (isFinishToolCall(call.name, 'finish_run') || isFinishToolCall(call.name, 'finish_phase')) {
+      call.arguments = { ...call.arguments, turns_remaining: turnsRemaining };
+    }
+  }
 }
 
 /**
@@ -971,7 +1016,7 @@ async function continueWithTools(done: DoneEvent, state: LoopState, ctx: LoopCon
 function maybeGrantFinishRunGrace(calls: ToolCall[], results: ToolResult[], state: LoopState, ctx: LoopContext): void {
   if (state.finishRunExecuted || state.finishRunGraceUsed) return;
   if (state.turns < ctx.config.maxTurns) return;
-  if (!refusedFinishRun(calls, results)) return;
+  if (!refusedFinishRun(calls, results, ctx.config.finishToolName ?? DEFAULT_FINISH_TOOL_NAME)) return;
   state.finishRunGraceUsed = true;
   ctx.onEvent?.(loopEvent('finishRunGrace', state.turns, 'finish_run was refused on the last turn — granted one extra turn'));
 }
@@ -1162,10 +1207,10 @@ async function runPool(indices: number[], limit: number, task: (i: number) => Pr
  * @param results Their results, in any order.
  * @returns True if a `finish_run` call returned a non-error result.
  */
-function executedFinishRun(calls: ToolCall[], results: ToolResult[]): boolean {
+function executedFinishRun(calls: ToolCall[], results: ToolResult[], finishToolName: string): boolean {
   return calls.some(
     (call) =>
-      (call.name === 'finish_run' || call.name.endsWith('__finish_run')) &&
+      isFinishToolCall(call.name, finishToolName) &&
       results.some((result) => result.toolCallId === call.id && !result.isError),
   );
 }
@@ -1179,10 +1224,10 @@ function executedFinishRun(calls: ToolCall[], results: ToolResult[]): boolean {
  * @param results Their results, in any order.
  * @returns True if a `finish_run` call returned an error result.
  */
-function refusedFinishRun(calls: ToolCall[], results: ToolResult[]): boolean {
+function refusedFinishRun(calls: ToolCall[], results: ToolResult[], finishToolName: string): boolean {
   return calls.some(
     (call) =>
-      (call.name === 'finish_run' || call.name.endsWith('__finish_run')) &&
+      isFinishToolCall(call.name, finishToolName) &&
       results.some((result) => result.toolCallId === call.id && result.isError),
   );
 }

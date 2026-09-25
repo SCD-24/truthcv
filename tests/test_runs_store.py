@@ -548,6 +548,33 @@ def test_list_page_with_no_limit_returns_everything(data_dir):
     assert total == 7
 
 
+def test_append_note_joins_existing_note_with_newline(data_dir):
+    store.start("run-note-1", trigger="scheduled", apply_cap=0)
+
+    store.append_note("run-note-1", "first")
+    second = store.append_note("run-note-1", "second")
+
+    assert second.note == "first\nsecond"
+    assert store.get("run-note-1").note == "first\nsecond"
+
+
+def test_concurrent_append_notes_do_not_lose_either_update(data_dir):
+    store.start("run-note-race", trigger="scheduled", apply_cap=0)
+
+    threads = [
+        threading.Thread(target=store.append_note, args=("run-note-race", "a")),
+        threading.Thread(target=store.append_note, args=("run-note-race", "b")),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    note = store.get("run-note-race").note
+    assert "a" in note.split("\n")
+    assert "b" in note.split("\n")
+
+
 def test_finish_refused_defaults_false(data_dir):
     record = store.start("run-fr-1", trigger="scheduled", apply_cap=0)
     assert record.finish_refused is False
@@ -572,3 +599,25 @@ def test_old_record_without_finish_refused_key_loads_as_false(data_dir):
 
 def test_mark_finish_refused_unknown_run_id_returns_none(data_dir):
     assert store.mark_finish_refused("no-such-run") is None
+
+
+def test_finish_refusals_defaults_zero(data_dir):
+    record = store.start("run-frn-1", trigger="scheduled", apply_cap=0)
+    assert record.finish_refusals == 0
+
+
+def test_old_record_without_finish_refusals_key_loads_as_zero(data_dir):
+    from runs.model import RunRecord
+
+    record = RunRecord.from_dict({"id": "run-frn-2", "status": "running"})
+    assert record.finish_refusals == 0
+
+
+def test_mark_finish_refused_increments_finish_refusals(data_dir):
+    store.start("run-frn-3", trigger="scheduled", apply_cap=0)
+
+    store.mark_finish_refused("run-frn-3")
+    second = store.mark_finish_refused("run-frn-3")
+
+    assert second.finish_refusals == 2
+    assert second.finish_refused is True

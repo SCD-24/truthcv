@@ -148,6 +148,13 @@ export interface CliConfig {
   /** Hard cap on completed loop turns. */
   maxTurns: number;
   /**
+   * The tool the loop treats as this run's outcome-reporting call — see
+   * loop.ts's `LoopConfig.finishToolName`. `'finish_run'` (default) closes a
+   * single-session run; `'finish_phase'` closes one channel session of a
+   * per-channel-sessions run, sharing a run_id with sibling sessions.
+   */
+  finishToolName: string;
+  /**
    * Maximum characters of a single MCP tool result inserted into the
    * conversation. A larger result is truncated with an explicit marker before
    * the model sees it, so it never receives silently partial data.
@@ -384,6 +391,19 @@ function resolvePromptCache(flag: string | undefined, envVal: string | undefined
   return raw !== 'false';
 }
 
+const FINISH_TOOL_NAMES = ['finish_run', 'finish_phase'] as const;
+
+/**
+ * Parse `--finish-tool`/`AGENT_FINISH_TOOL`, defaulting to `finish_run` when
+ * unset. CLI flag wins over env var wins over the default, matching
+ * resolveMaxTurns. An unrecognized value is passed through unvalidated here —
+ * validateConfig() rejects it as a config error, consistent with how other
+ * flags are validated after parsing rather than during it.
+ */
+function resolveFinishToolName(flag: string | undefined, envVal: string | undefined): string {
+  return flag || envVal || 'finish_run';
+}
+
 /**
  * Resolve the screening adapter's fields, defaulting every one to the
  * already-resolved main-model equivalent when unset — the default that keeps
@@ -445,6 +465,7 @@ export async function resolveConfig(
     ...resolveScreeningConfig(f, env, { model, provider, wire, token, baseUrl, authType }),
     mcpConfigPath: f['mcp-config'] ?? env.MCP_CONFIG_PATH ?? 'mcp.json',
     maxTurns: resolveMaxTurns(f['max-turns'], env.AGENT_MAX_TURNS),
+    finishToolName: resolveFinishToolName(f['finish-tool'], env.AGENT_FINISH_TOOL),
     maxToolResultChars: resolveMaxToolResultChars(f['max-tool-result-chars'], env.AGENT_MAX_TOOL_RESULT_CHARS),
     maxToolConcurrency: resolveMaxToolConcurrency(f['max-tool-concurrency'], env.AGENT_MAX_TOOL_CONCURRENCY),
     maxConsecutiveRetries: resolveMaxRetries(f['max-retries'], env.AGENT_MAX_RETRIES),
@@ -502,6 +523,8 @@ export function validateConfig(config: CliConfig): string[] {
   if (!PROVIDERS.includes(config.provider)) errors.push('a valid --provider (claude|codex|openrouter|ollama) is required');
   if (!WIRES.includes(config.wire)) errors.push('a valid --wire (anthropic-messages|openai-chat-completions|openai-responses) is required');
   if (!Number.isInteger(config.maxTurns) || config.maxTurns <= 0) errors.push('--max-turns must be a positive integer');
+  if (!(FINISH_TOOL_NAMES as readonly string[]).includes(config.finishToolName))
+    errors.push('--finish-tool must be one of finish_run|finish_phase');
   if (!Number.isInteger(config.maxToolResultChars) || config.maxToolResultChars <= 0)
     errors.push('--max-tool-result-chars must be a positive integer');
   if (!Number.isInteger(config.maxToolConcurrency) || config.maxToolConcurrency <= 0)
@@ -786,6 +809,7 @@ async function runAgent(
         maxToolConcurrency: config.maxToolConcurrency,
         maxConsecutiveRetries: config.maxConsecutiveRetries,
         maxRetryDelayMs: config.maxRetryDelayMs,
+        finishToolName: config.finishToolName,
       },
       compactionConfig,
       screeningAdapter,
@@ -832,7 +856,7 @@ async function report(
   emit.json({ type: 'done', stopReason: result.stopReason, turns: result.turns, exitCode });
   if (config.outputFile) await d.writeOutput(config.outputFile, finalAssistantText(result.messages));
   if (abandoned) {
-    await writeReason(config, d, tokens, abandonedReason(getFailureDetail()));
+    await writeReason(config, d, tokens, abandonedReason(getFailureDetail(), config.finishToolName));
   } else if (exitCode !== ExitCode.Success) {
     await writeReason(config, d, tokens, getFailureDetail() ?? `stopped: ${result.stopReason}`);
   }
@@ -851,13 +875,13 @@ async function report(
  * @param detail The run's captured failure detail, if any.
  * @returns One operator-readable sentence, well under the reason-file bound.
  */
-function abandonedReason(detail: string | undefined): string {
+function abandonedReason(detail: string | undefined, finishToolName: string): string {
   const cause =
     detail === EMPTY_TURN_STOP_DETAIL || detail === UNFINISHED_STOP_DETAIL ? ` (${detail})` : '';
   // With the longest cause this is ~234 chars; it must fit within MAX_REASON_CHARS (240)
   // so truncateReason never has to cut it and append an ellipsis.
   return (
-    `the agent stopped without calling finish_run${cause}; screenings and applications ` +
+    `the agent stopped without calling ${finishToolName}${cause}; screenings and applications ` +
     'still count from their records, but postings seen and discovery coverage are partial'
   );
 }

@@ -84,6 +84,20 @@ class RunRecord:
     # before this field existed, which from_dict's known-field filter loads
     # the same as False.
     finish_refused: bool = False
+    # How many times finish_run has been refused for this run. Paired with
+    # finish_refused (which only says "at least once") so a harness-aware
+    # caller passing turns_remaining can compare against a small cap
+    # (_MAX_FINISH_REFUSALS in agenttools/tools_runs.py) instead of the
+    # all-or-nothing one-shot guard. Absent from records written before this
+    # field existed, which from_dict's known-field filter loads as 0.
+    finish_refusals: int = 0
+    # Per-channel refusal counts for finish_phase (agenttools/tools_runs.py),
+    # keyed by "feed"/"direct"/"dork". finish_phase never touches run status,
+    # so it tracks its own refusal count separately from finish_refusals
+    # rather than sharing it. Defaults {} and absent from records written
+    # before this field existed, which from_dict's known-field filter loads
+    # the same as {}.
+    phase_refusals: dict = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, raw: dict) -> "RunRecord":

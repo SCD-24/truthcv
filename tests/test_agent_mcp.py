@@ -1370,3 +1370,76 @@ def test_record_application_leaves_the_stored_counter_at_zero_but_derives_one(da
 
     body = client.get("/api/runs/r2").json()
     assert body["applicationsSubmitted"] == 1
+
+
+def test_finish_phase_is_registered_with_a_non_empty_input_schema():
+    """The tools/list surface the agent reads must advertise finish_phase."""
+    from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
+
+    assert "finish_phase" in _TOOL_REGISTRY
+
+    fn, description = _TOOL_REGISTRY["finish_phase"]
+    assert description
+    schema = _input_schema(fn)
+    assert schema["properties"], "finish_phase advertises no parameters"
+    for name in ("run_id", "channel", "note", "turns_remaining"):
+        assert name in schema["properties"]
+    assert schema["required"] == []
+
+
+def test_finish_phase_refuses_dork_shortfall_up_to_three_times_then_records(monkeypatch, data_dir):
+    import agentconfig.dorks as dorks
+    from agenttools import tools_runs
+
+    monkeypatch.setattr(dorks, "compose_direct_boards", lambda *a, **k: [])
+    monkeypatch.setattr(dorks, "compose_queries", lambda *a, **k: [{}] * 3)
+
+    tools_runs.start_run("run-phase")
+    tools_runs.record_discovery_coverage(
+        run_id="run-phase", channel="dork", board="QueryOne", status="searched"
+    )
+
+    for _ in range(3):
+        with pytest.raises(ValueError) as excinfo:
+            tools_runs.finish_phase(
+                run_id="run-phase", channel="dork", turns_remaining=200
+            )
+        assert "dork" in str(excinfo.value)
+
+    result = tools_runs.finish_phase(
+        run_id="run-phase", channel="dork", note="paused for now", turns_remaining=200
+    )
+    assert result["recorded"] is True
+    assert result["channel"] == "dork"
+    assert result["shortfall"]
+
+    record = tools_runs.record_run_note(run_id="run-phase", note="")  # no-op, empty note
+    assert record == {"recorded": False}
+
+
+def test_finish_phase_never_sets_a_terminal_status(monkeypatch, data_dir):
+    import agentconfig.dorks as dorks
+    from agenttools import tools_runs
+    from runs import store as runs_store
+
+    monkeypatch.setattr(dorks, "compose_direct_boards", lambda *a, **k: [])
+    monkeypatch.setattr(dorks, "compose_queries", lambda *a, **k: [{}] * 3)
+
+    tools_runs.start_run("run-phase-status")
+
+    with pytest.raises(ValueError):
+        tools_runs.finish_phase(
+            run_id="run-phase-status", channel="dork", turns_remaining=200
+        )
+
+    assert runs_store.get("run-phase-status").status == "running"
+
+
+def test_finish_phase_rejects_an_invalid_channel(data_dir):
+    from agenttools import tools_runs
+
+    tools_runs.start_run("run-phase-bad-channel")
+
+    result = tools_runs.finish_phase(run_id="run-phase-bad-channel", channel="linkedin")
+    assert result["recorded"] is False
+    assert "error" in result

@@ -314,34 +314,49 @@ approved these postings, so apply to them before spending time on discovery.
 
 ## Phase 1: discovery
 
-After the approved queue, discover new postings across three channels, worked
-in this order: **feed** (postings pulled from API-backed job boards), then
-**direct boards** (searched on-site, via a Direct-search boards block in your
-run prompt — their own search box, not a dork), then **dork queries**
-(Google-style `site:` dorks). The feed is only one pass, not a whole run:
-finishing it is not a stopping point, and every direct board and composed
-query below must still be worked. A feed posting that comes back from
-`screen_and_record_posting` with `created:false` — already screened in an
-earlier run — is a normal outcome, not an error, and never a reason to stop
-or to skip the other channels. Take one full pass over every board and query in
-a channel before starting a second pass on any channel. Every board and query
-gets a `record_discovery_coverage` call — skipping one is never acceptable,
-even for a board that turned up nothing; recording `skipped` for a board you
-simply did not get to, while turns remain, is not acceptable either. Harvest the direct boards with the
-`harvest_postings` tool (one call, serial boards) rather than driving the
-browser step by step; read its raw snapshot only for `needs_review` and resolve
-that ambiguity before recording coverage (postings → `searched`/`llm`, explicit
-zero → `empty`, unresolved extraction → `blocked` with a reason).
-If a direct board's search wall requires a sign-in you don't have, call `report_apply_failure`
-with `blocker="login_required"` and its sign-in URL and move on to the next
+The channels you work this session are named in this run prompt's own
+"## This session" block, if one is present — work ONLY that one channel, and
+call the finish tool that block names (`finish_phase` for a non-final
+session, `finish_run` for the final one) when it is fully worked, never the
+other tools' channels. When no "## This session" block is present, this run
+is in single-session mode: work all three channels yourself, in this order,
+and close the run with `finish_run` at the end.
+
+The three channels, worked in this order when yours to work: **feed**
+(postings pulled from API-backed job boards), then **direct boards**
+(searched on-site, via a Direct-search boards block in your run prompt —
+their own search box, not a dork), then **dork queries** (Google-style
+`site:` dorks). The feed is only one pass, not a whole channel or a whole
+run: finishing it is not a stopping point, and every direct board and
+composed query below must still be worked. A feed posting that comes back
+from `screen_and_record_posting` with `created:false` — already screened in
+an earlier run — is a normal outcome, not an error, and never a reason to
+stop or to skip the other channels. Take one full pass over every board and
+query in a channel before starting a second pass on any channel. Every board
+and query gets a `record_discovery_coverage` call — skipping one is never
+acceptable, even for a board that turned up nothing; recording `skipped` for
+a board you simply did not get to, while turns remain, is not acceptable
+either. Harvest the direct boards with the `harvest_postings` tool (one
+call, serial boards) rather than driving the browser step by step; read its
+raw snapshot only for `needs_review` and resolve that ambiguity before
+recording coverage (postings → `searched`/`llm`, explicit zero → `empty`,
+unresolved extraction → `blocked` with a reason). If a direct board's search
+wall requires a sign-in you don't have, call `report_apply_failure` with
+`blocker="login_required"` and its sign-in URL and move on to the next
 board — never wait for a sign-in mid-run.
 
-`finish_run` enforces this: called with `status: "completed"` while
-direct-board or dork-query coverage is still short of the configured count, or
-has `skipped` entries, it refuses the first time and tells you to go back and
-work the remaining boards/queries. Call it again only if you genuinely cannot
-continue — a turn limit, a dead browser session — with an honest
-`stopped_reason` explaining why; the second call always closes the run.
+`finish_phase(run_id, channel, note)` ends a non-final session without
+ending the run; `finish_run` ends the final session and the run itself.
+Both are refused — up to three times — while the session's own channel's
+coverage is still short of the configured count, or has `skipped` entries,
+and turns remain: the refusal tells you to go back and work the remaining
+boards/queries for that channel. Call the finish tool again only once you
+genuinely cannot continue — coverage for that channel is as complete as it
+can get, or a dead browser session — with an honest `stopped_reason` (or
+`note`) explaining why. The harness reports how many turns remain to you
+itself, on every `finish_run`/`finish_phase` call it refuses; never claim a
+turn or time limit beyond what it has actually told you — its own wrap-up
+warning, when it comes, is the only signal that the end is near.
 
 For each feed posting, fetch the full text if the feed supplied only metadata
 and a URL (serial browser retrieval is allowed), then screen and SAVE it with
@@ -357,11 +372,13 @@ The full procedure for all three channels is in `agent/RUNBOOK.md`, embedded abo
 
 ## End of run
 
-Call `finish_run` with your run id and an honest `stopped_reason` before you
-exit — this applies even when you are stopping early, not only on a normal
-finish. If direct-board or dork-query coverage is still incomplete, the first
-`completed` call is refused with a message telling you to go back and finish
-it; only call it a second time once you truly cannot continue.
+Call your session's finish tool — `finish_phase(run_id, channel, note)` for a
+non-final session, `finish_run(run_id, stopped_reason)` for the final session
+(or for the whole run in single-session mode) — before you exit, with an
+honest reason. This applies even when you are stopping early, not only on a
+normal finish. If your channel's coverage is still incomplete, the call is
+refused (up to three times, while turns remain) with a message telling you to
+go back and finish it; only call it again once you truly cannot continue.
 
 Finish with the report `agent/RUNBOOK.md` §9 describes: what was submitted,
 what was rejected and why, what was blocked by cooldown, what was skipped,

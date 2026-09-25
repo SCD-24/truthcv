@@ -33,6 +33,7 @@ from applications.store import save_confirmation as _save_confirmation
 from applications.store import save_fields_submitted as _save_fields_submitted
 from applications.store import save_screening as _save_screening
 import applications.store as _apps_store
+from runs.derive import counters_by_run as _counters_by_run
 import screening.store as _screening_store
 import agenttools.tools_runs as _tools_runs
 from screening.company import company_identity_key as _company_identity_key
@@ -808,6 +809,27 @@ def recommend_salary(profile_name: str, proposed: int | None = None) -> dict:
 _CLAIM_LEASE_SECONDS = 900
 
 
+def _already_submitted_this_run(run_id: str) -> int:
+    """How many applications this run has already submitted, so a repeated
+    ``get_approved_applications`` call within the same run counts them
+    against the per-run cap instead of resetting it every call.
+
+    A submitted item has already left the approved queue (it is not one of
+    the items the loop below re-claims), so this must be seeded separately
+    rather than double counted with the loop's own claimed_count. Reuses
+    ``runs.derive.counters_by_run`` over the applications store alone
+    (``screenings=[]``, since only ``applications_submitted`` is wanted).
+    Best-effort: any error here must not block the tool, so it falls back
+    to 0.
+    """
+    try:
+        applications = _apps_store.load_all()
+        counters = _counters_by_run([run_id], [], applications)
+        return counters[run_id]["applications_submitted"]
+    except Exception:
+        return 0
+
+
 def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:
     """Postings the operator approved and this run should apply to.
 
@@ -883,7 +905,7 @@ def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:
     # per-run cap and the claim-lease below are agent-only and stay here, since
     # only the agent claims work.
     items = []
-    claimed_count = 0
+    claimed_count = _already_submitted_this_run(run_id) if run_id else 0
     for entry in _applications_service.gather_approvable_screenings():
         s = entry["screening"]
         blocked_reason = entry["blocked_reason"]
