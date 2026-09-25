@@ -254,6 +254,7 @@ export interface LoopEvent {
     | 'compactionFloor'
     | 'turnCapReached'
     | 'wrapUp'
+    | 'finishRunGrace'
     | 'stop';
   /** The turn number this event relates to, when applicable. */
   turn?: number;
@@ -365,6 +366,10 @@ interface LoopState {
    * for no gain. {@link maybeCompact} short-circuits while this is set.
    * Never touched by the reactive overflow path in {@link compactAndRetry}. */
   proactiveCompactionSuspended?: boolean;
+  /** Whether the one-time grace turn for a refused `finish_run` on the cap
+   * turn has already been granted — bounded to once per run so a model that
+   * keeps erroring `finish_run` cannot extend the budget indefinitely. */
+  finishRunGraceUsed: boolean;
 }
 
 /** Per-iteration context handed to the outcome handlers. */
@@ -502,6 +507,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
     emptyTurns: 0,
     wrapUpSent: false,
     finishRunExecuted: false,
+    finishRunGraceUsed: false,
     unfinishedNudges: 0,
   };
   while (true) {
@@ -947,11 +953,27 @@ async function continueWithTools(done: DoneEvent, state: LoopState, ctx: LoopCon
   // truncated response is pushed into the history and then failed unexecuted by
   // handleLength(), and an errored call closed no run either.
   if (!state.finishRunExecuted) state.finishRunExecuted = executedFinishRun(calls, results);
+  maybeGrantFinishRunGrace(calls, results, state, ctx);
   // Tools actually ran this turn, so any prior unfinished-turn nudges are
   // moot — the model is doing work again, not repeatedly ending with nothing
   // done. Mirrors emptyTurns resetting on the first non-empty turn.
   state.unfinishedNudges = 0;
   return capOrContinue(state, ctx);
+}
+
+/**
+ * Grant a single extra turn when `finish_run` was refused on the very turn
+ * that reached the hard cap — the server's discovery-coverage guard rejects a
+ * first `finish_run` call but always accepts the retry, so without this a run
+ * caught on the cap turn could never close itself. Bounded to once per run by
+ * {@link LoopState.finishRunGraceUsed}.
+ */
+function maybeGrantFinishRunGrace(calls: ToolCall[], results: ToolResult[], state: LoopState, ctx: LoopContext): void {
+  if (state.finishRunExecuted || state.finishRunGraceUsed) return;
+  if (state.turns < ctx.config.maxTurns) return;
+  if (!refusedFinishRun(calls, results)) return;
+  state.finishRunGraceUsed = true;
+  ctx.onEvent?.(loopEvent('finishRunGrace', state.turns, 'finish_run was refused on the last turn — granted one extra turn'));
 }
 
 /**
@@ -972,8 +994,9 @@ async function handleLength(done: DoneEvent, state: LoopState, ctx: LoopContext)
 /** Stop with `turnCapReached` if the hard cap is now met, else continue —
  * warning the model once when it enters the wrap-up window. */
 function capOrContinue(state: LoopState, ctx: LoopContext): LoopResult | undefined {
-  if (state.turns >= ctx.config.maxTurns) {
-    ctx.onEvent?.(loopEvent('turnCapReached', state.turns, `hard turn cap of ${ctx.config.maxTurns} reached`));
+  const effectiveMaxTurns = ctx.config.maxTurns + (state.finishRunGraceUsed ? 1 : 0);
+  if (state.turns >= effectiveMaxTurns) {
+    ctx.onEvent?.(loopEvent('turnCapReached', state.turns, `hard turn cap of ${effectiveMaxTurns} reached`));
     return {
       stopReason: 'turnCapReached',
       messages: state.messages,
@@ -995,7 +1018,9 @@ function capOrContinue(state: LoopState, ctx: LoopContext): LoopResult | undefin
  *
  * The warning does not extend the budget — `maxTurns` still stops the loop. It
  * only buys the model notice, so its last turns are a deliberate wind-down
- * instead of an arbitrary cut.
+ * instead of an arbitrary cut. The one exception is the single finish_run
+ * grace turn granted in {@link continueWithTools} when `finish_run` is
+ * refused on the cap turn itself.
  */
 function maybeWarnWrapUp(state: LoopState, ctx: LoopContext): void {
   const reserved = ctx.config.wrapUpTurns ?? DEFAULT_WRAP_UP_TURNS;
@@ -1142,6 +1167,23 @@ function executedFinishRun(calls: ToolCall[], results: ToolResult[]): boolean {
     (call) =>
       (call.name === 'finish_run' || call.name.endsWith('__finish_run')) &&
       results.some((result) => result.toolCallId === call.id && !result.isError),
+  );
+}
+
+/**
+ * Did this turn call `finish_run` and have it refused (returned `isError`)?
+ * Mirrors {@link executedFinishRun}'s name-matching and by-id result lookup,
+ * but for the opposite outcome — used to grant the one-time grace turn.
+ *
+ * @param calls The tool calls this turn requested.
+ * @param results Their results, in any order.
+ * @returns True if a `finish_run` call returned an error result.
+ */
+function refusedFinishRun(calls: ToolCall[], results: ToolResult[]): boolean {
+  return calls.some(
+    (call) =>
+      (call.name === 'finish_run' || call.name.endsWith('__finish_run')) &&
+      results.some((result) => result.toolCallId === call.id && result.isError),
   );
 }
 
