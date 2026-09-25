@@ -180,15 +180,52 @@ def set_note(run_id: str, note: str) -> RunRecord | None:
         return record
 
 
+def append_note(run_id: str, text: str) -> RunRecord | None:
+    """Append ``text`` to the run's free-text note under the same lock as the
+    read, joined with the existing note by a newline (matching the separator
+    finish_phase used to build up when it did the read-modify-write itself).
+    Doing the read and the write outside the lock let two concurrent appends
+    both read the same starting note and one clobber the other; this makes
+    the whole read-modify-write atomic."""
+    with locked(runs_path()):
+        runs = load_all()
+        record = next((r for r in runs if r.id == run_id), None)
+        if record is None:
+            return None
+        record.note = f"{record.note}\n{text}" if record.note else text
+        _write_all(runs)
+        return record
+
+
 def mark_finish_refused(run_id: str) -> RunRecord | None:
     """Mark that finish_run was refused once for incomplete discovery
-    coverage, so a second finish_run call is let through unconditionally."""
+    coverage: sets ``finish_refused`` and increments ``finish_refusals``
+    under the same lock. The legacy one-shot guard only reads
+    ``finish_refused`` (a second call is let through unconditionally); the
+    harness-aware guard reads ``finish_refusals`` against a small cap."""
     with locked(runs_path()):
         runs = load_all()
         record = next((r for r in runs if r.id == run_id), None)
         if record is None:
             return None
         record.finish_refused = True
+        record.finish_refusals += 1
+        _write_all(runs)
+        return record
+
+
+def record_phase_refusal(run_id: str, channel: str) -> RunRecord | None:
+    """Increment the per-channel refusal count for finish_phase, under the
+    same lock every other mutator uses. Never touches ``status`` or
+    ``finish_refused``/``finish_refusals`` — finish_phase is deliberately
+    non-terminal and tracks its own count.
+    """
+    with locked(runs_path()):
+        runs = load_all()
+        record = next((r for r in runs if r.id == run_id), None)
+        if record is None:
+            return None
+        record.phase_refusals[channel] = record.phase_refusals.get(channel, 0) + 1
         _write_all(runs)
         return record
 

@@ -104,6 +104,107 @@ def test_config_load_error_does_not_raise(monkeypatch, data_dir):
     assert result["status"] == "completed"
 
 
+def test_status_with_whitespace_and_case_is_still_refused(monkeypatch, data_dir):
+    """'Completed ' must be refused just like 'completed': the store
+    normalizes status via runs.model.validate_status (strip + casefold), so
+    the guard must compare against that same normalization, not the raw
+    string."""
+    _patch_expected_counts(monkeypatch, direct_count=2, query_count=3)
+    tools_runs.start_run("run-status-case")
+    _cover("run-status-case", "direct", "BoardOne")
+
+    with pytest.raises(ValueError) as excinfo:
+        tools_runs.finish_run(run_id="run-status-case", status="Completed ")
+    assert "direct" in str(excinfo.value)
+
+
+def test_config_load_error_with_skipped_dork_still_refuses(monkeypatch, data_dir):
+    """A config load/compose failure must only drop the count-vs-config
+    comparison, never the skipped-entry check, which reads the record alone."""
+    def _boom():
+        raise RuntimeError("config store is on fire")
+
+    monkeypatch.setattr(agentconfig_store, "load", _boom)
+    tools_runs.start_run("run-cfg-skip")
+    _cover("run-cfg-skip", "dork", "QueryBlocked", status="skipped")
+
+    with pytest.raises(ValueError) as excinfo:
+        tools_runs.finish_run(run_id="run-cfg-skip", status="completed")
+    assert "QueryBlocked" in str(excinfo.value)
+
+
+def test_turns_remaining_refuses_three_times_then_accepts(monkeypatch, data_dir):
+    _patch_expected_counts(monkeypatch, direct_count=2, query_count=3)
+    tools_runs.start_run("run-turns")
+    _cover("run-turns", "direct", "BoardOne")
+
+    for _ in range(3):
+        with pytest.raises(ValueError):
+            tools_runs.finish_run(
+                run_id="run-turns", status="completed", turns_remaining=300
+            )
+
+    result = tools_runs.finish_run(
+        run_id="run-turns", status="completed", turns_remaining=300
+    )
+    assert result["recorded"] is True
+
+
+def test_turns_remaining_near_reserve_is_accepted_first_call(monkeypatch, data_dir):
+    _patch_expected_counts(monkeypatch, direct_count=2, query_count=3)
+    tools_runs.start_run("run-turns-low")
+    _cover("run-turns-low", "direct", "BoardOne")
+
+    result = tools_runs.finish_run(
+        run_id="run-turns-low", status="completed", turns_remaining=2
+    )
+    assert result["recorded"] is True
+
+
+def test_omitted_turns_remaining_keeps_one_shot_behavior(monkeypatch, data_dir):
+    _patch_expected_counts(monkeypatch, direct_count=2, query_count=3)
+    tools_runs.start_run("run-turns-omit")
+    _cover("run-turns-omit", "direct", "BoardOne")
+
+    with pytest.raises(ValueError):
+        tools_runs.finish_run(run_id="run-turns-omit", status="completed")
+
+    result = tools_runs.finish_run(run_id="run-turns-omit", status="completed")
+    assert result["recorded"] is True
+
+
+def test_skipped_feed_entry_refuses_even_with_complete_direct_and_dork(monkeypatch, data_dir):
+    """feed has no expected-count config, so only its skipped entries can flag
+    it, but a skipped feed entry must still refuse the finish even when direct
+    and dork are fully covered."""
+    _patch_expected_counts(monkeypatch, direct_count=1, query_count=1)
+    tools_runs.start_run("run-feed-skip")
+    _cover("run-feed-skip", "feed", "BoardFeed", status="skipped")
+    _cover("run-feed-skip", "direct", "BoardOne")
+    _cover("run-feed-skip", "dork", "QueryOne")
+
+    with pytest.raises(ValueError) as excinfo:
+        tools_runs.finish_run(run_id="run-feed-skip", status="completed", turns_remaining=100)
+    assert "BoardFeed" in str(excinfo.value)
+    assert "feed" in str(excinfo.value)
+
+
+def test_harness_aware_refusal_message_does_not_promise_recording(monkeypatch, data_dir):
+    """With turns_remaining >= 0 the guard keeps refusing while coverage is
+    short and turns remain, so the message must not say a repeat call "will
+    be recorded" the way the legacy one-shot message does."""
+    _patch_expected_counts(monkeypatch, direct_count=2, query_count=3)
+    tools_runs.start_run("run-harness-msg")
+    _cover("run-harness-msg", "direct", "BoardOne")
+
+    with pytest.raises(ValueError) as excinfo:
+        tools_runs.finish_run(run_id="run-harness-msg", status="completed", turns_remaining=100)
+    message = str(excinfo.value)
+    assert "will be recorded" not in message
+    assert "turns_remaining=100" in message
+    assert "turn limit is NOT a valid stopped_reason" in message
+
+
 def test_refused_finish_run_is_a_tool_error_via_mcp(monkeypatch, data_dir):
     """Through the MCP tools/call handler, a refused finish_run comes back as
     an isError tool result — the harness treats any non-isError finish_run as

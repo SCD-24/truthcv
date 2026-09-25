@@ -28,6 +28,7 @@ from agenttools.tools_research import (
     record_company_finding as _record_company_finding,
 )
 from agenttools.tools_runs import (
+    finish_phase as _finish_phase,
     finish_run as _finish_run,
     record_discovery_coverage as _record_discovery_coverage,
     record_postings_seen as _record_postings_seen,
@@ -157,6 +158,14 @@ _TOOL_REGISTRY = {
         "finish. Pass an honest stopped_reason describing where you stopped (e.g. 'apply cap "
         "reached', 'browser session died', 'no more postings found'). A run that ends without "
         "calling this is indistinguishable from one that crashed.",
+    ),
+    "finish_phase": (
+        _finish_phase,
+        "Reports progress on one discovery channel (feed, direct or dork) mid-run, WITHOUT ending "
+        "the run — use this to check in or leave a note partway through, not just at the end. "
+        "May raise (and record nothing) when this channel's coverage looks short and, per "
+        "turns_remaining, there is still enough run left to act on it — the same discipline as "
+        "finish_run, but scoped to one channel and never terminal.",
     ),
     "record_run_note": (
         _record_run_note,
