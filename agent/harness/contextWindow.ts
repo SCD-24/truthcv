@@ -9,7 +9,15 @@
  */
 
 import { DEFAULT_FALLBACK_CONTEXT_WINDOW } from './compaction.js';
+import { accountIdFromToken } from './providers/openaiResponses.js';
 import type { AuthType, Provider, Wire } from './providers/registry.js';
+
+/**
+ * Client version sent to the Codex `/models` catalog. The backend may filter
+ * which models it lists by client version, so a model missing from the
+ * response just falls back — it does not mean discovery is broken.
+ */
+export const CODEX_MODELS_CLIENT_VERSION = '0.50.0';
 
 /** Time budget for a single discovery call before it is treated as failed. */
 export const DISCOVERY_TIMEOUT_MS = 5000;
@@ -78,7 +86,7 @@ async function discoverOpenRouter(
     if (!isPlainObject(parsed)) return fallback('malformed response');
     body = parsed as typeof body;
   } catch (err) {
-    return fallback(`openrouter response was not valid JSON (${errorMessage(err)})`);
+    return fallback(`openrouter response was not valid JSON (${errorMessage(err, opts.token)})`);
   }
   const entry = body.data?.find((m) => m.id === opts.model);
   if (!entry) return fallback(`model '${opts.model}' not found in openrouter model list`);
@@ -117,7 +125,7 @@ async function discoverAnthropic(
     if (!isPlainObject(parsed)) return fallback('malformed response');
     body = parsed as typeof body;
   } catch (err) {
-    return fallback(`anthropic response was not valid JSON (${errorMessage(err)})`);
+    return fallback(`anthropic response was not valid JSON (${errorMessage(err, opts.token)})`);
   }
   if (!isValidWindow(body.max_input_tokens))
     return fallback(`anthropic reported no usable max_input_tokens for '${opts.model}'`);
@@ -161,7 +169,7 @@ async function discoverOllama(
     if (!isPlainObject(parsed)) return fallback('malformed response');
     body = parsed as typeof body;
   } catch (err) {
-    return fallback(`ollama response was not valid JSON (${errorMessage(err)})`);
+    return fallback(`ollama response was not valid JSON (${errorMessage(err, opts.token)})`);
   }
   const window = ollamaContextLength(body.model_info);
   if (!isValidWindow(window)) return fallback(`ollama reported no usable context_length for '${opts.model}'`);
@@ -174,24 +182,129 @@ function errorMessage(err: unknown, token?: string): string {
   return token ? message.split(token).join('[redacted]') : message;
 }
 
+/** True when the Codex base URL targets OpenAI's own API rather than the ChatGPT backend. */
+function isOpenAiApiHost(base: string): boolean {
+  try {
+    return new URL(base).hostname === 'api.openai.com';
+  } catch {
+    return false;
+  }
+}
+
+/** Discover the context window from OpenAI's `/v1/models/{model}` (api-key Codex path). */
+async function discoverOpenAiModels(
+  opts: DiscoverContextWindowOptions,
+  base: string,
+  fetchFn: FetchFn,
+): Promise<DiscoveredContextWindow> {
+  let response: Response;
+  try {
+    response = await fetchFn(`${base}/models/${encodeURIComponent(opts.model)}`, {
+      headers: opts.token ? { authorization: `Bearer ${opts.token}` } : {},
+      signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
+    });
+  } catch (err) {
+    return fallback(`openai request failed (${errorMessage(err, opts.token)})`);
+  }
+  if (!response.ok) return fallback(`openai responded with status ${response.status}`);
+  let body: { context_window?: unknown; context_length?: unknown };
+  try {
+    const parsed: unknown = await response.json();
+    if (!isPlainObject(parsed)) return fallback('malformed response');
+    body = parsed as typeof body;
+  } catch (err) {
+    return fallback(`openai response was not valid JSON (${errorMessage(err, opts.token)})`);
+  }
+  // OpenAI's /v1/models endpoint generally does not report a context length at
+  // all, so a missing field here is the common case, not an error.
+  const window = body.context_window ?? body.context_length;
+  if (!isValidWindow(window)) return fallback(`openai models endpoint reports no context window for '${opts.model}'`);
+  return { window, source: 'openai' };
+}
+
+/** Build auth headers for the Codex `/models` catalog. */
+function codexAuthHeaders(token: string): Record<string, string> {
+  const headers: Record<string, string> = { authorization: `Bearer ${token}`, originator: 'truthcv' };
+  const accountId = accountIdFromToken(token);
+  if (accountId) headers['chatgpt-account-id'] = accountId;
+  return headers;
+}
+
+/**
+ * Picks the Codex discovery route and base URL. The ChatGPT catalog is only
+ * used for the `openai-responses` wire, non-api_key auth, and a base that
+ * isn't already OpenAI's own API host; every other case (including the
+ * `openai-chat-completions` wire, whose adapter default base is
+ * `api.openai.com/v1`) talks to OpenAI's `/v1/models/{model}` endpoint.
+ */
+function codexRoute(opts: DiscoverContextWindowOptions): { useChatGpt: boolean; base: string } {
+  if (opts.wire === 'openai-responses' && opts.authType !== 'api_key') {
+    const base = (opts.baseUrl || 'https://chatgpt.com/backend-api/codex').replace(/\/+$/, '');
+    if (!isOpenAiApiHost(base)) return { useChatGpt: true, base };
+  }
+  return { useChatGpt: false, base: (opts.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '') };
+}
+
+/**
+ * Discovers Codex's context window. For the `openai-responses` wire with a
+ * non-api_key auth type and a base that is not OpenAI's own API host, this
+ * queries the ChatGPT backend's Codex model catalog; otherwise (including the
+ * `openai-chat-completions` wire, or an api_key auth type, or an explicit
+ * `api.openai.com` base) it falls back to OpenAI's `/v1/models/{model}`.
+ */
+async function discoverCodex(
+  opts: DiscoverContextWindowOptions,
+  fetchFn: FetchFn,
+): Promise<DiscoveredContextWindow> {
+  const { useChatGpt, base } = codexRoute(opts);
+  if (!useChatGpt) return discoverOpenAiModels(opts, base, fetchFn);
+  let response: Response;
+  try {
+    response = await fetchFn(`${base}/models?client_version=${CODEX_MODELS_CLIENT_VERSION}`, {
+      headers: codexAuthHeaders(opts.token),
+      signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
+    });
+  } catch (err) {
+    return fallback(`codex request failed (${errorMessage(err, opts.token)})`);
+  }
+  if (!response.ok) return fallback(`codex responded with status ${response.status}`);
+  let body: { models?: Array<{ slug?: string; context_window?: unknown }> };
+  try {
+    const parsed: unknown = await response.json();
+    if (!isPlainObject(parsed)) return fallback('malformed response');
+    body = parsed as typeof body;
+  } catch (err) {
+    return fallback(`codex response was not valid JSON (${errorMessage(err, opts.token)})`);
+  }
+  const entry = body.models?.find((m) => m.slug === opts.model);
+  if (!entry) return fallback(`model '${opts.model}' not found in codex model list`);
+  if (!isValidWindow(entry.context_window))
+    return fallback(`codex reported no usable context_window for '${opts.model}'`);
+  return { window: entry.context_window, source: 'codex' };
+}
+
 /**
  * Discover a model's input context window from its provider.
  *
  * Never throws: every failure path resolves to `{ window:
  * DEFAULT_FALLBACK_CONTEXT_WINDOW, source: 'fallback: <reason>' }`, and no
- * `source` string ever includes the credential token. `codex`,
- * `openai-responses` and any other unrecognised combination have no
- * discovery endpoint and fall back immediately.
+ * `source` string ever includes the credential token. Codex is discovered
+ * via its models catalog (or OpenAI's `/v1/models` when using an API key);
+ * any other unrecognised provider has no discovery endpoint and falls back
+ * immediately.
  */
 export async function discoverContextWindow(
   opts: DiscoverContextWindowOptions,
   fetchFn: FetchFn = fetch,
 ): Promise<DiscoveredContextWindow> {
   try {
-    if (opts.wire === 'openai-responses') return fallback(`no discovery endpoint for wire '${opts.wire}'`);
     if (opts.provider === 'openrouter') return await discoverOpenRouter(opts, fetchFn);
-    if (opts.provider === 'claude' || opts.wire === 'anthropic-messages') return await discoverAnthropic(opts, fetchFn);
+    if (opts.provider === 'claude') return await discoverAnthropic(opts, fetchFn);
     if (opts.provider === 'ollama') return await discoverOllama(opts, fetchFn);
+    if (opts.provider === 'codex') return await discoverCodex(opts, fetchFn);
+    // Provider first, wire last: an unrecognised provider on the Anthropic
+    // wire still speaks the Anthropic Models API.
+    if (opts.wire === 'anthropic-messages') return await discoverAnthropic(opts, fetchFn);
     return fallback(`no discovery endpoint for provider '${opts.provider}'`);
   } catch (err) {
     return fallback(`unexpected error (${errorMessage(err, opts.token)})`);

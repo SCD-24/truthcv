@@ -1025,7 +1025,7 @@ describe('model-generated compaction summaries', () => {
     expect(events[0]).toContain('Summarized');
   });
 
-  it('skips the summarizer and reports compactionFloor once, even across three back-to-back proactive compactions', async () => {
+  it('suspends proactive compaction once the floor is hit, instead of re-firing every remaining turn', async () => {
     const summaryDone: HarnessEvent = {
       type: 'done',
       stopReason: 'end',
@@ -1058,20 +1058,151 @@ describe('model-generated compaction summaries', () => {
     });
 
     expect(result.stopReason).toBe('end');
-    // The summarizer call for the first compaction, then three actual turns —
-    // the back-to-back compactions (second and third) make no adapter call
-    // of their own.
+    // The pinned lead plus kept tail alone still exceed the trigger after the
+    // first compaction, so the conversation is at its floor: no further
+    // 'compaction' event fires on the remaining turns, even though nothing
+    // shrank them.
     expect(calls()).toBe(4);
-    expect(kinds.filter((k) => k === 'compaction')).toHaveLength(3);
-    // Reported once only, on the SECOND compaction — not again on the third.
+    expect(kinds.filter((k) => k === 'compaction')).toHaveLength(1);
+    // Reported exactly once, alongside the compaction that hit the floor.
     expect(kinds.filter((k) => k === 'compactionFloor')).toHaveLength(1);
     expect(compactionDetails.some((d) => d.includes('MODEL SUMMARY'))).toBe(true);
-    expect(compactionDetails.some((d) => d.includes('Summarized'))).toBe(true);
     // Only the first (summarizer-backed) compaction issued a summarizer
     // request — identified by its shape (no tools, unlike an ordinary turn
     // request which carries the pool's tools) rather than by raw count,
     // since scriptedAdapterCapturing records every request (summarizer plus
     // all three ordinary turns).
+    const summarizerRequests = requests.filter((r) => r.tools.length === 0);
+    expect(summarizerRequests).toHaveLength(1);
+  });
+
+  it('does not suspend a proactive compaction that gets comfortably under the trigger', async () => {
+    // A generous window: the first compaction drops well under the trigger,
+    // so growth over the following turns can legitimately push it back over
+    // and earn a second, independent proactive compaction.
+    const summary1: HarnessEvent = { type: 'done', stopReason: 'end', message: { role: 'assistant', content: 'MODEL SUMMARY: pass one.' } };
+    const growth: HarnessEvent = {
+      type: 'done',
+      stopReason: 'toolCalls',
+      message: { role: 'assistant', content: 'x'.repeat(3000), toolCalls: [{ id: 'g1', name: 'truthcv__start_run', arguments: {} }] },
+    };
+    const summary2: HarnessEvent = { type: 'done', stopReason: 'end', message: { role: 'assistant', content: 'MODEL SUMMARY: pass two.' } };
+    const { adapter } = scriptedAdapterCapturing([[summary1], [doneToolCalls()], [growth], [growth], [summary2], [doneEnd]]);
+    const { pool } = fakePool();
+    const kinds: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: longConversation(),
+      config: { maxTurns: 10 },
+      compactionConfig: { contextWindow: 5000 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e) kinds.push(e.kind);
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    expect(kinds.filter((k) => k === 'compaction')).toHaveLength(2);
+    expect(kinds.filter((k) => k === 'compactionFloor')).toHaveLength(0);
+  });
+
+  it('still lets a reactive compaction fire after a proactive one has been suspended', async () => {
+    // First turn hits the floor (contextWindow 1000, same as the suspension
+    // test above) and proactive compaction suspends itself. The very next
+    // adapter call then reports a context-overflow error — a DIFFERENT path
+    // (compactAndRetry), which must still fire and rescue the run.
+    const summaryDone: HarnessEvent = { type: 'done', stopReason: 'end', message: { role: 'assistant', content: 'MODEL SUMMARY: first pass.' } };
+    const overflow: HarnessEvent = {
+      type: 'error',
+      message: 'Anthropic request failed with status 400: prompt is too long: 214000 tokens > 200000 maximum',
+      retryable: false,
+    };
+    // Three small no-op turns after the floor is hit, growing the (suspended,
+    // so untouched) history past PIN_LEADING + KEEP_RECENT — otherwise the
+    // reactive pass would find nothing left to drop either, and the test
+    // would not distinguish it from the (already covered) genuinely-stuck case.
+    const { adapter, calls } = scriptedAdapterCapturing([
+      [summaryDone],
+      [doneToolCalls()],
+      [doneToolCalls()],
+      [doneToolCalls()],
+      [overflow],
+      [doneEnd],
+    ]);
+    const { pool } = fakePool();
+    const kinds: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: longConversation(),
+      config: { maxTurns: 10 },
+      compactionConfig: { contextWindow: 1000 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e) kinds.push(e.kind);
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    expect(calls()).toBe(6);
+    expect(kinds.filter((k) => k === 'compactionFloor')).toHaveLength(1);
+    // The proactive compaction (before the overflowing turn) plus the
+    // reactive one (after it) — both are 'compaction' events.
+    expect(kinds.filter((k) => k === 'compaction')).toHaveLength(2);
+  });
+
+  it('suspends proactive compaction when reported usage overhead re-triggers back-to-back, even though the messages estimate alone is under trigger', async () => {
+    // First compaction leaves the messages estimate comfortably under the
+    // trigger (like the "does not suspend" case above), but the adapter's
+    // reported inputTokens on that same turn is large enough — covering
+    // system prompt + tool schema overhead the messages estimate never sees —
+    // that the very next turn's check trips again anyway. That back-to-back
+    // firing (atFloor) must suspend proactive compaction just as surely as
+    // the messages-estimate floor does, and must do so without a second
+    // summarizer request (atFloor skips the summarizer).
+    const summary1: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'MODEL SUMMARY: first pass.' },
+    };
+    const bigUsage: HarnessEvent = { type: 'usage', inputTokens: 3000, outputTokens: 0 };
+    const { adapter, calls, requests } = scriptedAdapterCapturing([
+      [summary1],
+      [bigUsage, doneToolCalls()],
+      // Keep reporting the same overhead after the floor, so only the
+      // suspension flag (not a quiet estimate) stops further compactions.
+      [bigUsage, doneToolCalls()],
+      [bigUsage, doneToolCalls()],
+      [bigUsage, doneToolCalls()],
+      [doneEnd],
+    ]);
+    const { pool } = fakePool();
+    const kinds: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: longConversation(),
+      config: { maxTurns: 10 },
+      compactionConfig: { contextWindow: 5000 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e) kinds.push(e.kind);
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    expect(calls()).toBe(6);
+    // First (summarizer-backed) compaction, then the back-to-back one caused
+    // by reported usage overhead — exactly two, none after that.
+    expect(kinds.filter((k) => k === 'compaction')).toHaveLength(2);
+    expect(kinds.filter((k) => k === 'compactionFloor')).toHaveLength(1);
     const summarizerRequests = requests.filter((r) => r.tools.length === 0);
     expect(summarizerRequests).toHaveLength(1);
   });

@@ -359,6 +359,12 @@ interface LoopState {
    * run — a third (or later) back-to-back proactive compaction still falls
    * back to the mechanical summary, but must not report the floor again. */
   compactionFloorReported?: boolean;
+  /** Set once a PROACTIVE compaction still leaves the conversation over the
+   * trigger (pinned lead + kept tail alone exceed it) — the floor has been
+   * reached and further proactive compactions can only re-fire every turn
+   * for no gain. {@link maybeCompact} short-circuits while this is set.
+   * Never touched by the reactive overflow path in {@link compactAndRetry}. */
+  proactiveCompactionSuspended?: boolean;
 }
 
 /** Per-iteration context handed to the outcome handlers. */
@@ -556,6 +562,7 @@ async function maybeCompact(
   diagnostic: DiagnosticTimer,
 ): Promise<ConversationMessage[]> {
   if (!config || !config.contextWindow) return state.messages;
+  if (state.proactiveCompactionSuspended) return state.messages;
   const untracked = state.messages.slice(state.usageCoveredMessages);
   if (!shouldCompact(untracked, state.usage, config)) return state.messages;
   return diagnostic.time('compaction', () => applyCompaction(state, config, adapter, onEvent, 'approaching the context window'), { turn: state.turns });
@@ -606,6 +613,29 @@ async function summarizeDropped(adapter: ProviderAdapter, dropped: ConversationM
 }
 
 /**
+ * Suspend proactive compaction (once) and emit 'compactionFloor' (once,
+ * guarded by compactionFloorReported) when a compaction has landed at its
+ * floor — either by the messages estimate still exceeding the trigger, or
+ * by having fired back-to-back with the previous one.
+ */
+function suspendAtFloor(
+  state: LoopState,
+  config: CompactionConfig,
+  onEvent: ((event: HarnessEvent | LoopEvent) => void) | undefined,
+): void {
+  state.proactiveCompactionSuspended = true;
+  if (state.compactionFloorReported) return;
+  onEvent?.(
+    loopEvent(
+      'compactionFloor',
+      state.turns,
+      `context window in use: ${config.contextWindow} — proactive compaction suspended`,
+    ),
+  );
+  state.compactionFloorReported = true;
+}
+
+/**
  * Compact, reset the usage anchor, and report it. PROACTIVE path only — the
  * reactive path (`compactAndRetry`) compacts mechanically and never reaches
  * here, because it fires exactly when the context has just overflowed, the
@@ -637,9 +667,16 @@ async function applyCompaction(
     state.usage = undefined;
     state.usageCoveredMessages = 0;
     onEvent?.(loopEvent('compaction', state.turns, `${why}: ${record.summary}`));
-    if (atFloor && !state.compactionFloorReported) {
-      onEvent?.(loopEvent('compactionFloor', state.turns, `context window in use: ${config.contextWindow}`));
-      state.compactionFloorReported = true;
+    // Suspend proactive compaction once it can no longer help, on either of
+    // two signals: (1) the pinned lead plus the kept tail alone still exceed
+    // the trigger by the messages estimate alone, or (2) this compaction
+    // followed immediately on the heels of the previous one (atFloor) —
+    // which covers provider-reported usage overhead (system prompt + tool
+    // schemas counted in inputTokens but not in the messages estimate) that
+    // compaction cannot remove, and which would otherwise keep re-firing
+    // every turn without ever showing up in the messages-only check.
+    if (shouldCompact(compacted, undefined, config) || atFloor) {
+      suspendAtFloor(state, config, onEvent);
     }
     state.lastProactiveCompactionTurn = state.turns;
   }
