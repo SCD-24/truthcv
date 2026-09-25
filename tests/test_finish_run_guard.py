@@ -9,7 +9,6 @@ discovery; a second call always closes the run.
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
 
 import agentconfig.dorks as dorks
 import agentconfig.store as agentconfig_store
@@ -106,32 +105,28 @@ def test_config_load_error_does_not_raise(monkeypatch, data_dir):
 
 
 def test_refused_finish_run_is_a_tool_error_via_mcp(monkeypatch, data_dir):
-    """Through the actual MCP transport, a refused finish_run comes back as
-    an isError tool result, not a bare error string in a 'result' — the
-    harness treats any non-isError finish_run as the run being closed."""
-    from api.main import app
+    """Through the MCP tools/call handler, a refused finish_run comes back as
+    an isError tool result — the harness treats any non-isError finish_run as
+    the run being closed.
+
+    Calls the handler directly rather than POSTing /mcp: the app's
+    streamable-HTTP session manager can only be started once per process,
+    and tests/test_mcp_transport.py owns that single start.
+    """
+    import asyncio
+
+    from mcp import types
+
+    from api.main import _handle_call_tool
 
     _patch_expected_counts(monkeypatch, direct_count=2, query_count=3)
     tools_runs.start_run("run-mcp")
     _cover("run-mcp", "direct", "BoardOne")
 
-    with TestClient(app) as client:
-        response = client.post(
-            "/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/call",
-                "params": {
-                    "name": "finish_run",
-                    "arguments": {"run_id": "run-mcp", "status": "completed"},
-                },
-            },
-            follow_redirects=False,
-        )
+    params = types.CallToolRequestParams(
+        name="finish_run", arguments={"run_id": "run-mcp", "status": "completed"}
+    )
+    result = asyncio.run(_handle_call_tool(None, params))
 
-    assert response.status_code == 200, response.text
-    body = response.json()
-    result = body["result"]
-    assert result["isError"] is True
-    assert "Discovery is not finished" in result["content"][0]["text"]
+    assert result.is_error is True
+    assert "Discovery is not finished" in result.content[0].text
