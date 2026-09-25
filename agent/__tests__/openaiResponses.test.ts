@@ -3,12 +3,13 @@
  *
  * Stub global fetch (no real network calls). Cover:
  * - Request URL, headers, body correctness
- * - SSE parser: multiple delta events assembled + stop at response.completed
- * - Error event and response.failed event surface as error HarnessEvents
  * - HTTP 429 + usage_limit_reached code => terminal usage-limit error with resets_at
- * - Stream ending without response.completed => throws
+ * - Stream ending without a completion event => error
  * - createProviderAdapter routes wire 'openai-responses', 'anthropic-messages',
  *   'openai-chat-completions', and throws on unknown wire
+ *
+ * SSE stream-parsing behaviour (deltas, function calls, terminal statuses,
+ * error events, usage) is covered in openaiResponsesStream.test.ts.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -17,7 +18,6 @@ import { beforeEach, afterEach } from "vitest";
 import {
   createOpenAiResponsesAdapter,
   accountIdFromToken,
-  type OpenAiResponsesOptions,
 } from "../harness/providers/openaiResponses";
 import { createProviderAdapter } from "../harness/providers/registry";
 
@@ -28,7 +28,7 @@ import { createProviderAdapter } from "../harness/providers/registry";
 /** Build a minimal ModelRequest for the adapter. */
 function makeRequest(overrides: Partial<{
   systemPrompt: string;
-  messages: Array<{ role: string; content: string }>;
+  messages: Array<Record<string, unknown>>;
   tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>;
   maxTokens: number;
 }> = {}) {
@@ -68,6 +68,18 @@ function mockStreamResponse(events: string[], status = 200, extraHeaders: Record
     headers,
     body,
   });
+}
+
+/** Build a `data: {...}\n` SSE line from an event object. */
+function sse(event: unknown): string {
+  return `data: ${JSON.stringify(event)}\n`;
+}
+
+/** Collect all HarnessEvents from an adapter run. */
+async function collect(adapter: ReturnType<typeof createOpenAiResponsesAdapter>, request: ReturnType<typeof makeRequest>) {
+  const out: unknown[] = [];
+  for await (const ev of adapter.sendMessage(request)) out.push(ev);
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -176,78 +188,60 @@ describe("createOpenAiResponsesAdapter — request correctness", () => {
     })));
     for (const tool of body.tools) expect(tool).not.toHaveProperty("function");
   });
-});
 
-// ---------------------------------------------------------------------------
-// SSE parser — reassembly
-// ---------------------------------------------------------------------------
+  it("translates assistant toolCalls and following toolResults into function_call/function_call_output input items", async () => {
+    const fetchMock = mockStreamResponse(["data: [DONE]\n"]);
+    vi.stubGlobal("fetch", fetchMock);
 
-describe("SSE reassembly — response.output_text.delta", () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
-
-  it("accumulates multiple delta events and stops at response.completed", async () => {
-    const events = [
-      'data: {"type":"response.output_text.delta","response":{"output_text":{"delta":"Hello"}}}\n',
-      'data: {"type":"response.output_text.delta","response":{"output_text":{"delta":" world"}}}\n',
-      'data: {"type":"response.completed","response":{"completed_reason":"stop"}}\n',
+    const messages = [
+      { role: "user", content: "search for jobs" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "call_1", name: "search_jobs", arguments: { query: "engineer" } }],
+      },
+      {
+        role: "tool",
+        content: "",
+        toolResults: [{ toolCallId: "call_1", content: "[]" }],
+      },
     ];
-    vi.stubGlobal("fetch", mockStreamResponse(events));
     const adapter = createOpenAiResponsesAdapter({ token: makeJwt("a"), model: "gpt-5.4" });
+    await adapter.sendMessage(makeRequest({ messages })).next();
 
-    const events_out: unknown[] = [];
-    for await (const ev of adapter.sendMessage(makeRequest())) {
-      events_out.push(ev);
+    const [, init] = fetchMock.mock.calls[0]!;
+    const body = JSON.parse(init.body as string);
+    const input = body.input as Array<Record<string, unknown>>;
+
+    const call = input.find((i) => i.type === "function_call");
+    expect(call).toEqual({
+      type: "function_call",
+      call_id: "call_1",
+      name: "search_jobs",
+      arguments: JSON.stringify({ query: "engineer" }),
+    });
+
+    const output = input.find((i) => i.type === "function_call_output");
+    expect(output).toEqual({
+      type: "function_call_output",
+      call_id: "call_1",
+      output: "[]",
+    });
+
+    for (const item of input) {
+      expect(item).not.toHaveProperty("toolCalls");
+      expect(item).not.toHaveProperty("toolResults");
     }
-
-    const deltas = events_out.filter((e: unknown) => (e as { type: string }).type === "text");
-    expect(deltas).toHaveLength(2);
-    expect((deltas[0] as { delta: string }).delta).toBe("Hello");
-    expect((deltas[1] as { delta: string }).delta).toBe(" world");
-    const done = events_out.find((e: unknown) => (e as { type: string }).type === "done");
-    expect(done).toBeTruthy();
-    expect((done as { stopReason: string }).stopReason).toBe("end");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Error events
+// Error events (HTTP-level)
 // ---------------------------------------------------------------------------
 
 describe("Error events", () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
-
-  it("an SSE 'error' event yields an error HarnessEvent with the server code/message", async () => {
-    vi.stubGlobal("fetch", mockStreamResponse([
-      'data: {"type":"error","response":{"error":{"code":"some_error","message":"Something went wrong."}}}\n',
-    ]));
-    const adapter = createOpenAiResponsesAdapter({ token: makeJwt("a"), model: "gpt-5.4" });
-
-    const errors: unknown[] = [];
-    for await (const ev of adapter.sendMessage(makeRequest())) {
-      if ((ev as { type: string }).type === "error") errors.push(ev);
-    }
-
-    expect(errors).toHaveLength(1);
-    expect((errors[0] as { message: string }).message).toBe("some_error: Something went wrong.");
-    expect((errors[0] as { retryable: boolean }).retryable).toBe(false);
-  });
-
-  it("an SSE 'response.failed' event yields an error HarnessEvent", async () => {
-    vi.stubGlobal("fetch", mockStreamResponse([
-      'data: {"type":"response.failed","response":{"error":{"code":"internal_error","message":"Something went wrong."}}}\n',
-    ]));
-    const adapter = createOpenAiResponsesAdapter({ token: makeJwt("a"), model: "gpt-5.4" });
-
-    const errors: unknown[] = [];
-    for await (const ev of adapter.sendMessage(makeRequest())) {
-      if ((ev as { type: string }).type === "error") errors.push(ev);
-    }
-
-    expect(errors).toHaveLength(1);
-    expect((errors[0] as { message: string }).message).toContain("internal_error");
-  });
 
   it("HTTP 429 with usage_limit_reached code yields terminal usage-limit error with resets_at", async () => {
     // Mock a JSON body response (not SSE) for the non-streaming error path
@@ -263,10 +257,9 @@ describe("Error events", () => {
     }));
     const adapter = createOpenAiResponsesAdapter({ token: makeJwt("a"), model: "gpt-5.4" });
 
-    const errors: unknown[] = [];
-    for await (const ev of adapter.sendMessage(makeRequest())) {
-      if ((ev as { type: string }).type === "error") errors.push(ev);
-    }
+    const errors = (await collect(adapter, makeRequest())).filter(
+      (e: unknown) => (e as { type: string }).type === "error",
+    );
 
     expect(errors).toHaveLength(1);
     expect((errors[0] as { message: string }).message).toContain("usage limit reached");
@@ -283,19 +276,18 @@ describe("Incomplete stream", () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
-  it("stream ending without response.completed throws a non-retryable error", async () => {
+  it("stream ending without a completion event yields a non-retryable error", async () => {
     vi.stubGlobal("fetch", mockStreamResponse([
-      'data: {"type":"response.output_text.delta","response":{"output_text":{"delta":"partial"}}}\n',
+      sse({ type: "response.output_text.delta", delta: "partial" }),
     ]));
     const adapter = createOpenAiResponsesAdapter({ token: makeJwt("a"), model: "gpt-5.4" });
 
-    const errors: unknown[] = [];
-    for await (const ev of adapter.sendMessage(makeRequest())) {
-      if ((ev as { type: string }).type === "error") errors.push(ev);
-    }
+    const errors = (await collect(adapter, makeRequest())).filter(
+      (e: unknown) => (e as { type: string }).type === "error",
+    );
 
     expect(errors).toHaveLength(1);
-    expect((errors[0] as { message: string }).message).toContain("completion");
+    expect((errors[0] as { message: string }).message).toBe("Stream ended without a completion event");
     expect((errors[0] as { retryable: boolean }).retryable).toBe(false);
   });
 });
