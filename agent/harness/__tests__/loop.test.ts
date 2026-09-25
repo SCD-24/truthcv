@@ -475,6 +475,75 @@ describe('finish_run grace turn', () => {
   });
 });
 
+describe('turns_remaining injection', () => {
+  /** A pool allowing `finish_run` and recording every call's args. */
+  function poolWithFinishRun() {
+    const { pool } = fakePool();
+    const callTool = vi.fn(async (_name: string, _args: Record<string, unknown>) => ({ content: 'ok', isError: false }));
+    const tools: NamespacedTool[] = [
+      ...pool.listTools(),
+      { namespacedName: 'truthcv__finish_run', serverName: 'truthcv', toolName: 'finish_run', description: 'd', inputSchema: { type: 'object' } },
+      { namespacedName: 'truthcv__finish_phase', serverName: 'truthcv', toolName: 'finish_phase', description: 'd', inputSchema: { type: 'object' } },
+    ];
+    return { pool: { ...pool, callTool, listTools: () => tools } as unknown as McpClientPool, callTool };
+  }
+
+  it('overwrites a model-supplied turns_remaining with the harness-computed value', async () => {
+    const FINISH_RUN_CALL: ToolCall = { id: 'f1', name: 'truthcv__finish_run', arguments: { turns_remaining: 999, note: 'x' } };
+    const doneFinishRun: HarnessEvent = {
+      type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [FINISH_RUN_CALL] },
+    };
+    const { adapter } = scriptedAdapter([[doneFinishRun]]);
+    const { pool, callTool } = poolWithFinishRun();
+    const result = await run(adapter, pool, { maxTurns: 5 });
+    expect(result.finishRunExecuted).toBe(true);
+    expect(callTool).toHaveBeenCalledWith('truthcv__finish_run', expect.objectContaining({ turns_remaining: 4, note: 'x' }));
+  });
+
+  it('injects turns_remaining into a namespaced finish_phase call under the configured finish tool name', async () => {
+    const FINISH_PHASE_CALL: ToolCall = { id: 'f1', name: 'truthcv__finish_phase', arguments: { channel: 'feed' } };
+    const donePhase: HarnessEvent = {
+      type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [FINISH_PHASE_CALL] },
+    };
+    const { adapter } = scriptedAdapter([[donePhase]]);
+    const { pool, callTool } = poolWithFinishRun();
+    await run(adapter, pool, { maxTurns: 5, finishToolName: 'finish_phase' } as Parameters<typeof runLoop>[0]['config']);
+    expect(callTool).toHaveBeenCalledWith('truthcv__finish_phase', expect.objectContaining({ turns_remaining: 4, channel: 'feed' }));
+  });
+});
+
+describe('finish_phase grace turn (configured finish tool)', () => {
+  function poolWithFinishPhase() {
+    const { pool } = fakePool();
+    const callTool = vi.fn(async (_name: string, _args: Record<string, unknown>) => ({ content: 'ok', isError: false }));
+    const tools: NamespacedTool[] = [
+      ...pool.listTools(),
+      { namespacedName: 'truthcv__finish_phase', serverName: 'truthcv', toolName: 'finish_phase', description: 'd', inputSchema: { type: 'object' } },
+    ];
+    return { pool: { ...pool, callTool, listTools: () => tools } as unknown as McpClientPool, callTool };
+  }
+
+  const FINISH_PHASE_CALL: ToolCall = { id: 'p1', name: 'truthcv__finish_phase', arguments: {} };
+
+  function doneFinishPhase(): HarnessEvent {
+    return { type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [FINISH_PHASE_CALL] } };
+  }
+
+  it('grants one extra turn when finish_phase is refused on the cap turn, then succeeds', async () => {
+    const { adapter, calls } = scriptedAdapter([[doneToolCalls()], [doneToolCalls()], [doneFinishPhase()], [doneFinishPhase()]]);
+    const { pool, callTool } = poolWithFinishPhase();
+    callTool.mockImplementation(async (name: string) =>
+      name === FINISH_PHASE_CALL.name && callTool.mock.calls.filter((c) => c[0] === FINISH_PHASE_CALL.name).length === 1
+        ? { content: 'refused', isError: true }
+        : { content: 'ok', isError: false },
+    );
+    const result = await run(adapter, pool, { maxTurns: 3, finishToolName: 'finish_phase' } as Parameters<typeof runLoop>[0]['config']);
+    expect(result.turns).toBe(4);
+    expect(result.finishRunExecuted).toBe(true);
+    expect(calls()).toBe(4);
+  });
+});
+
 describe('a turn that produced nothing at all', () => {
   // The 2026-08-30 incident: a router swapped in a reasoning model, which
   // answered with an empty `content`, no tool calls and finish_reason 'stop'.

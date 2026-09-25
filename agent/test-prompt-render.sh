@@ -491,6 +491,130 @@ if [[ "$PROMPT" != *"- 5. Applying"* ]] || [[ "$PROMPT" != *"- 2. Hard filters"*
 fi
 echo "PASS: composed prompt inlines RUNBOOK rules + TOC, not full procedural text"
 
+# --- Per-channel sessions: mode default, channel selection, rc aggregation -
+# Mirrors daily-apply.sh's session-mode logic verbatim (see "AGENT_SESSION_MODE"
+# and the per-channel session loop there), so a divergence between this
+# simulation and the real script is a bug in one of the two, not just here.
+
+echo "Testing: AGENT_SESSION_MODE defaults to per-channel in daily-apply.sh..."
+if ! grep -q 'AGENT_SESSION_MODE="\${AGENT_SESSION_MODE:-per-channel}"' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: daily-apply.sh does not default AGENT_SESSION_MODE to per-channel"
+  exit 1
+fi
+echo "PASS: AGENT_SESSION_MODE defaults to per-channel"
+
+echo "Testing: single mode still guards the byte-identical composition path..."
+if ! grep -q 'AGENT_SESSION_MODE" == "single" ]]; then' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: daily-apply.sh lost its single-mode guard around prompt composition"
+  exit 1
+fi
+if ! grep -q '\$PROFILE_BLOCK\$FEED_SECTION\$DIRECT_SECTION\$DORK_SECTION\$PROFILE_TAIL' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: single-mode composition no longer concatenates header+every channel+tail in RUNBOOK order"
+  exit 1
+fi
+echo "PASS: single mode composes header+feed+direct+dork+tail exactly as before per-channel sessions existed"
+
+echo "Testing: run_harness takes a prompt file and finish tool as arguments..."
+if ! grep -q 'local prompt_file="\$1" finish_tool="\$2"' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: run_harness was not refactored to take (prompt_file, finish_tool) arguments"
+  exit 1
+fi
+if ! grep -q -- '--finish-tool "\$finish_tool"' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: run_harness does not pass --finish-tool to the CLI"
+  exit 1
+fi
+echo "PASS: run_harness(prompt_file, finish_tool) refactor present"
+
+# Selects the sessions to run and each one's finish tool, mirroring the real
+# SESSION_CHANNELS/LAST_INDEX logic: 'feed' always runs; 'direct'/'dork' are
+# included only when their section is non-empty; the last present session
+# gets finish_run, every session before it gets finish_phase.
+select_sessions() {
+  local direct_section="$1" dork_section="$2"
+  local channels=(feed)
+  [[ -n "$direct_section" ]] && channels+=(direct)
+  [[ -n "$dork_section" ]] && channels+=(dork)
+  local last=$(( ${#channels[@]} - 1 ))
+  local i out=""
+  for i in "${!channels[@]}"; do
+    if (( i == last )); then
+      out="$out${channels[$i]}=finish_run "
+    else
+      out="$out${channels[$i]}=finish_phase "
+    fi
+  done
+  echo "$out"
+}
+
+echo "Testing: all three channels configured yields three sessions, feed+direct get finish_phase, dork gets finish_run..."
+SESSIONS_ALL="$(select_sessions "has-direct" "has-dork")"
+if [[ "$SESSIONS_ALL" != "feed=finish_phase direct=finish_phase dork=finish_run " ]]; then
+  echo "FAIL: expected feed=finish_phase direct=finish_phase dork=finish_run, got: '$SESSIONS_ALL'"
+  exit 1
+fi
+echo "PASS: three-channel session plan is correct"
+
+echo "Testing: no direct/dork data omits those sessions, feed alone gets finish_run..."
+SESSIONS_FEED_ONLY="$(select_sessions "" "")"
+if [[ "$SESSIONS_FEED_ONLY" != "feed=finish_run " ]]; then
+  echo "FAIL: expected feed=finish_run only, got: '$SESSIONS_FEED_ONLY'"
+  exit 1
+fi
+echo "PASS: channel with no configured data is omitted, remaining session finishes with finish_run"
+
+echo "Testing: dork configured but not direct yields feed+dork, dork finishes the run..."
+SESSIONS_NO_DIRECT="$(select_sessions "" "has-dork")"
+if [[ "$SESSIONS_NO_DIRECT" != "feed=finish_phase dork=finish_run " ]]; then
+  echo "FAIL: expected feed=finish_phase dork=finish_run, got: '$SESSIONS_NO_DIRECT'"
+  exit 1
+fi
+echo "PASS: direct omitted, dork present, dork finishes the run"
+
+# Mirrors daily-apply.sh's FINAL_RC aggregation: rc 3/4/5 aborts remaining
+# sessions and is the final rc; rc 2/6 is recorded but does not stop the
+# next session; final rc is the first non-zero rc seen, else 0.
+aggregate_rc() {
+  local final_rc=0 final_rc_set=0 rc
+  for rc in "$@"; do
+    if (( final_rc_set == 0 )); then
+      final_rc=$rc
+      final_rc_set=1
+    fi
+    if [[ "$rc" == 3 || "$rc" == 4 || "$rc" == 5 ]]; then
+      break
+    fi
+    if (( final_rc == 0 && rc != 0 )); then
+      final_rc=$rc
+    fi
+  done
+  echo "$final_rc"
+}
+
+echo "Testing: rc aggregation - all sessions succeed..."
+AGG1="$(aggregate_rc 0 0 0)"
+[[ "$AGG1" == "0" ]] || { echo "FAIL: expected 0, got $AGG1"; exit 1; }
+echo "PASS: all-success aggregates to 0"
+
+echo "Testing: rc aggregation - turn cap (2) in an early session does not stop the next, is remembered..."
+AGG2="$(aggregate_rc 2 0 0)"
+[[ "$AGG2" == "2" ]] || { echo "FAIL: expected 2, got $AGG2"; exit 1; }
+echo "PASS: rc 2 propagates as final rc while later sessions still ran"
+
+echo "Testing: rc aggregation - no-finish (6) then success keeps 6 as first non-zero..."
+AGG3="$(aggregate_rc 0 6 0)"
+[[ "$AGG3" == "6" ]] || { echo "FAIL: expected 6, got $AGG3"; exit 1; }
+echo "PASS: first non-zero rc (6) wins even when a later session succeeds"
+
+echo "Testing: rc aggregation - provider error (3) aborts remaining sessions immediately..."
+AGG4="$(aggregate_rc 3 0 0)"
+[[ "$AGG4" == "3" ]] || { echo "FAIL: expected 3, got $AGG4"; exit 1; }
+echo "PASS: rc 3 is the final rc"
+
+echo "Testing: rc aggregation - config error (5) after a turn-cap session still reports the earlier non-zero rc..."
+AGG5="$(aggregate_rc 2 5)"
+[[ "$AGG5" == "2" ]] || { echo "FAIL: expected 2 (first non-zero rc wins over a later abort's own rc), got $AGG5"; exit 1; }
+echo "PASS: first non-zero rc wins even when a later session aborts with a different rc"
+
 echo ""
 echo "All tests passed!"
 exit 0

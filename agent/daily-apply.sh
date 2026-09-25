@@ -40,6 +40,17 @@ STAMP="$(date +%Y-%m-%d_%H%M)"
 # accountable.
 TRUTHCV_RUN_ID="${TRUTHCV_RUN_ID:-$(date +%s)-$$}"
 
+# per-channel (default): the run is driven as up to three sequential harness
+# sessions sharing this TRUTHCV_RUN_ID — (1) approved queue + feed, (2)
+# direct-search boards, (3) dork queries — each closing with finish_phase
+# except the last, which closes with finish_run. single: today's one-session
+# run, byte-for-byte including the composed prompt.
+AGENT_SESSION_MODE="${AGENT_SESSION_MODE:-per-channel}"
+case "$AGENT_SESSION_MODE" in
+  single|per-channel) ;;
+  *) echo "invalid AGENT_SESSION_MODE '$AGENT_SESSION_MODE' (expected single|per-channel)" >&2; exit 1 ;;
+esac
+
 mkdir -p "$RUN_LOG_DIR"
 RUN_LOG="$RUN_LOG_DIR/run_${STAMP}_${TRUTHCV_RUN_ID}.log"
 
@@ -408,6 +419,17 @@ def fmt_band(min_v; max_v; cur): if (min_v != null and max_v != null and cur != 
 # without at least one enabled profile there is nothing to search for, so the
 # run aborts before invoking the LLM instead of silently applying someone
 # else's defaults.
+# Discovery-channel sections are accumulated separately from PROFILE_BLOCK
+# (the shared header) and PROFILE_TAIL (cooldown/freshness/profile criteria,
+# also shared) so a per-channel session can compose header+its own
+# channel+tail, while single-session mode concatenates all three channels
+# between header and tail exactly as before. Pre-declared (set -u) so a
+# JOB_CONFIG fetch failure below still leaves every one of them defined-empty.
+PROFILE_BLOCK=""
+PROFILE_TAIL=""
+FEED_SECTION=""
+DIRECT_SECTION=""
+DORK_SECTION=""
 if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_config 2>/dev/null)"; then
   # Parse check first: a payload that is not JSON at all (a truncated or
   # corrupt fetch) must be reported as such, not as a profiles problem — the
@@ -482,19 +504,19 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     # app image serving no source).
     FEED_PROFILE_MATCHED="$(jq -r '.feedPostings[]? | select((.profile // "") != "") | "  - [\(.profile)] \(.title)\(if (.company // "") != "" then " — " + .company else "" end)\(if (.salaryRange // "") != "" then " (" + .salaryRange + ")" else "" end)\(if ((.source // "") != "" or (.tier // "") != "") then " [" + ([(.source // ""), (.tier // "")] | map(select(. != "")) | join("/")) + "]" else "" end)\n    \(.url)"' <<<"$JOB_CONFIG")"
     if [[ -n "$FEED_PROFILE_MATCHED" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Postings pulled from your API-backed job boards (metadata and URLs, not guaranteed full text; pre-filtered by the board's own keyword and location matching, where the board supports it; a posting naming no salary can still appear even with a salary floor set — open each URL for full text and screen-and-record before direct-board/dork discovery or new applications; postings are still subject to every profile criterion):"$'\n'
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$FEED_PROFILE_MATCHED"$'\n'
+      FEED_SECTION="$FEED_SECTION"$'\n'"Postings pulled from your API-backed job boards (metadata and URLs, not guaranteed full text; pre-filtered by the board's own keyword and location matching, where the board supports it; a posting naming no salary can still appear even with a salary floor set — open each URL for full text and screen-and-record before direct-board/dork discovery or new applications; postings are still subject to every profile criterion):"$'\n'
+      FEED_SECTION="$FEED_SECTION"$'\n'"$FEED_PROFILE_MATCHED"$'\n'
     fi
 
     FEED_COMPANY_BOARDS="$(jq -r '.feedPostings[]? | select((.profile // "") == "") | "  - [Company board] \(.title)\(if (.company // "") != "" then " — " + .company else "" end)\(if (.salaryRange // "") != "" then " (" + .salaryRange + ")" else "" end)\(if ((.source // "") != "" or (.tier // "") != "") then " [" + ([(.source // ""), (.tier // "")] | map(select(. != "")) | join("/")) + "]" else "" end)\n    \(.url)"' <<<"$JOB_CONFIG")"
     if [[ -n "$FEED_COMPANY_BOARDS" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Postings pulled directly from watchlist companies' own applicant-tracking systems — NOT filtered by profile keywords, locations or salary floor (only a freshness window); screen each fully against your profile criteria before applying:"$'\n'
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$FEED_COMPANY_BOARDS"$'\n'
+      FEED_SECTION="$FEED_SECTION"$'\n'"Postings pulled directly from watchlist companies' own applicant-tracking systems — NOT filtered by profile keywords, locations or salary floor (only a freshness window); screen each fully against your profile criteria before applying:"$'\n'
+      FEED_SECTION="$FEED_SECTION"$'\n'"$FEED_COMPANY_BOARDS"$'\n'
     fi
 
     FEED_ALREADY_SCREENED="$(jq -r '.feedAlreadyScreened // 0' <<<"$JOB_CONFIG")"
     if [[ "$FEED_ALREADY_SCREENED" -gt 0 ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"${FEED_ALREADY_SCREENED} feed posting(s) already screened in earlier runs were omitted from the list above; do not look for them. The feed is only the first of three channels: after it, always work every direct-search board and composed query below."$'\n'
+      FEED_SECTION="$FEED_SECTION"$'\n'"${FEED_ALREADY_SCREENED} feed posting(s) already screened in earlier runs were omitted from the list above; do not look for them. The feed is only the first of three channels: after it, always work every direct-search board and composed query below."$'\n'
     fi
 
     # A feed failure is rendered rather than swallowed: an empty feed and a
@@ -502,7 +524,7 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     # would silently apply to fewer jobs with nothing in the run log saying why.
     FEED_ERROR="$(jq -r '.feedError // ""' <<<"$JOB_CONFIG")"
     if [[ -n "$FEED_ERROR" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Job board feed warning: ${FEED_ERROR} Continue the run using the other discovery channels; do not treat this as a reason to stop."$'\n'
+      FEED_SECTION="$FEED_SECTION"$'\n'"Job board feed warning: ${FEED_ERROR} Continue the run using the other discovery channels; do not treat this as a reason to stop."$'\n'
     fi
 
     # Direct-search boards: searched on the board's own site rather than via
@@ -517,11 +539,11 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     DIRECT_CRITERIA="$(jq -r '[.directBoards[]? | .profiles[]?] | unique_by(.profile)[] | "  [\(.profile)] keywords: \(.keywords // [] | join(", "))" + (if ((.locations // []) | length) > 0 then "; locations: \(.locations | join(", "))" else "" end) + (if ((.rejectedRoleTypes // []) | length) > 0 then "; avoid: \(.rejectedRoleTypes | join(", "))" else "" end)' <<<"$JOB_CONFIG")"
     DIRECT_BOARDS="$(jq -r '.directBoards[]? | "  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end)' <<<"$JOB_CONFIG")"
     if [[ -n "$DIRECT_BOARDS" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Direct-search boards (search each on the board's own site using the per-profile criteria listed once below; on a login wall, report_apply_failure with blocker \"login_required\" and the sign-in URL, then continue to the next board):"$'\n'
+      DIRECT_SECTION="$DIRECT_SECTION"$'\n'"Direct-search boards (search each on the board's own site using the per-profile criteria listed once below; on a login wall, report_apply_failure with blocker \"login_required\" and the sign-in URL, then continue to the next board):"$'\n'
       if [[ -n "$DIRECT_CRITERIA" ]]; then
-        PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$DIRECT_CRITERIA"$'\n'
+        DIRECT_SECTION="$DIRECT_SECTION"$'\n'"$DIRECT_CRITERIA"$'\n'
       fi
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$DIRECT_BOARDS"$'\n'
+      DIRECT_SECTION="$DIRECT_SECTION"$'\n'"$DIRECT_BOARDS"$'\n'
     fi
 
     # Add composed search queries (deterministic entry points, not a boundary
@@ -531,11 +553,11 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     # alongside them.
     QUERIES="$(jq -r '.searchQueries[]? | "  - [\(.profile)] \(.source): \(.query)\n    \(.url)"' <<<"$JOB_CONFIG")"
     if [[ -n "$QUERIES" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Composed search queries (deterministic entry points from keywords/locations and the configured job boards; use WebSearch or the browser, free-form search still applies too):"$'\n'
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$QUERIES"$'\n'
+      DORK_SECTION="$DORK_SECTION"$'\n'"Composed search queries (deterministic entry points from keywords/locations and the configured job boards; use WebSearch or the browser, free-form search still applies too):"$'\n'
+      DORK_SECTION="$DORK_SECTION"$'\n'"$QUERIES"$'\n'
     fi
 
-    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Cooldown days (stale company filter): $(jq -r '.cooldownDays // "not configured"' <<<"$JOB_CONFIG")"$'\n'
+    PROFILE_TAIL="$PROFILE_TAIL"$'\n'"Cooldown days (stale company filter): $(jq -r '.cooldownDays // "not configured"' <<<"$JOB_CONFIG")"$'\n'
 
     # Discovery freshness window. Rendered as a hard filter rather than only
     # baked into the composed search URLs: WebSearch results and an employer's
@@ -558,7 +580,7 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
       # happened before this setting existed.
       AGE_LINE="Posting freshness window: not configured — a posting's age is never a rejection reason on this run. Prefer recent postings when choosing what to open, but never reject one for being old."
     fi
-    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$AGE_LINE"$'\n'
+    PROFILE_TAIL="$PROFILE_TAIL"$'\n'"$AGE_LINE"$'\n'
 
     # Render each profile's full criteria: name, employment country, remote
     # model, salary band, Glassdoor minimum, EOR/entity-verification rules,
@@ -568,10 +590,16 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     # recommend_salary.
     PROFILE_CRITERIA="$(jq -r "$PROFILE_CRITERIA_JQ" <<<"$JOB_CONFIG")"
     if [[ -n "$PROFILE_CRITERIA" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Profile criteria (call get_job_profiles to re-fetch verbatim; call"$'\n'"recommend_salary with the matched profile's name for any salary-expectation field):"$'\n\n'"$PROFILE_CRITERIA"$'\n'
+      PROFILE_TAIL="$PROFILE_TAIL"$'\n'"Profile criteria (call get_job_profiles to re-fetch verbatim; call"$'\n'"recommend_salary with the matched profile's name for any salary-expectation field):"$'\n\n'"$PROFILE_CRITERIA"$'\n'
     fi
 
-    PROMPT="$PROMPT"$'\n\n'"$PROFILE_BLOCK"
+    # Single-session mode folds every channel into PROMPT right here, in
+    # RUNBOOK order, exactly as before per-channel sessions existed. In
+    # per-channel mode PROMPT stays the shared core (no channel content) and
+    # each session composes header+its own channel+tail for itself, below.
+    if [[ "$AGENT_SESSION_MODE" == "single" ]]; then
+      PROMPT="$PROMPT"$'\n\n'"$PROFILE_BLOCK$FEED_SECTION$DIRECT_SECTION$DORK_SECTION$PROFILE_TAIL"
+    fi
   fi
 fi
 
@@ -599,7 +627,7 @@ fi
 # is no daily quota"; docker-compose.yml defaults the env var to empty for
 # that reason). Only append a limit line when the resolved value is actually
 # a positive integer, so the common no-cap case adds nothing to the prompt.
-if [[ "$APPLY_CAP" =~ ^[1-9][0-9]*$ ]]; then
+if [[ "$AGENT_SESSION_MODE" == "single" && "$APPLY_CAP" =~ ^[1-9][0-9]*$ ]]; then
   PROMPT="$PROMPT"$'\n\n'"Apply to at most $APPLY_CAP role(s) this run."
 fi
 
@@ -705,8 +733,6 @@ esac
 # — see above) is handed over via a temp file.
 log "invoking agent harness... (provider: $AGENT_LLM_PROVIDER, browser driver: $AGENT_BROWSER_DRIVER)"
 
-HARNESS_PROMPT_FILE="$(mktemp)"
-printf '%s' "$PROMPT" >"$HARNESS_PROMPT_FILE"
 # The harness writes its final assistant message here; named alongside RUN_LOG
 # so a run's artifacts share one stamp+id prefix.
 RUN_OUTPUT="$RUN_LOG_DIR/run_${STAMP}_${TRUTHCV_RUN_ID}.output"
@@ -729,9 +755,14 @@ fi
 # gets today's exact behaviour: one model doing both jobs. Set the
 # AGENT_SCREENING_* env vars to point screening at a separate, cheaper model
 # instead.
+# run_harness takes the prompt file and finish-tool name as arguments so a
+# per-channel run can invoke it once per session, each with its own prompt
+# and its own --finish-tool (finish_phase for every non-final session,
+# finish_run for the last).
 run_harness() {
+local prompt_file="$1" finish_tool="$2"
 node "$HARNESS_CLI" \
-  --prompt-file "$HARNESS_PROMPT_FILE" \
+  --prompt-file "$prompt_file" \
   --model "$AGENT_MODEL" \
   --provider "$AGENT_LLM_PROVIDER" \
   --wire "$AGENT_LLM_WIRE" \
@@ -750,6 +781,7 @@ node "$HARNESS_CLI" \
   --screening-token "${AGENT_SCREENING_API_KEY:-$AGENT_LLM_API_KEY}" \
   --screening-base-url "${AGENT_SCREENING_BASE_URL:-$AGENT_LLM_BASE_URL}" \
   --screening-auth-type "${AGENT_SCREENING_AUTH_TYPE:-$AGENT_LLM_AUTH_TYPE}" \
+  --finish-tool "$finish_tool" \
   --output-file "$RUN_OUTPUT" \
   --reason-file "$REASON_FILE" \
   --diagnostics-file "$DIAGNOSTIC_FILE" \
@@ -757,20 +789,154 @@ node "$HARNESS_CLI" \
   </dev/null >>"$RUN_LOG" 2>&1
 }
 
-# Only the harness gets fd 3. All precondition helpers above are synchronous;
-# neither shell nor later cleanup may keep the pipe open after the harness exits.
+# Renders 'Applications remaining this run: N' from the run record's live
+# applications_submitted (GET /api/runs/{run_id}, same base URL as
+# TRUTHCV_MCP_URL with /mcp stripped, no auth required — the same route the
+# web UI reads). Falls back to the static cap line on any fetch failure
+# (run not yet recorded, network error, malformed body) so a per-channel
+# session never blocks on this becoming available.
+render_remaining_line() {
+  local cap="$1"
+  [[ "$cap" =~ ^[1-9][0-9]*$ ]] || { printf ''; return; }
+  local base="${TRUTHCV_MCP_URL%/mcp}"
+  base="${base%/mcp/}"
+  local submitted
+  submitted="$(node -e '
+const http = require("http"); const https = require("https");
+let u;
+try { u = new URL(process.argv[1] + "/api/runs/" + process.argv[2]); } catch { process.exit(1); }
+const mod = u.protocol === "https:" ? https : http;
+const req = mod.get(u, { timeout: 5000 }, (res) => {
+  if (res.statusCode !== 200) { res.resume(); process.exit(1); }
+  let body = "";
+  res.on("data", (c) => (body += c));
+  res.on("end", () => {
+    try {
+      const rec = JSON.parse(body);
+      const n = Number(rec.applications_submitted);
+      if (!Number.isFinite(n)) process.exit(1);
+      process.stdout.write(String(n));
+    } catch { process.exit(1); }
+  });
+});
+req.on("timeout", () => { req.destroy(); process.exit(1); });
+req.on("error", () => process.exit(1));
+' "$base" "$TRUTHCV_RUN_ID" 2>/dev/null)" || submitted=""
+  if [[ "$submitted" =~ ^[0-9]+$ ]]; then
+    local remaining=$(( cap - submitted ))
+    (( remaining < 0 )) && remaining=0
+    printf 'Applications remaining this run: %s' "$remaining"
+  else
+    printf 'Apply to at most %s role(s) this run.' "$cap"
+  fi
+}
+
+# The '## This session' block: names the channel this session works, states
+# the others run in separate sessions sharing this run_id and must not be
+# worked here, and names the finish tool that ends this session.
+render_session_block() {
+  local channel="$1" finish_tool="$2" desc
+  case "$channel" in
+    feed) desc="the approved-application queue and the job-board feed" ;;
+    direct) desc="the direct-search boards" ;;
+    dork) desc="the composed dork queries" ;;
+  esac
+  printf '\n\n## This session\n\nThis session works ONLY %s (channel: "%s"). The other discovery channels run\nin separate sessions that share this run_id; do not work them here.\n\nWhen this channel is fully worked, call %s(run_id, channel: "%s", note: ...%s) to end this session.' \
+    "$desc" "$channel" "$finish_tool" "$channel" \
+    "$([[ "$finish_tool" == finish_run ]] && printf '' || printf '')"
+}
+
+# Runs one harness session, logging its channel and rc; fd 3 (when present)
+# stays open across every session in the run and is closed once, after the
+# last session, by the caller.
+run_session() {
+  local prompt_file="$1" finish_tool="$2" channel="$3"
+  log "session start: channel=$channel finish-tool=$finish_tool"
+  run_harness "$prompt_file" "$finish_tool"
+  local rc=$?
+  log "session end: channel=$channel rc=$rc"
+  return $rc
+}
+
+FD3_OPEN=0
 if [[ "${TRUTHCV_DIAGNOSTICS_FD:-}" == 3 && -e /dev/fd/3 ]]; then
-  run_harness &
-  HARNESS_PID=$!
-  exec 3>&-
-  wait "$HARNESS_PID"
-  RC=$?
+  FD3_OPEN=1
 else
   unset TRUTHCV_DIAGNOSTICS_FD
-  run_harness
-  RC=$?
 fi
-rm -f "$HARNESS_PROMPT_FILE"
+
+FINAL_RC=0
+FINAL_RC_SET=0
+
+if [[ "$AGENT_SESSION_MODE" == "single" ]]; then
+  HARNESS_PROMPT_FILE="$(mktemp)"
+  printf '%s' "$PROMPT" >"$HARNESS_PROMPT_FILE"
+  run_session "$HARNESS_PROMPT_FILE" finish_run single
+  FINAL_RC=$?
+  rm -f "$HARNESS_PROMPT_FILE"
+else
+  # Sessions in RUNBOOK order; a channel with no configured data is omitted.
+  # 'feed' (approved queue + job-board feed) always runs: Phase 0 (the
+  # approved queue) is unconditional. The last present session finishes with
+  # finish_run; every session before it finishes with finish_phase.
+  SESSION_CHANNELS=(feed)
+  [[ -n "$DIRECT_SECTION" ]] && SESSION_CHANNELS+=(direct)
+  [[ -n "$DORK_SECTION" ]] && SESSION_CHANNELS+=(dork)
+  LAST_INDEX=$(( ${#SESSION_CHANNELS[@]} - 1 ))
+
+  for i in "${!SESSION_CHANNELS[@]}"; do
+    CHANNEL="${SESSION_CHANNELS[$i]}"
+    case "$CHANNEL" in
+      feed) CHANNEL_SECTION="$FEED_SECTION" ;;
+      direct) CHANNEL_SECTION="$DIRECT_SECTION" ;;
+      dork) CHANNEL_SECTION="$DORK_SECTION" ;;
+    esac
+    if (( i == LAST_INDEX )); then
+      SESSION_FINISH_TOOL="finish_run"
+    else
+      SESSION_FINISH_TOOL="finish_phase"
+    fi
+
+    SESSION_PROMPT="$PROMPT"
+    if [[ -n "$PROFILE_BLOCK" ]]; then
+      SESSION_PROMPT="$SESSION_PROMPT"$'\n\n'"$PROFILE_BLOCK$CHANNEL_SECTION$PROFILE_TAIL"
+    fi
+    REMAINING_LINE="$(render_remaining_line "$APPLY_CAP")"
+    if [[ -n "$REMAINING_LINE" ]]; then
+      SESSION_PROMPT="$SESSION_PROMPT"$'\n\n'"$REMAINING_LINE"
+    fi
+    SESSION_PROMPT="$SESSION_PROMPT$(render_session_block "$CHANNEL" "$SESSION_FINISH_TOOL")"
+
+    SESSION_PROMPT_FILE="$(mktemp)"
+    printf '%s' "$SESSION_PROMPT" >"$SESSION_PROMPT_FILE"
+    run_session "$SESSION_PROMPT_FILE" "$SESSION_FINISH_TOOL" "$CHANNEL"
+    SESSION_RC=$?
+    rm -f "$SESSION_PROMPT_FILE"
+
+    if (( FINAL_RC_SET == 0 )); then
+      FINAL_RC=$SESSION_RC
+      FINAL_RC_SET=1
+    fi
+
+    if [[ "$SESSION_RC" == 3 || "$SESSION_RC" == 4 || "$SESSION_RC" == 5 ]]; then
+      # Provider/MCP/config failures abort the rest of the run immediately;
+      # later sessions cannot succeed either.
+      break
+    fi
+    # rc 0 or (2 turn-cap / 6 no-finish) both fall through to the next
+    # session; 2/6 are logged above and recorded as FINAL_RC only if no
+    # earlier session already set a non-zero FINAL_RC.
+    if (( FINAL_RC == 0 && SESSION_RC != 0 )); then
+      FINAL_RC=$SESSION_RC
+    fi
+  done
+fi
+
+if (( FD3_OPEN )); then
+  exec 3>&-
+fi
+
+RC=$FINAL_RC
 log "agent harness exited rc=$RC"
 
 log "=== run complete: $RUN_LOG ==="

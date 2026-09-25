@@ -53,6 +53,7 @@ const TRUTHCV_ALLOWED_TOOL_NAMES = [
   'get_company_findings',
   'start_run',
   'finish_run',
+  'finish_phase',
   'record_run_note',
   'record_postings_seen',
   'record_discovery_coverage',

@@ -52,8 +52,8 @@ def _rendered_feed_block(payload: dict) -> str:
     snippet = SCRIPT[start:end]
     script = (
         "JOB_CONFIG=" + shlex.quote(json.dumps(payload)) + "\n"
-        'PROFILE_BLOCK=""\n' + snippet + "\n"
-        'printf \'%s\' "$PROFILE_BLOCK"\n'
+        'FEED_SECTION=""\n' + snippet + "\n"
+        'printf \'%s\' "$FEED_SECTION"\n'
     )
     result = subprocess.run(["bash"], input=script, capture_output=True, text=True, check=True)
     return result.stdout
