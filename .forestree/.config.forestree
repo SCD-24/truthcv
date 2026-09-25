@@ -208,6 +208,16 @@
                   "desc": "Stop a run: forwards cancel to the supervisor when it owns the run, otherwise closes the record as failed/orphaned. 404 unknown run, 409 already finished.",
                   "method": "POST",
                   "path": "/api/runs/{run_id}/stop"
+                },
+                {
+                  "desc": "Non-terminal end of one per-channel agent session (feed|direct|dork). Refuses while that channel's coverage is short and the harness reports turns remaining (max 3 refusals). Appends the note to the run and never closes it.",
+                  "method": "MCP",
+                  "path": "finish_phase"
+                },
+                {
+                  "desc": "Optional turns_remaining argument supplied by the harness. While turns remain, a short or skipped coverage is refused repeatedly (max 3) instead of only once.",
+                  "method": "MCP",
+                  "path": "finish_run (turns_remaining)"
                 }
               ]
             },
