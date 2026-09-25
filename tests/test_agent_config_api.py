@@ -36,6 +36,7 @@ def test_get_returns_defaults(client, data_dir):
         # empty shape and never calls out to an API-backed board.
         "feedPostings": [],
         "feedError": "",
+        "feedAlreadyScreened": 0,
         "directBoards": [],
     }
     got = r.json()

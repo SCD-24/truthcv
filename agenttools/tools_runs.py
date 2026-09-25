@@ -7,6 +7,12 @@ mid-application. Every parameter has a default (agenttools/mcp_app.py derives
 the JSON schema from ``inspect.signature`` and marks a defaultless parameter
 required, which would turn a forgetful model call into a mid-run TypeError),
 and every function no-ops on an empty ``run_id`` rather than raising.
+
+One deliberate exception: ``finish_run`` raises ``ValueError`` the FIRST time
+it is called on a run whose direct-board or dork-query discovery coverage
+looks incomplete, so the model is sent back to finish discovery instead of
+silently ending a partial run. See ``_coverage_shortfall``. A second call
+always closes the run.
 """
 
 from __future__ import annotations
@@ -29,6 +35,63 @@ def start_run(run_id: str = "", trigger: str = "scheduled", apply_cap: int = 0) 
     return {"recorded": True, **record.to_dict()}
 
 
+_FINISH_REFUSAL_INSTRUCTIONS = (
+    "Discovery is not finished — go back and work these boards/queries and "
+    "record_discovery_coverage for each. created:false feed results are not "
+    "a reason to stop. If you genuinely cannot continue (turn limit, "
+    "browser down), call finish_run again with an honest stopped_reason and "
+    "it will be recorded."
+)
+
+
+def _coverage_shortfall(record) -> list[str]:
+    """Per-channel shortfall messages for the run's direct/dork discovery
+    coverage against what the current config expects, or [] when it looks
+    complete. Counts are compared, never status labels (free text), and a
+    channel with any 'skipped' entry is always flagged even if its count is
+    otherwise met. Any error here (e.g. config load failure) must not block
+    finish_run, so it fails safe to [].
+    """
+    try:
+        from agentconfig import store as _agentconfig_store
+        from agentconfig.dorks import compose_direct_boards, compose_queries
+
+        cfg = _agentconfig_store.load()
+        resolved = cfg.resolved_boards()
+        expected = {
+            "direct": len(compose_direct_boards(cfg.profiles, resolved)),
+            "dork": len(compose_queries(cfg.profiles, cfg.max_posting_age_days, resolved)),
+        }
+        messages = []
+        for channel, want in expected.items():
+            entries = [e for e in record.discovery_coverage if e.get("channel") == channel]
+            worked = sum(1 for e in entries if e.get("status") != "skipped")
+            skipped = [e.get("board", "") for e in entries if e.get("status") == "skipped"]
+            if worked < want or skipped:
+                detail = f", skipped: {', '.join(skipped)}" if skipped else ""
+                messages.append(f"{channel}: worked {worked}/{want}{detail}")
+        return messages
+    except Exception:
+        return []
+
+
+def _guard_incomplete_discovery(run_id: str, status: str) -> None:
+    """Raise ValueError, and mark the record refused, on the first
+    finish_run call for a run whose discovery coverage looks short. A
+    second call sees ``finish_refused`` already set and lets it through.
+    """
+    if status != "completed":
+        return
+    record = _runs_store.get(run_id)
+    if record is None or record.finish_refused:
+        return
+    shortfall = _coverage_shortfall(record)
+    if not shortfall:
+        return
+    _runs_store.mark_finish_refused(run_id)
+    raise ValueError("; ".join(shortfall) + ". " + _FINISH_REFUSAL_INSTRUCTIONS)
+
+
 def finish_run(
     run_id: str = "",
     status: str = "completed",
@@ -39,9 +102,16 @@ def finish_run(
     stopping early — with ``stopped_reason`` saying honestly where you
     stopped (e.g. "apply cap reached", "browser session died"). A run that
     ends without this call is indistinguishable from one that crashed.
+
+    Raises ValueError, and refuses to close the run, on the FIRST call for a
+    'completed' run whose direct-board or dork-query discovery coverage
+    looks incomplete — deliberately, to send the model back to finish
+    discovery rather than let it stop early unnoticed. A second finish_run
+    call for the same run always succeeds.
     """
     if not run_id:
         return {"recorded": False}
+    _guard_incomplete_discovery(run_id, status)
     try:
         record = _runs_store.finish(
             run_id, status=status, stopped_reason=stopped_reason, note=note

@@ -180,6 +180,19 @@ def set_note(run_id: str, note: str) -> RunRecord | None:
         return record
 
 
+def mark_finish_refused(run_id: str) -> RunRecord | None:
+    """Mark that finish_run was refused once for incomplete discovery
+    coverage, so a second finish_run call is let through unconditionally."""
+    with locked(runs_path()):
+        runs = load_all()
+        record = next((r for r in runs if r.id == run_id), None)
+        if record is None:
+            return None
+        record.finish_refused = True
+        _write_all(runs)
+        return record
+
+
 def add_discovery_coverage(run_id: str, entry: dict) -> RunRecord | None:
     """Append one discovery-coverage entry to the run's record, in call
     order. A genuine second pass over the same (channel, board) — with
