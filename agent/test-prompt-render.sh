@@ -615,6 +615,116 @@ AGG5="$(aggregate_rc 2 5)"
 [[ "$AGG5" == "2" ]] || { echo "FAIL: expected 2 (first non-zero rc wins over a later abort's own rc), got $AGG5"; exit 1; }
 echo "PASS: first non-zero rc wins even when a later session aborts with a different rc"
 
+# --- render_session_block: real function, extracted verbatim from daily-apply.sh ---
+# Sourcing the real function (not a copy) so a change there is exercised here
+# directly, no drift possible.
+RENDER_SESSION_BLOCK_SRC="$(sed -n '/^render_session_block() {/,/^}$/p' "$DAILY_APPLY_SRC")"
+eval "$RENDER_SESSION_BLOCK_SRC"
+
+echo "Testing: finish_phase session (non-final) renders finish_phase call shape, no channel arg..."
+BLOCK_PHASE="$(render_session_block "direct" "finish_phase" 0 "")"
+if [[ "$BLOCK_PHASE" != *'finish_phase(run_id, channel: "direct", note: ...)'* ]]; then
+  echo "FAIL: finish_phase session block missing correct finish_phase call shape"
+  exit 1
+fi
+if [[ "$BLOCK_PHASE" == *"finish_run("* ]]; then
+  echo "FAIL: non-final session block must not tell the model to call finish_run"
+  exit 1
+fi
+echo "PASS: non-final session block renders finish_phase(run_id, channel, note)"
+
+echo "Testing: finish_run session (final) renders finish_run call shape (run_id, status, stopped_reason, note), no channel arg..."
+BLOCK_RUN="$(render_session_block "dork" "finish_run" 0 "")"
+if [[ "$BLOCK_RUN" != *'finish_run(run_id, status: ...,'*'stopped_reason: ...'*'note: ...)'* ]]; then
+  echo "FAIL: finish_run session block missing correct finish_run call shape"
+  exit 1
+fi
+if [[ "$BLOCK_RUN" == *'finish_run(run_id, channel'* ]]; then
+  echo "FAIL: finish_run call must not be told to take a channel argument"
+  exit 1
+fi
+echo "PASS: final session block renders finish_run(run_id, status, stopped_reason, note)"
+
+echo "Testing: direct/dork (non-first) session overrides gmail/Phase 0 instructions..."
+BLOCK_NON_FIRST="$(render_session_block "direct" "finish_phase" 0 "")"
+if [[ "$BLOCK_NON_FIRST" != *"do NOT call"*"get_approved_applications"* ]] || [[ "$BLOCK_NON_FIRST" != *"do NOT call check_gmail_responses"* ]]; then
+  echo "FAIL: non-first session block does not override Phase 0 / check_gmail_responses instructions"
+  exit 1
+fi
+echo "PASS: non-first session block overrides Phase 0 / check_gmail_responses"
+
+echo "Testing: feed (first) session keeps gmail/Phase 0 instructions..."
+BLOCK_FIRST="$(render_session_block "feed" "finish_phase" 1 "")"
+if [[ "$BLOCK_FIRST" != *"call check_gmail_responses once at"* ]] || [[ "$BLOCK_FIRST" != *"work Phase 0"* ]]; then
+  echo "FAIL: first session block does not instruct check_gmail_responses/Phase 0"
+  exit 1
+fi
+echo "PASS: first session block instructs check_gmail_responses/Phase 0"
+
+echo "Testing: every session block states start_run is idempotent..."
+if [[ "$BLOCK_FIRST" != *"start_run is idempotent"* ]] || [[ "$BLOCK_NON_FIRST" != *"start_run is idempotent"* ]]; then
+  echo "FAIL: session block does not state start_run is idempotent"
+  exit 1
+fi
+echo "PASS: session block states start_run is idempotent"
+
+echo "Testing: final session with an earlier rc-2 session states it hit the turn cap and requires an honest non-completed status..."
+PRIOR_ISSUES_RC2=$'\n'"- The feed session hit the turn cap and did not finish its work."
+BLOCK_RECONCILE="$(render_session_block "dork" "finish_run" 0 "$PRIOR_ISSUES_RC2")"
+if [[ "$BLOCK_RECONCILE" != *"feed session hit the turn cap"* ]]; then
+  echo "FAIL: final session block does not name the earlier feed session's turn-cap outcome"
+  exit 1
+fi
+if [[ "$BLOCK_RECONCILE" != *'status: "failed"'* ]]; then
+  echo "FAIL: final session block does not require a non-completed status when an earlier session failed"
+  exit 1
+fi
+echo "PASS: final session block reconciles an earlier turn-cap session with an honest non-completed status"
+
+echo "Testing: single mode does not call render_session_block at all..."
+SINGLE_MODE_BLOCK="$(sed -n '/AGENT_SESSION_MODE" == "single" ]]; then/,/^else$/p' "$DAILY_APPLY_SRC")"
+if [[ "$SINGLE_MODE_BLOCK" == *"render_session_block"* ]]; then
+  echo "FAIL: single mode must stay byte-identical — it must not call render_session_block"
+  exit 1
+fi
+echo "PASS: single mode does not invoke render_session_block, prompt composition unaffected"
+
+echo "Testing: render_remaining_line reads rec.applicationsSubmitted (camelCase) from the runs API..."
+if ! grep -q 'rec.applicationsSubmitted' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: render_remaining_line does not read the camelCase applicationsSubmitted field"
+  exit 1
+fi
+echo "PASS: render_remaining_line reads applicationsSubmitted"
+
+# --- Reason-file preservation: first non-zero session's reason must survive
+# a later session overwriting the shared reason file. Mirrors daily-apply.sh's
+# FIRST_FAILURE_REASON snapshot/restore around the session loop.
+echo "Testing: first non-zero session's reason file content survives a later session's overwrite..."
+REASON_FILE_TEST="$TEST_DIR/reason_test.txt"
+echo "turn cap reached in feed session" > "$REASON_FILE_TEST"
+FIRST_FAILURE_REASON="$(cat "$REASON_FILE_TEST" 2>/dev/null || true)"
+# Simulate a later session overwriting the shared reason file with its own text.
+echo "dork session finished cleanly" > "$REASON_FILE_TEST"
+if [[ -n "$FIRST_FAILURE_REASON" ]]; then
+  printf '%s\n' "$FIRST_FAILURE_REASON" > "$REASON_FILE_TEST"
+fi
+if [[ "$(cat "$REASON_FILE_TEST")" != "turn cap reached in feed session" ]]; then
+  echo "FAIL: first non-zero session's reason was not preserved after a later session overwrote the reason file"
+  exit 1
+fi
+echo "PASS: first non-zero session's reason file content is preserved"
+
+echo "Testing: daily-apply.sh snapshots FIRST_FAILURE_REASON and restores it after the session loop..."
+if ! grep -q 'FIRST_FAILURE_REASON="\$(cat "\$REASON_FILE"' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: daily-apply.sh does not snapshot the reason file on the first non-zero session rc"
+  exit 1
+fi
+if ! grep -q 'printf .%s\\n. "\$FIRST_FAILURE_REASON" >"\$REASON_FILE"' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: daily-apply.sh does not restore FIRST_FAILURE_REASON to REASON_FILE after the session loop"
+  exit 1
+fi
+echo "PASS: daily-apply.sh snapshots and restores the first non-zero session's reason"
+
 echo ""
 echo "All tests passed!"
 exit 0

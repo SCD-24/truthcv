@@ -510,6 +510,17 @@ describe('turns_remaining injection', () => {
     await run(adapter, pool, { maxTurns: 5, finishToolName: 'finish_phase' } as Parameters<typeof runLoop>[0]['config']);
     expect(callTool).toHaveBeenCalledWith('truthcv__finish_phase', expect.objectContaining({ turns_remaining: 4, channel: 'feed' }));
   });
+
+  it('injects turns_remaining into finish_run even when the session is configured for finish_phase', async () => {
+    const FINISH_RUN_CALL: ToolCall = { id: 'f1', name: 'truthcv__finish_run', arguments: { note: 'x' } };
+    const doneFinishRun: HarnessEvent = {
+      type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [FINISH_RUN_CALL] },
+    };
+    const { adapter } = scriptedAdapter([[doneFinishRun]]);
+    const { pool, callTool } = poolWithFinishRun();
+    await run(adapter, pool, { maxTurns: 5, finishToolName: 'finish_phase' } as Parameters<typeof runLoop>[0]['config']);
+    expect(callTool).toHaveBeenCalledWith('truthcv__finish_run', expect.objectContaining({ turns_remaining: 4, note: 'x' }));
+  });
 });
 
 describe('finish_phase grace turn (configured finish tool)', () => {

@@ -813,7 +813,8 @@ const req = mod.get(u, { timeout: 5000 }, (res) => {
   res.on("end", () => {
     try {
       const rec = JSON.parse(body);
-      const n = Number(rec.applications_submitted);
+      const submittedRaw = rec.applicationsSubmitted !== undefined ? rec.applicationsSubmitted : rec.applications_submitted;
+      const n = Number(submittedRaw);
       if (!Number.isFinite(n)) process.exit(1);
       process.stdout.write(String(n));
     } catch { process.exit(1); }
@@ -833,17 +834,60 @@ req.on("error", () => process.exit(1));
 
 # The '## This session' block: names the channel this session works, states
 # the others run in separate sessions sharing this run_id and must not be
-# worked here, and names the finish tool that ends this session.
+# worked here, names the finish tool that ends this session with its correct
+# call shape, and — since it comes last in the prompt — overrides the shared
+# instructions that would otherwise contradict a per-channel session: only
+# the first (feed) session does check_gmail_responses/Phase 0, start_run is
+# idempotent so every session calls it again with the same run_id, and only
+# the final session ever calls finish_run (a non-final session always ends
+# with finish_phase, even when stopping early). `prior_issues` is a
+# newline-prefixed list of earlier-session problems (turn cap / no-finish),
+# non-empty only on the final session, and forces an honest non-completed
+# status and a stopped_reason naming them.
 render_session_block() {
-  local channel="$1" finish_tool="$2" desc
+  local channel="$1" finish_tool="$2" is_first="$3" prior_issues="$4" desc block
   case "$channel" in
     feed) desc="the approved-application queue and the job-board feed" ;;
     direct) desc="the direct-search boards" ;;
     dork) desc="the composed dork queries" ;;
   esac
-  printf '\n\n## This session\n\nThis session works ONLY %s (channel: "%s"). The other discovery channels run\nin separate sessions that share this run_id; do not work them here.\n\nWhen this channel is fully worked, call %s(run_id, channel: "%s", note: ...%s) to end this session.' \
-    "$desc" "$channel" "$finish_tool" "$channel" \
-    "$([[ "$finish_tool" == finish_run ]] && printf '' || printf '')"
+
+  block=""$'\n\n'"## This session"$'\n\n'"This session works ONLY $desc (channel: \"$channel\"). The other discovery
+channels run in separate sessions that share this run_id; do not work them
+here."$'\n\n'"start_run is idempotent: call it here too, with this same run_id, even
+though an earlier session in this run already called it — calling it again
+is expected and fine."
+
+  if [[ "$is_first" == 1 ]]; then
+    block="$block"$'\n\n'"This is the first session of the run: call check_gmail_responses once at
+the start, and work Phase 0 (the approved queue, via
+get_approved_applications) before discovery, as described above."
+  else
+    block="$block"$'\n\n'"This is NOT the first session of the run: do NOT call
+get_approved_applications and do NOT work Phase 0 (the approved queue), and
+do NOT call check_gmail_responses — the run's first session already did
+both."
+  fi
+
+  if [[ "$finish_tool" == finish_run ]]; then
+    if [[ -n "$prior_issues" ]]; then
+      block="$block"$'\n\n'"This run had earlier session(s) that did not finish cleanly:$prior_issues"$'\n\n'"Do not report this run as a clean completion. Call finish_run(run_id,
+status: \"failed\", stopped_reason: ..., note: ...) with a stopped_reason
+that names which earlier session(s) above did not finish and why."
+    fi
+    block="$block"$'\n\n'"When this channel is fully worked, call finish_run(run_id, status: ...,
+stopped_reason: ..., note: ...) to end this session and the run. This is the
+final session of the run: the Run identity instruction above to call
+finish_run before exiting applies to this session."
+  else
+    block="$block"$'\n\n'"When this channel is fully worked — including when you are stopping
+early — call finish_phase(run_id, channel: \"$channel\", note: ...) to end
+this session. Do NOT call finish_run here, even if you are stopping early:
+this is not the final session of the run, and finish_run applies only to
+the final session."
+  fi
+
+  printf '%s' "$block"
 }
 
 # Runs one harness session, logging its channel and rc; fd 3 (when present)
@@ -884,6 +928,15 @@ else
   [[ -n "$DORK_SECTION" ]] && SESSION_CHANNELS+=(dork)
   LAST_INDEX=$(( ${#SESSION_CHANNELS[@]} - 1 ))
 
+  # Per-session outcomes, "channel:rc" pairs, used to build the final
+  # session's prior-issues text (see render_session_block). A snapshot of
+  # REASON_FILE's content is taken the moment FINAL_RC is first set non-zero
+  # and restored after the loop, since every session shares one reason file
+  # and a later (possibly clean) session would otherwise overwrite the first
+  # failing session's reason with its own.
+  SESSION_OUTCOMES=()
+  FIRST_FAILURE_REASON=""
+
   for i in "${!SESSION_CHANNELS[@]}"; do
     CHANNEL="${SESSION_CHANNELS[$i]}"
     case "$CHANNEL" in
@@ -896,6 +949,21 @@ else
     else
       SESSION_FINISH_TOOL="finish_phase"
     fi
+    IS_FIRST=0
+    (( i == 0 )) && IS_FIRST=1
+
+    PRIOR_ISSUES=""
+    if (( i == LAST_INDEX )); then
+      for OUTCOME in "${SESSION_OUTCOMES[@]:-}"; do
+        [[ -z "$OUTCOME" ]] && continue
+        OUTCOME_CHANNEL="${OUTCOME%%:*}"
+        OUTCOME_RC="${OUTCOME##*:}"
+        case "$OUTCOME_RC" in
+          2) PRIOR_ISSUES="$PRIOR_ISSUES"$'\n'"- The $OUTCOME_CHANNEL session hit the turn cap and did not finish its work." ;;
+          6) PRIOR_ISSUES="$PRIOR_ISSUES"$'\n'"- The $OUTCOME_CHANNEL session ended without calling finish_phase and did not finish its work." ;;
+        esac
+      done
+    fi
 
     SESSION_PROMPT="$PROMPT"
     if [[ -n "$PROFILE_BLOCK" ]]; then
@@ -905,17 +973,21 @@ else
     if [[ -n "$REMAINING_LINE" ]]; then
       SESSION_PROMPT="$SESSION_PROMPT"$'\n\n'"$REMAINING_LINE"
     fi
-    SESSION_PROMPT="$SESSION_PROMPT$(render_session_block "$CHANNEL" "$SESSION_FINISH_TOOL")"
+    SESSION_PROMPT="$SESSION_PROMPT$(render_session_block "$CHANNEL" "$SESSION_FINISH_TOOL" "$IS_FIRST" "$PRIOR_ISSUES")"
 
     SESSION_PROMPT_FILE="$(mktemp)"
     printf '%s' "$SESSION_PROMPT" >"$SESSION_PROMPT_FILE"
     run_session "$SESSION_PROMPT_FILE" "$SESSION_FINISH_TOOL" "$CHANNEL"
     SESSION_RC=$?
     rm -f "$SESSION_PROMPT_FILE"
+    SESSION_OUTCOMES+=("$CHANNEL:$SESSION_RC")
 
     if (( FINAL_RC_SET == 0 )); then
       FINAL_RC=$SESSION_RC
       FINAL_RC_SET=1
+    fi
+    if [[ "$SESSION_RC" != 0 && -z "$FIRST_FAILURE_REASON" ]]; then
+      FIRST_FAILURE_REASON="$(cat "$REASON_FILE" 2>/dev/null || true)"
     fi
 
     if [[ "$SESSION_RC" == 3 || "$SESSION_RC" == 4 || "$SESSION_RC" == 5 ]]; then
@@ -930,6 +1002,10 @@ else
       FINAL_RC=$SESSION_RC
     fi
   done
+
+  if [[ -n "$FIRST_FAILURE_REASON" ]]; then
+    printf '%s\n' "$FIRST_FAILURE_REASON" >"$REASON_FILE" 2>/dev/null || true
+  fi
 fi
 
 if (( FD3_OPEN )); then

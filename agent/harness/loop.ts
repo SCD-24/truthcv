@@ -985,18 +985,22 @@ async function continueWithTools(done: DoneEvent, state: LoopState, ctx: LoopCon
 }
 
 /**
- * Harness-owned: before dispatch, stamp every call to the configured finish
- * tool (bare or namespaced `*__<name>`) with how many turns remain, so the
- * server's coverage guard knows whether it may still hold the run open. This
- * OVERWRITES any `turns_remaining` value the model supplied — the model has
- * no reliable way to know the harness's own turn budget, and a stale or
- * fabricated value would defeat the guard.
+ * Harness-owned: before dispatch, stamp every call to `finish_run` or
+ * `finish_phase` (bare or namespaced `*__<name>`) with how many turns
+ * remain, so the server's coverage guard knows whether it may still hold the
+ * run open. Both are stamped regardless of which one is this session's
+ * *configured* finish tool: a per-channel session's model may legitimately
+ * call the other (e.g. a `finish_phase` session's model calling `finish_run`
+ * because it believes the run is over), and that call still needs an honest
+ * turns_remaining for the guard to reason about. This OVERWRITES any
+ * `turns_remaining` value the model supplied — the model has no reliable way
+ * to know the harness's own turn budget, and a stale or fabricated value
+ * would defeat the guard.
  */
 function injectTurnsRemaining(calls: ToolCall[], state: LoopState, ctx: LoopContext): void {
-  const finishToolName = ctx.config.finishToolName ?? DEFAULT_FINISH_TOOL_NAME;
   const turnsRemaining = ctx.config.maxTurns - state.turns;
   for (const call of calls) {
-    if (isFinishToolCall(call.name, finishToolName)) {
+    if (isFinishToolCall(call.name, 'finish_run') || isFinishToolCall(call.name, 'finish_phase')) {
       call.arguments = { ...call.arguments, turns_remaining: turnsRemaining };
     }
   }
