@@ -110,10 +110,14 @@ export const harvestPostingsTool: ToolDefinition = {
     'a blockKind — "login" means call report_apply_failure with blocker="login_required" then ' +
     'record status "login_walled", never "blocked"; "wall" (a CAPTCHA/consent interstitial with ' +
     'no substantive content of its own) or "unreachable" (a confirmed DNS/connection failure, ' +
-    'never just a slow page) both map to status "blocked" as-is; an ABSENT blockKind means an ' +
-    'internal tool failure rather than a page signal — still record status "blocked", using note ' +
-    'for detail. A board whose url looks like a sign-in page (by path or query string) is refused ' +
-    'and never navigated — harvest never drives a sign-in flow through a tab. ' +
+    'never just a slow page) both map to status "blocked" as-is; "location" means every candidate ' +
+    'for the given location (the value itself and its known local-language aliases) was never ' +
+    'confirmed by the board\'s own location control — still record status "blocked". An ABSENT ' +
+    'blockKind means an internal tool failure rather than a page signal — still record status ' +
+    '"blocked", using note for detail. A board whose url looks like a sign-in page (by path or ' +
+    'query string) is refused and never navigated — harvest never drives a sign-in flow through a tab. ' +
+    'Pass optional location to type into the board\'s own detected location field — never fold it ' +
+    'into keywords. ' +
     "A board's result carries a raw snapshot ONLY when its page had content but extraction " +
     'matched nothing (including a consent/bot-check phrase seen alongside real content) — read ' +
     'that yourself as the last resort. Production harvests boards serially, one at a time, ' +
@@ -131,6 +135,7 @@ export const harvestPostingsTool: ToolDefinition = {
             board: { type: 'string', description: "The board's name, for reporting." },
             url: { type: 'string', description: "The board's search or listing URL to open." },
             keywords: { type: 'string', description: 'Keywords to type into the detected search box, if any.' },
+            location: { type: 'string', description: "A location to type into the board's own detected location field, if any — never folded into keywords." },
           },
           required: ['board', 'url'],
           additionalProperties: false,
@@ -231,6 +236,7 @@ function coerceBoard(v: Record<string, unknown>): HarvestBoardRequest {
     board: v.board as string,
     url: v.url as string,
     keywords: typeof v.keywords === 'string' ? v.keywords : undefined,
+    location: typeof v.location === 'string' ? v.location : undefined,
   };
 }
 

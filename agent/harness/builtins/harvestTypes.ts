@@ -14,6 +14,11 @@ export interface HarvestBoardRequest {
   url: string;
   /** Keywords to type into the board's own detected search box, if any. */
   keywords?: string;
+  /** A location to type into the board's own detected location field, if
+   * any — NEVER folded into `keywords`. See harvestLocation.ts for how the
+   * field is detected and how a rejected/unrecognised value is retried
+   * with local-language aliases. */
+  location?: string;
 }
 
 /** One posting extracted by URL-shape heuristics. */
@@ -40,8 +45,13 @@ export type HarvestOutcome = 'searched' | 'empty' | 'blocked' | 'needs_review';
  * board and a bot wall need different operator follow-up, and distinct from
  * a merely slow page (see harvestNavigate.ts's `isUnreachableNavigationError`).
  * A `blocked` result's `blockKind` can also be `undefined` — see
- * {@link HarvestBoardResult.blockKind}. */
-export type BlockKind = 'login' | 'wall' | 'unreachable';
+ * {@link HarvestBoardResult.blockKind}. `'location'` means every candidate
+ * for a given `location` (the value itself and its known local-language
+ * aliases, see harvestLocation.ts) was either rejected outright by the
+ * board's own location control or produced no results even from a
+ * location-only control search — so the board never demonstrably
+ * recognised the location at all. */
+export type BlockKind = 'login' | 'wall' | 'unreachable' | 'location';
 
 /** One board's harvest result. */
 export interface HarvestBoardResult {

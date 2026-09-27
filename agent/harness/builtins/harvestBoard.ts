@@ -10,8 +10,9 @@
  * already harvested.
  */
 
-import { blockedResult, classifySnapshot } from './harvestClassify.js';
-import { navigateAndSnapshot, refuseSignInUrl, searchAndSnapshot } from './harvestNavigate.js';
+import { blockedResult } from './harvestClassify.js';
+import { navigateAndSnapshot, refuseSignInUrl } from './harvestNavigate.js';
+import { searchAndClassify } from './harvestSearch.js';
 import { callOnBoardTab, closeAllOpenedTabs, createAsyncLock, createBoardTab, selectAndNavigate } from './harvestTabs.js';
 import type { AsyncLock } from './harvestTabs.js';
 import type { BrowserToolCall, HarvestBoardRequest, HarvestBoardResult } from './harvestTypes.js';
@@ -35,8 +36,7 @@ async function harvestOneBoard(call: BrowserToolCall, board: HarvestBoardRequest
   if (refused) return refused;
   const navigated = await navigateAndSnapshot(call, board.url);
   if ('error' in navigated) return blockedResult(board, navigated.error, navigated.blockKind);
-  const finalSnapshot = board.keywords ? await searchAndSnapshot(call, navigated.snapshot, board.keywords) : navigated.snapshot;
-  return classifySnapshot(board, finalSnapshot);
+  return searchAndClassify(call, board, navigated.snapshot);
 }
 
 /**
@@ -66,8 +66,7 @@ async function harvestInTab(
   const navigated = await selectAndNavigate(call, lock, created.index, board.url);
   if ('error' in navigated) return blockedResult(board, navigated.error, navigated.blockKind);
   const tabCall: BrowserToolCall = (toolName, args) => callOnBoardTab(call, lock, created.index, toolName, args);
-  const finalSnapshot = board.keywords ? await searchAndSnapshot(tabCall, navigated.snapshot, board.keywords) : navigated.snapshot;
-  return classifySnapshot(board, finalSnapshot);
+  return searchAndClassify(tabCall, board, navigated.snapshot);
 }
 
 /** Harvest one board, confining any THROWN failure to this board's own

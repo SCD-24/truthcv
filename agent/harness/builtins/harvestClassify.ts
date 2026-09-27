@@ -68,6 +68,11 @@ const EMPTY_PHRASES: readonly string[] = [
   'no positions found',
   'no openings found',
   'no results match your search',
+  'keine ergebnisse',
+  'keine treffer',
+  'keine jobs gefunden',
+  'keine stellen gefunden',
+  'keine stellenangebote gefunden',
 ];
 
 /** Matches an explicit "zero results" count on a NUMBER boundary, so "10
@@ -109,8 +114,12 @@ export function matchesAny(text: string, patterns: readonly RegExp[]): boolean {
   return patterns.some((re) => re.test(text));
 }
 
-/** Whether the page explicitly states its search matched nothing. */
-function isExplicitlyEmpty(text: string): boolean {
+/** Whether the page explicitly states its search matched nothing — English
+ * or German phrasing. Exported for reuse by the location-control retry flow
+ * (harvestBoard.ts), which needs the same explicit-empty check to tell a
+ * board's location-only control search actually ran and matched nothing
+ * from one that merely failed to submit. */
+export function isExplicitlyEmpty(text: string): boolean {
   return containsPhrase(text, EMPTY_PHRASES) || ZERO_RESULTS_RE.test(text);
 }
 

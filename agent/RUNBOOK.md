@@ -344,10 +344,12 @@ board's own site instead of via a `site:` dork, because the board has no
 useful dork surface. Your run prompt carries a Direct-search boards block for
 these, with the board's URL and its sign-in URL (if any), plus a separate
 per-profile criteria line naming that profile's `keywords` and `locations`.
-`harvest_postings` (below) takes only a single `keywords` string — it has no
-separate location argument — so **fold a profile's `locations` into the
-`keywords` text you pass it** (e.g. `"backend engineer Berlin"`) rather than
-dropping them. Work this channel before the dork queries.
+`harvest_postings` (below) takes a separate `location` argument alongside
+`keywords` — pass a profile's `locations` there, one at a time, rather than
+folding them into `keywords` text. It types `location` into the board's own
+detected location field, never into the keyword box, and retries the
+board's own local-language spelling before giving up on it. Work this
+channel before the dork queries.
 
 Harvest each direct board with the `harvest_postings` built-in tool instead of
 driving the browser step by step yourself. Pass it one or more `boards`, each
@@ -381,6 +383,11 @@ but unreadable), which USUALLY also carries a `blockKind`:
   network errors is reported `blocked` with NO `blockKind` at all instead —
   see the next bullet — so a slow-but-reachable board is never misreported
   to you as a dead link.
+- `blockKind: "location"` — a `location` argument was given, but neither it
+  nor any of its known local-language aliases was ever confirmed by the
+  board's own location-only control search; the board's location field
+  never demonstrably recognised it. Record this the same as
+  `status="blocked"`.
 - No `blockKind` at all — an internal tool failure (a lost browser
   connection, a `browser_snapshot` call that itself errored, or a navigation
   failure too generic to confirm as a dead URL), rather than any signal read

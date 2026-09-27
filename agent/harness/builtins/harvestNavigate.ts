@@ -8,6 +8,7 @@
  */
 
 import { blockedResult, matchesAny } from './harvestClassify.js';
+import { isLocationFieldLine } from './harvestLocation.js';
 import type { BlockKind, BrowserToolCall, HarvestBoardRequest, HarvestBoardResult } from './harvestTypes.js';
 
 /** URL path segments unambiguously naming a sign-in/authentication flow.
@@ -46,6 +47,20 @@ const UNREACHABLE_NET_ERROR_PATTERNS: readonly RegExp[] = [
 
 /** Match a searchbox/textbox line and capture its `[ref=...]` element ref. */
 const SEARCH_BOX_RE = /-\s*(?:searchbox|textbox)[^\n[]*\[ref=([^\]]+)]/i;
+
+/** The `[ref=...]` of the first line in `snapshot` that looks like a plain
+ * keyword box — a searchbox/textbox line, in document order, SKIPPING any
+ * line {@link isLocationFieldLine} names a location field, so a board that
+ * lists its location field before its keyword box never has the location
+ * field mistaken for the keyword box. */
+function findKeywordFieldRef(snapshot: string): string | undefined {
+  for (const line of snapshot.split('\n')) {
+    if (isLocationFieldLine(line)) continue;
+    const match = SEARCH_BOX_RE.exec(line);
+    if (match) return match[1];
+  }
+  return undefined;
+}
 
 /** Whether `url` looks like a sign-in/login/auth flow rather than an
  * ordinary board page — by its path, or by a query-string parameter whose
@@ -109,7 +124,7 @@ export async function navigateAndSnapshot(
  * back to the original `snapshot` unchanged when no search box is found or
  * either call errors. */
 export async function searchAndSnapshot(call: BrowserToolCall, snapshot: string, keywords: string): Promise<string> {
-  const ref = SEARCH_BOX_RE.exec(snapshot)?.[1];
+  const ref = findKeywordFieldRef(snapshot);
   if (!ref) return snapshot;
   const typed = await call('browser_type', { element: 'search box', ref, text: keywords, submit: true });
   if (typed.isError) return snapshot;
