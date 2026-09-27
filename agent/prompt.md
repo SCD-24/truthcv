@@ -35,10 +35,12 @@ their application history is this tool surface. You have the following tools:
 - `harvest_postings` — harvests one or more direct-search boards' results in
   ONE call, instead of driving `browser_navigate`/`browser_snapshot`/
   `browser_type` yourself. Pass `boards`, each with a `board` name, its
-  search `url`, and optional `keywords` to type into the board's own search
-  box — there is no separate location argument, so fold a profile's
-  `locations` into the `keywords` text you pass too. It extracts posting URLs
-  by matching each known ATS's stable URL shape against the page's
+  search `url`, optional `keywords` to type into the board's own search
+  box, and optional `location` to type into the board's own detected
+  location field — never fold a profile's `locations` into `keywords`
+  text; pass one location at a time via `location` instead, and it retries
+  the board's own local-language spelling before giving up. It extracts
+  posting URLs by matching each known ATS's stable URL shape against the page's
   accessibility tree — never a CSS selector — and returns, per board, an
   `outcome`: `"searched"` (postings found — matches
   `record_discovery_coverage`'s own status vocabulary, so pass it straight
@@ -49,9 +51,11 @@ their application history is this tool surface. You have the following tools:
   `status="login_walled"`, NEVER `"blocked"`; `"wall"` (a CAPTCHA/consent
   interstitial with no substantive page content of its own) or
   `"unreachable"` (a confirmed DNS/connection failure, never just a slow
-  page) both map to `status="blocked"` as reported; an ABSENT `blockKind`
-  means an internal tool failure rather than a page signal — read `note` and
-  still record `status="blocked"`. A board whose `url` itself looks like a
+  page) both map to `status="blocked"` as reported; `"location"` means a
+  given `location` (and its known local-language aliases) was never
+  confirmed by the board's own location control — record `status="blocked"`;
+  an ABSENT `blockKind` means an internal tool failure rather than a page
+  signal — read `note` and still record `status="blocked"`. A board whose `url` itself looks like a
   sign-in page (by path or query string) is refused and never navigated —
   `harvest_postings` never drives a sign-in flow through a tab. A result
   carries a raw snapshot ONLY when its page had content but extraction

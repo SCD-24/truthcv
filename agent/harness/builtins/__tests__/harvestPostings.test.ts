@@ -123,9 +123,9 @@ describe('harvestPostingsTool definition', () => {
     expect(harvestPostingsTool.inputSchema.required).toEqual(['boards']);
   });
 
-  it('no longer accepts a location argument', () => {
+  it('accepts a location argument', () => {
     const properties = harvestPostingsTool.inputSchema.properties as { boards?: { items?: { properties?: object } } };
-    expect(properties.boards?.items?.properties).not.toHaveProperty('location');
+    expect(properties.boards?.items?.properties).toHaveProperty('location');
   });
 });
 
@@ -780,7 +780,7 @@ describe('harvestPostings: argument validation and error handling', () => {
     expect(results[0].board).toBe('Valid');
   });
 
-  it('drops a location argument rather than acting on it', async () => {
+  it('accepts a location argument, harvesting normally when the page has no location field', async () => {
     const call = stubBrowserCall(singleTabHandlers(GREENHOUSE_LINK));
 
     const result = await harvestPostings(
@@ -806,6 +806,276 @@ describe('harvestPostings: argument validation and error handling', () => {
     const { results } = JSON.parse(result.content);
     expect(results[0].outcome).toBe('blocked');
     expect(results[0].note).toContain('mcp connection lost');
+  });
+});
+
+describe('harvestPostings: location field control-search flow', () => {
+  /** Field lines: a keyword box and a location box, in the given order —
+   * used to test that ordering never matters (case 7). */
+  function fieldLines(order: 'kw-first' | 'loc-first' = 'kw-first'): string {
+    const kw = '- textbox "Keywords" [ref=kw]';
+    const loc = '- textbox "Location" [ref=loc]';
+    return `${order === 'kw-first' ? kw : loc}\n${order === 'kw-first' ? loc : kw}\n`;
+  }
+
+  /** A stateful fake single-tab browser driving the location-control flow:
+   * `resultFor(kw, loc)` decides what each snapshot shows for the CURRENT
+   * typed keywords/location, reset to '' on every `browser_navigate`. */
+  function makeLocationBrowser(
+    resultFor: (kw: string, loc: string) => 'postings' | 'zero' | 'rejected',
+    order: 'kw-first' | 'loc-first' = 'kw-first',
+  ): { call: BrowserToolCall; calls: { toolName: string; args: Record<string, unknown> }[] } {
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    let kw = '';
+    let loc = '';
+    function snapshotText(): string {
+      const outcome = resultFor(kw, loc);
+      if (outcome === 'postings') return fieldLines(order) + GREENHOUSE_LINK;
+      if (outcome === 'rejected') return fieldLines(order) + 'Invalid location entered.';
+      return fieldLines(order) + 'No jobs found.';
+    }
+    const call = stubBrowserCall(
+      {
+        browser_navigate: () => {
+          kw = '';
+          loc = '';
+          return { content: 'ok', isError: false };
+        },
+        browser_snapshot: () => ({ content: snapshotText(), isError: false }),
+        browser_type: (args) => {
+          const ref = args.ref as string;
+          if (ref === 'kw') kw = args.text as string;
+          if (ref === 'loc') loc = args.text as string;
+          return { content: 'ok', isError: false };
+        },
+      },
+      calls,
+    );
+    return { call, calls };
+  }
+
+  it('(1) types the location on the location ref and keywords on the keyword ref, returning searched', async () => {
+    const { call, calls } = makeLocationBrowser((kw, loc) => (kw === 'eng' && loc === 'Berlin' ? 'postings' : 'zero'));
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    const typeCalls = calls.filter((c) => c.toolName === 'browser_type');
+    expect(typeCalls).toContainEqual({ toolName: 'browser_type', args: expect.objectContaining({ ref: 'loc', text: 'Berlin', submit: false }) });
+    expect(typeCalls).toContainEqual({ toolName: 'browser_type', args: expect.objectContaining({ ref: 'kw', text: 'eng', submit: true }) });
+  });
+
+  it('(2) with no location field, zero results classify empty with no control navigate issued', async () => {
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    const call = stubBrowserCall(
+      {
+        browser_navigate: { content: 'ok', isError: false },
+        browser_snapshot: { content: '- textbox "Keywords" [ref=kw]\nNo jobs found.', isError: false },
+        browser_type: { content: 'ok', isError: false },
+      },
+      calls,
+    );
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('empty');
+    expect(calls.filter((c) => c.toolName === 'browser_navigate')).toHaveLength(1);
+  });
+
+  it('(3) a zero combined search whose control search confirms the location classifies empty, naming it', async () => {
+    const { call } = makeLocationBrowser((kw, loc) => (kw === '' && loc === 'Berlin' ? 'postings' : 'zero'));
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('empty');
+    expect(results[0].note).toBe('search ran; zero matches; location "Berlin" confirmed recognised by a location-only control search');
+  });
+
+  it('(4) retries the German alias when the English control comes back zero, and the alias search finds postings', async () => {
+    const { call } = makeLocationBrowser((kw, loc) => (kw === 'eng' && loc === 'Deutschland' ? 'postings' : 'zero'));
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Germany' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+  });
+
+  it('(5) blocks with blockKind location when every candidate is empty/rejected', async () => {
+    const { call } = makeLocationBrowser(() => 'zero');
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Germany' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('blocked');
+    expect(results[0].blockKind).toBe('location');
+    expect(results[0].note).toContain('tried Germany, Deutschland');
+  });
+
+  it('(6) a rejection phrase short-circuits straight to the next candidate', async () => {
+    const { call } = makeLocationBrowser((kw, loc) => {
+      if (kw === '' && loc === 'Germany') return 'rejected';
+      if (kw === 'eng' && loc === 'Deutschland') return 'postings';
+      return 'zero';
+    });
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Germany' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+  });
+
+  it('(7) a keyword box listed after the location field is still chosen for the keywords', async () => {
+    const { call, calls } = makeLocationBrowser((kw, loc) => (kw === 'eng' && loc === 'Berlin' ? 'postings' : 'zero'), 'loc-first');
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    const typeCalls = calls.filter((c) => c.toolName === 'browser_type');
+    expect(typeCalls).toContainEqual({ toolName: 'browser_type', args: expect.objectContaining({ ref: 'kw', text: 'eng' }) });
+  });
+
+  it('(8) a rejection phrase on the COMBINED page skips the control entirely and tries the next candidate', async () => {
+    const { call, calls } = makeLocationBrowser((kw, loc) => {
+      if (kw === 'eng' && loc === 'Germany') return 'rejected';
+      if (kw === 'eng' && loc === 'Deutschland') return 'postings';
+      return 'zero';
+    });
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Germany' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    // Only the initial navigate plus the re-navigate for the Deutschland
+    // candidate — no control navigate was ever issued for Germany.
+    expect(calls.filter((c) => c.toolName === 'browser_navigate')).toHaveLength(2);
+  });
+
+  it('(9) a control page showing a login wall blocks with blockKind login, never confirming the location', async () => {
+    let navigateCount = 0;
+    const call = stubBrowserCall({
+      browser_navigate: () => {
+        navigateCount++;
+        return { content: 'ok', isError: false };
+      },
+      browser_type: () => ({ content: 'ok', isError: false }),
+      browser_snapshot: () =>
+        navigateCount >= 2
+          ? { content: fieldLines() + 'Please sign in to continue.', isError: false }
+          : { content: fieldLines() + 'No jobs found.', isError: false },
+    });
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('blocked');
+    expect(results[0].blockKind).toBe('login');
+  });
+
+  it('(10) a browser_type error during the control search never confirms empty nor reports blockKind location', async () => {
+    let locTypeCount = 0;
+    const call = stubBrowserCall({
+      browser_navigate: () => ({ content: 'ok', isError: false }),
+      browser_type: (args) => {
+        if (args.ref === 'loc') {
+          locTypeCount++;
+          if (locTypeCount >= 2) return { content: 'type failed', isError: true };
+        }
+        return { content: 'ok', isError: false };
+      },
+      browser_snapshot: () => ({ content: fieldLines() + 'No jobs found.', isError: false }),
+    });
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('empty');
+    expect(results[0].blockKind).not.toBe('location');
+    expect(results[0].note).not.toContain('confirmed recognised');
+  });
+
+  it('(11) a navigation error during the control search falls back to the combined snapshot instead of blocking as location', async () => {
+    let navigateCount = 0;
+    const call = stubBrowserCall({
+      browser_navigate: () => {
+        navigateCount++;
+        if (navigateCount >= 2) return { content: 'nav failed', isError: true };
+        return { content: 'ok', isError: false };
+      },
+      browser_type: () => ({ content: 'ok', isError: false }),
+      browser_snapshot: () => ({ content: fieldLines() + 'No jobs found.', isError: false }),
+    });
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('empty');
+    expect(results[0].blockKind).not.toBe('location');
+  });
+
+  it('(12) real ATS posting links alongside a "did you mean" phrase on the combined page still classify searched', async () => {
+    const call = stubBrowserCall({
+      browser_navigate: () => ({ content: 'ok', isError: false }),
+      browser_type: () => ({ content: 'ok', isError: false }),
+      browser_snapshot: () => ({ content: `${fieldLines()}${GREENHOUSE_LINK}\nDid you mean Engineer?`, isError: false }),
+    });
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    expect(results[0].postings).toHaveLength(1);
   });
 });
 
