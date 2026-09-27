@@ -45,7 +45,8 @@ their application history is this tool surface. You have the following tools:
   `outcome`: `"searched"` (postings found — matches
   `record_discovery_coverage`'s own status vocabulary, so pass it straight
   through as `status`) plus `tier: "harvest"`; `"empty"` (explicit zero-result
-  evidence); `"needs_review"` (internal ambiguous extraction); or `"blocked"` (the page was reachable but
+  evidence); `"needs_review"` (internal ambiguous extraction, resolved to
+  `searched`/`llm`, `empty`, or `extraction_failed` if unresolved); or `"blocked"` (the page was reachable but
   unreadable), which USUALLY also carries a `blockKind` — `"login"` means
   call `report_apply_failure` with `blocker="login_required"` and then record
   `status="login_walled"`, NEVER `"blocked"`; `"wall"` (a CAPTCHA/consent
@@ -65,7 +66,7 @@ their application history is this tool surface. You have the following tools:
   That ambiguous result has `outcome="needs_review"` ONLY inside the harvest
   result, NEVER as a coverage status: recover postings from the raw snapshot
   and record `searched`/`llm`, use `empty` only on explicit zero-result
-  evidence, or record `blocked` with an extraction-failure reason if unresolved.
+  evidence, or record `extraction_failed` with the reason if unresolved.
   Boards harvest serially, one at a time through the primary browser
   connection (not concurrent tabs). Its own execution is serialized against every other browser-driving tool call, so
   it never interleaves with one you issue yourself.
@@ -109,7 +110,7 @@ their application history is this tool surface. You have the following tools:
 - `record_discovery_coverage` — call this after EVERY board or query you work
   in Phase 1, across all three channels (feed, direct boards, dorks), with the
   channel, the board (or query), a status (`searched`, `empty`,
-  `login_walled`, `blocked`, or `skipped`), and `postings_found`. This is what
+  `login_walled`, `blocked`, `extraction_failed`, or `skipped`), and `postings_found`. This is what
   makes the §9 report's per-board coverage possible — skipping the call is
   never acceptable, even for a board that turned up nothing. `empty` means the
   search ran and genuinely matched nothing; `blocked` means the page could not

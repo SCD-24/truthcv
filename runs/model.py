@@ -66,7 +66,7 @@ class RunRecord:
     # Per-source discovery coverage: what the agent actually searched this run,
     # not just what it found. Each entry is a dict shaped like:
     #   {"channel": "feed"|"direct"|"dork", "board": str,
-    #    "status": "searched"|"empty"|"login_walled"|"blocked"|"skipped",
+    #    "status": "searched"|"empty"|"login_walled"|"blocked"|"extraction_failed"|"skipped",
     #    "postings_found": int, "reason": str, "tier": "api"|"harvest"|"llm"|""}
     # so a run that skipped or was blocked from a source leaves that fact
     # behind instead of just an absence of postings from it. "empty" means the

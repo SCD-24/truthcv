@@ -74,6 +74,7 @@ describe("RecentRunsSection", () => {
             { channel: "direct", board: "Lever", status: "searched", postingsFound: 0, reason: "" },
             { channel: "direct", board: "Personio", status: "login_walled", postingsFound: 0, reason: "" },
             { channel: "direct", board: "Workday", status: "login_walled", postingsFound: 0, reason: "" },
+            { channel: "direct", board: "Indeed", status: "extraction_failed", postingsFound: 0, reason: "extraction matched nothing" },
           ],
         }),
       ]),
@@ -83,7 +84,9 @@ describe("RecentRunsSection", () => {
 
     await waitFor(() => expect(screen.getByText("run-with-coverage")).toBeTruthy());
     expect(
-      screen.getByText("Feed: 11 postings · Direct boards: 3 searched, 2 login-walled · Dorks: not reached"),
+      screen.getByText(
+        "Feed: 11 postings · Direct boards: 3 searched, 1 extraction-failed, 2 login-walled · Dorks: not reached",
+      ),
     ).toBeTruthy();
   });
 

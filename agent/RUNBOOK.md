@@ -406,7 +406,7 @@ result also carries the raw snapshot text — read that yourself as the
 LAST-RESORT fallback (an LLM-extraction tier 3 step) only for that
 `needs_review` result. Resolve it before coverage: recovered postings map to
 `searched`/`llm`; explicit zero-result evidence maps to `empty`; unresolved
-extraction maps to `blocked` with a reason naming extraction failure.
+extraction maps to `extraction_failed` with a reason naming extraction failure.
 `needs_review` is NEVER a `record_discovery_coverage` status. Do not fall
 back to a manual `browser_navigate`/`browser_snapshot` pass otherwise, and
 never for a board `harvest_postings`
@@ -435,8 +435,8 @@ next run — and move on to the next board or query.
 
 After every board or query in every channel — feed, direct boards, and dork
 queries alike — call `record_discovery_coverage` with the channel, the board
-(or query), a status (`searched`, `empty`, `login_walled`, `blocked`, or
-`skipped`), and `postings_found`. This is what makes the §9 coverage report
+(or query), a status (`searched`, `empty`, `login_walled`, `blocked`,
+`extraction_failed`, or `skipped`), and `postings_found`. This is what makes the §9 coverage report
 possible: a board worked but never recorded is indistinguishable, at report
 time, from one never reached at all. Call it even for a board that turned up
 nothing — `empty` is a real, useful status, and skipping the call is never

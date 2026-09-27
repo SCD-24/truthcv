@@ -345,6 +345,40 @@ def test_add_discovery_coverage_is_a_no_op_for_an_unknown_run(data_dir):
     assert store.add_discovery_coverage("never-started", {"channel": "feed"}) is None
 
 
+def test_record_discovery_coverage_accepts_extraction_failed_status(data_dir):
+    """"extraction_failed" (board reachable and not walled, but harvest could
+    not extract or read its results) is distinct from both "empty" and
+    "blocked", and round-trips through the store on read."""
+    tools_runs.start_run(run_id="run-extraction-failed", trigger="scheduled")
+
+    result = tools_runs.record_discovery_coverage(
+        run_id="run-extraction-failed",
+        channel="direct",
+        board="greenhouse",
+        status="extraction_failed",
+        postings_found=0,
+        reason="extraction matched nothing without zero-result evidence",
+    )
+
+    assert result["recorded"] is True
+    entry = store.get("run-extraction-failed").discovery_coverage[0]
+    assert entry["status"] == "extraction_failed"
+
+
+def test_record_discovery_coverage_rejects_an_unknown_status(data_dir):
+    tools_runs.start_run(run_id="run-bad-status", trigger="scheduled")
+
+    result = tools_runs.record_discovery_coverage(
+        run_id="run-bad-status",
+        channel="direct",
+        board="greenhouse",
+        status="not_a_real_status",
+    )
+
+    assert result == {"recorded": False}
+    assert store.get("run-bad-status").discovery_coverage == []
+
+
 def test_record_discovery_coverage_accepts_blocked_status_and_tier(data_dir):
     """"blocked" (reachable but unreadable — CAPTCHA, consent wall, bot check)
     is distinct from "empty" (ran and genuinely matched nothing), and the tier
