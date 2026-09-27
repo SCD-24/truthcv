@@ -23,7 +23,7 @@
 
 import { blockedResult, classifySnapshot, isExplicitlyEmpty } from './harvestClassify.js';
 import { findLocationFieldRef, locationCandidates, showsLocationRejected } from './harvestLocation.js';
-import { navigateAndSnapshot, searchAndSnapshot } from './harvestNavigate.js';
+import { navigateAndSnapshot, searchAndSnapshot, type KeywordSearchResult } from './harvestNavigate.js';
 import type { BrowserToolCall, HarvestBoardRequest, HarvestBoardResult } from './harvestTypes.js';
 
 /** Type `location` into the location field at `ref` and, when `keywords` is
@@ -48,7 +48,7 @@ async function typeLocationAndKeywords(
     if (snap.isError) throw new Error(`location box: browser_snapshot failed: ${snap.content}`);
     return snap.content;
   }
-  return searchAndSnapshot(call, snapshot, keywords);
+  return (await searchAndSnapshot(call, snapshot, keywords)).snapshot;
 }
 
 /** Run the combined keywords+location search for `candidate` against the
@@ -183,11 +183,22 @@ export async function searchAndClassify(call: BrowserToolCall, board: HarvestBoa
   try {
     const locationRef = board.location ? findLocationFieldRef(snapshot) : undefined;
     if (!locationRef) {
-      const best = board.keywords ? await searchAndSnapshot(call, snapshot, board.keywords) : snapshot;
-      return classifySnapshot(board, best);
+      if (!board.keywords) return classifySnapshot(board, snapshot);
+      const search = await searchAndSnapshot(call, snapshot, board.keywords);
+      return annotateUnsubmitted(classifySnapshot(board, search.snapshot), search);
     }
     return await resolveLocationControl(call, board, snapshot);
   } catch {
     return classifySnapshot(board, snapshot);
   }
+}
+
+/** When `result` is `needs_review` and the keyword search never confirmed
+ * being submitted, append the search's own `reason` to `result.note` so an
+ * operator reviewing it can tell an unconfirmed search apart from a
+ * genuinely unrecognised page. Returns `result` unchanged otherwise. */
+function annotateUnsubmitted(result: HarvestBoardResult, search: KeywordSearchResult): HarvestBoardResult {
+  if (result.outcome !== 'needs_review' || search.submitted) return result;
+  const suffix = `search not submitted: ${search.reason}`;
+  return { ...result, note: result.note ? `${result.note}; ${suffix}` : suffix };
 }

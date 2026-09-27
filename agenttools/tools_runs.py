@@ -336,10 +336,13 @@ def record_discovery_coverage(
     stays absent from the record rather than getting silently reported as
     "empty" — the operator reads a missing entry as "not reached". ``channel``
     must be one of feed, direct or dork; ``status`` must be one of searched,
-    empty, login_walled, blocked or skipped. ``empty`` means the search ran
-    and genuinely matched nothing; ``blocked`` means the board or query was
-    reachable but the results could not be read — a CAPTCHA, a consent
-    interstitial, a bot wall — and must never be reported as ``empty``.
+    empty, login_walled, blocked, extraction_failed or skipped. ``empty``
+    means the search ran and genuinely matched nothing; ``blocked`` means
+    the board or query was reachable but the results could not be read — a
+    CAPTCHA, a consent interstitial, a bot wall — and must never be reported
+    as ``empty``. ``extraction_failed`` means the board was reachable and
+    not walled, but harvest could not extract or read its results — never
+    reported as ``empty`` or ``blocked``.
     ``tier`` is optional and records which extraction tier produced the
     postings: one of api, harvest or llm, or "" when not applicable.
     """
@@ -347,7 +350,7 @@ def record_discovery_coverage(
         return {"recorded": False}
     if channel not in ("feed", "direct", "dork"):
         return {"recorded": False}
-    if status not in ("searched", "empty", "login_walled", "blocked", "skipped"):
+    if status not in ("searched", "empty", "login_walled", "blocked", "extraction_failed", "skipped"):
         return {"recorded": False}
     if tier not in ("api", "harvest", "llm", ""):
         return {"recorded": False}

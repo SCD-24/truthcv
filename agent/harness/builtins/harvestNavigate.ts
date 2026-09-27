@@ -48,6 +48,25 @@ const UNREACHABLE_NET_ERROR_PATTERNS: readonly RegExp[] = [
 /** Match a searchbox/textbox line and capture its `[ref=...]` element ref. */
 const SEARCH_BOX_RE = /-\s*(?:searchbox|textbox)[^\n[]*\[ref=([^\]]+)]/i;
 
+/** Strips every `[ref=...]` token from a snapshot before comparing two
+ * snapshots for an actual content change — refs are reassigned on every
+ * `browser_snapshot` call, so comparing raw text would see a "change" even
+ * when nothing on the page actually moved. */
+const REF_TOKEN_RE = /\[ref=[^\]]+]/g;
+
+/** An input-field snapshot line's trailing `: <value>` — Playwright's aria
+ * snapshot renders a filled searchbox/textbox/combobox as
+ * `- textbox "Search": backend`, so merely TYPING the keywords changes the
+ * snapshot even when the submit itself never did anything. Captures the
+ * line without that value so it can be dropped before comparing. Applied
+ * after {@link REF_TOKEN_RE}. */
+const FIELD_VALUE_RE = /^(\s*-\s*(?:searchbox|textbox|combobox)\b[^\n]*?):\s[^\n]*$/gim;
+
+/** Seconds to wait, via `browser_wait_for`, for a client-side search submit
+ * that has not visibly changed the page yet — some boards debounce or
+ * animate their results in rather than updating synchronously. */
+const SEARCH_SETTLE_SECONDS = 2;
+
 /** The `[ref=...]` of the first line in `snapshot` that looks like a plain
  * keyword box — a searchbox/textbox line, in document order, SKIPPING any
  * line {@link isLocationFieldLine} names a location field, so a board that
@@ -120,14 +139,56 @@ export async function navigateAndSnapshot(
   return { snapshot: snap.content };
 }
 
-/** Type `keywords` into the first detected search box, then re-snapshot; falls
- * back to the original `snapshot` unchanged when no search box is found or
- * either call errors. */
-export async function searchAndSnapshot(call: BrowserToolCall, snapshot: string, keywords: string): Promise<string> {
-  const ref = findKeywordFieldRef(snapshot);
-  if (!ref) return snapshot;
-  const typed = await call('browser_type', { element: 'search box', ref, text: keywords, submit: true });
-  if (typed.isError) return snapshot;
+/** Outcome of {@link searchAndSnapshot}: `snapshot` is always the best one
+ * obtained (the pre-search snapshot on any failure or non-submission,
+ * otherwise the post-search one); `submitted` is true only once the page is
+ * confirmed to have actually changed; `reason` explains a `false` `submitted`
+ * and is absent when `submitted` is true. */
+export interface KeywordSearchResult {
+  snapshot: string;
+  submitted: boolean;
+  reason?: string;
+}
+
+/** Strip every `[ref=...]` token, every input field's typed value (see
+ * {@link FIELD_VALUE_RE}) and surrounding whitespace so two snapshots can be
+ * compared for an actual content change rather than reassigned refs or the
+ * keywords just typed into the box. */
+function normaliseForComparison(snapshot: string): string {
+  return snapshot.replace(REF_TOKEN_RE, '').replace(FIELD_VALUE_RE, '$1').trim();
+}
+
+/** Re-snapshot after an inconclusive submit and give the page one more
+ * chance to settle — waits, then takes one more snapshot. Falls back to
+ * `previous` (both as the returned snapshot and for the unchanged check)
+ * when this final snapshot itself errors. */
+async function waitAndResnapshot(call: BrowserToolCall, previous: string): Promise<string> {
+  await call('browser_wait_for', { time: SEARCH_SETTLE_SECONDS });
   const snap = await call('browser_snapshot', {});
-  return snap.isError ? snapshot : snap.content;
+  return snap.isError ? previous : snap.content;
+}
+
+/** Type `keywords` into the first detected search box, submit, and confirm
+ * the page actually changed — comparing snapshots with `[ref=...]` tokens
+ * stripped, since those are reassigned on every `browser_snapshot` call and
+ * would otherwise look like a change on their own. When the first post-type
+ * snapshot looks unchanged, waits {@link SEARCH_SETTLE_SECONDS} seconds for a
+ * debounced/animated result and re-snapshots once before giving up. Never
+ * throws: any failure or an unconfirmed submit reports `submitted: false`
+ * with a `reason`, and `snapshot` is always the best one available. */
+export async function searchAndSnapshot(call: BrowserToolCall, snapshot: string, keywords: string): Promise<KeywordSearchResult> {
+  const ref = findKeywordFieldRef(snapshot);
+  if (!ref) return { snapshot, submitted: false, reason: 'no keyword search box detected' };
+  const typed = await call('browser_type', { element: 'search box', ref, text: keywords, submit: true });
+  if (typed.isError) return { snapshot, submitted: false, reason: 'keyword browser_type failed' };
+  const snap = await call('browser_snapshot', {});
+  if (snap.isError) return { snapshot, submitted: false, reason: 'post-search snapshot failed' };
+  if (normaliseForComparison(snap.content) !== normaliseForComparison(snapshot)) {
+    return { snapshot: snap.content, submitted: true };
+  }
+  const settled = await waitAndResnapshot(call, snap.content);
+  if (normaliseForComparison(settled) === normaliseForComparison(snapshot)) {
+    return { snapshot: settled, submitted: false, reason: 'submit did not change the page' };
+  }
+  return { snapshot: settled, submitted: true };
 }

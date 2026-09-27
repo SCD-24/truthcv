@@ -33,8 +33,9 @@ export interface HarvestedPosting {
 
 /** `needs_review` is internal only, NEVER a coverage status. Resolve its
  * rawSnapshot to searched/llm if postings are recovered, empty only with
- * explicit zero-result evidence, otherwise blocked with extraction detail.
- * A blocked login maps to login_walled after report_apply_failure. */
+ * explicit zero-result evidence, otherwise extraction_failed with the
+ * extraction detail as reason. A blocked login maps to login_walled after
+ * report_apply_failure. */
 export type HarvestOutcome = 'searched' | 'empty' | 'blocked' | 'needs_review';
 
 /** Which kind of `blocked` a result is, for a `blocked` outcome only —

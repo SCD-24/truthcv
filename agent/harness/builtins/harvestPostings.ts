@@ -105,7 +105,8 @@ export const harvestPostingsTool: ToolDefinition = {
     'nothing, with explicit zero-result evidence); "needs_review" (internal only: extraction ' +
     'matched nothing without zero-result evidence; inspect rawSnapshot to recover postings and ' +
     'record coverage searched/tier llm, or empty only if explicit zero results are found; if ' +
-    'unresolved record blocked with an extraction-failure reason — never persist needs_review); ' +
+    'unresolved record status "extraction_failed" with the note as reason — never persist ' +
+    'needs_review); ' +
     'or "blocked" (the page was reachable but unreadable), which usually also carries ' +
     'a blockKind — "login" means call report_apply_failure with blocker="login_required" then ' +
     'record status "login_walled", never "blocked"; "wall" (a CAPTCHA/consent interstitial with ' +

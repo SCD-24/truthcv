@@ -446,6 +446,126 @@ describe('harvestPostings: search box typing', () => {
     // No leak: the created tab (index 1 — index 0 is the pre-seeded default) was closed.
     expect(calls.some((c) => c.toolName === 'browser_tab_close' && c.args.index === 1)).toBe(true);
   });
+
+  it('a submit that never visibly changes the page (even after waiting) classifies needs_review, noting the search was never confirmed submitted', async () => {
+    // Every browser_snapshot call returns text identical except for its
+    // [ref=...] token — exercising both the "keeps waiting once" behaviour
+    // and that a ref-only difference is correctly treated as unchanged.
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    let snapshotCalls = 0;
+    const call = stubBrowserCall(
+      {
+        ...singleTabHandlers(''),
+        browser_type: { content: 'ok', isError: false },
+        browser_snapshot: () => {
+          snapshotCalls += 1;
+          return { content: `- searchbox "Search jobs" [ref=e${snapshotCalls}]\n${UNKNOWN_LINK}`, isError: false };
+        },
+      },
+      calls,
+    );
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'backend' }] },
+      call,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('needs_review');
+    expect(results[0].note).toContain('search not submitted: submit did not change the page');
+    expect(calls.filter((c) => c.toolName === 'browser_wait_for')).toHaveLength(1);
+    // navigate snapshot + post-submit snapshot + post-wait snapshot.
+    expect(snapshotCalls).toBe(3);
+  });
+
+  it('a snapshot differing only by the keywords typed into the search box still counts as not submitted', async () => {
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    let snapshotCalls = 0;
+    const call = stubBrowserCall(
+      {
+        ...singleTabHandlers(''),
+        browser_type: { content: 'ok', isError: false },
+        browser_snapshot: () => {
+          snapshotCalls += 1;
+          const value = snapshotCalls === 1 ? '' : ': backend';
+          return { content: `- searchbox "Search jobs" [ref=e${snapshotCalls}]${value}\n${UNKNOWN_LINK}`, isError: false };
+        },
+      },
+      calls,
+    );
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'backend' }] },
+      call,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('needs_review');
+    expect(results[0].note).toContain('search not submitted: submit did not change the page');
+    expect(calls.filter((c) => c.toolName === 'browser_wait_for')).toHaveLength(1);
+  });
+
+  it('a submit that only changes the page after waiting classifies from the settled snapshot, unannotated', async () => {
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    let waited = false;
+    let refCounter = 0;
+    const call = stubBrowserCall(
+      {
+        ...singleTabHandlers(''),
+        browser_type: { content: 'ok', isError: false },
+        browser_wait_for: () => {
+          waited = true;
+          return { content: 'ok', isError: false };
+        },
+        browser_snapshot: () => {
+          if (waited) return { content: GREENHOUSE_LINK, isError: false };
+          refCounter += 1;
+          return { content: `- searchbox "Search jobs" [ref=e${refCounter}]\n${UNKNOWN_LINK}`, isError: false };
+        },
+      },
+      calls,
+    );
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'backend' }] },
+      call,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(waited).toBe(true);
+    expect(results[0].outcome).toBe('searched');
+    expect(results[0].note ?? '').not.toContain('search not submitted');
+    expect(calls.filter((c) => c.toolName === 'browser_wait_for')).toHaveLength(1);
+  });
+
+  it('no detected search box classifies needs_review, noting why the search was never submitted', async () => {
+    const call = stubBrowserCall(singleTabHandlers(UNKNOWN_LINK));
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'backend' }] },
+      call,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('needs_review');
+    expect(results[0].note).toContain('search not submitted: no keyword search box detected');
+  });
+
+  it('a failed keyword browser_type classifies needs_review, noting the failure', async () => {
+    const call = stubBrowserCall({
+      ...singleTabHandlers(`- searchbox "Search jobs" [ref=e5]\n${UNKNOWN_LINK}`),
+      browser_type: { content: 'type failed', isError: true },
+    });
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'backend' }] },
+      call,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('needs_review');
+    expect(results[0].note).toContain('search not submitted: keyword browser_type failed');
+  });
 });
 
 describe('harvestPostings: tab re-resolution never collides across a path boundary', () => {
