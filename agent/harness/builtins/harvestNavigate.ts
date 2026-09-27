@@ -54,6 +54,14 @@ const SEARCH_BOX_RE = /-\s*(?:searchbox|textbox)[^\n[]*\[ref=([^\]]+)]/i;
  * when nothing on the page actually moved. */
 const REF_TOKEN_RE = /\[ref=[^\]]+]/g;
 
+/** An input-field snapshot line's trailing `: <value>` — Playwright's aria
+ * snapshot renders a filled searchbox/textbox/combobox as
+ * `- textbox "Search": backend`, so merely TYPING the keywords changes the
+ * snapshot even when the submit itself never did anything. Captures the
+ * line without that value so it can be dropped before comparing. Applied
+ * after {@link REF_TOKEN_RE}. */
+const FIELD_VALUE_RE = /^(\s*-\s*(?:searchbox|textbox|combobox)\b[^\n]*?):\s[^\n]*$/gim;
+
 /** Seconds to wait, via `browser_wait_for`, for a client-side search submit
  * that has not visibly changed the page yet — some boards debounce or
  * animate their results in rather than updating synchronously. */
@@ -142,10 +150,12 @@ export interface KeywordSearchResult {
   reason?: string;
 }
 
-/** Strip every `[ref=...]` token and surrounding whitespace so two snapshots
- * can be compared for an actual content change rather than reassigned refs. */
+/** Strip every `[ref=...]` token, every input field's typed value (see
+ * {@link FIELD_VALUE_RE}) and surrounding whitespace so two snapshots can be
+ * compared for an actual content change rather than reassigned refs or the
+ * keywords just typed into the box. */
 function normaliseForComparison(snapshot: string): string {
-  return snapshot.replace(REF_TOKEN_RE, '').trim();
+  return snapshot.replace(REF_TOKEN_RE, '').replace(FIELD_VALUE_RE, '$1').trim();
 }
 
 /** Re-snapshot after an inconclusive submit and give the page one more

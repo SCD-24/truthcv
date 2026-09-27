@@ -478,6 +478,33 @@ describe('harvestPostings: search box typing', () => {
     expect(snapshotCalls).toBe(3);
   });
 
+  it('a snapshot differing only by the keywords typed into the search box still counts as not submitted', async () => {
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    let snapshotCalls = 0;
+    const call = stubBrowserCall(
+      {
+        ...singleTabHandlers(''),
+        browser_type: { content: 'ok', isError: false },
+        browser_snapshot: () => {
+          snapshotCalls += 1;
+          const value = snapshotCalls === 1 ? '' : ': backend';
+          return { content: `- searchbox "Search jobs" [ref=e${snapshotCalls}]${value}\n${UNKNOWN_LINK}`, isError: false };
+        },
+      },
+      calls,
+    );
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'backend' }] },
+      call,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('needs_review');
+    expect(results[0].note).toContain('search not submitted: submit did not change the page');
+    expect(calls.filter((c) => c.toolName === 'browser_wait_for')).toHaveLength(1);
+  });
+
   it('a submit that only changes the page after waiting classifies from the settled snapshot, unannotated', async () => {
     const calls: { toolName: string; args: Record<string, unknown> }[] = [];
     let waited = false;
