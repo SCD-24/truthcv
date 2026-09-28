@@ -601,6 +601,7 @@ export interface JobProfile {
   name: string;
   enabled: boolean;
   keywords: string[];
+  titleKeywords: string[];
   locations: string[];
   remoteModel: string | null;
   employmentCountry: string | null;

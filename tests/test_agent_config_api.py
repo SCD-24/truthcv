@@ -221,6 +221,38 @@ def test_search_queries_populated_after_put_of_enabled_profile(client, data_dir)
     assert got["searchQueries"][0]["query"].startswith("site:jobs.ashbyhq.com")
 
 
+def test_title_keywords_round_trip_and_drive_search_queries(client, data_dir):
+    """titleKeywords survives PUT/GET round-trip, and searchQueries built from
+    it use the title keyword — not the non-title keywords — in the query."""
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "profiles": [
+                {
+                    "name": "Data Roles",
+                    "enabled": True,
+                    "keywords": ["SQL", "Airflow"],
+                    "titleKeywords": ["Data Engineer"],
+                    "locations": ["Berlin"],
+                }
+            ]
+        },
+    )
+    assert r.status_code == 200
+    profile = r.json()["profiles"][0]
+    assert profile["titleKeywords"] == ["Data Engineer"]
+
+    got = client.get("/api/agent/config").json()
+    got_profile = got["profiles"][0]
+    assert got_profile["titleKeywords"] == ["Data Engineer"]
+
+    queries = [q["query"] for q in got["searchQueries"]]
+    assert queries
+    assert any("Data Engineer" in q for q in queries)
+    assert not any("SQL" in q for q in queries)
+    assert not any("Airflow" in q for q in queries)
+
+
 def test_profile_search_fields_round_trip_through_put_and_get(client, data_dir):
     """keywords and locations survive a PUT then GET round-trip on the wire,
     under their camelCase aliases. Sources are no longer per-profile — see
