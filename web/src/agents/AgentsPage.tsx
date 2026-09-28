@@ -961,6 +961,7 @@ interface ProfileDraft {
   name: string;
   enabled: boolean;
   keywordsText: string;
+  titleKeywordsText: string;
   locationsText: string;
   remoteModel: string;
   employmentCountry: string;
@@ -1014,6 +1015,7 @@ function profileToDraft(p: JobProfile): ProfileDraft {
     name: p.name,
     enabled: p.enabled,
     keywordsText: listToText(p.keywords),
+    titleKeywordsText: listToText(p.titleKeywords ?? []),
     locationsText: listToText(p.locations),
     remoteModel: p.remoteModel ?? "",
     employmentCountry: p.employmentCountry ?? "",
@@ -1036,6 +1038,7 @@ function emptyDraft(): ProfileDraft {
     name: "New profile",
     enabled: true,
     keywordsText: "",
+    titleKeywordsText: "",
     locationsText: "",
     remoteModel: "remote",
     employmentCountry: "Germany",
@@ -1059,6 +1062,7 @@ function draftToProfile(d: ProfileDraft): JobProfile {
     name: d.name.trim(),
     enabled: d.enabled,
     keywords: textToList(d.keywordsText),
+    titleKeywords: textToList(d.titleKeywordsText),
     locations: textToList(d.locationsText),
     remoteModel: d.remoteModel.trim() || null,
     employmentCountry: d.employmentCountry.trim() || null,
@@ -1243,6 +1247,14 @@ function ProfilesSection({
                   value={draft.keywordsText}
                   onChange={(e) => updateDraft(index, { keywordsText: e.target.value })}
                   helperText="Comma-separated. Blank means no keyword filter."
+                />
+                <TextField
+                  label="Job titles (search)"
+                  size="small"
+                  fullWidth
+                  value={draft.titleKeywordsText}
+                  onChange={(e) => updateDraft(index, { titleKeywordsText: e.target.value })}
+                  helperText="Comma-separated job titles used for Google searches. Blank means titles are picked out of Keywords automatically."
                 />
                 <TextField
                   label="Locations"

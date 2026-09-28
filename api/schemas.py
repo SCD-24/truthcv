@@ -297,6 +297,7 @@ class JobProfileModel(_Camel):
     name: str = ""
     enabled: bool = True
     keywords: list[str] = Field(default_factory=list)
+    title_keywords: list[str] = Field(default_factory=list)
     locations: list[str] = Field(default_factory=list)
     remote_model: str | None = None
     employment_country: str | None = None
@@ -335,7 +336,7 @@ class JobProfileModel(_Camel):
             raise ValueError("glassdoor_min_reviews must be >= 0")
         return v
 
-    @field_validator("keywords", "locations", "accepted_role_types", "rejected_role_types", mode="before")
+    @field_validator("keywords", "title_keywords", "locations", "accepted_role_types", "rejected_role_types", mode="before")
     @classmethod
     def _split_comma_delimited_lists(cls, v):
         if isinstance(v, str):

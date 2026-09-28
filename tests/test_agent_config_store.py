@@ -236,6 +236,24 @@ def test_non_int_window_value_falls_back_to_none():
     assert cfg.cooldown_days_same_company is None
 
 
+def test_title_keywords_round_trip():
+    profile = store.JobProfile(title_keywords=["Data Engineer", "Backend Engineer"])
+    restored = store.JobProfile.from_dict(profile.to_dict())
+    assert restored.title_keywords == ["Data Engineer", "Backend Engineer"]
+
+
+def test_title_keywords_missing_key_defaults_to_empty():
+    cfg = store.JobProfile.from_dict({"name": "p"})
+    assert cfg.title_keywords == []
+
+
+def test_title_keywords_wrong_type_defaults_to_empty():
+    cfg = store.JobProfile.from_dict({"title_keywords": "not-a-list"})
+    assert cfg.title_keywords == []
+    cfg2 = store.JobProfile.from_dict({"title_keywords": [1, 2, 3]})
+    assert cfg2.title_keywords == []
+
+
 def test_job_profile_currency_defaults_to_none():
     """JobProfile has no regional default currency; the user states their own."""
     profile = store.JobProfile()

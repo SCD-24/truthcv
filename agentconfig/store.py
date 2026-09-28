@@ -89,6 +89,9 @@ class JobProfile:
     enabled: bool = True
     # Search group
     keywords: list[str] = field(default_factory=list)
+    # Job titles used for Google dork discovery; when empty, dork composition
+    # falls back to titles detected from keywords (see agentconfig/dorks.py).
+    title_keywords: list[str] = field(default_factory=list)
     locations: list[str] = field(default_factory=list)
     # Requirement fields (all optional/nullable per spec)
     remote_model: str | None = None
@@ -118,8 +121,8 @@ class JobProfile:
         if "enabled" in raw and isinstance(raw["enabled"], bool):
             kwargs["enabled"] = raw["enabled"]
 
-        # keywords, locations: list[str]
-        for field_name in ("keywords", "locations"):
+        # keywords, title_keywords, locations: list[str]
+        for field_name in ("keywords", "title_keywords", "locations"):
             if field_name in raw:
                 if _is_string_list(raw[field_name]):
                     kwargs[field_name] = raw[field_name]
@@ -164,6 +167,7 @@ class JobProfile:
             "name": self.name,
             "enabled": self.enabled,
             "keywords": self.keywords,
+            "title_keywords": self.title_keywords,
             "locations": self.locations,
             "remote_model": self.remote_model,
             "employment_country": self.employment_country,
