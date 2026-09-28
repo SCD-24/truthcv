@@ -209,7 +209,8 @@ Record which profile drove each application in the screening report.
 
 The profile's `keywords` and `locations` are not screening criteria — they
 drive discovery instead, alongside the global job boards list on the Agents
-page (which always includes the default boards); see §5's Discovery
+page (which includes the default boards unless the operator has switched
+one off on the Job Boards page); see §5's Discovery
 subsection.
 
 **Verify entity and remote policy on the employer's own posting.** Never

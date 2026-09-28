@@ -26,6 +26,7 @@ vi.mock("../api/client", () => ({
 const REMOTE_ROCKETSHIP: JobBoard = {
   source: "remoterocketship",
   signinUrl: "",
+  enabled: true,
   mode: "feed",
   modeLocked: true,
   domain: "remoterocketship.com",
@@ -56,10 +57,10 @@ afterEach(() => {
 });
 
 const DEFAULT_BOARDS: JobBoard[] = [
-  { source: "ashby", signinUrl: "", mode: "dork", modeLocked: true, domain: "jobs.ashbyhq.com", effectiveSigninUrl: "https://jobs.ashbyhq.com", isDefault: true, isApi: false, keyRequired: false, searchUrl: "", postingUrlPattern: "" },
-  { source: "greenhouse", signinUrl: "", mode: "dork", modeLocked: true, domain: "job-boards.greenhouse.io", effectiveSigninUrl: "https://job-boards.greenhouse.io", isDefault: true, isApi: false, keyRequired: false, searchUrl: "", postingUrlPattern: "" },
-  { source: "lever", signinUrl: "", mode: "dork", modeLocked: true, domain: "jobs.lever.co", effectiveSigninUrl: "https://jobs.lever.co", isDefault: true, isApi: false, keyRequired: false, searchUrl: "", postingUrlPattern: "" },
-  { source: "workday", signinUrl: "", mode: "dork", modeLocked: true, domain: "myworkdayjobs.com", effectiveSigninUrl: "https://www.myworkdayjobs.com", isDefault: true, isApi: false, keyRequired: false, searchUrl: "", postingUrlPattern: "" },
+  { source: "ashby", signinUrl: "", enabled: true, mode: "dork", modeLocked: true, domain: "jobs.ashbyhq.com", effectiveSigninUrl: "https://jobs.ashbyhq.com", isDefault: true, isApi: false, keyRequired: false, searchUrl: "", postingUrlPattern: "" },
+  { source: "greenhouse", signinUrl: "", enabled: true, mode: "dork", modeLocked: true, domain: "job-boards.greenhouse.io", effectiveSigninUrl: "https://job-boards.greenhouse.io", isDefault: true, isApi: false, keyRequired: false, searchUrl: "", postingUrlPattern: "" },
+  { source: "lever", signinUrl: "", enabled: true, mode: "dork", modeLocked: true, domain: "jobs.lever.co", effectiveSigninUrl: "https://jobs.lever.co", isDefault: true, isApi: false, keyRequired: false, searchUrl: "", postingUrlPattern: "" },
+  { source: "workday", signinUrl: "", enabled: true, mode: "dork", modeLocked: true, domain: "myworkdayjobs.com", effectiveSigninUrl: "https://www.myworkdayjobs.com", isDefault: true, isApi: false, keyRequired: false, searchUrl: "", postingUrlPattern: "" },
 ];
 
 function makeConfig(jobBoards: JobBoard[]): AgentConfig {
@@ -127,6 +128,7 @@ describe("JobBoardsPage", () => {
     const linkedin: JobBoard = {
       source: "linkedin",
       signinUrl: "",
+      enabled: true,
       mode: "dork",
       modeLocked: true,
       domain: "linkedin.com/jobs",
@@ -153,6 +155,7 @@ describe("JobBoardsPage", () => {
     const board: JobBoard = {
       source: "custom.example.com",
       signinUrl: "",
+      enabled: true,
       mode: "direct",
       modeLocked: false,
       domain: "custom.example.com",
@@ -186,6 +189,7 @@ describe("JobBoardsPage", () => {
           {
             source: "linkedin",
             signinUrl: "",
+            enabled: true,
             mode: "dork",
             modeLocked: true,
             domain: "",
@@ -225,6 +229,7 @@ describe("JobBoardsPage", () => {
           {
             source: "custom.example.com",
             signinUrl: "",
+            enabled: true,
             mode: "direct",
             modeLocked: false,
             domain: "custom.example.com",
@@ -314,6 +319,7 @@ describe("JobBoardsPage", () => {
     const custom: JobBoard = {
       source: "custom.example.com",
       signinUrl: "",
+      enabled: true,
       mode: "dork",
       modeLocked: false,
       domain: "custom.example.com",
@@ -388,6 +394,7 @@ describe("JobBoardsPage", () => {
     const board: JobBoard = {
       source: "custom.example.com",
       signinUrl: "",
+      enabled: true,
       mode: "direct",
       modeLocked: false,
       domain: "custom.example.com",
@@ -521,6 +528,7 @@ describe("JobBoardsPage", () => {
     const board: JobBoard = {
       source: "custom.example.com",
       signinUrl: "",
+      enabled: true,
       mode: "dork",
       modeLocked: false,
       domain: "custom.example.com",
@@ -552,6 +560,7 @@ describe("JobBoardsPage", () => {
     const board: JobBoard = {
       source: "custom.example.com",
       signinUrl: "",
+      enabled: true,
       mode: "direct",
       modeLocked: false,
       domain: "custom.example.com",
@@ -581,6 +590,7 @@ describe("JobBoardsPage", () => {
     const custom: JobBoard = {
       source: "strasse.de",
       signinUrl: "",
+      enabled: true,
       mode: "direct",
       modeLocked: false,
       domain: "strasse.de",
@@ -610,6 +620,7 @@ describe("JobBoardsPage", () => {
     const custom: JobBoard = {
       source: "custom.example.com",
       signinUrl: "",
+      enabled: true,
       mode: "direct",
       modeLocked: false,
       domain: "custom.example.com",
@@ -632,5 +643,33 @@ describe("JobBoardsPage", () => {
 
     await screen.findByText("Another board already uses this source.");
     expect(updateAgentConfig).not.toHaveBeenCalled();
+  });
+
+  // --- Enabled toggle -----------------------------------------------------
+
+  it("toggling a default board off calls updateAgentConfig with that board's enabled false", async () => {
+    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
+    const board = DEFAULT_BOARDS[0];
+    vi.mocked(updateAgentConfig).mockResolvedValue(makeConfig([{ ...board, enabled: false }]));
+    await renderPage(makeConfig([board]));
+
+    const toggle = await screen.findByRole("switch", { name: `Search ${board.domain}` });
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(updateAgentConfig).toHaveBeenCalledWith({
+        jobBoards: [{ ...board, enabled: false }],
+      }),
+    );
+  });
+
+  it("renders a disabled board's switch unchecked and still shows no Remove button", async () => {
+    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
+    const board = { ...DEFAULT_BOARDS[0], enabled: false };
+    await renderPage(makeConfig([board]));
+
+    const toggle = await screen.findByRole("switch", { name: `Search ${board.domain}` });
+    expect((toggle as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
   });
 });

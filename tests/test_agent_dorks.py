@@ -29,7 +29,8 @@ def test_multiple_keywords_and_locations_become_separate_or_groups():
 
 def test_preferred_source_containing_dot_used_verbatim():
     p = JobProfile(name="p", enabled=True, keywords=["backend"])
-    entries = dorks.compose_queries([p], None, ["custom.example.com"])
+    sources = ["ashby", "greenhouse", "lever", "workday", "custom.example.com"]
+    entries = dorks.compose_queries([p], None, sources)
     # 4 defaults + the custom domain.
     assert len(entries) == 5
     custom = next(e for e in entries if e["source"] == "custom.example.com")
@@ -38,30 +39,38 @@ def test_preferred_source_containing_dot_used_verbatim():
 
 def test_known_source_name_maps_to_domain():
     p = JobProfile(name="p", enabled=True, keywords=["backend"])
-    # "greenhouse" is already one of the four defaults, so no duplicate entry.
-    entries = dorks.compose_queries([p], None, ["greenhouse"])
+    # "greenhouse" repeated alongside the other defaults is not duplicated.
+    sources = ["ashby", "greenhouse", "lever", "workday", "greenhouse"]
+    entries = dorks.compose_queries([p], None, sources)
     assert len(entries) == 4
     assert "job-boards.greenhouse.io" in {e["source"] for e in entries}
 
 
 def test_unknown_non_domain_source_is_skipped():
     p = JobProfile(name="p", enabled=True, keywords=["backend"])
-    entries = dorks.compose_queries([p], None, ["totallymadeup"])
+    sources = ["ashby", "greenhouse", "lever", "workday", "totallymadeup"]
+    entries = dorks.compose_queries([p], None, sources)
     assert len(entries) == 4
     assert {e["source"] for e in entries} == set(dorks.DEFAULT_BOARD_DOMAINS)
 
 
-def test_defaults_present_when_no_boards_configured():
+def test_none_sources_yields_four_defaults():
     p = JobProfile(name="p", enabled=True, keywords=["backend"])
-    entries = dorks.compose_queries([p], None, [])
+    entries = dorks.compose_queries([p], None, None)
     assert len(entries) == len(dorks.DEFAULT_BOARD_DOMAINS) == 4
     sources = {e["source"] for e in entries}
     assert sources == set(dorks.DEFAULT_BOARD_DOMAINS)
 
 
+def test_empty_list_sources_yields_no_queries():
+    p = JobProfile(name="p", enabled=True, keywords=["backend"])
+    assert dorks.compose_queries([p], None, []) == []
+
+
 def test_defaults_present_even_when_operator_configured_boards():
     p = JobProfile(name="p", enabled=True, keywords=["backend"])
-    entries = dorks.compose_queries([p], None, ["linkedin"])
+    sources_in = ["ashby", "greenhouse", "lever", "workday", "linkedin"]
+    entries = dorks.compose_queries([p], None, sources_in)
     sources = {e["source"] for e in entries}
     assert sources.issuperset(set(dorks.DEFAULT_BOARD_DOMAINS))
     assert "linkedin.com/jobs" in sources
@@ -227,11 +236,25 @@ def test_window_does_not_alter_the_query_string_itself():
 
 def test_direct_mode_board_emits_no_dork():
     p = JobProfile(name="p", enabled=True, keywords=["backend"])
+    defaults = [JobBoard(source=s, mode="dork") for s in ["ashby", "greenhouse", "lever", "workday"]]
     direct_board = JobBoard(source="custom.example.com", mode="direct")
-    entries = dorks.compose_queries([p], None, [direct_board])
+    entries = dorks.compose_queries([p], None, defaults + [direct_board])
     # Only the four always-searched defaults; no entry for the direct board.
     assert len(entries) == 4
     assert "custom.example.com" not in {e["source"] for e in entries}
+
+
+def test_disabled_default_board_emits_no_dork():
+    p = JobProfile(name="p", enabled=True, keywords=["backend"])
+    boards = [
+        JobBoard(source="ashby", mode="dork", enabled=False),
+        JobBoard(source="greenhouse", mode="dork"),
+        JobBoard(source="lever", mode="dork"),
+        JobBoard(source="workday", mode="dork"),
+    ]
+    entries = dorks.compose_queries([p], None, boards)
+    assert len(entries) == 3
+    assert "jobs.ashbyhq.com" not in {e["source"] for e in entries}
 
 
 def test_dork_mode_board_still_emits_a_dork():

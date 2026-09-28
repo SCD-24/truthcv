@@ -70,8 +70,8 @@ function NeedsAttention() {
 }
 
 /** Job boards: one list, not two — every board the agent searches is also a
- * site you can sign in to. Default boards are always searched and cannot be
- * removed; the "Needs attention" queue is the agent's own experience of
+ * site you can sign in to. Default boards cannot be removed but can be
+ * switched off; the "Needs attention" queue is the agent's own experience of
  * being blocked, and it is deliberately the only sign-in status shown here —
  * TruthCV has no way to confirm a session is still valid, so claiming a
  * board is "signed in" would be an assertion nothing checks.
@@ -138,6 +138,14 @@ export function JobBoardsPage() {
     );
   }
 
+  function handleToggle(source: string, enabled: boolean) {
+    // Ignore a toggle while a save is in flight: the PUT replaces the whole
+    // board list, so a second toggle built from the same stale config would
+    // silently undo the first.
+    if (!config || saving) return;
+    persist(config.jobBoards.map((b) => (b.source === source ? { ...b, enabled } : b)));
+  }
+
   function handleEditSave(original: JobBoard, updated: JobBoard) {
     if (!config) return;
     setEditingBoard(null);
@@ -184,6 +192,7 @@ export function JobBoardsPage() {
             onRemove={() => handleRemove(board.source)}
             onModeChange={(mode) => handleModeChange(board.source, mode)}
             onEdit={() => setEditingBoard(board)}
+            onToggleEnabled={(enabled) => handleToggle(board.source, enabled)}
           />
         ))}
         {editingBoard && (

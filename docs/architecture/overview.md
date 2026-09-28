@@ -148,7 +148,7 @@ Provider connection layer (connections/): a static catalog of connection cards p
 <!-- generated:start comp:agent-config -->
 ## Agent Config (`agent-config`, BACKEND)
 
-Owns the unattended agent's configuration (agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed. Also composes the deterministic dork-style search queries handed to each run.
+Owns the unattended agent's configuration (agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed, but any board (default or the operator's own) can be switched off, and a disabled board is not searched. Also composes the deterministic dork-style search queries handed to each run.
 <!-- generated:end comp:agent-config -->
 
 <!-- generated:start comp:screening-engine -->

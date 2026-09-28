@@ -106,6 +106,56 @@ def test_put_default_board_with_signin_override_is_persisted(client, data_dir):
     assert any(b["source"] == "ashby" for b in stored["job_boards"])
 
 
+def test_put_disabling_a_default_board_persists_and_drops_it_from_search_queries(client, data_dir):
+    r = client.put("/api/agent/config", json={"jobBoards": [{"source": "ashby", "enabled": False}]})
+    assert r.status_code == 200
+    ashby = next(b for b in r.json()["jobBoards"] if b["source"] == "ashby")
+    assert ashby["enabled"] is False
+    assert ashby["isDefault"] is True
+
+    import json as jsonlib
+    from pathlib import Path
+
+    stored = jsonlib.loads((Path(data_dir) / "agent_config.json").read_text())
+    assert any(b["source"] == "ashby" and b["enabled"] is False for b in stored["job_boards"])
+
+    client.put(
+        "/api/agent/config",
+        json={"profiles": [{"name": "p", "enabled": True, "keywords": ["backend"]}]},
+    )
+    got = client.get("/api/agent/config").json()
+    sources = {q["source"] for q in got["searchQueries"]}
+    assert "jobs.ashbyhq.com" not in sources
+    urls = [b["url"] for b in got["directBoards"]]
+    assert "jobs.ashbyhq.com" not in urls
+
+
+def test_put_reenabling_a_default_board_drops_the_stored_entry(client, data_dir):
+    client.put("/api/agent/config", json={"jobBoards": [{"source": "ashby", "enabled": False}]})
+    r = client.put("/api/agent/config", json={"jobBoards": [{"source": "ashby", "enabled": True}]})
+    assert r.status_code == 200
+
+    import json as jsonlib
+    from pathlib import Path
+
+    stored = jsonlib.loads((Path(data_dir) / "agent_config.json").read_text())
+    assert stored["job_boards"] == []
+
+
+def test_disabled_direct_custom_board_absent_from_direct_boards(client, data_dir):
+    client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [
+                {"source": "custom-direct.example.com", "mode": "direct", "enabled": False}
+            ],
+            "profiles": [{"name": "p", "enabled": True, "keywords": ["backend"]}],
+        },
+    )
+    got = client.get("/api/agent/config").json()
+    assert got["directBoards"] == []
+
+
 def test_search_queries_source_follows_resolved_boards_not_profile(client, data_dir):
     r = client.put(
         "/api/agent/config",

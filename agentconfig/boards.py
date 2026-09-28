@@ -76,13 +76,15 @@ SIGNIN_URLS: dict[str, str] = {
     "workday": "https://www.myworkdayjobs.com",
 }
 
-# The catalog keys that are ALWAYS searched and cannot be removed by the
-# operator — they are unioned into the resolved board list at resolve time,
-# never seeded into storage, so they survive a bad PUT or a hand-edited
-# config file. The first four resolve their domain straight from
-# DEFAULT_BOARD_DOMAINS (dork boards); "arbeitnow" is a fifth, API-backed
-# default (see jobfeeds/arbeitnow.py) that is fetched directly and never
-# gets a dork, so it deliberately stays OUT of DEFAULT_BOARD_DOMAINS.
+# The catalog keys whose domains are exactly DEFAULT_BOARD_DOMAINS plus the
+# API-backed "arbeitnow" default. These boards are built-in and cannot be
+# REMOVED by the operator — they are unioned into the resolved board list at
+# resolve time, never seeded into storage, so they survive a bad PUT or a
+# hand-edited config file. They CAN be disabled, though (JobBoard.enabled) —
+# a disabled default stays listed and re-enableable but drops out of
+# discovery. The first four are dork boards; "arbeitnow" is fetched directly
+# (see jobfeeds/arbeitnow.py) and never gets a dork, so it deliberately stays
+# OUT of DEFAULT_BOARD_DOMAINS.
 DEFAULT_BOARD_SOURCES: list[str] = ["ashby", "greenhouse", "lever", "workday", "arbeitnow"]
 
 
@@ -250,7 +252,11 @@ def posting_url_pattern_error(v: str) -> str | None:
 
 
 def is_default_source(source: str) -> bool:
-    """Check whether source is one of the always-searched, unremovable default boards."""
+    """Check whether source is one of the built-in, unremovable default boards.
+
+    Built-in and unremovable, not necessarily searched — a default can be
+    disabled by the operator (JobBoard.enabled) and still answer True here.
+    """
     return source.strip().casefold() in {s.casefold() for s in DEFAULT_BOARD_SOURCES}
 
 

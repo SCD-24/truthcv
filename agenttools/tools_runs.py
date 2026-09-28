@@ -88,10 +88,10 @@ def _expected_counts() -> dict[str, int]:
         from agentconfig.dorks import compose_direct_boards, compose_queries
 
         cfg = _agentconfig_store.load()
-        resolved = cfg.resolved_boards()
+        searched = cfg.searched_boards()
         return {
-            "direct": len(compose_direct_boards(cfg.profiles, resolved)),
-            "dork": len(compose_queries(cfg.profiles, cfg.max_posting_age_days, resolved)),
+            "direct": len(compose_direct_boards(cfg.profiles, searched)),
+            "dork": len(compose_queries(cfg.profiles, cfg.max_posting_age_days, searched)),
         }
     except Exception:
         return {}

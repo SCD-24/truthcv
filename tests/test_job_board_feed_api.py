@@ -72,7 +72,8 @@ def test_the_boards_raw_domain_is_recognised_as_api_backed_too():
     assert boards.is_api_source("remoterocketship.com")
     assert boards.resolve_signin_url("remoterocketship.com") == ""
     profile = JobProfile(name="p", enabled=True, keywords=["backend"])
-    entries = dorks.compose_profile_queries(profile, None, ["remoterocketship.com"])
+    sources = ["ashby", "greenhouse", "lever", "workday", "remoterocketship.com"]
+    entries = dorks.compose_profile_queries(profile, None, sources)
     assert {e["source"] for e in entries} == set(dorks.DEFAULT_BOARD_DOMAINS)
 
 
@@ -106,7 +107,8 @@ def test_an_api_board_composes_no_google_dork():
     """The postings are pulled from the API. A site: dork for the same board
     would send the agent to the aggregator's own listing pages instead."""
     profile = JobProfile(name="p", enabled=True, keywords=["backend"])
-    entries = dorks.compose_profile_queries(profile, None, ["remoterocketship"])
+    sources = ["ashby", "greenhouse", "lever", "workday", "remoterocketship"]
+    entries = dorks.compose_profile_queries(profile, None, sources)
     assert {e["source"] for e in entries} == set(dorks.DEFAULT_BOARD_DOMAINS)
     assert not any("remoterocketship" in e["query"] for e in entries)
 

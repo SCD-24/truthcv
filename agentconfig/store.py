@@ -57,6 +57,10 @@ class JobBoard:
     signin_url: str = ""
     mode: str = ""
     search_url: str = ""
+    # Whether this board is actually searched. Missing/non-bool loads as True
+    # (mirrors JobProfile.enabled), so a board is only ever excluded by an
+    # explicit operator action, never by a hand-edited or older config file.
+    enabled: bool = True
     posting_url_pattern: str = ""
 
     @classmethod
@@ -76,6 +80,8 @@ class JobBoard:
                 )
             else:
                 kwargs["search_url"] = raw["search_url"]
+        if "enabled" in raw and isinstance(raw["enabled"], bool):
+            kwargs["enabled"] = raw["enabled"]
         if "posting_url_pattern" in raw and isinstance(raw["posting_url_pattern"], str):
             if posting_url_pattern_error(raw["posting_url_pattern"]):
                 logging.getLogger(__name__).warning(
@@ -92,6 +98,7 @@ class JobBoard:
             "signin_url": self.signin_url,
             "mode": self.mode,
             "search_url": self.search_url,
+            "enabled": self.enabled,
             "posting_url_pattern": self.posting_url_pattern,
         }
 
@@ -230,8 +237,10 @@ class AgentConfig:
     max_posting_age_days: int | None = None
     # The operator's OWN boards, beyond the four defaults. The defaults
     # (agentconfig.boards.DEFAULT_BOARD_SOURCES) are unioned in at resolve
-    # time via resolved_board_sources(), never stored here, so they are
-    # always searched and cannot be lost to a bad PUT or a hand-edited file.
+    # time via resolved_board_sources(), so they cannot be lost to a bad PUT
+    # or a hand-edited file, but a default is now STORED here when it carries
+    # a sign-in override OR has been disabled — both are per-board state that
+    # would otherwise have nowhere to live.
     job_boards: list[JobBoard] = field(default_factory=list)
 
     @property
@@ -246,19 +255,14 @@ class AgentConfig:
         return self.mode != "off"
 
     def resolved_board_sources(self) -> list[str]:
-        """Job board sources actually searched: the four defaults, then the operator's own.
+        """ENABLED job board sources actually searched: the four defaults, then the operator's own.
 
         The one place the union is expressed, so discovery (agentconfig/dorks.py)
-        and the API cannot drift apart on what "the boards" means.
+        and the API cannot drift apart on what "the boards" means. A default or
+        custom board the operator has disabled is excluded — see resolved_boards()
+        for the full listing (enabled or not).
         """
-        result = list(DEFAULT_BOARD_SOURCES)
-        seen = {s.casefold() for s in DEFAULT_BOARD_SOURCES}
-        for board in self.job_boards:
-            key = board.source.strip().casefold()
-            if key and key not in seen:
-                seen.add(key)
-                result.append(board.source)
-        return result
+        return [b.source for b in self.resolved_boards() if b.enabled]
 
     def resolved_boards(self) -> list[JobBoard]:
         """Job boards actually searched, defaults-first, each carrying its effective mode.
@@ -279,6 +283,7 @@ class AgentConfig:
             override = overrides.get(key)
             signin_url = override.signin_url if override else ""
             search_url = override.search_url if override and is_custom_source(source) else ""
+            enabled = override.enabled if override else True
             posting_url_pattern = override.posting_url_pattern if override else ""
             result.append(
                 JobBoard(
@@ -286,6 +291,7 @@ class AgentConfig:
                     signin_url=signin_url,
                     mode=catalog_mode(source) or "dork",
                     search_url=search_url,
+                    enabled=enabled,
                     posting_url_pattern=posting_url_pattern,
                 )
             )
@@ -304,10 +310,21 @@ class AgentConfig:
                     signin_url=board.signin_url,
                     mode=mode,
                     search_url=search_url,
+                    enabled=board.enabled,
                     posting_url_pattern=board.posting_url_pattern,
                 )
             )
         return result
+
+    def searched_boards(self) -> list[JobBoard]:
+        """Resolved boards actually searched — resolved_boards() filtered to enabled ones.
+
+        A disabled board (default or custom) stays listed by resolved_boards()
+        so the operator can re-enable it, but must not contribute a dork,
+        direct-board entry, API feed pull, or coverage count — this is the
+        one place callers should use instead of resolved_boards() for that.
+        """
+        return [b for b in self.resolved_boards() if b.enabled]
 
     @classmethod
     def from_dict(cls, raw: dict) -> AgentConfig:
@@ -385,9 +402,10 @@ class AgentConfig:
             # Migrated from each profile's old preferred_sources when the
             # job_boards key is absent, so an existing config's discovery
             # behaviour survives the upgrade. The defaults are NOT seeded
-            # here — they are added at resolve time by resolved_board_sources()
-            # — so an empty result here is correct and simply means "just
-            # the defaults".
+            # here — they are added at resolve time by resolved_boards() —
+            # so an empty result here is correct and simply means "just the
+            # defaults, all enabled". (A default is only ever stored once it
+            # carries a sign-in override or has been disabled.)
             migrated: list[JobBoard] = []
             raw_profiles = raw.get("profiles")
             if isinstance(raw_profiles, list):

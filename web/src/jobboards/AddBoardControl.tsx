@@ -37,6 +37,7 @@ export function AddBoardControl({ onAdd, existing }: { onAdd: (board: JobBoard) 
       onAdd({
         source: customDomain.trim(),
         signinUrl: customSigninUrl.trim(),
+        enabled: true,
         mode: "direct",
         modeLocked: false,
         domain: customDomain.trim(),
@@ -58,6 +59,7 @@ export function AddBoardControl({ onAdd, existing }: { onAdd: (board: JobBoard) 
       onAdd({
         source: choice,
         signinUrl: "",
+        enabled: true,
         mode: "dork",
         modeLocked: true,
         domain: "",
