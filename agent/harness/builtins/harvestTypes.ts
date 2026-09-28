@@ -26,6 +26,11 @@ export interface HarvestBoardRequest {
    * used as `board.url` and the snapshot is classified directly — no
    * search-box typing, no `browser_type` call at all. */
   searchUrl?: string;
+  /** A glob (`*` as the only wildcard) matching this board's OWN posting-link
+   * URL shape, e.g. `https://boards.example.com/job/*` — tried as the
+   * second extraction tier, after known ATS shapes and before the general
+   * same-site heuristic. Anchored to the URL's start; open-ended. */
+  postingUrlPattern?: string;
 }
 
 /** One posting extracted by URL-shape heuristics. */
@@ -34,7 +39,10 @@ export interface HarvestedPosting {
   url: string;
   /** The link's accessible name, as the posting's title. */
   title: string;
-  /** Which known ATS's URL shape matched (`ashby`, `greenhouse`, `lever`, `personio`). */
+  /** Which known ATS's URL shape matched (`ashby`, `greenhouse`, `lever`,
+   * `personio`), or `board-pattern` (matched the board's own
+   * `postingUrlPattern`) or `board-heuristic` (matched the general
+   * same-site job-link rule). */
   ats: string;
 }
 

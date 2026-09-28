@@ -11,6 +11,7 @@
  */
 
 import type { BlockKind, HarvestBoardRequest, HarvestBoardResult, HarvestedPosting } from './harvestTypes.js';
+import { globToRegExp, resolveLinks, resolveSnapshotBase, sameSiteLinkQualifies, stripHash, type ResolvedLink } from './harvestLinks.js';
 
 /** Cap on postings returned per board — bounds the structured result's size. */
 const MAX_POSTINGS_PER_BOARD = 50;
@@ -81,9 +82,6 @@ const EMPTY_PHRASES: readonly string[] = [
  * content. */
 const ZERO_RESULTS_RE = /(?<!\d)0\s+(?:results?|jobs?|openings?|positions?|matches?)\b/i;
 
-/** Match one accessibility-tree link line and capture its title and URL. */
-const LINK_LINE_RE = /-\s*link\s+"([^"]+)"[^\n]*?(https?:\/\/\S+)/gi;
-
 /** Matches ANY accessibility-tree link line, regardless of its URL shape —
  * used only by {@link hasSubstantiveContent} to tell a page that plainly has
  * content (just none of it ATS-shaped) from a bare interstitial, never for
@@ -100,6 +98,75 @@ const MIN_SUBSTANTIVE_SNAPSHOT_LENGTH = 200;
 function detectAts(url: string): string {
   const hit = ATS_URL_PATTERNS.find((entry) => entry.pattern.test(url));
   return hit ? hit.ats : '';
+}
+
+/** Minimum distinct qualifying URLs the same-site tier requires before it
+ * counts at all — a single stray nav/category link must never alone flip a
+ * board to `searched`. */
+const MIN_SAME_SITE_LINKS = 2;
+
+/** One link paired with the `ats` tier it was matched under, before dedupe. */
+interface TieredLink extends ResolvedLink {
+  ats: string;
+}
+
+/** Dedupe `entries` by resolved URL, trim titles, cap at
+ * {@link MAX_POSTINGS_PER_BOARD}, preserving document order. */
+function dedupeCap(entries: TieredLink[]): HarvestedPosting[] {
+  const seen = new Set<string>();
+  const postings: HarvestedPosting[] = [];
+  for (const e of entries) {
+    const url = e.url.href;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    postings.push({ url, title: e.title.trim(), ats: e.ats });
+    if (postings.length >= MAX_POSTINGS_PER_BOARD) break;
+  }
+  return postings;
+}
+
+/** Tier 1: links whose URL matches a known ATS shape. */
+function extractAtsPostings(links: ResolvedLink[]): HarvestedPosting[] {
+  const entries = links
+    .map((l) => ({ ...l, ats: detectAts(l.url.href) }))
+    .filter((e) => e.ats !== '');
+  return dedupeCap(entries);
+}
+
+/** Tier 2: links matching the board's own `postingUrlPattern` glob. */
+function extractPatternPostings(links: ResolvedLink[], pattern: string): HarvestedPosting[] {
+  const re = globToRegExp(pattern);
+  const entries = links.filter((l) => re.test(l.url.href)).map((l) => ({ ...l, ats: 'board-pattern' }));
+  return dedupeCap(entries);
+}
+
+/** `base`'s hostname, or `''` if `base` fails to parse. */
+function safeHostname(base: string): string {
+  try {
+    return new URL(base).hostname;
+  } catch {
+    return '';
+  }
+}
+
+/** Tier 3: the general same-site job-link rule — counts only when at least
+ * {@link MIN_SAME_SITE_LINKS} distinct qualifying URLs are found, so one
+ * stray nav/category link can never alone flip a board to `searched`. */
+function extractSameSitePostings(links: ResolvedLink[], board: HarvestBoardRequest, baseUrl: string): HarvestedPosting[] {
+  const baseHost = safeHostname(baseUrl);
+  if (baseHost === '') return [];
+  const excludeHrefs = new Set([stripHash(baseUrl), stripHash(board.url)]);
+  const qualifying = links.filter((l) => sameSiteLinkQualifies(l, baseHost, excludeHrefs));
+  const distinct = new Set(qualifying.map((l) => stripHash(l.url.href)));
+  if (distinct.size < MIN_SAME_SITE_LINKS) return [];
+  return dedupeCap(qualifying.map((l) => ({ ...l, ats: 'board-heuristic' })));
+}
+
+/** Human-readable label for the tier that produced `ats`, for the result's `note`. */
+function tierLabel(ats: string): string {
+  if (ats === 'board-pattern') return "the board's own posting URL pattern";
+  if (ats === 'board-heuristic') return 'a general same-site job-link rule';
+  return "known ATS URL shapes";
 }
 
 /** Whether `text` (case-insensitively) contains any of `phrases`. */
@@ -147,25 +214,23 @@ export function blockedResult(board: HarvestBoardRequest, note: string, blockKin
 }
 
 /**
- * Extract postings from a `browser_snapshot` accessibility tree by URL-shape
- * heuristics: every `link "title" ... https://...` line whose URL matches a
- * known ATS shape is kept, in document order, de-duplicated by URL, capped at
- * {@link MAX_POSTINGS_PER_BOARD}. A link to an unrecognised URL shape is
- * dropped — never guessed at.
+ * Extract postings from a `browser_snapshot` accessibility tree, trying
+ * tiers in order and returning the first that yields anything: (1) known ATS
+ * URL shapes; (2) `board.postingUrlPattern`, when set; (3) the general
+ * same-site job-link rule, which counts only with ≥{@link MIN_SAME_SITE_LINKS}
+ * distinct qualifying URLs. Every candidate link is parsed and resolved by
+ * harvestLinks.ts, covering both the same-line and Playwright indented
+ * `- /url:` link formats. A link matching no tier is dropped — never guessed at.
  */
-function extractPostings(snapshot: string): HarvestedPosting[] {
-  const seen = new Set<string>();
-  const postings: HarvestedPosting[] = [];
-  for (const match of snapshot.matchAll(LINK_LINE_RE)) {
-    const [, title, rawUrl] = match;
-    const url = rawUrl.replace(/[).,]+$/, '');
-    const ats = detectAts(url);
-    if (!ats || seen.has(url)) continue;
-    seen.add(url);
-    postings.push({ url, title: title.trim(), ats });
-    if (postings.length >= MAX_POSTINGS_PER_BOARD) break;
+function extractPostings(board: HarvestBoardRequest, snapshot: string): HarvestedPosting[] {
+  const links = resolveLinks(board, snapshot);
+  const atsPostings = extractAtsPostings(links);
+  if (atsPostings.length > 0) return atsPostings;
+  if (board.postingUrlPattern) {
+    const patternPostings = extractPatternPostings(links, board.postingUrlPattern);
+    if (patternPostings.length > 0) return patternPostings;
   }
-  return postings;
+  return extractSameSitePostings(links, board, resolveSnapshotBase(board, snapshot));
 }
 
 /**
@@ -183,9 +248,10 @@ function extractPostings(snapshot: string): HarvestedPosting[] {
  */
 export function classifySnapshot(board: HarvestBoardRequest, snapshot: string): HarvestBoardResult {
   const base = { board: board.board, url: board.url };
-  const postings = extractPostings(snapshot);
+  const postings = extractPostings(board, snapshot);
   if (postings.length > 0) {
-    return { ...base, outcome: 'searched', tier: 'harvest', postings, note: `${postings.length} posting(s) extracted by URL-shape heuristics` };
+    const note = `${postings.length} posting(s) extracted by ${tierLabel(postings[0].ats)}`;
+    return { ...base, outcome: 'searched', tier: 'harvest', postings, note };
   }
   if (isExplicitlyEmpty(snapshot)) {
     return { ...base, outcome: 'empty', tier: '', postings: [], note: 'search ran; the board reported no matches' };

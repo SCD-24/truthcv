@@ -133,6 +133,7 @@ def compose_direct_boards(
             "url": board.source,
             "signin_url": resolve_signin_url(board.source, board.signin_url),
             "search_url": board.search_url,
+            "posting_url_pattern": board.posting_url_pattern,
             "profiles": profile_entries,
         })
     return results
