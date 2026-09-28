@@ -498,6 +498,7 @@ def test_enabled_boards_all_present_in_searched_boards():
         "greenhouse",
         "lever",
         "workday",
+        "arbeitnow",
     ]
 
 

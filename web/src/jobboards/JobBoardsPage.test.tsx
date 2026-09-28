@@ -35,11 +35,13 @@ const REMOTE_ROCKETSHIP: JobBoard = {
   isApi: true,
   keyRequired: true,
   searchUrl: "",
+  postingUrlPattern: "",
 };
 
 const ARBEITNOW: JobBoard = {
   source: "arbeitnow",
   signinUrl: "",
+  enabled: true,
   mode: "feed",
   modeLocked: true,
   domain: "arbeitnow.com",
@@ -428,12 +430,14 @@ describe("JobBoardsPage", () => {
     const board: JobBoard = {
       source: "custom.example.com",
       signinUrl: "",
+      enabled: true,
       mode: "direct",
       modeLocked: false,
       domain: "custom.example.com",
       effectiveSigninUrl: "",
       isDefault: false,
       isApi: false,
+      keyRequired: false,
       searchUrl: "",
       postingUrlPattern: "",
     };
@@ -458,12 +462,14 @@ describe("JobBoardsPage", () => {
     const board: JobBoard = {
       source: "custom.example.com",
       signinUrl: "",
+      enabled: true,
       mode: "dork",
       modeLocked: false,
       domain: "custom.example.com",
       effectiveSigninUrl: "",
       isDefault: false,
       isApi: false,
+      keyRequired: false,
       searchUrl: "",
       postingUrlPattern: "",
     };
@@ -479,12 +485,14 @@ describe("JobBoardsPage", () => {
     const board: JobBoard = {
       source: "custom.example.com",
       signinUrl: "",
+      enabled: true,
       mode: "direct",
       modeLocked: false,
       domain: "custom.example.com",
       effectiveSigninUrl: "",
       isDefault: false,
       isApi: false,
+      keyRequired: false,
       searchUrl: "",
       postingUrlPattern: "https://custom.example.com/jobs/*",
     };
