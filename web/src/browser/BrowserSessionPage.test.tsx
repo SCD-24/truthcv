@@ -316,6 +316,65 @@ describe("BrowserSessionPage", () => {
     });
   });
 
+  it("keeps the viewer live after a single failed eviction poll", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let pollCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === undefined) {
+          // GET /api/browser/session — the 5s eviction poll.
+          pollCount += 1;
+          if (pollCount === 2) throw new TypeError("network blip");
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ open: true, url: "https://example.com/login", startedAt: "x", evictDeadline: null }),
+        };
+      }),
+    );
+    renderPage();
+    await vi.waitFor(() => expect(screen.getByText("example.com")).toBeTruthy());
+
+    // Advance past one poll tick (the rejected one) and confirm still live.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(screen.getByText("example.com")).toBeTruthy();
+    expect(screen.queryByText(/browser is unavailable/i)).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("shows unavailable after three consecutive failed eviction polls", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let firstFetchDone = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === undefined && firstFetchDone) {
+          throw new TypeError("network down");
+        }
+        firstFetchDone = true;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ open: true, url: "https://example.com/login", startedAt: "x", evictDeadline: null }),
+        };
+      }),
+    );
+    renderPage();
+    await vi.waitFor(() => expect(screen.getByText("example.com")).toBeTruthy());
+
+    // Three consecutive 5s poll ticks, all failing.
+    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(5000);
+
+    await vi.waitFor(() =>
+      expect(screen.getByText(/lost contact with the browser session/i)).toBeTruthy(),
+    );
+    vi.useRealTimers();
+  });
+
   it("distinguishes a launch failure from the agent being busy", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: false,

@@ -58,14 +58,60 @@ export interface ResponseEvent {
 }
 
 /** Convert a ReadableStream<Uint8Array> (fetch's default) to an AsyncIterable<string>. */
+/**
+ * Read one chunk, aborting with a timeout `DOMException` if none arrives
+ * within `timeoutMs`. On timeout, cancels the reader so the underlying
+ * connection is torn down rather than left dangling.
+ */
+async function readWithInactivityTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  let timedOut = false;
+  let timer!: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      reject(new DOMException("the stream timed out", "TimeoutError"));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([reader.read(), timeout]);
+  } catch (err) {
+    if (timedOut) {
+      // Best-effort: the connection is presumed dead already.
+      await reader.cancel(err).catch(() => {});
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Decode a response body into text chunks.
+ *
+ * `inactivityTimeoutMs`, when given, resets on every chunk received: only a
+ * stream that goes silent for that long (not the stream's total duration) is
+ * treated as dead, so a healthy multi-minute generation is never killed by
+ * it. On timeout the reader is cancelled and a `TimeoutError` DOMException is
+ * thrown to the caller.
+ */
 export async function* streamToText(
   body: ReadableStream<Uint8Array>,
+  inactivityTimeoutMs?: number,
 ): AsyncIterable<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   try {
     let result: ReadableStreamReadResult<Uint8Array>;
-    while ((result = await reader.read()), !result.done) {
+    while (
+      (result =
+        inactivityTimeoutMs !== undefined
+          ? await readWithInactivityTimeout(reader, inactivityTimeoutMs)
+          : await reader.read()),
+      !result.done
+    ) {
       yield decoder.decode(result.value, { stream: true });
     }
     // Flush any remaining bytes in the decoder

@@ -39,6 +39,37 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('createProviderAdapter requestTimeoutMs forwarding (registry)', () => {
+  it('forwards requestTimeoutMs to the adapter, timing out a hanging fetch', async () => {
+    // A hanging fetch that never settles on its own, but — like real fetch —
+    // rejects with an AbortError once its signal aborts, so the adapter's
+    // own `AbortSignal.timeout` actually terminates the request instead of
+    // the test idling out on vitest's default per-test timeout.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted', 'AbortError')));
+      })),
+    );
+    const adapter = createProviderAdapter({
+      provider: 'ollama',
+      wire: 'openai-chat-completions',
+      model: 'llama3',
+      token: '',
+      baseUrl: 'http://localhost:11434/v1',
+      requestTimeoutMs: 20,
+    });
+
+    const events: HarnessEvent[] = [];
+    for await (const ev of adapter.sendMessage(request)) events.push(ev);
+
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe('error');
+    expect((events[0] as { message: string }).message).toContain('timed out');
+    expect((events[0] as { retryable: boolean }).retryable).toBe(true);
+  });
+});
+
 describe('createProviderAdapter contextWindow forwarding (registry)', () => {
   it('forwards contextWindow as options.num_ctx for ollama', async () => {
     const { body } = stubFetchCapturingBody();

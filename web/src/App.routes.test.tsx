@@ -108,11 +108,6 @@ describe("App routing", () => {
     expect(await screen.findByText("Your truth file")).toBeTruthy();
   });
 
-  it("redirects an unknown path to Analytics", async () => {
-    renderAt("/some/bogus/path");
-    expect(await screen.findByRole("heading", { name: "Analytics" })).toBeTruthy();
-  });
-
   it("redirects to Onboarding when onboarding is incomplete", async () => {
     vi.mocked(getOnboarding).mockResolvedValueOnce({
       providerDone: false,

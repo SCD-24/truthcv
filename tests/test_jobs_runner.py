@@ -166,7 +166,29 @@ def test_failure_is_captured_into_error_and_status_failed():
     _wait(sentinel_started, "sentinel never started")
 
     assert get(job.id).status == STATUS_FAILED
-    assert get(job.id).error == "boom"
+    assert get(job.id).error == "ValueError: boom"
+
+    for e in blocker_release[1:]:
+        e.set()
+
+
+def test_failure_with_no_message_records_just_the_exception_type():
+    blocker_release = _saturate_pool()
+
+    def failing():
+        raise ValueError()
+
+    job = submit("failing-empty", failing)
+    assert get(job.id).status == STATUS_PENDING
+
+    blocker_release[0].set()
+
+    sentinel_started = threading.Event()
+    submit("sentinel", lambda: sentinel_started.set())
+    _wait(sentinel_started, "sentinel never started")
+
+    assert get(job.id).status == STATUS_FAILED
+    assert get(job.id).error == "ValueError"
 
     for e in blocker_release[1:]:
         e.set()
@@ -286,6 +308,25 @@ def test_pending_and_running_jobs_are_never_evicted_even_over_cap():
 
     for e in release:
         e.set()
+
+
+def test_list_jobs_returns_newest_created_at_first():
+    # Use timestamps close to "now" (not some arbitrary small constant) so
+    # neither job looks like the oldest thing in the registry and gets
+    # evicted by a later test's cap-eviction pass before we can assert on it.
+    base = time.time()
+
+    older = submit("order-a", lambda: None)
+    _wait_all_terminal_or_evicted([older.id])
+    older.created_at = base
+
+    newer = submit("order-b", lambda: None)
+    _wait_all_terminal_or_evicted([newer.id])
+    newer.created_at = base + 100.0
+
+    jobs = list_jobs()
+    ids = [j.id for j in jobs]
+    assert ids.index(newer.id) < ids.index(older.id)
 
 
 def test_registry_stays_at_or_under_cap_after_a_burst_of_finished_jobs():

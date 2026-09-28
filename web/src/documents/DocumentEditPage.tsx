@@ -1,3 +1,4 @@
+import { useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Typography from "@mui/material/Typography";
@@ -5,6 +6,9 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { DocumentEditor } from "../steps/DocumentEditor";
 import type { EditRequest } from "../App";
 import { ROUTES } from "../routes";
+
+/** Confirmation shown before leaving with an unsaved edit. */
+const DISCARD_CONFIRM_MESSAGE = "Discard unsaved changes?";
 
 /**
  * Route-level home for re-editing an already-generated document opened from
@@ -17,6 +21,13 @@ export function DocumentEditPage() {
   const location = useLocation();
   const editRequest =
     (location.state as { editRequest?: EditRequest } | null)?.editRequest ?? null;
+  const [dirty, setDirty] = useState(false);
+
+  /** Navigate back to Applications, confirming first if there's an unsaved edit. */
+  function backToApplications() {
+    if (dirty && !window.confirm(DISCARD_CONFIRM_MESSAGE)) return;
+    navigate(ROUTES.applications);
+  }
 
   if (!editRequest) {
     return (
@@ -24,7 +35,7 @@ export function DocumentEditPage() {
         <Typography variant="body1" sx={{ color: "text.secondary" }}>
           No document was chosen to edit.
         </Typography>
-        <Button variant="outlined" onClick={() => navigate(ROUTES.applications)} sx={{ alignSelf: "flex-start" }}>
+        <Button variant="outlined" onClick={backToApplications} sx={{ alignSelf: "flex-start" }}>
           Back to Applications
         </Button>
       </Box>
@@ -33,13 +44,14 @@ export function DocumentEditPage() {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <Button variant="outlined" onClick={() => navigate(ROUTES.applications)} sx={{ alignSelf: "flex-start" }}>
+      <Button variant="outlined" onClick={backToApplications} sx={{ alignSelf: "flex-start" }}>
         Back to Applications
       </Button>
       <DocumentEditor
         kind={editRequest.kind}
         initial={editRequest.source}
         lockedAppId={editRequest.appId}
+        onDirtyChange={setDirty}
       />
     </Box>
   );

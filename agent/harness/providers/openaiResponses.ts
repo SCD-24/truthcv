@@ -19,6 +19,7 @@ import type {
 } from "./types.js";
 
 import { networkErrorEvent, providerErrorEvent, readBody } from "./errors.js";
+import { describeTimeout, PROVIDER_REQUEST_TIMEOUT_MS, STREAM_INACTIVITY_TIMEOUT_MS } from "./timeout.js";
 import {
   errorFromEvent,
   errorFromObj,
@@ -38,6 +39,8 @@ export interface OpenAiResponsesOptions {
   baseUrl?: string;
   /** Model identifier to request. */
   model: string;
+  /** Override for {@link PROVIDER_REQUEST_TIMEOUT_MS}, in milliseconds. */
+  requestTimeoutMs?: number;
 }
 
 /** Statuses worth retrying. */
@@ -138,16 +141,29 @@ export class OpenAiResponsesAdapter implements ProviderAdapter {
     const headers = buildHeaders(this.opts.token, accountId);
     const body = buildBody(request, this.opts);
 
+    // The response is a long-lived SSE stream, so the timeout guards only
+    // getting a response at all (headers) — the timer is cleared as soon as
+    // fetch resolves, and never reapplies to the body read that follows, so a
+    // healthy multi-minute stream is never killed by it.
+    const timeoutController = new AbortController();
+    const timeoutMs = this.opts.requestTimeoutMs ?? PROVIDER_REQUEST_TIMEOUT_MS;
+    const timer = setTimeout(
+      () => timeoutController.abort(new DOMException("the request timed out", "TimeoutError")),
+      timeoutMs,
+    );
     let response: Response;
     try {
       response = await fetch(url, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
+        signal: timeoutController.signal,
       });
     } catch (err) {
-      yield networkErrorEvent("OpenAI Responses", err);
+      yield networkErrorEvent("OpenAI Responses", describeTimeout(err));
       return;
+    } finally {
+      clearTimeout(timer);
     }
 
     if (!response.ok) {
@@ -278,9 +294,17 @@ export class OpenAiResponsesAdapter implements ProviderAdapter {
     const toolCalls: ToolCall[] = [];
     const seenCallIds = new Set<string>();
 
-    for await (const event of parseSSEStream(streamToText(body))) {
-      const cont = yield* this._handleEvent(event, state, toolCalls, seenCallIds);
-      if (!cont) return;
+    try {
+      for await (const event of parseSSEStream(streamToText(body, STREAM_INACTIVITY_TIMEOUT_MS))) {
+        const cont = yield* this._handleEvent(event, state, toolCalls, seenCallIds);
+        if (!cont) return;
+      }
+    } catch (err) {
+      // A silent stream past the inactivity deadline throws a `TimeoutError`
+      // from `streamToText`; reported as a retryable network error rather
+      // than escaping the generator and killing the run outright.
+      yield networkErrorEvent("OpenAI Responses", describeTimeout(err));
+      return;
     }
 
     // Stream ended without a completion event

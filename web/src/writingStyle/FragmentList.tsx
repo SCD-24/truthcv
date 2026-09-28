@@ -112,6 +112,43 @@ function FragmentText({ text }: { text: string }) {
   );
 }
 
+/** Confirmation dialog for deleting a fragment. Disables its own buttons
+ * while the delete request is in flight. */
+function DeleteFragmentDialog({
+  title,
+  deleting,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  deleting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog
+      open
+      onClose={() => {
+        if (deleting) return;
+        onCancel();
+      }}
+    >
+      <DialogTitle>Delete fragment?</DialogTitle>
+      <DialogContent>
+        <Typography>Delete fragment "{title}"? This can't be undone.</Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onCancel} disabled={deleting}>
+          Cancel
+        </Button>
+        <Button color="error" onClick={onConfirm} disabled={deleting}>
+          Delete
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 /** One fragment row: title, slot badge, seeded badge, recommended chip (if applicable),
  * expand button to reveal text, and — for user fragments only — edit/delete controls. */
 function FragmentRow({
@@ -126,6 +163,22 @@ function FragmentRow({
   onError: (message: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function confirmDelete() {
+    onError(null);
+    setDeletingId(fragment.id);
+    try {
+      await deletePromptFragment(fragment.id);
+      onDeleted();
+    } catch (e) {
+      onError(errText(e, "Couldn't delete the fragment."));
+    } finally {
+      setDeletingId(null);
+      setConfirmingDelete(false);
+    }
+  }
 
   return (
     <Box component="li" sx={{ listStyle: "none" }}>
@@ -171,15 +224,8 @@ function FragmentRow({
             <IconButton
               size="small"
               aria-label={`Delete ${fragment.title}`}
-              onClick={async () => {
-                onError(null);
-                try {
-                  await deletePromptFragment(fragment.id);
-                  onDeleted();
-                } catch (e) {
-                  onError(errText(e, "Couldn't delete the fragment."));
-                }
-              }}
+              disabled={deletingId === fragment.id}
+              onClick={() => setConfirmingDelete(true)}
             >
               <DeleteOutlineIcon fontSize="small" />
             </IconButton>
@@ -191,6 +237,16 @@ function FragmentRow({
           <FragmentText text={fragment.text} />
         </Box>
       </Collapse>
+      {confirmingDelete && (
+        <DeleteFragmentDialog
+          title={fragment.title}
+          deleting={deletingId === fragment.id}
+          onCancel={() => setConfirmingDelete(false)}
+          onConfirm={() => {
+            void confirmDelete();
+          }}
+        />
+      )}
     </Box>
   );
 }

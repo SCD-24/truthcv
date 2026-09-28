@@ -229,6 +229,8 @@ describe("WritingStylePage", () => {
     await library.findByText("My voice");
 
     fireEvent.click(library.getByRole("button", { name: "Delete My voice" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: /^delete$/i }));
 
     expect(await screen.findByText(/fragment is in use/i)).toBeTruthy();
   });

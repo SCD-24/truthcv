@@ -31,13 +31,23 @@ export function DocumentEditor({
   kind,
   initial,
   lockedAppId,
+  onDirtyChange,
 }: {
   kind: Kind;
   initial: string;
   lockedAppId?: string;
+  /** Notified whenever this editor's dirty state changes — content differs
+   * from what was last loaded/saved. Optional: ManualPage also renders this
+   * editor without tracking dirtiness. */
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [content, setContent] = useState(initial);
+  // The content as of the last successful save (or the initial load). Dirty
+  // is measured against this, not `initial`, so a save clears dirtiness even
+  // though `initial` itself never changes for the life of this editor.
+  const [savedContent, setSavedContent] = useState(initial);
   const [apps, setApps] = useState<Application[]>([]);
+  const [appsError, setAppsError] = useState(false);
   const [appId, setAppId] = useState<string>(lockedAppId ?? "");
   const [newCompany, setNewCompany] = useState("");
   const [busy, setBusy] = useState(false);
@@ -47,9 +57,34 @@ export function DocumentEditor({
   // create here so a freshly-tracked application is prefilled with what it's for.
   const { posting } = useWizard();
 
+  // Whether the content has changed since it was last loaded/saved. Derived
+  // from savedContent rather than tracked as its own state, so an edit typed
+  // during an in-flight save (after savedContent was captured but before it
+  // was updated) can never be silently dropped.
+  const dirty = content !== savedContent;
+
   // A generated document is the natural starting point; keep the editor in sync
   // if the user regenerates upstream.
-  useEffect(() => setContent(initial), [initial]);
+  useEffect(() => {
+    setContent(initial);
+    setSavedContent(initial);
+  }, [initial]);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  // Warn on tab close/reload while there is an unsaved edit — same guard as
+  // ModelRoutingSession's outstanding-writes warning.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
 
   // When re-editing a ledger document, keep the fixed target in sync if the
   // user opens a different saved document without unmounting the editor.
@@ -57,10 +92,16 @@ export function DocumentEditor({
     if (lockedAppId) setAppId(lockedAppId);
   }, [lockedAppId]);
 
-  useEffect(() => {
+  function loadApplications() {
+    setAppsError(false);
     listApplications()
       .then(setApps)
-      .catch(() => setApps([]));
+      .catch(() => setAppsError(true));
+  }
+
+  useEffect(() => {
+    loadApplications();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const label = kind === "cv" ? "CV" : "cover letter";
@@ -84,6 +125,7 @@ export function DocumentEditor({
     setBusy(true);
     setError(null);
     setResult(null);
+    const submitted = content;
     try {
       const target = await ensureApplication();
       if (!target) {
@@ -92,9 +134,12 @@ export function DocumentEditor({
       }
       const resp =
         kind === "cv"
-          ? await saveApplicationCv(target, content)
-          : await saveApplicationCoverLetter(target, content);
+          ? await saveApplicationCv(target, submitted)
+          : await saveApplicationCoverLetter(target, submitted);
       setResult(resp);
+      // Reset dirtiness relative to what was actually submitted, not the
+      // (possibly newer) content the user has kept typing meanwhile.
+      if (!resp.blocked) setSavedContent(submitted);
       if (!resp.blocked && resp.application) {
         // Reflect the freshly-attached document in the picker list.
         setApps((prev) =>
@@ -129,7 +174,7 @@ export function DocumentEditor({
         className="editor__area"
         value={content}
         onChange={(e) => setContent(e.target.value)}
-        aria-label={`Edit ${label}`}
+        slotProps={{ htmlInput: { "aria-label": `Edit ${label}` } }}
         multiline
         minRows={kind === "cv" ? 16 : 12}
         fullWidth
@@ -179,6 +224,20 @@ export function DocumentEditor({
       {error && (
         <Alert severity="error" sx={{ mt: 2 }}>
           {error}
+        </Alert>
+      )}
+
+      {appsError && !lockedAppId && (
+        <Alert
+          severity="error"
+          sx={{ mt: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={loadApplications}>
+              Retry
+            </Button>
+          }
+        >
+          Couldn't load your applications
         </Alert>
       )}
 

@@ -178,6 +178,31 @@ def resolve(finding_id: str, resolution: str, note: str = "") -> CompanyFinding 
         return finding
 
 
+def _open_contradictions_from(findings: list[CompanyFinding]) -> list[dict]:
+    """Open contradiction groups within an already-selected findings list.
+
+    Shared by ``open_contradictions`` and ``all_open_contradictions``: each
+    entry is {"claim": str, "findings": [CompanyFinding, ...]}, findings
+    ordered strongest source first then most recently observed. A rejected
+    finding is excluded, so resolving one side clears the group.
+    """
+    cited = [f for f in findings if is_cited(f) and f.resolution != "rejected"]
+    by_claim: dict[str, list[CompanyFinding]] = {}
+    for f in cited:
+        by_claim.setdefault(f.claim, []).append(f)
+    groups = []
+    for claim, group_findings in by_claim.items():
+        values = {f.value.strip().casefold() for f in group_findings}
+        if len(values) < 2:
+            continue
+        # Stable sort: most recently observed first, then strongest source
+        # first — the second sort's ties keep the first sort's ordering.
+        ordered = sorted(group_findings, key=lambda f: f.observed_at, reverse=True)
+        ordered.sort(key=lambda f: source_rank(f.source_class))
+        groups.append({"claim": claim, "findings": ordered})
+    return groups
+
+
 def open_contradictions(company: str) -> list[dict]:
     """Open contradiction groups for ``company``: cited claims with >=2 values.
 
@@ -186,18 +211,31 @@ def open_contradictions(company: str) -> list[dict]:
     finding is excluded, so resolving one side clears the group. Returns []
     for a clean company.
     """
-    cited = [f for f in for_company(company) if is_cited(f) and f.resolution != "rejected"]
-    by_claim: dict[str, list[CompanyFinding]] = {}
-    for f in cited:
-        by_claim.setdefault(f.claim, []).append(f)
-    groups = []
-    for claim, findings in by_claim.items():
-        values = {f.value.strip().casefold() for f in findings}
-        if len(values) < 2:
-            continue
-        # Stable sort: most recently observed first, then strongest source
-        # first — the second sort's ties keep the first sort's ordering.
-        ordered = sorted(findings, key=lambda f: f.observed_at, reverse=True)
-        ordered.sort(key=lambda f: source_rank(f.source_class))
-        groups.append({"claim": claim, "findings": ordered})
+    return _open_contradictions_from(for_company(company))
+
+
+def all_open_contradictions() -> list[dict]:
+    """Open contradiction groups across every company, one load_all() call.
+
+    Groups findings by company (using the same identity key as
+    ``for_company``), sorted by observed_at then id within each company —
+    matching ``for_company`` — and orders companies by each company's
+    earliest-observed finding, then by its normalized key, matching the
+    order company groups appear across the stored data.
+    """
+    all_items = load_all()
+    by_company: dict[str, list[CompanyFinding]] = {}
+    for f in all_items:
+        by_company.setdefault(_key(f.company), []).append(f)
+    for key in by_company:
+        by_company[key].sort(key=lambda f: (f.observed_at, f.id))
+
+    def _company_sort_key(key: str) -> tuple[str, str]:
+        findings = by_company[key]
+        earliest = min(f.observed_at for f in findings) if findings else ""
+        return (earliest, key)
+
+    groups: list[dict] = []
+    for key in sorted(by_company, key=_company_sort_key):
+        groups.extend(_open_contradictions_from(by_company[key]))
     return groups

@@ -14,6 +14,7 @@ import type {
 } from './types.js';
 
 import { networkErrorEvent, providerErrorEvent, readBody, retryAfterMsFrom } from './errors.js';
+import { describeTimeout, PROVIDER_REQUEST_TIMEOUT_MS } from './timeout.js';
 
 /** Options for constructing an OpenAI Chat Completions adapter. */
 export interface OpenAiChatCompletionsOptions {
@@ -28,6 +29,8 @@ export interface OpenAiChatCompletionsOptions {
   /** Display name used in error events (e.g. "OpenAI request failed with
    * status ..."); defaults to 'OpenAI'. */
   vendorLabel?: string;
+  /** Override for {@link PROVIDER_REQUEST_TIMEOUT_MS}, in milliseconds. */
+  requestTimeoutMs?: number;
 }
 
 /** HTTP statuses worth retrying. */
@@ -181,18 +184,21 @@ export class OpenAiChatCompletionsAdapter implements ProviderAdapter {
 
   /** Send a request and yield normalised events to completion. */
   async *sendMessage(request: ModelRequest): AsyncGenerator<HarnessEvent, void, unknown> {
+    const signal = AbortSignal.timeout(this.opts.requestTimeoutMs ?? PROVIDER_REQUEST_TIMEOUT_MS);
     let response: Response;
     try {
       response = await fetch(`${this.opts.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: buildHeaders(this.opts.apiKey),
         body: JSON.stringify(buildBody(request, this.opts)),
+        signal,
       });
     } catch (err) {
       // See the Anthropic adapter: a thrown fetch escapes the retry loop, so
       // the one failure class most likely to be transient is reported as a
-      // retryable event instead.
-      yield networkErrorEvent(this.vendorLabel, err);
+      // retryable event instead. A timed-out signal lands here too, reported
+      // as a plain timeout rather than the DOMException's generic wording.
+      yield networkErrorEvent(this.vendorLabel, describeTimeout(err, signal));
       return;
     }
     if (!response.ok) {
@@ -207,8 +213,10 @@ export class OpenAiChatCompletionsAdapter implements ProviderAdapter {
       // `terminated` rather than `fetch failed`, and it is the same transient
       // socket death as a failed connect — a long response over a flapping
       // link is exactly where it happens. Retryable for the same reason: a
-      // body we never read cannot have been acted on.
-      yield networkErrorEvent(this.vendorLabel, err);
+      // body we never read cannot have been acted on. A signal abort past the
+      // deadline lands here too, since this whole request runs under one
+      // timeout — reported as a plain timeout rather than the raw abort error.
+      yield networkErrorEvent(this.vendorLabel, describeTimeout(err, signal));
       return;
     }
     const parsed = payload as OpenAiErrorBody;

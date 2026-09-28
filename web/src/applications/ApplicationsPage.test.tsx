@@ -20,6 +20,8 @@ vi.mock("../api/client", () => ({
   saveApplicationCoverLetter: vi.fn(),
 }));
 
+import { deleteApplication } from "../api/client";
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -278,6 +280,32 @@ describe("ApplicationsPage compact row layout", () => {
 
     // Main row's Company cell should NOT contain the links
     expect(within(mainRow).queryByText("+ Add CV")).toBeNull();
+  });
+});
+
+describe("ApplicationsPage delete confirmation", () => {
+  it("shows a confirmation dialog and only deletes after confirming", async () => {
+    await renderPage([makeApp({ id: "a1", company: "Acme" })]);
+
+    const deleteBtn = await screen.findByRole("button", { name: "Delete" });
+    fireEvent.click(deleteBtn);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(deleteApplication).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(deleteApplication).toHaveBeenCalledWith("a1"));
+  });
+
+  it("cancelling the dialog does not delete", async () => {
+    await renderPage([makeApp({ id: "a1", company: "Acme" })]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(deleteApplication).not.toHaveBeenCalled();
   });
 });
 
