@@ -10,12 +10,33 @@
  * already harvested.
  */
 
-import { blockedResult } from './harvestClassify.js';
-import { navigateAndSnapshot, refuseSignInUrl } from './harvestNavigate.js';
+import { blockedResult, classifySnapshot } from './harvestClassify.js';
+import { buildSearchUrl, navigateAndSnapshot, refuseSignInUrl } from './harvestNavigate.js';
 import { searchAndClassify } from './harvestSearch.js';
 import { callOnBoardTab, closeAllOpenedTabs, createAsyncLock, createBoardTab, selectAndNavigate } from './harvestTabs.js';
 import type { AsyncLock } from './harvestTabs.js';
 import type { BrowserToolCall, HarvestBoardRequest, HarvestBoardResult } from './harvestTypes.js';
+
+/** For a board carrying a `searchUrl` template, resolve the templated board
+ * (with `url` replaced by the built URL) and a note about a `location` the
+ * template has no `{location}` placeholder for — `undefined` note when the
+ * template applies every argument it was given. Boards without `searchUrl`
+ * are returned unchanged, with no note. */
+function resolveTemplatedBoard(board: HarvestBoardRequest): { board: HarvestBoardRequest; locationNote?: string } {
+  if (!board.searchUrl) return { board };
+  const url = buildSearchUrl(board.searchUrl, board.keywords, board.location);
+  const locationNote =
+    board.location && !board.searchUrl.includes('{location}')
+      ? 'location not applied: search URL template has no {location}'
+      : undefined;
+  return { board: { ...board, url }, locationNote };
+}
+
+/** Append `locationNote` (if any) to a classified result's own note. */
+function withLocationTemplateNote(result: HarvestBoardResult, locationNote: string | undefined): HarvestBoardResult {
+  if (!locationNote) return result;
+  return { ...result, note: result.note ? `${result.note}; ${locationNote}` : locationNote };
+}
 
 /** How many boards harvest concurrently, each in its own tab, in the
  * TAB-PER-BOARD FALLBACK path — taken when the session-per-worker path
@@ -32,11 +53,13 @@ export function errorMessage(err: unknown): string {
 /** Harvest one board on whatever tab `call` is currently scoped to — the
  * degraded serial path's per-board step; see {@link harvestSerial}. */
 async function harvestOneBoard(call: BrowserToolCall, board: HarvestBoardRequest): Promise<HarvestBoardResult> {
-  const refused = refuseSignInUrl(board);
-  if (refused) return refused;
-  const navigated = await navigateAndSnapshot(call, board.url);
-  if ('error' in navigated) return blockedResult(board, navigated.error, navigated.blockKind);
-  return searchAndClassify(call, board, navigated.snapshot);
+  const { board: resolved, locationNote } = resolveTemplatedBoard(board);
+  const refused = refuseSignInUrl(resolved);
+  if (refused) return withLocationTemplateNote(refused, locationNote);
+  const navigated = await navigateAndSnapshot(call, resolved.url);
+  if ('error' in navigated) return withLocationTemplateNote(blockedResult(resolved, navigated.error, navigated.blockKind), locationNote);
+  if (resolved.searchUrl) return withLocationTemplateNote(classifySnapshot(resolved, navigated.snapshot), locationNote);
+  return searchAndClassify(call, resolved, navigated.snapshot);
 }
 
 /**
@@ -58,15 +81,17 @@ async function harvestInTab(
   board: HarvestBoardRequest,
   createdIndices: number[],
 ): Promise<HarvestBoardResult> {
-  const refused = refuseSignInUrl(board);
-  if (refused) return refused;
+  const { board: resolved, locationNote } = resolveTemplatedBoard(board);
+  const refused = refuseSignInUrl(resolved);
+  if (refused) return withLocationTemplateNote(refused, locationNote);
   const created = await createBoardTab(call, lock);
-  if ('error' in created) return blockedResult(board, created.error);
+  if ('error' in created) return withLocationTemplateNote(blockedResult(resolved, created.error), locationNote);
   createdIndices.push(created.index);
-  const navigated = await selectAndNavigate(call, lock, created.index, board.url);
-  if ('error' in navigated) return blockedResult(board, navigated.error, navigated.blockKind);
+  const navigated = await selectAndNavigate(call, lock, created.index, resolved.url);
+  if ('error' in navigated) return withLocationTemplateNote(blockedResult(resolved, navigated.error, navigated.blockKind), locationNote);
+  if (resolved.searchUrl) return withLocationTemplateNote(classifySnapshot(resolved, navigated.snapshot), locationNote);
   const tabCall: BrowserToolCall = (toolName, args) => callOnBoardTab(call, lock, created.index, toolName, args);
-  return searchAndClassify(tabCall, board, navigated.snapshot);
+  return searchAndClassify(tabCall, resolved, navigated.snapshot);
 }
 
 /** Harvest one board, confining any THROWN failure to this board's own
@@ -78,10 +103,11 @@ async function harvestBoardSafely(
   board: HarvestBoardRequest,
   createdIndices: number[],
 ): Promise<HarvestBoardResult> {
+  const { board: resolved } = resolveTemplatedBoard(board);
   try {
     return await harvestInTab(call, lock, board, createdIndices);
   } catch (err) {
-    return blockedResult(board, `harvest failed: ${errorMessage(err)}`);
+    return blockedResult(resolved, `harvest failed: ${errorMessage(err)}`);
   }
 }
 
@@ -91,10 +117,11 @@ async function harvestBoardSafely(
  * the same "one call scoped to one board at a time" role a serial `call`
  * plays here, so the same containment applies unchanged. */
 export async function harvestOneBoardSafely(call: BrowserToolCall, board: HarvestBoardRequest): Promise<HarvestBoardResult> {
+  const { board: resolved } = resolveTemplatedBoard(board);
   try {
     return await harvestOneBoard(call, board);
   } catch (err) {
-    return blockedResult(board, `harvest failed: ${errorMessage(err)}`);
+    return blockedResult(resolved, `harvest failed: ${errorMessage(err)}`);
   }
 }
 

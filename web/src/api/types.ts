@@ -641,6 +641,10 @@ export interface JobBoard {
   readonly effectiveSigninUrl: string;
   readonly isDefault: boolean;
   readonly isApi: boolean;
+  /** Search URL template used in "direct" mode — must contain {keywords},
+   * may contain {location}. Only meaningful for custom boards; default
+   * catalog boards are dork-only, so this is "" for them. */
+  searchUrl: string;
 }
 
 /** Whether an API-backed board has a key saved. The key is never returned. */

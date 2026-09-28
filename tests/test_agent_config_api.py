@@ -267,6 +267,89 @@ def test_job_boards_round_trip_source_and_signin_url(client, data_dir):
     assert got["jobs.acme.com"]["effectiveSigninUrl"] == "https://acme.com/login"
 
 
+def test_job_boards_round_trip_search_url(client, data_dir):
+    """searchUrl survives a PUT then GET round-trip for a custom board."""
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [
+                {
+                    "source": "jobs.acme.com",
+                    "searchUrl": "https://jobs.acme.com/search?q={keywords}",
+                },
+            ]
+        },
+    )
+    assert r.status_code == 200
+    got = {b["source"]: b for b in client.get("/api/agent/config").json()["jobBoards"]}
+    assert got["jobs.acme.com"]["searchUrl"] == "https://jobs.acme.com/search?q={keywords}"
+
+
+def test_put_rejects_search_url_missing_keywords_placeholder(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={"jobBoards": [{"source": "jobs.acme.com", "searchUrl": "https://jobs.acme.com/search?q=x"}]},
+    )
+    assert r.status_code == 422
+
+
+def test_put_rejects_search_url_non_http_scheme(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={"jobBoards": [{"source": "jobs.acme.com", "searchUrl": "ftp://jobs.acme.com/search?q={keywords}"}]},
+    )
+    assert r.status_code == 422
+
+
+def test_put_rejects_search_url_unknown_placeholder(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [
+                {
+                    "source": "jobs.acme.com",
+                    "searchUrl": "https://jobs.acme.com/search?q={keywords}&x={foo}",
+                }
+            ]
+        },
+    )
+    assert r.status_code == 422
+
+
+def test_put_rejects_search_url_malformed_braces(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [
+                {
+                    "source": "jobs.acme.com",
+                    "searchUrl": "https://x/s?q={keywords}&f={foo{location}}",
+                }
+            ]
+        },
+    )
+    assert r.status_code == 422
+
+
+def test_put_rejects_search_url_stray_closing_brace(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={"jobBoards": [{"source": "jobs.acme.com", "searchUrl": "https://x/s?q={keywords}}"}]},
+    )
+    assert r.status_code == 422
+
+
+def test_get_with_invalid_stored_search_url_returns_200_with_empty(client, data_dir):
+    (data_dir / "agent_config.json").write_text(
+        '{"job_boards": [{"source": "jobs.acme.com", "search_url": "ftp://x/?q={keywords}"}]}',
+        encoding="utf-8",
+    )
+    r = client.get("/api/agent/config")
+    assert r.status_code == 200
+    got = {b["source"]: b for b in r.json()["jobBoards"]}
+    assert got["jobs.acme.com"]["searchUrl"] == ""
+
+
 def test_put_merges_partial(client, data_dir):
     r = client.put("/api/agent/config", json={"mode": "off"})
     assert r.status_code == 200

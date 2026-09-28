@@ -348,14 +348,23 @@ per-profile criteria line naming that profile's `keywords` and `locations`.
 `keywords` — pass a profile's `locations` there, one at a time, rather than
 folding them into `keywords` text. It types `location` into the board's own
 detected location field, never into the keyword box, and retries the
-board's own local-language spelling before giving up on it. Work this
-channel before the dork queries.
+board's own local-language spelling before giving up on it — that retry
+applies to on-page location controls only; for a board with a `searchUrl`
+template, `location` is substituted into the URL as given, so retry a local
+spelling (e.g. München) by calling again with that spelling as `location`.
+Work this channel before the dork queries.
 
 Harvest each direct board with the `harvest_postings` built-in tool instead of
 driving the browser step by step yourself. Pass it one or more `boards`, each
 with the board's `board` name, its search `url`, and optional `keywords` to
 type into the board's own search box — ONE call replaces the whole
-navigate/snapshot/type/snapshot sequence this section used to prescribe. It
+navigate/snapshot/type/snapshot sequence this section used to prescribe. A
+board with no on-page search box instead carries its own `searchUrl`
+templated search URL (`{keywords}` required, `{location}` optional, e.g.
+`https://www.adzuna.de/search?q={keywords}&loc={location}`) — pass its
+`keywords`/`location` along as usual; the built URL replaces `url` outright,
+is navigated to directly, and the snapshot classified with no search-box
+typing at all. It
 drives the allow-listed browser tools internally and extracts posting URLs by
 matching each known ATS's stable URL shape (Ashby, Greenhouse, Lever,
 Personio) against the accessibility tree `browser_snapshot` returns — never a
@@ -388,13 +397,16 @@ but unreadable), which USUALLY also carries a `blockKind`:
   board's own location-only control search; the board's location field
   never demonstrably recognised it. Record this the same as
   `status="blocked"`.
+- `blockKind: "timeout"` — navigation itself timed out TWICE in a row (an
+  initial attempt and one automatic retry): the page did not load at all.
+  Record this the same as `status="blocked"`.
 - No `blockKind` at all — an internal tool failure (a lost browser
   connection, a `browser_snapshot` call that itself errored, or a navigation
   failure too generic to confirm as a dead URL), rather than any signal read
   from the page. Read `note` for what happened; still record this the same
   as `status="blocked"`.
 
-`blockKind: "wall"` or `"unreachable"` both map to
+`blockKind: "wall"`, `"unreachable"` or `"timeout"` all map to
 `record_discovery_coverage`'s `status="blocked"` as-is; name which one it
 was (or that none was given) in your run report so a dead board URL is never
 confused with a bot wall.

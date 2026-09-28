@@ -132,6 +132,7 @@ def compose_direct_boards(
         results.append({
             "url": board.source,
             "signin_url": resolve_signin_url(board.source, board.signin_url),
+            "search_url": board.search_url,
             "profiles": profile_entries,
         })
     return results

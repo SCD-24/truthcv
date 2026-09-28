@@ -118,7 +118,12 @@ export const harvestPostingsTool: ToolDefinition = {
     '"blocked", using note for detail. A board whose url looks like a sign-in page (by path or ' +
     'query string) is refused and never navigated — harvest never drives a sign-in flow through a tab. ' +
     'Pass optional location to type into the board\'s own detected location field — never fold it ' +
-    'into keywords. ' +
+    'into keywords. For a board with no on-page search box, pass searchUrl (its templated search URL, ' +
+    'e.g. "https://example.com/search?q={keywords}&loc={location}"): {keywords} is required in the ' +
+    'template and {location} optional; when set, the built URL replaces url outright, is navigated to ' +
+    'directly, and the snapshot classified with no browser_type call at all. "timeout" blockKind means ' +
+    'navigation timed out twice in a row (an initial attempt and one retry) — still maps to status ' +
+    '"blocked". ' +
     "A board's result carries a raw snapshot ONLY when its page had content but extraction " +
     'matched nothing (including a consent/bot-check phrase seen alongside real content) — read ' +
     'that yourself as the last resort. Production harvests boards serially, one at a time, ' +
@@ -137,6 +142,7 @@ export const harvestPostingsTool: ToolDefinition = {
             url: { type: 'string', description: "The board's search or listing URL to open." },
             keywords: { type: 'string', description: 'Keywords to type into the detected search box, if any.' },
             location: { type: 'string', description: "A location to type into the board's own detected location field, if any — never folded into keywords." },
+            searchUrl: { type: 'string', description: 'A templated search URL for a board with no on-page search box, e.g. "https://example.com/search?q={keywords}&loc={location}" — {keywords} required, {location} optional. When set, the built URL replaces url and is navigated to directly, with no search-box typing.' },
           },
           required: ['board', 'url'],
           additionalProperties: false,
@@ -238,6 +244,7 @@ function coerceBoard(v: Record<string, unknown>): HarvestBoardRequest {
     url: v.url as string,
     keywords: typeof v.keywords === 'string' ? v.keywords : undefined,
     location: typeof v.location === 'string' ? v.location : undefined,
+    searchUrl: typeof v.searchUrl === 'string' ? v.searchUrl : undefined,
   };
 }
 

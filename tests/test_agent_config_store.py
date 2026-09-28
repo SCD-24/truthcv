@@ -292,6 +292,40 @@ def test_job_board_round_trips_source_and_signin_url():
     assert restored.job_boards == cfg.job_boards
 
 
+def test_job_board_search_url_round_trips_and_defaults_to_empty():
+    cfg = store.AgentConfig(
+        job_boards=[store.JobBoard(source="jobs.acme.com", search_url="https://jobs.acme.com/search?q={keywords}")]
+    )
+    restored = store.AgentConfig.from_dict(cfg.to_dict())
+    assert restored.job_boards == cfg.job_boards
+    assert restored.job_boards[0].search_url == "https://jobs.acme.com/search?q={keywords}"
+    assert store.JobBoard.from_dict({"source": "x"}).search_url == ""
+
+
+def test_invalid_stored_search_url_loads_as_empty(data_dir):
+    (data_dir / "agent_config.json").write_text(
+        '{"job_boards": [{"source": "jobs.acme.com", "search_url": "ftp://x/?q={keywords}"}]}',
+        encoding="utf-8",
+    )
+    cfg = store.load()
+    assert cfg.job_boards[0].search_url == ""
+
+
+def test_resolved_boards_catalog_source_in_job_boards_has_empty_search_url():
+    cfg = store.AgentConfig(job_boards=[store.JobBoard(source="linkedin", search_url="")])
+    resolved = {b.source: b for b in cfg.resolved_boards()}
+    assert resolved["linkedin"].search_url == ""
+
+
+def test_resolved_boards_carries_search_url_for_custom_boards_only():
+    cfg = store.AgentConfig(
+        job_boards=[store.JobBoard(source="jobs.acme.com", search_url="https://jobs.acme.com/search?q={keywords}")]
+    )
+    resolved = {b.source: b for b in cfg.resolved_boards()}
+    assert resolved["jobs.acme.com"].search_url == "https://jobs.acme.com/search?q={keywords}"
+    assert resolved["ashby"].search_url == ""
+
+
 def test_malformed_job_boards_yields_empty_list():
     assert store.AgentConfig.from_dict({"job_boards": "not-a-list"}).job_boards == []
     assert store.AgentConfig.from_dict({"job_boards": [1, 2, 3]}).job_boards == []
@@ -411,6 +445,29 @@ def test_board_for_url_port_stripped():
 
     assert board_for_url("https://linkedin.com:8080/jobs") == "linkedin"
     assert board_for_url("careers.example.com:9000") == "careers.example.com"
+
+
+def test_search_url_error_valid_and_empty():
+    from agentconfig.boards import search_url_error
+
+    assert search_url_error("") is None
+    assert search_url_error("https://jobs.acme.com/search?q={keywords}") is None
+    assert search_url_error("https://jobs.acme.com/search?q={keywords}&l={location}") is None
+
+
+def test_search_url_error_rejects_bad_scheme_and_missing_keywords():
+    from agentconfig.boards import search_url_error
+
+    assert search_url_error("ftp://x/?q={keywords}") is not None
+    assert search_url_error("https://x/?q=x") is not None
+
+
+def test_search_url_error_rejects_unknown_and_malformed_placeholders():
+    from agentconfig.boards import search_url_error
+
+    assert search_url_error("https://x/s?q={keywords}&f={foo}") is not None
+    assert search_url_error("https://x/s?q={keywords}&f={foo{location}}") is not None
+    assert search_url_error("https://x/s?q={keywords}}") is not None
 
 
 def test_board_for_url_empty_or_unparseable():

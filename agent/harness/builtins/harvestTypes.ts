@@ -19,6 +19,13 @@ export interface HarvestBoardRequest {
    * field is detected and how a rejected/unrecognised value is retried
    * with local-language aliases. */
   location?: string;
+  /** A templated search-URL for boards with no on-page search box: e.g.
+   * `https://www.adzuna.de/search?q={keywords}&loc={location}`. `{keywords}`
+   * is REQUIRED in the template (server-validated); `{location}` is optional.
+   * When set, the built URL (see harvestNavigate.ts's `buildSearchUrl`) is
+   * used as `board.url` and the snapshot is classified directly — no
+   * search-box typing, no `browser_type` call at all. */
+  searchUrl?: string;
 }
 
 /** One posting extracted by URL-shape heuristics. */
@@ -51,8 +58,10 @@ export type HarvestOutcome = 'searched' | 'empty' | 'blocked' | 'needs_review';
  * aliases, see harvestLocation.ts) was either rejected outright by the
  * board's own location control or produced no results even from a
  * location-only control search — so the board never demonstrably
- * recognised the location at all. */
-export type BlockKind = 'login' | 'wall' | 'unreachable' | 'location';
+ * recognised the location at all. `'timeout'` means navigation itself timed
+ * out TWICE in a row (an initial attempt and one retry) — see
+ * harvestNavigate.ts's `TIMEOUT_NAV_ERROR_PATTERNS`. */
+export type BlockKind = 'login' | 'wall' | 'unreachable' | 'location' | 'timeout';
 
 /** One board's harvest result. */
 export interface HarvestBoardResult {

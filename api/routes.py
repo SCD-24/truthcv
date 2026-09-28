@@ -1183,6 +1183,7 @@ def _resolved_job_boards(cfg: agent_config_store.AgentConfig) -> list[dict]:
             "source": board.source,
             "signin_url": board.signin_url,
             "mode": board.mode,
+            "search_url": board.search_url,
             "mode_locked": not boards.is_custom_source(board.source),
             "domain": boards.resolve_domain(board.source) or "",
             "effective_signin_url": boards.resolve_signin_url(board.source, board.signin_url),

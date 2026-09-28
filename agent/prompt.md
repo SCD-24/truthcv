@@ -39,7 +39,12 @@ their application history is this tool surface. You have the following tools:
   box, and optional `location` to type into the board's own detected
   location field — never fold a profile's `locations` into `keywords`
   text; pass one location at a time via `location` instead, and it retries
-  the board's own local-language spelling before giving up. It extracts
+  the board's own local-language spelling before giving up. A board with no
+  on-page search box instead carries its own `searchUrl` templated search
+  URL (e.g. `https://www.adzuna.de/search?q={keywords}&loc={location}`) —
+  pass its `keywords`/`location` along as usual; the built URL replaces
+  `url` outright, is navigated to directly, and the snapshot classified
+  with no search-box typing at all. It extracts
   posting URLs by matching each known ATS's stable URL shape against the page's
   accessibility tree — never a CSS selector — and returns, per board, an
   `outcome`: `"searched"` (postings found — matches
@@ -55,6 +60,8 @@ their application history is this tool surface. You have the following tools:
   page) both map to `status="blocked"` as reported; `"location"` means a
   given `location` (and its known local-language aliases) was never
   confirmed by the board's own location control — record `status="blocked"`;
+  `"timeout"` means navigation itself timed out TWICE in a row (an initial
+  attempt and one retry) — the page did not load — record `status="blocked"`;
   an ABSENT `blockKind` means an internal tool failure rather than a page
   signal — read `note` and still record `status="blocked"`. A board whose `url` itself looks like a
   sign-in page (by path or query string) is refused and never navigated —
@@ -342,10 +349,12 @@ and query gets a `record_discovery_coverage` call — skipping one is never
 acceptable, even for a board that turned up nothing; recording `skipped` for
 a board you simply did not get to, while turns remain, is not acceptable
 either. Harvest the direct boards with the `harvest_postings` tool (one
-call, serial boards) rather than driving the browser step by step; read its
-raw snapshot only for `needs_review` and resolve that ambiguity before
-recording coverage (postings → `searched`/`llm`, explicit zero → `empty`,
-unresolved extraction → `blocked` with a reason). If a direct board's search
+call, serial boards) rather than driving the browser step by step; for a
+board with no on-page search box, pass its `searchUrl` templated URL along
+with `keywords`/`location` as usual. Read its raw snapshot only for
+`needs_review` and resolve that ambiguity before recording coverage
+(postings → `searched`/`llm`, explicit zero → `empty`, unresolved extraction
+→ `blocked` with a reason). If a direct board's search
 wall requires a sign-in you don't have, call `report_apply_failure` with
 `blocker="login_required"` and its sign-in URL and move on to the next
 board — never wait for a sign-in mid-run.

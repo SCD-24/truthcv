@@ -32,6 +32,7 @@ const REMOTE_ROCKETSHIP: JobBoard = {
   effectiveSigninUrl: "",
   isDefault: false,
   isApi: true,
+  searchUrl: "",
 };
 
 afterEach(() => {
@@ -40,10 +41,10 @@ afterEach(() => {
 });
 
 const DEFAULT_BOARDS: JobBoard[] = [
-  { source: "ashby", signinUrl: "", mode: "dork", modeLocked: true, domain: "jobs.ashbyhq.com", effectiveSigninUrl: "https://jobs.ashbyhq.com", isDefault: true, isApi: false },
-  { source: "greenhouse", signinUrl: "", mode: "dork", modeLocked: true, domain: "job-boards.greenhouse.io", effectiveSigninUrl: "https://job-boards.greenhouse.io", isDefault: true, isApi: false },
-  { source: "lever", signinUrl: "", mode: "dork", modeLocked: true, domain: "jobs.lever.co", effectiveSigninUrl: "https://jobs.lever.co", isDefault: true, isApi: false },
-  { source: "workday", signinUrl: "", mode: "dork", modeLocked: true, domain: "myworkdayjobs.com", effectiveSigninUrl: "https://www.myworkdayjobs.com", isDefault: true, isApi: false },
+  { source: "ashby", signinUrl: "", mode: "dork", modeLocked: true, domain: "jobs.ashbyhq.com", effectiveSigninUrl: "https://jobs.ashbyhq.com", isDefault: true, isApi: false, searchUrl: "" },
+  { source: "greenhouse", signinUrl: "", mode: "dork", modeLocked: true, domain: "job-boards.greenhouse.io", effectiveSigninUrl: "https://job-boards.greenhouse.io", isDefault: true, isApi: false, searchUrl: "" },
+  { source: "lever", signinUrl: "", mode: "dork", modeLocked: true, domain: "jobs.lever.co", effectiveSigninUrl: "https://jobs.lever.co", isDefault: true, isApi: false, searchUrl: "" },
+  { source: "workday", signinUrl: "", mode: "dork", modeLocked: true, domain: "myworkdayjobs.com", effectiveSigninUrl: "https://www.myworkdayjobs.com", isDefault: true, isApi: false, searchUrl: "" },
 ];
 
 function makeConfig(jobBoards: JobBoard[]): AgentConfig {
@@ -106,6 +107,7 @@ describe("JobBoardsPage", () => {
       effectiveSigninUrl: "https://www.linkedin.com/login",
       isDefault: false,
       isApi: false,
+      searchUrl: "",
     };
     const config = makeConfig([...DEFAULT_BOARDS, linkedin]);
     vi.mocked(updateAgentConfig).mockResolvedValue(makeConfig(DEFAULT_BOARDS));
@@ -129,6 +131,7 @@ describe("JobBoardsPage", () => {
       effectiveSigninUrl: "",
       isDefault: false,
       isApi: false,
+      searchUrl: "",
     };
     await renderPage(makeConfig([board]));
 
@@ -159,6 +162,7 @@ describe("JobBoardsPage", () => {
             effectiveSigninUrl: "",
             isDefault: false,
             isApi: false,
+            searchUrl: "",
           },
         ],
       }),
@@ -174,6 +178,9 @@ describe("JobBoardsPage", () => {
     fireEvent.mouseDown(screen.getByRole("combobox"));
     fireEvent.click(within(screen.getByRole("listbox")).getByText("Custom domain…"));
     fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "custom.example.com" } });
+    fireEvent.change(screen.getByLabelText("Search URL template (optional)"), {
+      target: { value: "https://custom.example.com/jobs?q={keywords}" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() =>
@@ -189,6 +196,7 @@ describe("JobBoardsPage", () => {
             effectiveSigninUrl: "",
             isDefault: false,
             isApi: false,
+            searchUrl: "https://custom.example.com/jobs?q={keywords}",
           },
         ],
       }),
@@ -258,6 +266,7 @@ describe("JobBoardsPage", () => {
       effectiveSigninUrl: "",
       isDefault: false,
       isApi: false,
+      searchUrl: "",
     };
     vi.mocked(updateAgentConfig).mockResolvedValue(makeConfig([custom]));
     await renderPage(makeConfig([custom]));
@@ -295,5 +304,167 @@ describe("JobBoardsPage", () => {
     await screen.findByText("Postings come from this board's own API — only the API key below is configurable.");
     expect(screen.queryByText("Google dork")).toBeNull();
     expect(screen.queryByText("Search the site directly")).toBeNull();
+  });
+
+  // --- Edit dialog ------------------------------------------------------
+
+  it("edits a default board's sign-in URL and persists it", async () => {
+    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
+    const board = DEFAULT_BOARDS[0];
+    vi.mocked(updateAgentConfig).mockResolvedValue(makeConfig(DEFAULT_BOARDS));
+    await renderPage(makeConfig([board]));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(await screen.findByLabelText("Sign-in URL"), {
+      target: { value: "https://jobs.ashbyhq.com/login" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(updateAgentConfig).toHaveBeenCalledWith({
+        jobBoards: [{ ...board, signinUrl: "https://jobs.ashbyhq.com/login" }],
+      }),
+    );
+  });
+
+  it("edits a custom board's search URL and persists it", async () => {
+    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
+    const board: JobBoard = {
+      source: "custom.example.com",
+      signinUrl: "",
+      mode: "direct",
+      modeLocked: false,
+      domain: "custom.example.com",
+      effectiveSigninUrl: "",
+      isDefault: false,
+      isApi: false,
+      searchUrl: "",
+    };
+    vi.mocked(updateAgentConfig).mockResolvedValue(makeConfig([board]));
+    await renderPage(makeConfig([board]));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(await screen.findByLabelText("Search URL template"), {
+      target: { value: "https://custom.example.com/jobs?q={keywords}&loc={location}" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(updateAgentConfig).toHaveBeenCalledWith({
+        jobBoards: [
+          { ...board, searchUrl: "https://custom.example.com/jobs?q={keywords}&loc={location}" },
+        ],
+      }),
+    );
+  });
+
+  it("clears a stale search URL when saving a dork-mode custom board", async () => {
+    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
+    const board: JobBoard = {
+      source: "custom.example.com",
+      signinUrl: "",
+      mode: "dork",
+      modeLocked: false,
+      domain: "custom.example.com",
+      effectiveSigninUrl: "",
+      isDefault: false,
+      isApi: false,
+      searchUrl: "https://custom.example.com/jobs?q={keywords}",
+    };
+    vi.mocked(updateAgentConfig).mockResolvedValue(makeConfig([board]));
+    await renderPage(makeConfig([board]));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(await screen.findByLabelText("Sign-in URL"), {
+      target: { value: "https://custom.example.com/login" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(updateAgentConfig).toHaveBeenCalledWith({
+        jobBoards: [{ ...board, signinUrl: "https://custom.example.com/login", searchUrl: "" }],
+      }),
+    );
+  });
+
+  it("clears a custom board's search URL when its mode is switched away from direct", async () => {
+    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
+    const board: JobBoard = {
+      source: "custom.example.com",
+      signinUrl: "",
+      mode: "direct",
+      modeLocked: false,
+      domain: "custom.example.com",
+      effectiveSigninUrl: "",
+      isDefault: false,
+      isApi: false,
+      searchUrl: "https://custom.example.com/jobs?q={keywords}",
+    };
+    vi.mocked(updateAgentConfig).mockResolvedValue(makeConfig([board]));
+    await renderPage(makeConfig([board]));
+
+    const select = await screen.findByRole("combobox", { name: "Mode" });
+    fireEvent.mouseDown(select);
+    fireEvent.click(within(screen.getByRole("listbox")).getByText("Google dork"));
+
+    await waitFor(() =>
+      expect(updateAgentConfig).toHaveBeenCalledWith({
+        jobBoards: [{ ...board, mode: "dork", searchUrl: "" }],
+      }),
+    );
+  });
+
+  it("refuses a source rename that collides, casefolded, with a ß/ss variant of another board", async () => {
+    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
+    const custom: JobBoard = {
+      source: "strasse.de",
+      signinUrl: "",
+      mode: "direct",
+      modeLocked: false,
+      domain: "strasse.de",
+      effectiveSigninUrl: "",
+      isDefault: false,
+      isApi: false,
+      searchUrl: "",
+    };
+    const other: JobBoard = { ...custom, source: "other.example.com", domain: "other.example.com" };
+    await renderPage(makeConfig([custom, other]));
+
+    const editButtons = await screen.findAllByRole("button", { name: "Edit" });
+    fireEvent.click(editButtons[1]);
+    fireEvent.change(await screen.findByLabelText("Source"), {
+      target: { value: "straße.de" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await screen.findByText("Another board already uses this source.");
+    expect(updateAgentConfig).not.toHaveBeenCalled();
+  });
+
+  it("refuses a source rename that collides with another board, without saving", async () => {
+    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
+    const custom: JobBoard = {
+      source: "custom.example.com",
+      signinUrl: "",
+      mode: "direct",
+      modeLocked: false,
+      domain: "custom.example.com",
+      effectiveSigninUrl: "",
+      isDefault: false,
+      isApi: false,
+      searchUrl: "",
+    };
+    const other: JobBoard = { ...custom, source: "other.example.com", domain: "other.example.com" };
+    await renderPage(makeConfig([custom, other]));
+
+    const editButtons = await screen.findAllByRole("button", { name: "Edit" });
+    fireEvent.click(editButtons[0]);
+    fireEvent.change(await screen.findByLabelText("Source"), {
+      target: { value: "  Other.Example.com  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await screen.findByText("Another board already uses this source.");
+    expect(updateAgentConfig).not.toHaveBeenCalled();
   });
 });

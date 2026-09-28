@@ -45,6 +45,18 @@ const UNREACHABLE_NET_ERROR_PATTERNS: readonly RegExp[] = [
   /ECONNREFUSED/i,
 ];
 
+/** Regexes matching a Chromium navigation-timeout-class error — distinct
+ * from {@link UNREACHABLE_NET_ERROR_PATTERNS}: the page WAS reachable (or at
+ * least attempted) but did not finish loading within the timeout, rather
+ * than a confirmed DNS/connection failure. Retried once; a second timeout
+ * maps to `blockKind: 'timeout'`. */
+const TIMEOUT_NAV_ERROR_PATTERNS: readonly RegExp[] = [
+  /Timeout \d+ms exceeded/i,
+  /ERR_TIMED_OUT/i,
+  /ERR_CONNECTION_TIMED_OUT/i,
+  /did not load/i,
+];
+
 /** Match a searchbox/textbox line and capture its `[ref=...]` element ref. */
 const SEARCH_BOX_RE = /-\s*(?:searchbox|textbox)[^\n[]*\[ref=([^\]]+)]/i;
 
@@ -117,26 +129,70 @@ function isUnreachableNavigationError(message: string): boolean {
   return matchesAny(message, UNREACHABLE_NET_ERROR_PATTERNS);
 }
 
+/** Whether a `browser_navigate` failure's own message names a timeout-class
+ * error — see {@link TIMEOUT_NAV_ERROR_PATTERNS}. Checked only once the
+ * message is already confirmed NOT unreachable, so `ERR_DNS_TIMED_OUT`
+ * (a confirmed DNS failure) always stays `'unreachable'`, never `'timeout'`. */
+function isTimeoutNavigationError(message: string): boolean {
+  return matchesAny(message, TIMEOUT_NAV_ERROR_PATTERNS);
+}
+
+/** Replace every `{keywords}`/`{location}` placeholder in a board's
+ * `searchUrl` template with the URI-encoded keywords/location — `{keywords}`
+ * with `encodeURIComponent(keywords ?? '')`, `{location}` likewise for
+ * `location`, every occurrence of each. Used for direct boards with no
+ * on-page search box: the built URL replaces `board.url` outright, is
+ * navigated to directly, and its snapshot classified with no search-box
+ * typing at all. */
+export function buildSearchUrl(template: string, keywords?: string, location?: string): string {
+  return template
+    .split('{keywords}').join(encodeURIComponent(keywords ?? ''))
+    .split('{location}').join(encodeURIComponent(location ?? ''));
+}
+
 /** Navigate to `url` and take one snapshot, or a `blocked`-shaped error
  * otherwise. `blockKind: 'unreachable'` is set ONLY for a confirmed
  * DNS/connection-class navigation failure ({@link isUnreachableNavigationError});
- * any other navigation failure (a generic timeout, a page-level error) is
+ * a timeout-class failure ({@link isTimeoutNavigationError}) is retried once
+ * via {@link navigateOnce}, and `blockKind: 'timeout'` set only if the retry
+ * also times out; any OTHER navigation failure (a page-level error) is
  * reported with NO `blockKind` at all rather than mislabelling a possibly
  * slow-but-reachable board as a dead URL — see `HarvestBoardResult.blockKind`. */
 export async function navigateAndSnapshot(
   call: BrowserToolCall,
   url: string,
 ): Promise<{ snapshot: string } | { error: string; blockKind?: BlockKind }> {
-  const nav = await call('browser_navigate', { url });
-  if (nav.isError) {
-    if (isUnreachableNavigationError(nav.content)) {
-      return { error: `board unreachable: navigation failed: ${nav.content}`, blockKind: 'unreachable' };
-    }
-    return { error: `navigation failed (not a confirmed dead URL — could be a slow or erroring page): ${nav.content}` };
-  }
+  const navError = await navigateOnce(call, url);
+  if (navError) return navError;
   const snap = await call('browser_snapshot', {});
   if (snap.isError) return { error: `snapshot failed: ${snap.content}` };
   return { snapshot: snap.content };
+}
+
+/** Call `browser_navigate`, retrying exactly ONCE on a timeout-class error
+ * ({@link isTimeoutNavigationError}) — a second timeout in a row returns
+ * `blockKind: 'timeout'` rather than retrying indefinitely. Shared by
+ * {@link navigateAndSnapshot} and harvestTabs.ts's `selectAndNavigate`, so
+ * both the single-shared-tab and tab-per-board paths get the same retry.
+ * Resolves to `null` on success, else the navigation error. */
+export async function navigateOnce(call: BrowserToolCall, url: string): Promise<{ error: string; blockKind?: BlockKind } | null> {
+  const nav = await call('browser_navigate', { url });
+  if (!nav.isError) return null;
+  if (isUnreachableNavigationError(nav.content)) {
+    return { error: `board unreachable: navigation failed: ${nav.content}`, blockKind: 'unreachable' };
+  }
+  if (isTimeoutNavigationError(nav.content)) {
+    const retry = await call('browser_navigate', { url });
+    if (!retry.isError) return null;
+    if (isUnreachableNavigationError(retry.content)) {
+      return { error: `board unreachable: navigation failed: ${retry.content}`, blockKind: 'unreachable' };
+    }
+    if (isTimeoutNavigationError(retry.content)) {
+      return { error: `navigation timed out twice: ${retry.content}`, blockKind: 'timeout' };
+    }
+    return { error: `navigation failed (not a confirmed dead URL — could be a slow or erroring page): ${retry.content}` };
+  }
+  return { error: `navigation failed (not a confirmed dead URL — could be a slow or erroring page): ${nav.content}` };
 }
 
 /** Outcome of {@link searchAndSnapshot}: `snapshot` is always the best one
