@@ -192,6 +192,30 @@ def search_url_error(v: str) -> str | None:
     return None
 
 
+def posting_url_pattern_error(v: str) -> str | None:
+    """Validate a job board's posting_url_pattern glob; return an error, or None if valid.
+
+    Empty is fine (no pattern configured); otherwise it must start with
+    http:// or https://, the host segment (up to the first '/' after the
+    scheme) must be non-empty and contain no '*', and the whole value must
+    contain no whitespace and no '{' or '}'. '*' elsewhere matches any
+    non-whitespace run and is anchored at the start, open at the end.
+    """
+    if not v:
+        return None
+    if not (v.startswith("http://") or v.startswith("https://")):
+        return "posting_url_pattern must start with http:// or https://"
+    scheme_len = len("https://") if v.startswith("https://") else len("http://")
+    rest = v[scheme_len:]
+    slash_idx = rest.find("/")
+    host = rest if slash_idx == -1 else rest[:slash_idx]
+    if not host or "*" in host:
+        return "posting_url_pattern must have a valid host"
+    if any(ch.isspace() for ch in v) or "{" in v or "}" in v:
+        return "posting_url_pattern must not contain whitespace, '{', or '}'"
+    return None
+
+
 def is_default_source(source: str) -> bool:
     """Check whether source is one of the always-searched, unremovable default boards."""
     return source.strip().casefold() in {s.casefold() for s in DEFAULT_BOARD_SOURCES}

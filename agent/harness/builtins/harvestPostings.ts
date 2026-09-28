@@ -128,7 +128,13 @@ export const harvestPostingsTool: ToolDefinition = {
     'matched nothing (including a consent/bot-check phrase seen alongside real content) — read ' +
     'that yourself as the last resort. Production harvests boards serially, one at a time, ' +
     'through the primary browser MCP connection and saved signed-in profile; it never opens ' +
-    'extra sessions or manages tabs, regardless of advertised tab tools.',
+    'extra sessions or manages tabs, regardless of advertised tab tools. Resolves both accessibility-tree ' +
+    'link formats browser_snapshot itself uses — a same-line URL and Playwright\'s own indented child ' +
+    '"- /url: <href>" line, often relative, resolved against the snapshot\'s own Page URL line or the ' +
+    'board url. Extraction tries, in order: known ATS URL shapes; a board\'s own postingUrlPattern glob, ' +
+    'when given; then a general same-site job-link rule (a jobs/careers/stellen-style path segment ' +
+    'followed by a posting-shaped later segment), which counts only with at least two distinct ' +
+    'qualifying links.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -143,6 +149,7 @@ export const harvestPostingsTool: ToolDefinition = {
             keywords: { type: 'string', description: 'Keywords to type into the detected search box, if any.' },
             location: { type: 'string', description: "A location to type into the board's own detected location field, if any — never folded into keywords." },
             searchUrl: { type: 'string', description: 'A templated search URL for a board with no on-page search box, e.g. "https://example.com/search?q={keywords}&loc={location}" — {keywords} required, {location} optional. When set, the built URL replaces url and is navigated to directly, with no search-box typing.' },
+            postingUrlPattern: { type: 'string', description: "A glob ('*' as the only wildcard) matching this board's own posting-link URL shape, e.g. 'https://boards.example.com/job/*' — tried after known ATS shapes and before the general same-site heuristic." },
           },
           required: ['board', 'url'],
           additionalProperties: false,
@@ -245,6 +252,7 @@ function coerceBoard(v: Record<string, unknown>): HarvestBoardRequest {
     keywords: typeof v.keywords === 'string' ? v.keywords : undefined,
     location: typeof v.location === 'string' ? v.location : undefined,
     searchUrl: typeof v.searchUrl === 'string' ? v.searchUrl : undefined,
+    postingUrlPattern: typeof v.postingUrlPattern === 'string' ? v.postingUrlPattern : undefined,
   };
 }
 

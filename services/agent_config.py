@@ -45,13 +45,19 @@ def update_agent_config(sent: dict) -> agent_config_store.AgentConfig:
             signin_url = item.get("signin_url", "")
             mode = item.get("mode", "")
             search_url = item.get("search_url", "")
-            if boards.is_default_source(source) and not signin_url.strip():
+            posting_url_pattern = item.get("posting_url_pattern", "")
+            if (
+                boards.is_default_source(source)
+                and not signin_url.strip()
+                and not posting_url_pattern.strip()
+            ):
                 continue
             normalised.append({
                 "source": source,
                 "signin_url": signin_url,
                 "mode": mode,
                 "search_url": search_url,
+                "posting_url_pattern": posting_url_pattern,
             })
         sent["job_boards"] = normalised
 

@@ -357,13 +357,36 @@ describe('harvestPostings: blocked vs empty, reported distinctly', () => {
   });
 });
 
+describe('harvestPostings: postingUrlPattern', () => {
+  it('extracts via the board posting-link pattern when its native links match', async () => {
+    const snapshot = [
+      '- link "Board Native Posting" [ref=e1]: https://employer.example/job/9001',
+      '- link "Unrelated nav link" [ref=e2]: https://employer.example/about',
+    ].join('\n');
+    const call = stubBrowserCall(singleTabHandlers(snapshot));
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Employer', url: 'https://employer.example/careers', postingUrlPattern: 'https://employer.example/job/*' }] },
+      call,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    expect(results[0].tier).toBe('harvest');
+    expect(results[0].postings).toEqual([{ url: 'https://employer.example/job/9001', title: 'Board Native Posting', ats: 'board-pattern' }]);
+  });
+});
+
 describe('harvestPostings: a consent/bot-check phrase over real content is never data loss', () => {
   it('attaches the raw snapshot and reports needs_review (never blocked) for a consent banner sitting over 20 non-ATS job links', async () => {
     // An employer's own careers site — the common case for a direct board —
     // whose links are never ATS-shaped, with a cookie-consent banner on top.
+    // Deliberately NOT job-listing-shaped by the same-site heuristic either
+    // (no jobs/careers/... path segment) — this test is specifically about
+    // the tier-3 last-resort case where NO tier extracts anything.
     const links = Array.from(
       { length: 20 },
-      (_, i) => `- link "Role ${i}" [ref=e${i}]: https://employer.example/careers/role-${i}`,
+      (_, i) => `- link "Role ${i}" [ref=e${i}]: https://employer.example/updates/role-${i}`,
     ).join('\n');
     const snapshot = `We value your privacy - Accept all cookies\n${links}`;
     const call = stubBrowserCall(singleTabHandlers(snapshot));

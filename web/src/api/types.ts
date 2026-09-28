@@ -646,6 +646,13 @@ export interface JobBoard {
    * may contain {location}. Only meaningful for custom boards; default
    * catalog boards are dork-only, so this is "" for them. */
   searchUrl: string;
+  /** Glob the agent uses to recognise posting links on a "direct" board's
+   * own site, e.g. "https://www.example.com/jobs/*". Must start with
+   * http:// or https://, is anchored at the start and open at the end, and
+   * `*` matches any run of non-whitespace characters. "" means unset. Unlike
+   * searchUrl this is editable even for default/catalog boards, since it
+   * only affects link recognition, not the search itself. */
+  postingUrlPattern: string;
 }
 
 /** Whether an API-backed board has a key saved. The key is never returned. */

@@ -731,7 +731,7 @@ echo "PASS: daily-apply.sh snapshots and restores the first non-zero session's r
 # script is a bug in one of the two, not just here.
 render_direct_boards() {
   local job_config="$1"
-  jq -r '.directBoards[]? | "  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end) + (if (.searchUrl // "") != "" then " (search URL template: \(.searchUrl))" else "" end)' <<<"$job_config"
+  jq -r '.directBoards[]? | "  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end) + (if (.searchUrl // "") != "" then " (search URL template: \(.searchUrl))" else "" end) + (if (.postingUrlPattern // "") != "" then " (posting link pattern: \(.postingUrlPattern))" else "" end)' <<<"$job_config"
 }
 
 echo "Testing: direct board with a searchUrl template appends the template note..."
@@ -758,6 +758,30 @@ if ! grep -q '\.searchUrl // ""' "$DAILY_APPLY_SRC"; then
   exit 1
 fi
 echo "PASS: daily-apply.sh reads .searchUrl from directBoards"
+
+echo "Testing: direct board with a postingUrlPattern appends the pattern note..."
+DIRECT_WITH_PATTERN='{"directBoards":[{"url":"https://employer.example/careers","postingUrlPattern":"https://employer.example/job/*"}]}'
+DIRECT_LINE_PATTERN="$(render_direct_boards "$DIRECT_WITH_PATTERN")"
+if [[ "$DIRECT_LINE_PATTERN" != *"(posting link pattern: https://employer.example/job/*)"* ]]; then
+  echo "FAIL: expected posting link pattern note, got: '$DIRECT_LINE_PATTERN'"
+  exit 1
+fi
+echo "PASS: direct board line appends the postingUrlPattern note"
+
+echo "Testing: direct board without a postingUrlPattern renders no pattern note..."
+DIRECT_LINE_NO_PATTERN="$(render_direct_boards "$DIRECT_NO_TEMPLATE")"
+if [[ "$DIRECT_LINE_NO_PATTERN" == *"posting link pattern"* ]]; then
+  echo "FAIL: expected no posting link pattern note, got: '$DIRECT_LINE_NO_PATTERN'"
+  exit 1
+fi
+echo "PASS: direct board line without postingUrlPattern has no pattern note"
+
+echo "Testing: daily-apply.sh's DIRECT_BOARDS jq reads the camelCase postingUrlPattern field..."
+if ! grep -q '\.postingUrlPattern // ""' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: daily-apply.sh does not read .postingUrlPattern from directBoards"
+  exit 1
+fi
+echo "PASS: daily-apply.sh reads .postingUrlPattern from directBoards"
 
 echo ""
 echo "All tests passed!"
