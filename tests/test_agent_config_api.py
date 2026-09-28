@@ -43,13 +43,18 @@ def test_get_returns_defaults(client, data_dir):
     job_boards = got.pop("jobBoards")
     assert got == expected
     # The regression this build fixes: with no boards configured, the
-    # sign-in list used to render nothing. GET must always return the four
-    # defaults, each searchable and each with a real sign-in URL.
-    assert len(job_boards) == 4
-    assert {b["source"] for b in job_boards} == {"ashby", "greenhouse", "lever", "workday"}
+    # sign-in list used to render nothing. GET must always return the five
+    # defaults (four dork boards plus the Arbeitnow API feed), each
+    # searchable.
+    assert len(job_boards) == 5
+    assert {b["source"] for b in job_boards} == {"ashby", "greenhouse", "lever", "workday", "arbeitnow"}
     assert all(b["isDefault"] for b in job_boards)
-    assert all(b["effectiveSigninUrl"] for b in job_boards)
-    assert all(b["domain"] for b in job_boards)
+    non_api = [b for b in job_boards if b["source"] != "arbeitnow"]
+    assert all(b["effectiveSigninUrl"] for b in non_api)
+    assert all(b["domain"] for b in non_api)
+    arbeitnow = next(b for b in job_boards if b["source"] == "arbeitnow")
+    assert arbeitnow["isApi"] is True
+    assert arbeitnow["effectiveSigninUrl"] == ""
 
 
 def test_defaults_present_even_when_operator_configured_boards(client, data_dir):
@@ -57,6 +62,7 @@ def test_defaults_present_even_when_operator_configured_boards(client, data_dir)
     assert r.status_code == 200
     sources = [b["source"] for b in r.json()["jobBoards"]]
     assert sources[:4] == ["ashby", "greenhouse", "lever", "workday"]
+    assert sources[4] == "arbeitnow"
     assert "linkedin" in sources
 
 

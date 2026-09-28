@@ -353,11 +353,14 @@ class JobBoardModel(_Camel):
     ``mode`` ("dork" or "direct") is only ever actually settable when the
     board is custom; a board dict that omits it (an older client, or a
     catalog board) still validates. ``domain``, ``effective_signin_url``,
-    ``is_default``, ``is_api`` and ``mode_locked`` are response-only, resolved
-    server-side by the routes from agentconfig/boards.py and stripped on a
-    PUT — ``is_default`` marks a board that is always searched and cannot be
-    removed, ``is_api`` a board reached with a saved API key rather than a
-    browser sign-in (``effective_signin_url`` is always "" for those), and
+    ``is_default``, ``is_api``, ``key_required`` and ``mode_locked`` are
+    response-only, resolved server-side by the routes from
+    agentconfig/boards.py and stripped on a PUT — ``is_default`` marks a
+    board that is always searched and cannot be removed, ``is_api`` a board
+    reached via an HTTP API rather than a browser sign-in
+    (``effective_signin_url`` is always "" for those), ``key_required``
+    whether that API board needs a saved key before its feed can run (false
+    for a public API board like Arbeitnow, and for every non-API board), and
     ``mode_locked`` marks a catalog board whose ``mode`` is fixed and not
     operator-editable.
     """
@@ -371,6 +374,7 @@ class JobBoardModel(_Camel):
     effective_signin_url: str = ""
     is_default: bool = False
     is_api: bool = False
+    key_required: bool = False
 
     @field_validator("search_url")
     @classmethod

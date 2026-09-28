@@ -19,21 +19,30 @@ SOURCE_DOMAINS: dict[str, str] = {
     "linkedin": "linkedin.com/jobs",
     "workday": "myworkdayjobs.com",
     "remoterocketship": "remoterocketship.com",
+    "arbeitnow": "arbeitnow.com",
 }
 
-# Boards reached through an HTTP API with a saved key instead of a browser
-# sign-in. They are configured like any other board and shown in the same
-# list, but two things differ and both are load-bearing:
+# Boards reached through an HTTP API instead of a browser sign-in. Most need
+# a saved key (KEYED_API_SOURCES); Arbeitnow's is public and needs none. They
+# are configured like any other board and shown in the same list, but two
+# things differ and both are load-bearing:
 #
 #   - Discovery does NOT emit a Google `site:` dork for them. The feed is
 #     pulled directly (see jobfeeds/), and a dork would send the agent to the
 #     aggregator's own listing pages instead of the postings the API returns.
 #   - There is no sign-in URL, so the Job boards page offers an API key field
-#     where every other board offers a "Sign in" button.
+#     (for KEYED_API_SOURCES) where every other board offers a "Sign in"
+#     button.
 #
 # Their SOURCE_DOMAINS entry exists only so the UI has a domain to label the
 # row with; nothing composes a search from it.
-API_BOARD_SOURCES: list[str] = ["remoterocketship"]
+API_BOARD_SOURCES: list[str] = ["remoterocketship", "arbeitnow"]
+
+# API-backed sources that need a saved key/credential before their feed can
+# run. Arbeitnow's job-board API is public (no auth), so it is API_BOARD_SOURCES
+# but NOT here — the key routes (api/routes.py) 404 for it, and its feed is
+# always fetched rather than gated on a saved key.
+KEYED_API_SOURCES: list[str] = ["remoterocketship"]
 
 # Fixed discovery mode per catalog source: how postings from that board are
 # found is a property of the board, not something the operator toggles. Every
@@ -48,6 +57,7 @@ CATALOG_MODES: dict[str, str] = {
     "linkedin": "dork",
     "workday": "dork",
     "remoterocketship": "feed",
+    "arbeitnow": "feed",
 }
 
 DEFAULT_BOARD_DOMAINS: list[str] = [
@@ -66,15 +76,18 @@ SIGNIN_URLS: dict[str, str] = {
     "workday": "https://www.myworkdayjobs.com",
 }
 
-# The catalog keys whose domains are exactly DEFAULT_BOARD_DOMAINS. These
-# boards are ALWAYS searched and cannot be removed by the operator — they are
-# unioned into the resolved board list at resolve time, never seeded into
-# storage, so they survive a bad PUT or a hand-edited config file.
-DEFAULT_BOARD_SOURCES: list[str] = ["ashby", "greenhouse", "lever", "workday"]
+# The catalog keys that are ALWAYS searched and cannot be removed by the
+# operator — they are unioned into the resolved board list at resolve time,
+# never seeded into storage, so they survive a bad PUT or a hand-edited
+# config file. The first four resolve their domain straight from
+# DEFAULT_BOARD_DOMAINS (dork boards); "arbeitnow" is a fifth, API-backed
+# default (see jobfeeds/arbeitnow.py) that is fetched directly and never
+# gets a dork, so it deliberately stays OUT of DEFAULT_BOARD_DOMAINS.
+DEFAULT_BOARD_SOURCES: list[str] = ["ashby", "greenhouse", "lever", "workday", "arbeitnow"]
 
 
-def is_api_source(source: str) -> bool:
-    """Check whether source is an API-backed board (key saved, never signed in to).
+def api_source_key(source: str) -> str | None:
+    """Resolve source to its API_BOARD_SOURCES catalog key, or None if it is not one.
 
     Matches the catalog key AND the board's domain, because the "add a board"
     control also accepts a raw domain: an operator who types
@@ -83,8 +96,28 @@ def is_api_source(source: str) -> bool:
     sign-in button for a session that cannot authenticate anything.
     """
     key = source.strip().casefold()
-    domains = {SOURCE_DOMAINS[s].casefold() for s in API_BOARD_SOURCES if s in SOURCE_DOMAINS}
-    return key in {s.casefold() for s in API_BOARD_SOURCES} or key in domains
+    for candidate in API_BOARD_SOURCES:
+        if key == candidate.casefold():
+            return candidate
+        domain = SOURCE_DOMAINS.get(candidate)
+        if domain and key == domain.casefold():
+            return candidate
+    return None
+
+
+def is_api_source(source: str) -> bool:
+    """Check whether source is an API-backed board (key saved or public, never signed in to)."""
+    return api_source_key(source) is not None
+
+
+def requires_key(source: str) -> bool:
+    """Check whether source is API-backed AND needs a saved key before its feed can run.
+
+    False for an API board whose feed is public (Arbeitnow) as well as for any
+    non-API board; the key routes 404 for both.
+    """
+    key = api_source_key(source)
+    return key in KEYED_API_SOURCES if key is not None else False
 
 
 def is_custom_source(source: str) -> bool:

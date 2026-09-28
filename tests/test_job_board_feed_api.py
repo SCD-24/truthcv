@@ -38,6 +38,21 @@ def mock_http(monkeypatch):
     return install
 
 
+# Arbeitnow is an always-on default board (agentconfig.boards.DEFAULT_BOARD_SOURCES),
+# so every test below that exercises the feed also exercises it, whether or
+# not the test cares about its postings. This is its empty, well-formed page.
+_ARBEITNOW_EMPTY_PAGE = {"data": [], "links": {"next": None}}
+
+
+def _empty_response_for_host(host: str) -> httpx.Response:
+    """An empty, well-formed page for whichever source a request's host names."""
+    if "arbeitnow" in host:
+        return httpx.Response(200, json=_ARBEITNOW_EMPTY_PAGE)
+    if "greenhouse" in host:
+        return httpx.Response(200, json={"jobs": []})
+    return httpx.Response(200, json={"jobOpenings": []})
+
+
 # --- catalog ---------------------------------------------------------------
 
 
@@ -67,11 +82,15 @@ def test_a_board_added_as_a_raw_domain_still_reaches_the_feed(client, data_dir, 
         "profiles": [{"name": "p", "enabled": True, "keywords": ["backend"]}],
     })
     client.put("/api/job-boards/remoterocketship.com/key", json={"apiKey": "rr_secret"})
-    mock_http(
-        lambda r: httpx.Response(
+
+    def handler(request):
+        if "arbeitnow" in request.url.host:
+            return httpx.Response(200, json=_ARBEITNOW_EMPTY_PAGE)
+        return httpx.Response(
             200, json={"jobOpenings": [{"roleTitle": "T", "url": "https://acme.example/1"}]}
         )
-    )
+
+    mock_http(handler)
     got = client.get("/api/agent/config?include_feed=true").json()
     assert [p["url"] for p in got["feedPostings"]] == ["https://acme.example/1"]
 
@@ -109,7 +128,40 @@ def test_configured_api_board_is_flagged_and_carries_no_signin_url(client, data_
     assert board["isApi"] is True
     assert board["isDefault"] is False
     assert board["effectiveSigninUrl"] == ""
-    assert all(b["isApi"] is False for b in r.json()["jobBoards"] if b["source"] != "remoterocketship")
+    assert all(
+        b["isApi"] is False
+        for b in r.json()["jobBoards"]
+        if b["source"] not in ("remoterocketship", "arbeitnow")
+    )
+
+
+def test_arbeitnow_is_an_api_backed_default_that_needs_no_key():
+    assert boards.is_api_source("arbeitnow")
+    assert boards.is_api_source("arbeitnow.com")
+    assert boards.is_default_source("arbeitnow")
+    assert not boards.requires_key("arbeitnow")
+    assert boards.requires_key("remoterocketship")
+    assert boards.api_source_key("arbeitnow") == "arbeitnow"
+    assert boards.api_source_key("arbeitnow.com") == "arbeitnow"
+    assert boards.api_source_key("remoterocketship") == "remoterocketship"
+    assert boards.api_source_key("ashby") is None
+
+
+def test_key_routes_reject_arbeitnow_since_its_api_is_public(client, data_dir):
+    for method, path in (
+        ("get", "/api/job-boards/arbeitnow/key"),
+        ("post", "/api/job-boards/arbeitnow/key/test"),
+    ):
+        assert getattr(client, method)(path).status_code == 404
+    assert client.put("/api/job-boards/arbeitnow/key", json={"apiKey": "x"}).status_code == 404
+
+
+def test_resolved_job_boards_report_key_required(client, data_dir):
+    r = client.put("/api/agent/config", json={"jobBoards": [{"source": "remoterocketship"}]})
+    by_source = {b["source"]: b for b in r.json()["jobBoards"]}
+    assert by_source["remoterocketship"]["keyRequired"] is True
+    assert by_source["arbeitnow"]["keyRequired"] is False
+    assert by_source["ashby"]["keyRequired"] is False
 
 
 # --- key routes ------------------------------------------------------------
@@ -187,8 +239,11 @@ def test_a_plain_config_get_never_calls_the_feed(client, data_dir, mock_http, mo
 
 def test_include_feed_returns_postings(client, data_dir, mock_http, monkeypatch):
     _configure(client, monkeypatch)
-    mock_http(
-        lambda r: httpx.Response(
+
+    def handler(request):
+        if "arbeitnow" in request.url.host:
+            return httpx.Response(200, json=_ARBEITNOW_EMPTY_PAGE)
+        return httpx.Response(
             200,
             json={
                 "jobOpenings": [
@@ -200,21 +255,59 @@ def test_include_feed_returns_postings(client, data_dir, mock_http, monkeypatch)
                 ]
             },
         )
-    )
+
+    mock_http(handler)
     got = client.get("/api/agent/config?include_feed=true").json()
     assert [p["url"] for p in got["feedPostings"]] == ["https://acme.example/jobs/1"]
     assert got["feedPostings"][0]["source"] == "remoterocketship"
     assert got["feedError"] == ""
 
 
+def test_arbeitnow_postings_reach_the_feed_with_no_rr_board_or_key(client, data_dir, mock_http, monkeypatch):
+    """Arbeitnow is an unremovable default: it must reach feedPostings with no
+    Remote Rocketship board configured and no key ever saved."""
+    monkeypatch.delenv("REMOTE_ROCKETSHIP_API_KEY", raising=False)
+    client.put(
+        "/api/agent/config",
+        json={"profiles": [{"name": "p", "enabled": True, "keywords": ["backend"]}]},
+    )
+
+    def handler(request):
+        assert "remoterocketship.com" not in request.url.host
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "title": "Backend Engineer",
+                        "company_name": "Acme",
+                        "url": "https://www.arbeitnow.com/view/backend-engineer",
+                        "tags": [],
+                        "job_types": ["Full-time"],
+                        "remote": True,
+                        "location": "Remote",
+                    }
+                ],
+                "links": {"next": None},
+            },
+        )
+
+    mock_http(handler)
+    got = client.get("/api/agent/config?include_feed=true").json()
+    assert [p["url"] for p in got["feedPostings"]] == ["https://www.arbeitnow.com/view/backend-engineer"]
+    assert got["feedPostings"][0]["source"] == "arbeitnow"
+
+
 def test_include_feed_without_the_board_configured_calls_nothing(client, data_dir, mock_http, monkeypatch):
-    """The board being in the config is what makes the feed opt-in — a key left
-    in secrets.enc from an earlier trial must not resurrect it."""
+    """The board being in the config is what makes Remote Rocketship's feed
+    opt-in — a key left in secrets.enc from an earlier trial must not
+    resurrect it. Arbeitnow, an always-on default, MAY still run."""
     monkeypatch.delenv("REMOTE_ROCKETSHIP_API_KEY", raising=False)
     client.put("/api/job-boards/remoterocketship/key", json={"apiKey": "rr_secret"})
 
-    def handler(request):  # pragma: no cover — must never run
-        raise AssertionError("the feed ran for a board that is not configured")
+    def handler(request):
+        assert "remoterocketship.com" not in request.url.host, "the feed ran for a board that is not configured"
+        return httpx.Response(200, json=_ARBEITNOW_EMPTY_PAGE)
 
     mock_http(handler)
     assert client.get("/api/agent/config?include_feed=true").json()["feedPostings"] == []
@@ -232,8 +325,11 @@ def test_an_already_screened_posting_is_omitted_and_counted(client, data_dir, mo
     screening_store.create_or_get(
         {"company": "Acme", "role": "Backend Engineer", "url": screened_url, "verdict": "rejected"}
     )
-    mock_http(
-        lambda r: httpx.Response(
+
+    def handler(request):
+        if "arbeitnow" in request.url.host:
+            return httpx.Response(200, json=_ARBEITNOW_EMPTY_PAGE)
+        return httpx.Response(
             200,
             json={
                 "jobOpenings": [
@@ -242,7 +338,8 @@ def test_an_already_screened_posting_is_omitted_and_counted(client, data_dir, mo
                 ]
             },
         )
-    )
+
+    mock_http(handler)
     got = client.get("/api/agent/config?include_feed=true").json()
     assert [p["url"] for p in got["feedPostings"]] == ["https://acme.example/jobs/2"]
     assert got["feedAlreadyScreened"] == 1
@@ -265,11 +362,14 @@ def test_an_unread_placeholder_screening_does_not_hide_its_posting(client, data_
             "screening_blocker": "not_found",
         }
     )
-    mock_http(
-        lambda r: httpx.Response(
+    def handler(request):
+        if "arbeitnow" in request.url.host:
+            return httpx.Response(200, json=_ARBEITNOW_EMPTY_PAGE)
+        return httpx.Response(
             200, json={"jobOpenings": [{"roleTitle": "Backend Engineer", "url": placeholder_url}]}
         )
-    )
+
+    mock_http(handler)
     got = client.get("/api/agent/config?include_feed=true").json()
     assert [p["url"] for p in got["feedPostings"]] == [placeholder_url]
     assert got["feedAlreadyScreened"] == 0
@@ -290,7 +390,13 @@ def test_a_feed_failure_does_not_break_the_config_response(client, data_dir, moc
     """The agent fetches its whole configuration from this route. A Remote
     Rocketship outage must cost the feed, not the run."""
     _configure(client, monkeypatch)
-    mock_http(lambda r: httpx.Response(500, json={"message": "Unable to fetch jobs"}))
+
+    def handler(request):
+        if "arbeitnow" in request.url.host:
+            return httpx.Response(200, json=_ARBEITNOW_EMPTY_PAGE)
+        return httpx.Response(500, json={"message": "Unable to fetch jobs"})
+
+    mock_http(handler)
     r = client.get("/api/agent/config?include_feed=true")
     assert r.status_code == 200
     got = r.json()
@@ -317,6 +423,8 @@ def test_the_feed_fans_out_across_remote_rocketship_and_watchlist_ats_boards(cli
             return httpx.Response(
                 200, json={"jobs": [{"title": "GH Role", "absolute_url": "https://acme.example/gh/1"}]}
             )
+        if "arbeitnow" in request.url.host:
+            return httpx.Response(200, json=_ARBEITNOW_EMPTY_PAGE)
         return httpx.Response(
             200, json={"jobOpenings": [{"roleTitle": "RR Role", "url": "https://acme.example/rr/1"}]}
         )
@@ -341,6 +449,8 @@ def test_the_feed_dedupes_across_sources_by_url(client, data_dir, mock_http, mon
     def handler(request):
         if "greenhouse" in request.url.host:
             return httpx.Response(200, json={"jobs": [{"title": "GH Role", "absolute_url": shared_url}]})
+        if "arbeitnow" in request.url.host:
+            return httpx.Response(200, json=_ARBEITNOW_EMPTY_PAGE)
         return httpx.Response(200, json={"jobOpenings": [{"roleTitle": "RR Role", "url": shared_url}]})
 
     mock_http(handler)
@@ -362,6 +472,8 @@ def test_one_sources_failure_does_not_drop_the_others_postings(client, data_dir,
             return httpx.Response(
                 200, json={"jobs": [{"title": "GH Role", "absolute_url": "https://acme.example/gh/1"}]}
             )
+        if "arbeitnow" in request.url.host:
+            return httpx.Response(200, json=_ARBEITNOW_EMPTY_PAGE)
         return httpx.Response(500, json={"message": "Unable to fetch jobs"})
 
     mock_http(handler)
@@ -379,7 +491,9 @@ def test_an_ats_board_reaches_the_feed_with_no_key_configured(client, data_dir, 
     board_store.record("Acme", "https://boards.greenhouse.io/acme", "greenhouse")
 
     mock_http(
-        lambda r: httpx.Response(
+        lambda r: httpx.Response(200, json=_ARBEITNOW_EMPTY_PAGE)
+        if "arbeitnow" in r.url.host
+        else httpx.Response(
             200, json={"jobs": [{"title": "GH Role", "absolute_url": "https://acme.example/gh/1"}]}
         )
     )
@@ -426,7 +540,7 @@ def test_the_combined_fetch_shares_one_deadline_between_both_sources(client, dat
 
     monkeypatch.setattr(rr_module, "fetch_postings", spy_rr_fetch)
     monkeypatch.setattr(ats_module, "fetch_ats_postings", spy_ats_fetch)
-    mock_http(lambda r: httpx.Response(200, json={"jobs": [], "jobOpenings": []}))
+    mock_http(lambda r: httpx.Response(200, json={"jobs": [], "jobOpenings": [], "data": [], "links": {"next": None}}))
 
     client.get("/api/agent/config?include_feed=true")
 
@@ -436,19 +550,22 @@ def test_the_combined_fetch_shares_one_deadline_between_both_sources(client, dat
 
 
 def test_remote_rocketship_and_ats_are_fetched_concurrently_not_serially(client, data_dir, mock_http, monkeypatch):
-    """Task t-1: the two sources run on separate threads sharing one deadline,
-    not one after another. Proven with a two-party Barrier: each mock handler
-    waits on it before responding, so if the fetches ran serially the SECOND
-    one would be a lone party and time out waiting for a partner that never
-    arrives — this only completes, with both sources' postings merged, because
-    both threads reach the barrier together."""
+    """Task t-1: the three sources run on separate threads sharing one
+    deadline, not one after another. Proven with a three-party Barrier: each
+    mock handler waits on it before responding, so if the fetches ran
+    serially an earlier one would be a lone party and time out waiting for
+    partners that never arrive — this only completes, with sources' postings
+    merged, because all three threads reach the barrier together."""
     from companyboards import store as board_store
 
     _configure(client, monkeypatch)
     client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
     board_store.record("Acme", "https://boards.greenhouse.io/acme", "greenhouse")
 
-    barrier = threading.Barrier(2, timeout=5)
+    # Three sources now run concurrently — Remote Rocketship, Arbeitnow (an
+    # always-on default) and the ATS fetch — so the barrier needs all three
+    # parties, not two, to prove none of them ran serially.
+    barrier = threading.Barrier(3, timeout=5)
 
     def handler(request):
         barrier.wait()
@@ -456,6 +573,8 @@ def test_remote_rocketship_and_ats_are_fetched_concurrently_not_serially(client,
             return httpx.Response(
                 200, json={"jobs": [{"title": "GH Role", "absolute_url": "https://acme.example/gh/1"}]}
             )
+        if "arbeitnow" in request.url.host:
+            return httpx.Response(200, json=_ARBEITNOW_EMPTY_PAGE)
         return httpx.Response(
             200, json={"jobOpenings": [{"roleTitle": "RR Role", "url": "https://acme.example/rr/1"}]}
         )

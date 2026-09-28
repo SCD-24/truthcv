@@ -164,8 +164,8 @@ export function JobBoardsPage() {
           <Typography variant="h6">Job boards</Typography>
           <Typography variant="body2" color="text.secondary">
             These are the boards the agent searches AND the sites you sign in to — one list, not two.
-            A board marked API is pulled from directly using a key you save here; there is nothing to
-            sign in to for those.
+            A board marked API is pulled from directly — using a key you save here if it needs one —
+            and there is nothing to sign in to for those.
           </Typography>
         </Stack>
         {error && <Alert severity="error">{error}</Alert>}
