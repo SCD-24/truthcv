@@ -127,7 +127,12 @@ export function JobBoardsPage() {
     persist(
       config.jobBoards.map((b) =>
         b.source === source
-          ? { ...b, mode: mode as JobBoard["mode"], searchUrl: mode === "direct" ? b.searchUrl : "" }
+          ? {
+              ...b,
+              mode: mode as JobBoard["mode"],
+              searchUrl: mode === "direct" ? b.searchUrl : "",
+              postingUrlPattern: mode === "direct" ? b.postingUrlPattern : "",
+            }
           : b,
       ),
     );

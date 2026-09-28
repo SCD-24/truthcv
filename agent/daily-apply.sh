@@ -537,7 +537,7 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     # the board with report_apply_failure(blocker="login_required", signin_url)
     # and move on to the next board — see RUNBOOK.md.
     DIRECT_CRITERIA="$(jq -r '[.directBoards[]? | .profiles[]?] | unique_by(.profile)[] | "  [\(.profile)] keywords: \(.keywords // [] | join(", "))" + (if ((.locations // []) | length) > 0 then "; locations: \(.locations | join(", "))" else "" end) + (if ((.rejectedRoleTypes // []) | length) > 0 then "; avoid: \(.rejectedRoleTypes | join(", "))" else "" end)' <<<"$JOB_CONFIG")"
-    DIRECT_BOARDS="$(jq -r '.directBoards[]? | "  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end) + (if (.searchUrl // "") != "" then " (search URL template: \(.searchUrl))" else "" end)' <<<"$JOB_CONFIG")"
+    DIRECT_BOARDS="$(jq -r '.directBoards[]? | "  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end) + (if (.searchUrl // "") != "" then " (search URL template: \(.searchUrl))" else "" end) + (if (.postingUrlPattern // "") != "" then " (posting link pattern: \(.postingUrlPattern))" else "" end)' <<<"$JOB_CONFIG")"
     if [[ -n "$DIRECT_BOARDS" ]]; then
       DIRECT_SECTION="$DIRECT_SECTION"$'\n'"Direct-search boards (search each on the board's own site using the per-profile criteria listed once below; on a login wall, report_apply_failure with blocker \"login_required\" and the sign-in URL, then continue to the next board):"$'\n'
       if [[ -n "$DIRECT_CRITERIA" ]]; then
