@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -42,6 +42,15 @@ import { ROUTES } from "./routes";
 const BrowserSessionPage = lazy(() =>
   import("./browser/BrowserSessionPage").then((m) => ({ default: m.BrowserSessionPage })),
 );
+
+/** Fallback shown while the lazy-loaded BrowserSessionPage chunk downloads. */
+function BrowserSessionLoading() {
+  return (
+    <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
+      <CircularProgress size={24} sx={{ color: "var(--attest)" }} />
+    </Box>
+  );
+}
 
 /**
  * A request to open a saved document for re-editing — fired when the user
@@ -95,13 +104,19 @@ function BootError({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-/** Hook: pending-approvals badge count, refreshed on every navigation. */
+/** Hook: pending-approvals badge count, refreshed on every navigation. A
+ * sequence ref guards against a slow request landing after (and clobbering
+ * the count set by) a faster one issued from a later navigation. */
 function usePendingApprovalsBadge(pathname: string): number {
   const [pendingApprovals, setPendingApprovals] = useState(0);
+  const seqRef = useRef(0);
 
   const refresh = useCallback(() => {
+    const seq = ++seqRef.current;
     listPendingApprovals()
-      .then((rows) => setPendingApprovals(rows.length))
+      .then((rows) => {
+        if (seq === seqRef.current) setPendingApprovals(rows.length);
+      })
       .catch(() => {});
   }, []);
 
@@ -117,10 +132,14 @@ function usePendingApprovalsBadge(pathname: string): number {
  * could not get past a sign-in wall on. */
 function useSigninQueueBadge(pathname: string): number {
   const [signinSites, setSigninSites] = useState(0);
+  const seqRef = useRef(0);
 
   const refresh = useCallback(() => {
+    const seq = ++seqRef.current;
     getSigninQueue()
-      .then((queue) => setSigninSites(queue.sites.length))
+      .then((queue) => {
+        if (seq === seqRef.current) setSigninSites(queue.sites.length);
+      })
       .catch(() => {});
   }, []);
 
@@ -129,6 +148,25 @@ function useSigninQueueBadge(pathname: string): number {
   }, [refresh, pathname]);
 
   return signinSites;
+}
+
+/** 404 view for any route this app doesn't recognize — offers a way back in
+ * rather than silently redirecting somewhere the URL didn't ask for. */
+function NotFoundPage() {
+  const navigate = useNavigate();
+  return (
+    <Box
+      sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, py: 6 }}
+    >
+      <Typography variant="h5">Page not found</Typography>
+      <Typography variant="body1" sx={{ color: "text.secondary" }}>
+        That page doesn't exist.
+      </Typography>
+      <Button variant="contained" onClick={() => navigate(ROUTES.analytics)}>
+        Go to Analytics
+      </Button>
+    </Box>
+  );
 }
 
 /** The app's top-level page routes. */
@@ -174,12 +212,12 @@ function TopLevelRoutes({ onOnboardingComplete }: { onOnboardingComplete: () => 
       <Route
         path={ROUTES.browserSession}
         element={
-          <Suspense fallback={null}>
+          <Suspense fallback={<BrowserSessionLoading />}>
             <BrowserSessionPage />
           </Suspense>
         }
       />
-      <Route path="*" element={<Navigate to={ROUTES.analytics} replace />} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 }

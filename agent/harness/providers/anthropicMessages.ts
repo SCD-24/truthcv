@@ -14,6 +14,7 @@ import type {
 } from './types.js';
 
 import { networkErrorEvent, providerErrorEvent, readBody, retryAfterMsFrom } from './errors.js';
+import { describeTimeout, PROVIDER_REQUEST_TIMEOUT_MS } from './timeout.js';
 
 /** Options for constructing an Anthropic Messages adapter. */
 export interface AnthropicMessagesOptions {
@@ -34,6 +35,8 @@ export interface AnthropicMessagesOptions {
    * exceed the savings.
    */
   promptCache?: boolean;
+  /** Override for {@link PROVIDER_REQUEST_TIMEOUT_MS}, in milliseconds. */
+  requestTimeoutMs?: number;
 }
 
 /** HTTP statuses worth retrying. */
@@ -219,18 +222,22 @@ export class AnthropicMessagesAdapter implements ProviderAdapter {
   /** Send a request and yield normalised events to completion. */
   async *sendMessage(request: ModelRequest): AsyncGenerator<HarnessEvent, void, unknown> {
     const baseUrl = this.opts.baseUrl ?? 'https://api.anthropic.com';
+    const signal = AbortSignal.timeout(this.opts.requestTimeoutMs ?? PROVIDER_REQUEST_TIMEOUT_MS);
     let response: Response;
     try {
       response = await fetch(`${baseUrl}/v1/messages`, {
         method: 'POST',
         headers: buildHeaders(this.opts),
         body: JSON.stringify(buildBody(request, this.opts)),
+        signal,
       });
     } catch (err) {
       // The request never left, or never came back. Reported rather than
       // thrown: a throw here escapes the retry loop entirely, and this is the
-      // failure class most likely to succeed on the next attempt.
-      yield networkErrorEvent('Anthropic', err);
+      // failure class most likely to succeed on the next attempt. A timed-out
+      // signal lands here too, reported as a plain timeout rather than the
+      // DOMException's generic wording.
+      yield networkErrorEvent('Anthropic', describeTimeout(err, signal));
       return;
     }
     if (!response.ok) {
@@ -245,8 +252,10 @@ export class AnthropicMessagesAdapter implements ProviderAdapter {
       // `terminated` rather than `fetch failed`, and it is the same transient
       // socket death as a failed connect — a long response over a flapping
       // link is exactly where it happens. Retryable for the same reason: a
-      // body we never read cannot have been acted on.
-      yield networkErrorEvent('Anthropic', err);
+      // body we never read cannot have been acted on. A signal abort past the
+      // deadline lands here too, since this whole request runs under one
+      // timeout — reported as a plain timeout rather than the raw abort error.
+      yield networkErrorEvent('Anthropic', describeTimeout(err, signal));
       return;
     }
     yield* emitAnthropicEvents(payload);

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createAnthropicMessagesAdapter } from '../anthropicMessages.js';
 import { createOpenAiChatCompletionsAdapter } from '../openaiChatCompletions.js';
+import { createOpenAiResponsesAdapter } from '../openaiResponses.js';
 import type { HarnessEvent, ModelRequest, ProviderAdapter } from '../types.js';
 
 /** A minimal request; the canned responses ignore its contents. */
@@ -76,6 +77,18 @@ function stubFetchBodyDying(): void {
   );
 }
 
+/** Build a fetch stub that rejects the way `AbortSignal.timeout` does: a
+ * `DOMException` named `TimeoutError`, as if the request never got a response
+ * within its deadline. */
+function stubFetchTimingOut(): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => {
+      throw new DOMException('signal timed out', 'TimeoutError');
+    }),
+  );
+}
+
 /** Drive an adapter to completion and collect every yielded event. */
 async function collect(adapter: ProviderAdapter): Promise<HarnessEvent[]> {
   const events: HarnessEvent[] = [];
@@ -85,6 +98,42 @@ async function collect(adapter: ProviderAdapter): Promise<HarnessEvent[]> {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('provider request timeouts', () => {
+  it('reports a timed-out Anthropic fetch as a retryable network error', async () => {
+    stubFetchTimingOut();
+    const events = await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    expect(events).toContainEqual({
+      type: 'error',
+      message: expect.stringMatching(/^Anthropic request could not be sent:.*timed out/),
+      retryable: true,
+    });
+  });
+
+  it('reports a timed-out OpenAI Chat Completions fetch as a retryable network error', async () => {
+    stubFetchTimingOut();
+    const events = await collect(
+      createOpenAiChatCompletionsAdapter({ apiKey: 'k', baseUrl: 'http://x', model: 'gpt' }),
+    );
+    expect(events).toContainEqual({
+      type: 'error',
+      message: expect.stringMatching(/^OpenAI request could not be sent:.*timed out/),
+      retryable: true,
+    });
+  });
+
+  it('reports a timed-out OpenAI Responses fetch as a retryable network error', async () => {
+    stubFetchTimingOut();
+    const events = await collect(
+      createOpenAiResponsesAdapter({ token: 'header.eyJ9.sig', model: 'gpt-5' }),
+    );
+    expect(events).toContainEqual({
+      type: 'error',
+      message: expect.stringMatching(/^OpenAI Responses request could not be sent:.*timed out/),
+      retryable: true,
+    });
+  });
 });
 
 describe('provider adapters', () => {

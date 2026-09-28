@@ -293,6 +293,45 @@ describe("Incomplete stream", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Stream inactivity timeout
+// ---------------------------------------------------------------------------
+
+describe("Stream inactivity timeout", () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+
+  it("stream stalling after headers yields a retryable timed-out network error", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(sse({ type: "response.output_text.delta", delta: "hi" })));
+        // Never close, never enqueue again — simulates a stalled connection.
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "text/event-stream" }),
+      body,
+    }));
+
+    const adapter = createOpenAiResponsesAdapter({ token: makeJwt("a"), model: "gpt-5.4" });
+
+    const events: unknown[] = [];
+    const runPromise = (async () => {
+      for await (const ev of adapter.sendMessage(makeRequest())) events.push(ev);
+    })();
+
+    await vi.advanceTimersByTimeAsync(70_000);
+    await runPromise;
+
+    const errors = events.filter((e: unknown) => (e as { type: string }).type === "error");
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as { message: string }).message).toContain("timed out");
+    expect((errors[0] as { retryable: boolean }).retryable).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // createProviderAdapter routing
 // ---------------------------------------------------------------------------
 

@@ -219,67 +219,115 @@ function RunNowSection({ agentEnabled }: { agentEnabled: boolean }) {
   const [cancelling, setCancelling] = useState(false);
   const [unreachable, setUnreachable] = useState<string | null>(null);
 
-  // Ref always holds the *current* active interval ID so the cleanup function
-  // clears whichever interval is live at unmount time, including any that were
+  // Ref always holds the *current* pending poll timer so the cleanup function
+  // clears whichever one is live at unmount time, including any that were
   // started by pace changes inside the poll callback.
-  const pollIdRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Mounted-ness has to outlive the effect closure: `setPoll` is called from
-  // async continuations (the cancel POST, the status poll) that can resolve
-  // after unmount. Without this an interval was installed on a dead component
-  // AFTER cleanup had already run, so nothing could ever clear it — a 2-second
-  // poll for the rest of the session.
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mounted-ness has to outlive the effect closure: continuations (the cancel
+  // POST, the status poll) can resolve after unmount. Without this a timer
+  // was installed on a dead component AFTER cleanup had already run, so
+  // nothing could ever clear it — a poll for the rest of the session.
   const aliveRef = useRef(true);
+  // The pace the poller is currently scheduled at, so a hidden-tab skip or a
+  // visibility-triggered poll reschedules at the right cadence.
+  const intervalRef = useRef(STATUS_POLL_IDLE_MS);
+  // Bumped on every request issued; a reply is applied only if it is still
+  // the newest one outstanding, so a slow response can never land after (and
+  // clobber) a faster one issued after it.
+  const seqRef = useRef(0);
+  // True while a status request (poll or the mount-time fetch) is
+  // outstanding, so a visibilitychange firing mid-request does not start a
+  // second, overlapping one.
+  const inFlightRef = useRef(false);
 
-  /** Replace the current poll with one at a new interval, unless unmounted. */
-  function setPoll(intervalMs: number) {
-    if (pollIdRef.current != null) clearInterval(pollIdRef.current);
-    pollIdRef.current = null;
+  function clearPollTimer() {
+    if (pollTimerRef.current != null) clearTimeout(pollTimerRef.current);
+    pollTimerRef.current = null;
+  }
+
+  /** Fetch status once, then reschedule itself after the request settles (or
+   * is skipped). A backgrounded tab has no one to show the result to, so a
+   * poll due while hidden is skipped rather than fetched — it still
+   * reschedules so polling resumes the moment the tab is shown again. */
+  function pollOnce() {
+    clearPollTimer();
     if (!aliveRef.current) return;
-    pollIdRef.current = setInterval(() => {
-      getAgentStatus()
-        .then((s) => {
-          setAgentStatus(s);
-          setUnreachable(null);
-          // The run is gone, so a cancel of it is no longer in progress —
-          // clear the local flag or the button stays stuck on "Stopping…".
-          if (!s.running) setCancelling(false);
-          // Slow down once the run finishes
-          if (!s.running && intervalMs === STATUS_POLL_ACTIVE_MS) {
-            setPoll(STATUS_POLL_IDLE_MS);
-          }
-        })
-        .catch((e: unknown) => {
-          setUnreachable(e instanceof Error ? e.message : "Agent service unreachable");
-        });
-    }, intervalMs);
+    if (inFlightRef.current) return;
+    if (document.hidden) {
+      pollTimerRef.current = setTimeout(pollOnce, intervalRef.current);
+      return;
+    }
+    const seq = ++seqRef.current;
+    inFlightRef.current = true;
+    getAgentStatus()
+      .then((s) => {
+        if (!aliveRef.current || seq !== seqRef.current) return;
+        setAgentStatus(s);
+        setUnreachable(null);
+        // The run is gone, so a cancel of it is no longer in progress —
+        // clear the local flag or the button stays stuck on "Stopping…".
+        if (!s.running) setCancelling(false);
+        intervalRef.current = s.running ? STATUS_POLL_ACTIVE_MS : STATUS_POLL_IDLE_MS;
+      })
+      .catch((e: unknown) => {
+        if (!aliveRef.current || seq !== seqRef.current) return;
+        setUnreachable(e instanceof Error ? e.message : "Agent service unreachable");
+      })
+      .finally(() => {
+        inFlightRef.current = false;
+        if (!aliveRef.current) return;
+        pollTimerRef.current = setTimeout(pollOnce, intervalRef.current);
+      });
+  }
+
+  /** (Re)schedule the next poll at a new interval, unless unmounted. */
+  function setPoll(intervalMs: number) {
+    intervalRef.current = intervalMs;
+    clearPollTimer();
+    if (!aliveRef.current) return;
+    pollTimerRef.current = setTimeout(pollOnce, intervalMs);
   }
 
   useEffect(() => {
     aliveRef.current = true;
     let alive = true;
 
-    // Kick off an immediate status fetch, then start the poller
+    // Poll once immediately when the tab becomes visible again, rather than
+    // waiting out whatever's left of the current interval. pollOnce itself
+    // both skips while a request is already in flight and clears/replaces
+    // whatever timer was pending, so this is the only place that schedules a
+    // poll in response to visibility — never a second, competing timer.
+    const onVisibilityChange = () => {
+      if (!document.hidden) pollOnce();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    // Kick off an immediate status fetch, through the same sequence guard (and
+    // the same in-flight tracking) as every poll, then start the poller.
+    const seq = ++seqRef.current;
+    inFlightRef.current = true;
     getAgentStatus()
       .then((s) => {
-        if (!alive) return;
+        if (!alive || seq !== seqRef.current) return;
         setAgentStatus(s);
         setUnreachable(null);
         setPoll(s.running ? STATUS_POLL_ACTIVE_MS : STATUS_POLL_IDLE_MS);
       })
       .catch((e: unknown) => {
-        if (!alive) return;
+        if (!alive || seq !== seqRef.current) return;
         setUnreachable(e instanceof Error ? e.message : "Agent service unreachable");
         // Keep polling so we recover when the container comes back up
         setPoll(STATUS_POLL_IDLE_MS);
+      })
+      .finally(() => {
+        inFlightRef.current = false;
       });
 
     return () => {
       alive = false;
       aliveRef.current = false;
-      if (pollIdRef.current != null) clearInterval(pollIdRef.current);
-      // Null it too: a later `setPoll` from an in-flight promise would
-      // otherwise clear an already-cleared id and install a fresh interval.
-      pollIdRef.current = null;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearPollTimer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -435,10 +483,20 @@ function RecentRunsSection({ timeZone }: { timeZone?: string } = {}) {
   useEffect(() => {
     aliveRef.current = true;
     refresh();
-    const id = setInterval(refresh, STATUS_POLL_IDLE_MS);
+    // A backgrounded tab has no one to show a refreshed list to; skip the
+    // fetch while hidden, and catch up with one immediate refresh when the
+    // tab is shown again rather than waiting out the rest of the interval.
+    const id = setInterval(() => {
+      if (!document.hidden) refresh();
+    }, STATUS_POLL_IDLE_MS);
+    const onVisibilityChange = () => {
+      if (!document.hidden) refresh();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       aliveRef.current = false;
       clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [refresh]);
 

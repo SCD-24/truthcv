@@ -41,6 +41,45 @@ describe('safe execution diagnostics', () => {
     expect(events.at(-1)?.active_operations[0].operation_id).toBe('op_0');
   });
 
+  it('evicts from the front under a byte cap, keeps the newest, and marks every survivor truncated', () => {
+    let text = '';
+    const sink = createDiagnostics('/unused', 'run_2b', { maxBytes: 1024, wall: () => 1000,
+      monotonic: () => 1, write: (_path, data) => { text = data; } });
+    // Close each operation immediately: an unclosed 'start' stays in the
+    // active-operations snapshot forever, so leaving all 40 open would make
+    // later events balloon with a growing active list and legitimately
+    // exceed even a single-event budget — a different behaviour (see "a
+    // single event larger than maxBytes") than the front-eviction this test
+    // means to exercise.
+    for (let i = 0; i < 40; i++) {
+      sink.onDiagnostic({ operationId: `op_${i}`, phase: 'model', status: 'start' });
+      sink.onDiagnostic({ operationId: `op_${i}`, phase: 'model', status: 'success' });
+    }
+    const events = parse(text);
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(1024);
+    // The newest event survives; an early one, evicted, is gone.
+    expect(events.at(-1)?.operation_id).toBe('op_39');
+    expect(events.some((e) => e.operation_id === 'op_0')).toBe(false);
+    expect(events.every((e) => e.truncated)).toBe(true);
+  });
+
+  it('serializes each event O(1) times as diagnostics accumulate past the cap, not once per survivor per write', () => {
+    const stringifySpy = vi.spyOn(JSON, 'stringify');
+    let text = '';
+    const sink = createDiagnostics('/unused', 'run_2c', { maxBytes: 2048, wall: () => 1000,
+      monotonic: () => 1, write: (_path, data) => { text = data; } });
+    const n = 200;
+    stringifySpy.mockClear();
+    for (let i = 0; i < n; i++) sink.onDiagnostic({ operationId: `op_${i}`, phase: 'model', status: 'start' });
+    const calls = stringifySpy.mock.calls.length;
+    stringifySpy.mockRestore();
+    // One stringify per event, plus one bounded re-serialization pass the
+    // first time truncation begins — never one full re-serialization of the
+    // whole retained window per subsequent event (which would be O(n^2)).
+    expect(calls).toBeLessThan(3 * n);
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(2048);
+  });
+
   it('reports failure independently when both overwriting and removing a valid snapshot fail', () => {
     let text = '';
     let writes = 0;

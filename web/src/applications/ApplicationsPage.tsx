@@ -96,6 +96,9 @@ export function ApplicationsPage({
   );
   // The application whose job posting is open in the view/edit modal.
   const [posting, setPosting] = useState<Application | null>(null);
+  // The application awaiting confirmation in the delete dialog; null when closed.
+  const [deleteTarget, setDeleteTarget] = useState<Application | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   // Newest applications first on load. The header reflects it, so the order is
   // visible and can be changed like any other column's.
   const [sortCol, setSortCol] = useState<ColumnDef | null>(DEFAULT_SORT_COLUMN);
@@ -225,15 +228,24 @@ export function ApplicationsPage({
     }
   }
 
-  async function remove(id: string) {
-    if (!confirm("Delete this application and its saved documents?")) return;
+  function requestDelete(app: Application) {
+    setDeleteTarget(app);
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    const id = deleteTarget.id;
     setError(null);
+    setDeletingId(id);
     try {
       await deleteApplication(id);
       // Deletion changes the list, so refetch the current page
       setReloadKey((k) => k + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't delete the application.");
+    } finally {
+      setDeletingId(null);
+      setDeleteTarget(null);
     }
   }
 
@@ -368,8 +380,9 @@ export function ApplicationsPage({
                     <ApplicationRow
                       key={app.id}
                       app={app}
+                      deleting={deletingId === app.id}
                       onEdit={() => startEdit(app)}
-                      onDelete={() => remove(app.id)}
+                      onDelete={() => requestDelete(app)}
                       onOpenDocument={(kind, source) =>
                         onEditDocument({ appId: app.id, kind, source })
                       }
@@ -427,6 +440,35 @@ export function ApplicationsPage({
           onClose={() => setPosting(null)}
         />
       )}
+
+      {deleteTarget && (
+        <Dialog
+          open
+          onClose={() => {
+            if (deletingId === deleteTarget.id) return;
+            setDeleteTarget(null);
+          }}
+        >
+          <DialogTitle>Delete application?</DialogTitle>
+          <DialogContent>
+            <Typography>
+              Delete {deleteTarget.company || "this application"} and its saved documents?
+            </Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setDeleteTarget(null)} disabled={deletingId === deleteTarget.id}>
+              Cancel
+            </Button>
+            <Button
+              color="error"
+              onClick={confirmDelete}
+              disabled={deletingId === deleteTarget.id}
+            >
+              Delete
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
     </Box>
   );
 }
@@ -438,6 +480,7 @@ export function ApplicationsPage({
  */
 function ApplicationRow({
   app,
+  deleting,
   onEdit,
   onDelete,
   onOpenDocument,
@@ -445,6 +488,7 @@ function ApplicationRow({
   onOpenPosting,
 }: {
   app: Application;
+  deleting: boolean;
   onEdit: () => void;
   onDelete: () => void;
   onOpenDocument: (kind: PreviewKind, source: string) => void;
@@ -507,7 +551,7 @@ function ApplicationRow({
             <Button size="small" onClick={onEdit}>
               Edit
             </Button>
-            <Button size="small" color="error" onClick={onDelete}>
+            <Button size="small" color="error" onClick={onDelete} disabled={deleting}>
               Delete
             </Button>
           </Stack>

@@ -105,13 +105,27 @@ export class GuardrailBlockedError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const callerSignal = init?.signal;
+  // Forward the caller's own abort into our timeout controller, rather than
+  // silently overwriting it — a caller that cancels its own request must
+  // still see that cancellation, not our generic timeout message.
+  let callerAborted = false;
+  const onCallerAbort = () => {
+    callerAborted = true;
+    controller.abort();
+  };
+  if (callerSignal) {
+    if (callerSignal.aborted) onCallerAbort();
+    else callerSignal.addEventListener("abort", onCallerAbort, { once: true });
+  }
   let res: Response;
   try {
     res = await fetch(path, { ...init, signal: controller.signal });
   } catch {
+    if (callerAborted) throw new DOMException("The request was aborted.", "AbortError");
     // An abort (our timeout) is distinct from a genuine connection failure —
     // reporting a slow model call as "server down" sends the user chasing the
     // wrong problem.
@@ -122,6 +136,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   } finally {
     clearTimeout(timer);
+    if (callerSignal) callerSignal.removeEventListener("abort", onCallerAbort);
   }
   if (!res.ok) {
     const body: unknown = await res.json().catch(() => undefined);

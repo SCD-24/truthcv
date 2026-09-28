@@ -104,9 +104,9 @@ def get(job_id: str) -> Job | None:
 
 
 def list_jobs() -> list[Job]:
-    """Return a snapshot list of every known job, in no particular order."""
+    """Return a snapshot list of every known job, newest created_at first."""
     with _lock:
-        return list(_jobs.values())
+        return sorted(_jobs.values(), key=lambda j: j.created_at, reverse=True)
 
 
 def job_to_dict(job: Job) -> dict:
@@ -125,6 +125,9 @@ def _run_job(job: Job, fn: Callable[[], Any]) -> None:
     Runs entirely on the pool's worker thread; the worker is only free to
     pick up its next queued job once this function returns, so ``job``'s
     final status is always set before that happens.
+
+    On failure, ``job.error`` is set to ``"{ExceptionType}: {message}"``,
+    falling back to just the exception type name when its message is empty.
     """
     with _lock:
         job.status = STATUS_RUNNING
@@ -136,7 +139,7 @@ def _run_job(job: Job, fn: Callable[[], Any]) -> None:
     except Exception as exc:  # noqa: BLE001 - deliberately capture any failure
         with _lock:
             job.status = STATUS_FAILED
-            job.error = str(exc)
+            job.error = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
             job.finished_at = time.time()
         logger.exception(
             "job failed", extra={"job_id": job.id, "job_kind": job.kind}

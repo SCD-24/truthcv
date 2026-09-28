@@ -7,10 +7,12 @@ the unverifiable tokens.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import logging
 import os
+import threading
 from datetime import date
 import urllib.error
 import urllib.request
@@ -517,10 +519,7 @@ def list_company_finding_contradictions(
     if company is not None:
         groups = company_findings_store.open_contradictions(company)
     else:
-        companies = {f.company for f in company_findings_store.load_all()}
-        groups = []
-        for c in companies:
-            groups.extend(company_findings_store.open_contradictions(c))
+        groups = company_findings_store.all_open_contradictions()
     return [
         ContradictionGroupModel(
             claim=g["claim"],
@@ -732,6 +731,26 @@ def _truth_doc(truth: Truth) -> TruthDoc:
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MiB — a CV/cover-letter upload has no legitimate reason to exceed this
 
+# Guards the persist_source_text/persist_source_hash/persist_profile triple below:
+# uploads run in asyncio.to_thread, so two concurrent /upload requests could
+# otherwise interleave their writes (e.g. source text from one request paired
+# with the hash/profile of another).
+_UPLOAD_PERSIST_LOCK = threading.Lock()
+
+
+def _extract_and_persist_upload(filename: str, data: bytes) -> None:
+    """Extract text from an uploaded file and persist it, off the event loop.
+
+    Raises DocumentExtractError on an unsupported/unparseable file; the
+    caller maps that to a 400 response.
+    """
+    ext = extension_for(filename)
+    text = extract_document_text(filename, data)
+    with _UPLOAD_PERSIST_LOCK:
+        persist_source_text(text)
+        persist_source_hash(text)  # keyed cache: lets /extract skip a repeat LLM pass
+        persist_profile(data, ext)
+
 
 @router.post("/upload", status_code=204)
 async def upload(file: UploadFile = File(...)) -> None:
@@ -742,14 +761,10 @@ async def upload(file: UploadFile = File(...)) -> None:
         raise HTTPException(
             status_code=413, detail="Upload exceeds the maximum allowed size."
         )
-    ext = extension_for(file.filename or "")
     try:
-        text = extract_document_text(file.filename or "", data)
+        await asyncio.to_thread(_extract_and_persist_upload, file.filename or "", data)
     except DocumentExtractError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    persist_source_text(text)
-    persist_source_hash(text)  # keyed cache: lets /extract skip a repeat LLM pass
-    persist_profile(data, ext)
 
 
 @router.post("/extract", response_model=TruthDoc)

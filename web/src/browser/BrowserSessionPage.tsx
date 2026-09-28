@@ -42,6 +42,11 @@ const REFUSAL_COPY: Record<string, string> = {
 const CLOSE_WAIT_MS = 15000;
 const CLOSE_POLL_MS = 500;
 
+/** How many consecutive failed eviction polls it takes to declare the
+ * session unavailable. A single failure tearing down a live viewer over a
+ * momentary blip is worse than staying live a little past a real outage. */
+const MAX_CONSECUTIVE_POLL_FAILURES = 3;
+
 type State = "starting" | "live" | "refused" | "unavailable" | "closed";
 
 function hostOf(url: string): string {
@@ -64,6 +69,24 @@ function mmss(total: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+/** How often the eviction countdown re-renders. Isolated into its own
+ * component so ticking it doesn't re-render the whole page (and, in
+ * particular, doesn't touch the noVNC viewer) every second. */
+const COUNTDOWN_TICK_MS = 1000;
+
+/** Ticking "time left" label for an eviction deadline. */
+function Countdown({ deadline }: { deadline: string }) {
+  const [remaining, setRemaining] = useState(() => secondsLeft(deadline));
+
+  useEffect(() => {
+    setRemaining(secondsLeft(deadline));
+    const id = setInterval(() => setRemaining(secondsLeft(deadline)), COUNTDOWN_TICK_MS);
+    return () => clearInterval(id);
+  }, [deadline]);
+
+  return <>{mmss(remaining)}</>;
+}
+
 /** The attended sign-in viewport.
  *
  * The noVNC socket is same-origin (`/api/browser/session/stream`) and the
@@ -80,7 +103,6 @@ export function BrowserSessionPage() {
   // was in the way. `url` alone cannot do it: the retry is at the same URL.
   const [attempt, setAttempt] = useState(0);
   const [deadline, setDeadline] = useState<string | null>(null);
-  const [remaining, setRemaining] = useState(0);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const rfbRef = useRef<RFB | null>(null);
   // Set just before a Reload-initiated disconnect, so the disconnect
@@ -223,30 +245,41 @@ export function BrowserSessionPage() {
     connect();
   }
 
-  // Poll for an eviction the run may have requested.
+  // Poll for an eviction the run may have requested. A single failed poll
+  // (a dropped request, a momentary blip) must not tear down a live viewer —
+  // only give up after several in a row.
   useEffect(() => {
     if (state !== "live") return;
+    let cancelled = false;
+    let inFlight = false;
+    let consecutiveFails = 0;
     const id = setInterval(() => {
+      if (inFlight) return;
+      inFlight = true;
       getBrowserSession()
         .then((s) => {
+          if (cancelled) return;
+          consecutiveFails = 0;
           if (!s.open) setState("closed");
           else setDeadline(s.evictDeadline);
         })
-        .catch(() => setState("unavailable"));
+        .catch(() => {
+          if (cancelled) return;
+          consecutiveFails += 1;
+          if (consecutiveFails >= MAX_CONSECUTIVE_POLL_FAILURES) {
+            setMessage("Lost contact with the browser session.");
+            setState("unavailable");
+          }
+        })
+        .finally(() => {
+          inFlight = false;
+        });
     }, 5000);
-    return () => clearInterval(id);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, [state]);
-
-  // Tick the countdown once a deadline exists.
-  useEffect(() => {
-    if (!deadline) {
-      setRemaining(0);
-      return;
-    }
-    setRemaining(secondsLeft(deadline));
-    const id = setInterval(() => setRemaining(secondsLeft(deadline)), 1000);
-    return () => clearInterval(id);
-  }, [deadline]);
 
   async function onDone() {
     try {
@@ -372,7 +405,7 @@ export function BrowserSessionPage() {
       </AppBar>
       {deadline && (
         <Alert severity="warning">
-          The agent needs the browser in {mmss(remaining)} — finish up.
+          The agent needs the browser in <Countdown deadline={deadline} /> — finish up.
         </Alert>
       )}
       <Box ref={canvasRef} sx={{ flexGrow: 1, minHeight: 480, bgcolor: "black" }} />

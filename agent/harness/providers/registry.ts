@@ -45,6 +45,10 @@ export interface ProviderAdapterOptions {
    * automatic prefix caching.
    */
   promptCache?: boolean;
+  /** Override for the provider request timeout, in milliseconds. Forwarded
+   * to whichever adapter is built; each adapter defaults to
+   * {@link PROVIDER_REQUEST_TIMEOUT_MS} when omitted. */
+  requestTimeoutMs?: number;
 }
 
 /** Default base URLs for OpenAI-wire providers when none is supplied. */
@@ -69,6 +73,7 @@ function buildAnthropic(opts: ProviderAdapterOptions): ProviderAdapter {
     baseUrl: opts.baseUrl || undefined,
     ...(useOauth ? { oauthToken: opts.token } : { apiKey: opts.token }),
     ...(opts.promptCache !== undefined ? { promptCache: opts.promptCache } : {}),
+    ...(opts.requestTimeoutMs !== undefined ? { requestTimeoutMs: opts.requestTimeoutMs } : {}),
   });
 }
 
@@ -83,6 +88,7 @@ function buildOpenAi(opts: ProviderAdapterOptions): ProviderAdapter {
     // Codex would add a stray options field to their request bodies.
     ...(opts.provider === 'ollama' ? { contextWindow: opts.contextWindow } : {}),
     vendorLabel: OPENAI_WIRE_VENDOR_LABELS[opts.provider] ?? 'OpenAI',
+    ...(opts.requestTimeoutMs !== undefined ? { requestTimeoutMs: opts.requestTimeoutMs } : {}),
   });
 }
 
@@ -92,6 +98,7 @@ function buildOpenAiResponses(opts: ProviderAdapterOptions): ProviderAdapter {
     token: opts.token,
     model: opts.model,
     baseUrl: opts.baseUrl || undefined,
+    ...(opts.requestTimeoutMs !== undefined ? { requestTimeoutMs: opts.requestTimeoutMs } : {}),
   });
 }
 

@@ -162,6 +162,54 @@ def test_upload_accepts_at_size_limit(client):
     assert r.status_code == 204, r.text
 
 
+def test_extract_and_persist_upload_serializes_concurrent_calls(monkeypatch):
+    """Two threads racing through _extract_and_persist_upload must not interleave
+    their persist_source_text/persist_source_hash/persist_profile calls."""
+    import threading
+    import time
+
+    calls: list[tuple[str, str]] = []
+    lock_checkpoints = []
+
+    def fake_extract(filename, data):
+        return data.decode()
+
+    def fake_persist_text(text):
+        calls.append(("text", text))
+        time.sleep(0.01)  # widen the window so an unguarded race would interleave
+        calls.append(("text-done", text))
+
+    def fake_persist_hash(text):
+        calls.append(("hash", text))
+
+    def fake_persist_profile(data, ext):
+        calls.append(("profile", data.decode()))
+
+    monkeypatch.setattr(routes, "extract_document_text", fake_extract)
+    monkeypatch.setattr(routes, "extension_for", lambda filename: ".txt")
+    monkeypatch.setattr(routes, "persist_source_text", fake_persist_text)
+    monkeypatch.setattr(routes, "persist_source_hash", fake_persist_hash)
+    monkeypatch.setattr(routes, "persist_profile", fake_persist_profile)
+
+    threads = [
+        threading.Thread(
+            target=routes._extract_and_persist_upload, args=(f"cv{i}.txt", str(i).encode())
+        )
+        for i in range(2)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # Each thread's triple of calls must stay contiguous: "text-done" for a
+    # given value must immediately follow its own "text", never interrupted
+    # by the other thread's persist calls.
+    for idx, (kind, value) in enumerate(calls):
+        if kind == "text":
+            assert calls[idx + 1] == ("text-done", value)
+
+
 def test_confirm_writes_edited_claim(client):
     """A user-edited claim (not the original) is persisted as a user-confirmed
     bullet on the target experience."""

@@ -104,7 +104,12 @@ export function createDiagnostics(
   const write = options.write ?? ((path: string, data: string) => writeFileSync(path, data, { flag: 'w', mode: 0o600 }));
   const remove = options.remove ?? ((path: string) => unlinkSync(path));
   const active = new Map<string, ActiveOperation & { started_mono: number }>();
-  let events: DiagnosticEvent[] = [];
+  // Each retained event is cached alongside its serialized NDJSON line and
+  // that line's byte length, so appending or evicting one costs O(1): no
+  // event is re-serialized unless truncation first begins for it.
+  interface CachedEvent { event: DiagnosticEvent; line: string; bytes: number }
+  let entries: CachedEvent[] = [];
+  let totalBytes = 0;
   let sequence = 0;
   let persisted = 0;
   let truncated = false;
@@ -136,15 +141,38 @@ export function createDiagnostics(
       const values = [...active.values()];
       event.active_truncated = values.length > MAX_ACTIVE;
       event.active_operations = values.slice(-MAX_ACTIVE).map(({ started_mono: _started, ...op }) => op);
-      events.push(event);
-      let text = events.map((item) => JSON.stringify(item) + '\n').join('');
-      while (Buffer.byteLength(text) > maxBytes && events.length > 1) {
-        events.shift();
-        truncated = true;
-        events.forEach((item) => { item.truncated = true; });
-        text = events.map((item) => JSON.stringify(item) + '\n').join('');
+      const line = JSON.stringify(event) + '\n';
+      const bytes = Buffer.byteLength(line);
+      entries.push({ event, line, bytes });
+      totalBytes += bytes;
+
+      // Evict from the front — cheap, since each entry already knows its own
+      // byte length — until under budget. The very first eviction flips
+      // `truncated`, which every earlier-cached line still says false; those
+      // need one re-serialization pass, but only once, not once per eviction.
+      let firstTruncation = false;
+      while (totalBytes > maxBytes && entries.length > 1) {
+        const removed = entries.shift()!;
+        totalBytes -= removed.bytes;
+        if (!truncated) { truncated = true; firstTruncation = true; }
       }
-      if (Buffer.byteLength(text) > maxBytes) throw new Error('diagnostic event exceeds retention');
+      if (firstTruncation) {
+        totalBytes = 0;
+        for (const entry of entries) {
+          entry.event.truncated = true;
+          entry.line = JSON.stringify(entry.event) + '\n';
+          entry.bytes = Buffer.byteLength(entry.line);
+          totalBytes += entry.bytes;
+        }
+        // Marking `truncated` grew each line by a few bytes; re-check the
+        // budget, now cheaply, against the cached lengths.
+        while (totalBytes > maxBytes && entries.length > 1) {
+          const removed = entries.shift()!;
+          totalBytes -= removed.bytes;
+        }
+      }
+      if (totalBytes > maxBytes) throw new Error('diagnostic event exceeds retention');
+      const text = entries.map((entry) => entry.line).join('');
       write(file, text);
       persisted = sequence;
       try { options.health?.update('healthy', persisted); } catch { /* the channel must never affect execution */ }
