@@ -525,7 +525,7 @@ export async function executeToolCall(
   // settings. The browserToolCall closure re-checks the allow-list and resolves
   // the current namespaced name on every underlying browser call.
   if (tool.namespacedName === HARVEST_POSTINGS_TOOL.namespacedName) {
-    const result = await harvestPostings(call.arguments, browserToolCall(pool, registry), false);
+    const result = await harvestPostings(call.arguments, browserToolCall(pool, registry), false, undefined, undefined, maxContentChars);
     return {
       toolCallId: call.id,
       content: capToolResultContent(result.content, maxContentChars),

@@ -205,7 +205,11 @@ the operator confirms no record exists. The read-only `screen_posting` remains
 available for manual screening followed by a separate `record_screening`.
 A raw-snapshot harvest `needs_review` is internal only: recover postings as
 `searched`/`llm`, mark `empty` only on explicit zero-result evidence, otherwise
-record `extraction_failed` with the reason. Phase 0, filters, caps and
+record `extraction_failed` with the reason. The `rawSnapshot` is an excerpt;
+if `rawSnapshotTruncated` is true or the note says it was omitted, re-harvest
+that board alone in its own call first. For dorks, pass the Google search URL
+(with the `site:` query) as the board url; links to the `site:` target are
+extracted automatically. Phase 0, filters, caps and
 autonomy are unchanged. `harvest_postings` takes an optional `location`,
 typed into the board's own detected location field (never folded into
 `keywords`); a location neither it nor its known local-language aliases ever

@@ -76,6 +76,7 @@
 
 import type { ToolDefinition } from '../providers/types.js';
 import { errorMessage, harvestBounded, harvestOneBoardSafely, harvestSerial } from './harvestBoard.js';
+import { fitRawSnapshots } from './harvestExcerpt.js';
 import { harvestWithSessions } from './harvestSessions.js';
 import { probeTabListing } from './harvestTabs.js';
 import type { BrowserToolCall, BrowserToolPermissionCheck, HarvestBoardRequest, HarvestBoardResult, HarvestPostingsResult } from './harvestTypes.js';
@@ -134,7 +135,11 @@ export const harvestPostingsTool: ToolDefinition = {
     'board url. Extraction tries, in order: known ATS URL shapes; a board\'s own postingUrlPattern glob, ' +
     'when given; then a general same-site job-link rule (a jobs/careers/stellen-style path segment ' +
     'followed by a posting-shaped later segment), which counts only with at least two distinct ' +
-    'qualifying links.',
+    'qualifying links. Raw snapshots are excerpts (link lines plus result text), not the full page: ' +
+    'when a result has rawSnapshotTruncated:true or a note saying the raw snapshot was omitted, ' +
+    're-harvest that board alone in its own call before recording extraction_failed. A Google ' +
+    'dork board (search URL with a site: query) has its links to the site: target extracted ' +
+    'automatically and comes back as searched/harvest.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -215,26 +220,29 @@ async function runHarvest(
   tabToolsAvailable: boolean,
   sessionPool?: BrowserSessionPool,
   isSessionToolPermitted?: BrowserToolPermissionCheck,
+  resultBudgetChars?: number,
 ): Promise<HarvestPostingsResult> {
+  const fit = (r: HarvestBoardResult[], extra?: Record<string, unknown>): HarvestBoardResult[] =>
+    (resultBudgetChars ? fitRawSnapshots(r, resultBudgetChars, extra) : r);
   const sessionCount = sessionPool ? await sessionPool.availableSessionCount() : 0;
   if (sessionPool && sessionCount >= MIN_SESSIONS_FOR_PARALLEL_HARVEST) {
     logHarvestMode('sessions', boards.length);
     const sessionResults = await harvestWithSessions(sessionPool, boards, sessionCount, isSessionToolPermitted);
-    const results = await fillUnclaimedBoards(call, boards, sessionResults);
+    const results = fit(await fillUnclaimedBoards(call, boards, sessionResults));
     return { content: JSON.stringify({ results }), isError: false };
   }
   if (!tabToolsAvailable) {
     logHarvestMode('serial', boards.length);
-    return { content: JSON.stringify({ results: await harvestSerial(call, boards) }), isError: false };
+    return { content: JSON.stringify({ results: fit(await harvestSerial(call, boards)) }), isError: false };
   }
   const tabsParseable = await probeTabListing(call);
   if (!tabsParseable) {
     logHarvestMode('serial', boards.length, 'tab-list-unparseable');
-    const results = await harvestSerial(call, boards);
+    const results = fit(await harvestSerial(call, boards), { degradedReason: TAB_LIST_UNPARSEABLE_REASON });
     return { content: JSON.stringify({ results, degradedReason: TAB_LIST_UNPARSEABLE_REASON }), isError: false };
   }
   logHarvestMode('concurrent-tabs', boards.length);
-  return { content: JSON.stringify({ results: await harvestBounded(call, boards) }), isError: false };
+  return { content: JSON.stringify({ results: fit(await harvestBounded(call, boards)) }), isError: false };
 }
 
 /** Whether `value` is a well-formed {@link HarvestBoardRequest} object. */
@@ -281,6 +289,8 @@ function coerceBoards(raw: unknown): HarvestBoardRequest[] {
  *   session-per-worker path. `undefined` falls back to
  *   permitting everything (see harvestSessions.ts's `harvestWithSessions`),
  *   so an existing caller/test keeps working unchanged.
+ * @param resultBudgetChars When set, raw snapshots are excerpted so the
+ *   serialised result stays within this many characters.
  * @returns The per-board results as JSON, or an error message, with `isError` set.
  */
 export async function harvestPostings(
@@ -289,13 +299,14 @@ export async function harvestPostings(
   tabToolsAvailable = true,
   sessionPool?: BrowserSessionPool,
   isSessionToolPermitted?: BrowserToolPermissionCheck,
+  resultBudgetChars?: number,
 ): Promise<HarvestPostingsResult> {
   const boards = coerceBoards(rawArgs.boards);
   if (boards.length === 0) {
     return { content: 'harvest_postings requires a non-empty boards array, each with board and url.', isError: true };
   }
   try {
-    return await runHarvest(call, boards, tabToolsAvailable, sessionPool, isSessionToolPermitted);
+    return await runHarvest(call, boards, tabToolsAvailable, sessionPool, isSessionToolPermitted, resultBudgetChars);
   } catch (err) {
     return { content: `harvest_postings failed: ${errorMessage(err)}`, isError: true };
   }

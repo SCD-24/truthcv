@@ -23,7 +23,7 @@
 
 import { blockedResult, classifySnapshot, isExplicitlyEmpty } from './harvestClassify.js';
 import { findLocationFieldRef, locationCandidates, showsLocationRejected } from './harvestLocation.js';
-import { navigateAndSnapshot, searchAndSnapshot, type KeywordSearchResult } from './harvestNavigate.js';
+import { navigateAndSnapshot, searchAndSnapshot, settleIfLoading, type KeywordSearchResult } from './harvestNavigate.js';
 import type { BrowserToolCall, HarvestBoardRequest, HarvestBoardResult } from './harvestTypes.js';
 
 /** Type `location` into the location field at `ref` and, when `keywords` is
@@ -183,9 +183,10 @@ export async function searchAndClassify(call: BrowserToolCall, board: HarvestBoa
   try {
     const locationRef = board.location ? findLocationFieldRef(snapshot) : undefined;
     if (!locationRef) {
-      if (!board.keywords) return classifySnapshot(board, snapshot);
+      if (!board.keywords) return classifySnapshot(board, await settleIfLoading(call, snapshot));
       const search = await searchAndSnapshot(call, snapshot, board.keywords);
-      return annotateUnsubmitted(classifySnapshot(board, search.snapshot), search);
+      const settled = await settleIfLoading(call, search.snapshot);
+      return annotateUnsubmitted(classifySnapshot(board, settled), search);
     }
     return await resolveLocationControl(call, board, snapshot);
   } catch {

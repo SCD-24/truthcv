@@ -42,7 +42,8 @@ export interface HarvestedPosting {
   /** Which known ATS's URL shape matched (`ashby`, `greenhouse`, `lever`,
    * `personio`), or `board-pattern` (matched the board's own
    * `postingUrlPattern`) or `board-heuristic` (matched the general
-   * same-site job-link rule). */
+   * same-site job-link rule) or `dork-site` (a Google `site:` dork result
+   * pointing at the dork's target domain). */
   ats: string;
 }
 
@@ -95,6 +96,10 @@ export interface HarvestBoardResult {
    * extraction matched nothing (including a consent/bot-check phrase seen
    * alongside real content). Never present on a `blocked` result. */
   rawSnapshot?: string;
+  /** True when `rawSnapshot` is an excerpt (link lines + result text) or was
+   * omitted entirely to fit the result budget; re-harvest this board alone
+   * before recording extraction_failed. */
+  rawSnapshotTruncated?: boolean;
 }
 
 /** The result shape this handler returns, mirroring every other built-in's `{ content, isError }`. */

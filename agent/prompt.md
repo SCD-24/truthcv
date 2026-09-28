@@ -81,6 +81,11 @@ their application history is this tool surface. You have the following tools:
   result, NEVER as a coverage status: recover postings from the raw snapshot
   and record `searched`/`llm`, use `empty` only on explicit zero-result
   evidence, or record `extraction_failed` with the reason if unresolved.
+  The raw snapshot is now an excerpt (link lines + result text); if
+  `rawSnapshotTruncated` is true or the note says it was omitted, re-harvest
+  that board alone in its own call before recording `extraction_failed`.
+  For dorks, pass the Google search URL (with the `site:` query) as the board
+  `url`; links to the `site:` target are extracted automatically.
   Boards harvest serially, one at a time through the primary browser
   connection (not concurrent tabs). Its own execution is serialized against every other browser-driving tool call, so
   it never interleaves with one you issue yourself.

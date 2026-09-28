@@ -11,6 +11,8 @@
  */
 
 import type { BlockKind, HarvestBoardRequest, HarvestBoardResult, HarvestedPosting } from './harvestTypes.js';
+import { extractDorkPostings, parseDorkTarget } from './harvestDork.js';
+import { compactSnapshot } from './harvestExcerpt.js';
 import { globToRegExp, resolveLinks, resolveSnapshotBase, sameSiteLinkQualifies, stripHash, type ResolvedLink } from './harvestLinks.js';
 
 /** Cap on postings returned per board — bounds the structured result's size. */
@@ -94,6 +96,9 @@ const ANY_LINK_LINE_RE = /-\s*link\s+"[^"]+"/i;
  * show no substantive content of its own — see {@link hasSubstantiveContent}. */
 const MIN_SUBSTANTIVE_SNAPSHOT_LENGTH = 200;
 
+/** Max chars of a needs_review result's raw snapshot excerpt. */
+const RAW_SNAPSHOT_MAX_CHARS = 6000;
+
 /** Which known ATS's URL shape `url` matches, or `''` if none does. */
 function detectAts(url: string): string {
   const hit = ATS_URL_PATTERNS.find((entry) => entry.pattern.test(url));
@@ -166,6 +171,7 @@ function extractSameSitePostings(links: ResolvedLink[], board: HarvestBoardReque
 function tierLabel(ats: string): string {
   if (ats === 'board-pattern') return "the board's own posting URL pattern";
   if (ats === 'board-heuristic') return 'a general same-site job-link rule';
+  if (ats === 'dork-site') return "the dork's site: target domain";
   return "known ATS URL shapes";
 }
 
@@ -230,7 +236,13 @@ function extractPostings(board: HarvestBoardRequest, snapshot: string): Harveste
     const patternPostings = extractPatternPostings(links, board.postingUrlPattern);
     if (patternPostings.length > 0) return patternPostings;
   }
-  return extractSameSitePostings(links, board, resolveSnapshotBase(board, snapshot));
+  const base = resolveSnapshotBase(board, snapshot);
+  const dorkTarget = parseDorkTarget(base);
+  if (dorkTarget) {
+    const dorkPostings = extractDorkPostings(links, dorkTarget);
+    if (dorkPostings.length > 0) return dorkPostings;
+  }
+  return extractSameSitePostings(links, board, base);
 }
 
 /**
@@ -266,5 +278,7 @@ export function classifySnapshot(board: HarvestBoardRequest, snapshot: string): 
   const note = wallKind === 'wall'
     ? 'a consent/bot-check phrase was seen, but the page also shows substantive content of its own; raw snapshot attached for manual review'
     : 'no recognised posting URLs found; raw snapshot attached for manual review';
-  return { ...base, outcome: 'needs_review', tier: '', postings: [], note, rawSnapshot: snapshot };
+  const excerpt = compactSnapshot(snapshot, RAW_SNAPSHOT_MAX_CHARS);
+  const truncated = excerpt.truncated ? { rawSnapshotTruncated: true } : {};
+  return { ...base, outcome: 'needs_review', tier: '', postings: [], note, rawSnapshot: excerpt.text, ...truncated };
 }

@@ -11,6 +11,32 @@ describe('classifySnapshot German empty phrasing', () => {
   });
 });
 
+describe('classifySnapshot dorks and excerpts', () => {
+  it('extracts site: target links from a Google SERP', () => {
+    const url = 'https://www.google.com/search?q=site:careers.example.org+engineer';
+    const snapshot = [
+      `- Page URL: ${url}`,
+      '- link "Engineer at Acme" [ref=e1]:',
+      '  - /url: https://careers.example.org/x',
+      '- link "Images" [ref=e2]:',
+      '  - /url: https://www.google.com/imghp',
+    ].join('\n');
+    const result = classifySnapshot({ board: 'Dork', url }, snapshot);
+    expect(result.outcome).toBe('searched');
+    expect(result.postings[0].ats).toBe('dork-site');
+    expect(result.note).toContain("dork's site");
+  });
+
+  it('caps an oversized needs_review snapshot', () => {
+    const board = { board: 'Big', url: 'https://big.example/jobs' };
+    const snapshot = '- generic: filler text line\n'.repeat(1000);
+    const result = classifySnapshot(board, snapshot);
+    expect(result.outcome).toBe('needs_review');
+    expect(result.rawSnapshotTruncated).toBe(true);
+    expect((result.rawSnapshot ?? '').length).toBeLessThanOrEqual(6000);
+  });
+});
+
 describe('isExplicitlyEmpty', () => {
   it('is exported and recognises German phrasing', () => {
     expect(isExplicitlyEmpty('Keine Stellen gefunden')).toBe(true);

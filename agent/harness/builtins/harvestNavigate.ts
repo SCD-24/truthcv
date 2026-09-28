@@ -224,6 +224,42 @@ async function waitAndResnapshot(call: BrowserToolCall, previous: string): Promi
   return snap.isError ? previous : snap.content;
 }
 
+/** Matches a snapshot still showing a loading/searching state. */
+const LOADING_RE = new RegExp(
+  [
+    'finding jobs',
+    'loading\\s*(?:\\.{2,}|…|jobs|results|more)',
+    'text:\\s*"?loading"?\\s*$',
+    'searching\\s*(?:\\.{2,}|…|for\\b|jobs)',
+    'lädt|wird geladen|bitte warten',
+    '-\\s*(?:progressbar|busy)\\b',
+  ].join('|'),
+  'im',
+);
+
+/** Max wait+resnapshot rounds while results are still loading. */
+const RESULTS_SETTLE_ATTEMPTS = 2;
+
+/** Seconds to wait per round while results are still loading. */
+const RESULTS_SETTLE_SECONDS = 3;
+
+/**
+ * When `snapshot` still shows loading text, wait and re-snapshot up to
+ * {@link RESULTS_SETTLE_ATTEMPTS} times, returning as soon as it clears.
+ * Makes no browser calls for a non-loading snapshot; a snapshot error
+ * returns the last good snapshot.
+ */
+export async function settleIfLoading(call: BrowserToolCall, snapshot: string): Promise<string> {
+  let current = snapshot;
+  for (let i = 0; i < RESULTS_SETTLE_ATTEMPTS && LOADING_RE.test(current); i++) {
+    await call('browser_wait_for', { time: RESULTS_SETTLE_SECONDS });
+    const snap = await call('browser_snapshot', {});
+    if (snap.isError) return current;
+    current = snap.content;
+  }
+  return current;
+}
+
 /** Type `keywords` into the first detected search box, submit, and confirm
  * the page actually changed — comparing snapshots with `[ref=...]` tokens
  * stripped, since those are reassigned on every `browser_snapshot` call and
