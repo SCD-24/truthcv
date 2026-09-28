@@ -420,6 +420,11 @@ LAST-RESORT fallback (an LLM-extraction tier 3 step) only for that
 `needs_review` result. Resolve it before coverage: recovered postings map to
 `searched`/`llm`; explicit zero-result evidence maps to `empty`; unresolved
 extraction maps to `extraction_failed` with a reason naming extraction failure.
+The raw snapshot is an excerpt (link lines + result text): if
+`rawSnapshotTruncated` is true or the note says it was omitted, re-harvest that
+board alone in its own call before recording `extraction_failed`. For dorks,
+pass the Google search URL (with the `site:` query) as the board `url`; links
+to the `site:` target are extracted automatically.
 `needs_review` is NEVER a `record_discovery_coverage` status. Do not fall
 back to a manual `browser_navigate`/`browser_snapshot` pass otherwise, and
 never for a board `harvest_postings`

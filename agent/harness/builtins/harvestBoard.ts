@@ -11,7 +11,7 @@
  */
 
 import { blockedResult, classifySnapshot } from './harvestClassify.js';
-import { buildSearchUrl, navigateAndSnapshot, refuseSignInUrl } from './harvestNavigate.js';
+import { buildSearchUrl, navigateAndSnapshot, refuseSignInUrl, settleIfLoading } from './harvestNavigate.js';
 import { searchAndClassify } from './harvestSearch.js';
 import { callOnBoardTab, closeAllOpenedTabs, createAsyncLock, createBoardTab, selectAndNavigate } from './harvestTabs.js';
 import type { AsyncLock } from './harvestTabs.js';
@@ -58,7 +58,10 @@ async function harvestOneBoard(call: BrowserToolCall, board: HarvestBoardRequest
   if (refused) return withLocationTemplateNote(refused, locationNote);
   const navigated = await navigateAndSnapshot(call, resolved.url);
   if ('error' in navigated) return withLocationTemplateNote(blockedResult(resolved, navigated.error, navigated.blockKind), locationNote);
-  if (resolved.searchUrl) return withLocationTemplateNote(classifySnapshot(resolved, navigated.snapshot), locationNote);
+  if (resolved.searchUrl) {
+    const settled = await settleIfLoading(call, navigated.snapshot);
+    return withLocationTemplateNote(classifySnapshot(resolved, settled), locationNote);
+  }
   return searchAndClassify(call, resolved, navigated.snapshot);
 }
 
@@ -89,8 +92,11 @@ async function harvestInTab(
   createdIndices.push(created.index);
   const navigated = await selectAndNavigate(call, lock, created.index, resolved.url);
   if ('error' in navigated) return withLocationTemplateNote(blockedResult(resolved, navigated.error, navigated.blockKind), locationNote);
-  if (resolved.searchUrl) return withLocationTemplateNote(classifySnapshot(resolved, navigated.snapshot), locationNote);
   const tabCall: BrowserToolCall = (toolName, args) => callOnBoardTab(call, lock, created.index, toolName, args);
+  if (resolved.searchUrl) {
+    const settled = await settleIfLoading(tabCall, navigated.snapshot);
+    return withLocationTemplateNote(classifySnapshot(resolved, settled), locationNote);
+  }
   return searchAndClassify(tabCall, resolved, navigated.snapshot);
 }
 

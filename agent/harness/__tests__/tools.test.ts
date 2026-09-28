@@ -554,6 +554,7 @@ describe('executeToolCall dispatching harvest_postings', () => {
     expect(parsed[0].blockKind).toBeUndefined();
     expect(parsed[1]).toMatchObject({ tier: 'harvest', postings: [{ ats: 'lever', title: 'Engineer' }] });
     expect(parsed[2]).toMatchObject({ rawSnapshot: raw });
+    expect(parsed[2].rawSnapshotTruncated).toBeUndefined();
     expect(parsed[3]).toMatchObject({ blockKind: 'login', postings: [] });
     expect(parsed[3].rawSnapshot).toBeUndefined();
     expect(callTool.mock.calls.map(([name, args]) => [name, args.url ?? ''])).toEqual([
