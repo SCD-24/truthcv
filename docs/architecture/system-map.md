@@ -7,6 +7,7 @@ graph TD
     api["API <br/> <small>(BACKEND)</small>"]
     application-agent["Application Agent <br/> <small>(BACKEND)</small>"]
     application-tracker["Application Tracker <br/> <small>(BACKEND)</small>"]
+    arbeitnow-api["Arbeitnow Job Board API <br/> <small>(CUSTOM)</small>"]
     browser-service["Browser Service <br/> <small>(BACKEND)</small>"]
     company-research["Company Research <br/> <small>(BACKEND)</small>"]
     connections["Connections <br/> <small>(BACKEND)</small>"]
@@ -83,6 +84,7 @@ graph TD
     guardrail-validator -->|in-process| keyword-vocabulary
     guardrail-validator -->|in-process| storage-leaf
     guardrail-validator -->|in-process| truth-store
+    job-feeds -->|HTTPS| arbeitnow-api
     job-feeds -->|in-process| company-research
     job-feeds -->|in-process| secret-store
     job-runner -->|in-process| gmail-response-sync
@@ -141,6 +143,7 @@ graph TD
 - [API](overview.md) (`api`, backend)
 - [Application Agent](overview.md) (`application-agent`, backend)
 - [Application Tracker](overview.md) (`application-tracker`, backend)
+- [Arbeitnow Job Board API](overview.md) (`arbeitnow-api`, custom)
 - [Browser Service](overview.md) (`browser-service`, backend)
 - [Company Research](overview.md) (`company-research`, backend)
 - [Connections](overview.md) (`connections`, backend)
@@ -220,6 +223,7 @@ graph TD
 - [guardrail-validator → keyword-vocabulary](interactions/guardrail-validator--keyword-vocabulary.md) via `in-process`
 - [guardrail-validator → storage-leaf](interactions/guardrail-validator--storage-leaf.md) via `in-process`
 - [guardrail-validator → truth-store](interactions/guardrail-validator--truth-store.md) via `in-process`
+- [job-feeds → arbeitnow-api](interactions/job-feeds--arbeitnow-api.md) via `HTTPS`
 - [job-feeds → company-research](interactions/job-feeds--company-research.md) via `in-process`
 - [job-feeds → secret-store](interactions/job-feeds--secret-store.md) via `in-process`
 - [job-runner → gmail-response-sync](interactions/job-runner--gmail-response-sync.md) via `in-process`

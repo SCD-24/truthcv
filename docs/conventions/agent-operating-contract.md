@@ -83,6 +83,7 @@ Use these exact names and ids when discussing the architecture.
 | API | `api` | backend |
 | Application Agent | `application-agent` | backend |
 | Application Tracker | `application-tracker` | backend |
+| Arbeitnow Job Board API | `arbeitnow-api` | custom |
 | Browser Service | `browser-service` | backend |
 | Company Research | `company-research` | backend |
 | Connections | `connections` | backend |
@@ -113,5 +114,5 @@ Use these exact names and ids when discussing the architecture.
 <!-- generated:start cap:system-boundary -->
 ## System Boundary
 
-The declared system consists of 29 component(s) and 101 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
+The declared system consists of 30 component(s) and 102 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
 <!-- generated:end cap:system-boundary -->
