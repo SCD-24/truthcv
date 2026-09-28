@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Button, Chip, MenuItem, Select, Stack, TextField, Tooltip, Typography } from "@mui/material";
+import { Alert, Button, Chip, MenuItem, Select, Stack, Switch, TextField, Tooltip, Typography } from "@mui/material";
 
 import { getJobBoardKey, saveJobBoardKey, testJobBoardKey } from "../api/client";
 import type { JobBoard, JobBoardKeyStatus } from "../api/types";
@@ -127,11 +127,13 @@ export function BoardRow({
   onRemove,
   onModeChange,
   onEdit,
+  onToggleEnabled,
 }: {
   board: JobBoard;
   onRemove: () => void;
   onModeChange: (mode: string) => void;
   onEdit: () => void;
+  onToggleEnabled: (enabled: boolean) => void;
 }) {
   const navigate = useNavigate();
   const noSigninUrl = !board.effectiveSigninUrl;
@@ -140,9 +142,16 @@ export function BoardRow({
     <Stack spacing={1}>
       <Stack direction="row" spacing={2} sx={{ alignItems: "center", justifyContent: "space-between" }}>
         <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-          <Typography variant="body2">{boardLabel(board)}</Typography>
+          <Switch
+            checked={board.enabled}
+            onChange={(e) => onToggleEnabled(e.target.checked)}
+            slotProps={{ input: { "aria-label": `Search ${boardLabel(board)}` } }}
+          />
+          <Typography variant="body2" color={board.enabled ? undefined : "text.secondary"}>
+            {boardLabel(board)}
+          </Typography>
           {board.isDefault && (
-            <Tooltip title="Default boards are always searched and cannot be removed.">
+            <Tooltip title="Built-in board — can be switched off but not removed.">
               <Chip label="Default" size="small" />
             </Tooltip>
           )}

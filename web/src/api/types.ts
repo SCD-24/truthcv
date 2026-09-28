@@ -627,12 +627,17 @@ export interface JobProfile {
  * `source`/`signinUrl` are the operator's stored input (an override, if
  * set). `domain`, `effectiveSigninUrl` and `isDefault` are resolved
  * server-side (like `companyBoards` on `AgentConfig`, readonly): `isDefault`
- * means the board is always searched and cannot be removed, `isApi` means the
- * board is pulled from over its HTTP API with a saved key instead of being
- * signed in to in a browser — `effectiveSigninUrl` is always "" for those. */
+ * means the board is built-in and cannot be removed — it can still be
+ * switched off via `enabled`. `isApi` means the board is pulled from over
+ * its HTTP API with a saved key instead of being signed in to in a
+ * browser — `effectiveSigninUrl` is always "" for those. */
 export interface JobBoard {
   source: string;
   signinUrl: string;
+  /** Whether this board is searched. Operator-settable for every board,
+   * including default ones — a default board can be switched off but not
+   * removed. */
+  enabled: boolean;
   /** "dork" (Google site: search) or "direct" (search the board's own site).
    * Only meaningful — and only operator-settable — for a custom board;
    * `modeLocked` says whether this board's mode can be changed at all. */

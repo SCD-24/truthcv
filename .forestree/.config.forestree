@@ -1943,7 +1943,7 @@
         "widgets": [
           {
             "data": {
-              "text": "Owns the unattended agent's configuration (agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed. Also composes the deterministic dork-style search queries handed to each run."
+              "text": "Owns the unattended agent's configuration (agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed, but any board (default or the operator's own) can be switched off, and a disabled board is not searched. Also composes the deterministic dork-style search queries handed to each run."
             },
             "h": 200,
             "id": "widget-text-agent-config",
@@ -1956,12 +1956,6 @@
           {
             "data": {
               "fields": [
-                {
-                  "flags": "",
-                  "name": "job_boards",
-                  "notes": "The operator's OWN boards. The four default boards are unioned in at resolve time and are not stored here unless carrying a signin_url override.",
-                  "type": "list[JobBoard]"
-                },
                 {
                   "flags": "",
                   "name": "job_boards[].source",
@@ -1985,6 +1979,18 @@
                   "name": "profiles[].title_keywords",
                   "notes": "Job titles used to compose Google dork queries. When empty, titles are detected from keywords by title noun (Engineer, Developer, Analyst…), falling back to the raw keywords. Each dork is capped at 32 words and split into several queries per board when needed.",
                   "type": "list[str]"
+                },
+                {
+                  "flags": "",
+                  "name": "job_boards",
+                  "notes": "The operator's OWN boards. The four default boards are unioned in at resolve time and are stored here only when carrying a signin_url override or when disabled.",
+                  "type": "list[JobBoard]"
+                },
+                {
+                  "flags": "optional",
+                  "name": "job_boards[].enabled",
+                  "notes": "Defaults to true. False keeps the board listed but excludes it from dorks, direct boards and API feeds. Applies to default boards too.",
+                  "type": "bool"
                 }
               ]
             },

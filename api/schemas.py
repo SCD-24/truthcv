@@ -355,17 +355,22 @@ class JobBoardModel(_Camel):
     catalog board) still validates. ``domain``, ``effective_signin_url``,
     ``is_default``, ``is_api`` and ``mode_locked`` are response-only, resolved
     server-side by the routes from agentconfig/boards.py and stripped on a
-    PUT — ``is_default`` marks a board that is always searched and cannot be
-    removed, ``is_api`` a board reached with a saved API key rather than a
-    browser sign-in (``effective_signin_url`` is always "" for those), and
-    ``mode_locked`` marks a catalog board whose ``mode`` is fixed and not
-    operator-editable.
+    PUT — ``is_default`` marks a board that is built-in and cannot be
+    removed (but CAN be disabled, via ``enabled``), ``is_api`` a board
+    reached with a saved API key rather than a browser sign-in
+    (``effective_signin_url`` is always "" for those), and ``mode_locked``
+    marks a catalog board whose ``mode`` is fixed and not operator-editable.
+
+    ``enabled`` IS operator-settable, for every board including a default —
+    a disabled board stays listed (re-enableable) but drops out of
+    discovery, dorks, direct boards, and API feeds.
     """
 
     source: str = ""
     signin_url: str = ""
     mode: str = ""
     search_url: str = ""
+    enabled: bool = True
     mode_locked: bool = False
     domain: str = ""
     effective_signin_url: str = ""

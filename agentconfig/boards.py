@@ -67,9 +67,11 @@ SIGNIN_URLS: dict[str, str] = {
 }
 
 # The catalog keys whose domains are exactly DEFAULT_BOARD_DOMAINS. These
-# boards are ALWAYS searched and cannot be removed by the operator — they are
+# boards are built-in and cannot be REMOVED by the operator — they are
 # unioned into the resolved board list at resolve time, never seeded into
-# storage, so they survive a bad PUT or a hand-edited config file.
+# storage, so they survive a bad PUT or a hand-edited config file. They CAN
+# be disabled, though (JobBoard.enabled) — a disabled default stays listed
+# and re-enableable but drops out of discovery.
 DEFAULT_BOARD_SOURCES: list[str] = ["ashby", "greenhouse", "lever", "workday"]
 
 
@@ -193,7 +195,11 @@ def search_url_error(v: str) -> str | None:
 
 
 def is_default_source(source: str) -> bool:
-    """Check whether source is one of the always-searched, unremovable default boards."""
+    """Check whether source is one of the built-in, unremovable default boards.
+
+    Built-in and unremovable, not necessarily searched — a default can be
+    disabled by the operator (JobBoard.enabled) and still answer True here.
+    """
     return source.strip().casefold() in {s.casefold() for s in DEFAULT_BOARD_SOURCES}
 
 

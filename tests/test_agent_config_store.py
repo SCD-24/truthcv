@@ -420,6 +420,55 @@ def test_resolved_boards_skips_a_default_reconfigured_by_the_operator():
     assert ashby_entries[0].mode == "dork"
 
 
+# --- Board enabled flag -----------------------------------------------------
+
+
+def test_job_board_enabled_round_trips():
+    board = store.JobBoard(source="jobs.acme.com", enabled=False)
+    restored = store.JobBoard.from_dict(board.to_dict())
+    assert restored.enabled is False
+
+
+def test_job_board_non_bool_enabled_ignored():
+    board = store.JobBoard.from_dict({"source": "jobs.acme.com", "enabled": "no"})
+    assert board.enabled is True
+
+
+def test_job_board_missing_enabled_key_defaults_true():
+    board = store.JobBoard.from_dict({"source": "jobs.acme.com"})
+    assert board.enabled is True
+
+
+def test_disabled_default_kept_in_resolved_boards_but_not_searched():
+    cfg = store.AgentConfig(job_boards=[store.JobBoard(source="ashby", enabled=False)])
+    resolved_sources = [b.source for b in cfg.resolved_boards()]
+    assert "ashby" in resolved_sources
+    searched_sources = [b.source for b in cfg.searched_boards()]
+    assert "ashby" not in searched_sources
+    assert "ashby" not in cfg.resolved_board_sources()
+
+
+def test_disabled_custom_board_excluded_from_searched_and_sources():
+    cfg = store.AgentConfig(
+        job_boards=[store.JobBoard(source="custom.example.com", enabled=False)]
+    )
+    resolved_sources = [b.source for b in cfg.resolved_boards()]
+    assert "custom.example.com" in resolved_sources
+    searched_sources = [b.source for b in cfg.searched_boards()]
+    assert "custom.example.com" not in searched_sources
+    assert "custom.example.com" not in cfg.resolved_board_sources()
+
+
+def test_enabled_boards_all_present_in_searched_boards():
+    cfg = store.AgentConfig()
+    assert [b.source for b in cfg.searched_boards()] == [
+        "ashby",
+        "greenhouse",
+        "lever",
+        "workday",
+    ]
+
+
 # --- board_for_url: URL-to-board derivation --------------------------------
 
 
