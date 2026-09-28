@@ -1,51 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Alert,
-  Button,
-  Chip,
-  Divider,
-  MenuItem,
-  Paper,
-  Select,
-  Stack,
-  TextField,
-  Tooltip,
-  Typography,
-} from "@mui/material";
+import { Alert, Button, Divider, Paper, Stack, Typography } from "@mui/material";
 
-import {
-  getAgentConfig,
-  getJobBoardKey,
-  getSigninQueue,
-  saveJobBoardKey,
-  testJobBoardKey,
-  updateAgentConfig,
-} from "../api/client";
-import type { AgentConfig, JobBoard, JobBoardKeyStatus, SigninQueueSite } from "../api/types";
+import { getAgentConfig, getSigninQueue, updateAgentConfig } from "../api/client";
+import type { AgentConfig, JobBoard, SigninQueueSite } from "../api/types";
 import { browserSessionPath } from "../routes";
-
-// Known board keys offered by the "add a board" control. This carries no
-// sign-in URLs or domains — those are resolved server-side per board — it
-// only lists the catalog keys a user can pick instead of typing a domain.
-const KNOWN_BOARDS = [
-  "ashby",
-  "greenhouse",
-  "lever",
-  "personio",
-  "linkedin",
-  "workday",
-  "remoterocketship",
-];
-
-// Display labels for board keys whose raw catalog key reads badly. Absent
-// keys fall back to the key itself, so adding a board never requires an entry
-// here.
-const BOARD_LABELS: Record<string, string> = { remoterocketship: "Remote Rocketship" };
-
-function boardLabel(board: JobBoard): string {
-  return BOARD_LABELS[board.source.toLowerCase()] ?? (board.domain || board.source);
-}
+import { AddBoardControl } from "./AddBoardControl";
+import { BoardRow } from "./BoardRow";
+import { EditBoardDialog } from "./EditBoardDialog";
+import { sourceKey } from "./sourceKey";
 
 function hostLabel(iso: string): string {
   if (!iso) return "";
@@ -106,259 +69,6 @@ function NeedsAttention() {
   );
 }
 
-/** The credential control for an API-backed board: a write-only API key field
- * where every other board gets a "Sign in" button. The key is never read back
- * from the server — the status only says whether one is saved — so the field
- * always starts blank and submitting a blank one clears the stored key. */
-function ApiKeyControl({ source }: { source: string }) {
-  const [status, setStatus] = useState<JobBoardKeyStatus | null>(null);
-  const [value, setValue] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-
-  useEffect(() => {
-    let live = true;
-    getJobBoardKey(source)
-      .then((s) => live && setStatus(s))
-      .catch((e: Error) => live && setError(e.message));
-    return () => {
-      live = false;
-    };
-  }, [source]);
-
-  async function handleSave() {
-    setBusy(true);
-    setError("");
-    setNotice("");
-    try {
-      setStatus(await saveJobBoardKey(source, value));
-      setValue("");
-      setNotice("Saved.");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't save the API key.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleTest() {
-    setBusy(true);
-    setError("");
-    setNotice("");
-    try {
-      const result = await testJobBoardKey(source);
-      if (result.ok) setNotice(result.detail);
-      else setError(result.detail);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't reach the board.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const encryptionOff = status !== null && !status.encryptionAvailable;
-
-  return (
-    <Stack spacing={1} sx={{ pl: 2 }}>
-      {encryptionOff && (
-        <Alert severity="warning">Set ENCRYPTION_KEY in .env before saving an API key.</Alert>
-      )}
-      {error && <Alert severity="error">{error}</Alert>}
-      {notice && <Alert severity="success">{notice}</Alert>}
-      <Typography variant="caption" color="text.secondary">
-        {status?.keySet
-          ? "An API key is saved. Enter a new one to replace it, or save an empty field to remove it."
-          : "This board is pulled from over its API — save an API key instead of signing in. Generate one under Advanced · API access on Remote Rocketship (an active subscription is required)."}
-      </Typography>
-      <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-        <TextField
-          size="small"
-          type="password"
-          label="API key"
-          autoComplete="off"
-          value={value}
-          disabled={busy || encryptionOff}
-          onChange={(e) => setValue(e.target.value)}
-          sx={{ minWidth: 260 }}
-        />
-        <Button size="small" variant="contained" disabled={busy || encryptionOff} onClick={handleSave}>
-          Save key
-        </Button>
-        <Button size="small" variant="outlined" disabled={busy || !status?.keySet} onClick={handleTest}>
-          Test
-        </Button>
-      </Stack>
-    </Stack>
-  );
-}
-
-/** How postings are found on this board — a fixed label for a catalog board
- * (its mode can't be changed), or a live selector for a custom one. A locked
- * board is ALWAYS rendered as plain text, never a disabled control, so it
- * cannot be mistaken for something the operator could enable. */
-function BoardModeControl({ board, onModeChange }: { board: JobBoard; onModeChange: (mode: string) => void }) {
-  if (board.modeLocked) {
-    return (
-      <Typography variant="caption" color="text.secondary">
-        {board.isApi
-          ? "Postings come from this board's own API — only the API key below is configurable."
-          : "Searched via Google."}
-      </Typography>
-    );
-  }
-  return (
-    <Select
-      size="small"
-      value={board.mode || "dork"}
-      onChange={(e) => onModeChange(e.target.value)}
-      sx={{ minWidth: 220 }}
-      inputProps={{ "aria-label": "Mode" }}
-    >
-      <MenuItem value="dork">Google dork</MenuItem>
-      <MenuItem value="direct">Search the site directly</MenuItem>
-    </Select>
-  );
-}
-
-function BoardRow({
-  board,
-  onRemove,
-  onModeChange,
-}: {
-  board: JobBoard;
-  onRemove: () => void;
-  onModeChange: (mode: string) => void;
-}) {
-  const navigate = useNavigate();
-  const noSigninUrl = !board.effectiveSigninUrl;
-
-  return (
-    <Stack spacing={1}>
-      <Stack direction="row" spacing={2} sx={{ alignItems: "center", justifyContent: "space-between" }}>
-        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-          <Typography variant="body2">{boardLabel(board)}</Typography>
-          {board.isDefault && (
-            <Tooltip title="Default boards are always searched and cannot be removed.">
-              <Chip label="Default" size="small" />
-            </Tooltip>
-          )}
-          {board.isApi && (
-            <Tooltip title="Pulled from over its API with a saved key — there is nothing to sign in to.">
-              <Chip label="API" size="small" variant="outlined" />
-            </Tooltip>
-          )}
-        </Stack>
-        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-          <BoardModeControl board={board} onModeChange={onModeChange} />
-          {!board.isApi && (
-            <Tooltip title={noSigninUrl ? "No sign-in URL is set for this board" : ""}>
-              <span>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  disabled={noSigninUrl}
-                  onClick={() => navigate(browserSessionPath(board.effectiveSigninUrl))}
-                >
-                  Sign in
-                </Button>
-              </span>
-            </Tooltip>
-          )}
-          {!board.isDefault && (
-            <Button size="small" color="error" onClick={onRemove}>
-              Remove
-            </Button>
-          )}
-        </Stack>
-      </Stack>
-      {board.isApi && <ApiKeyControl source={board.source} />}
-    </Stack>
-  );
-}
-
-function AddBoardControl({ onAdd, existing }: { onAdd: (board: JobBoard) => void; existing: Set<string> }) {
-  const [choice, setChoice] = useState("");
-  const [customDomain, setCustomDomain] = useState("");
-  const [customSigninUrl, setCustomSigninUrl] = useState("");
-
-  function handleAdd() {
-    if (choice === "__custom__") {
-      if (!customDomain.trim()) return;
-      onAdd({
-        source: customDomain.trim(),
-        signinUrl: customSigninUrl.trim(),
-        mode: "direct",
-        modeLocked: false,
-        domain: customDomain.trim(),
-        effectiveSigninUrl: customSigninUrl.trim(),
-        isDefault: false,
-        isApi: false,
-      });
-      setCustomDomain("");
-      setCustomSigninUrl("");
-    } else if (choice) {
-      // The response-only fields are placeholders here: the PUT strips them
-      // and the GET that follows carries the server's resolved values, which
-      // is where isApi/isDefault actually come from.
-      onAdd({
-        source: choice,
-        signinUrl: "",
-        mode: "dork",
-        modeLocked: true,
-        domain: "",
-        effectiveSigninUrl: "",
-        isDefault: false,
-        isApi: false,
-      });
-    }
-    setChoice("");
-  }
-
-  return (
-    <Stack spacing={1}>
-      <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-        <Select
-          size="small"
-          displayEmpty
-          value={choice}
-          onChange={(e) => setChoice(e.target.value)}
-          sx={{ minWidth: 200 }}
-        >
-          <MenuItem value="">
-            <em>Add a board…</em>
-          </MenuItem>
-          {KNOWN_BOARDS.filter((source) => !existing.has(source)).map((source) => (
-            <MenuItem key={source} value={source}>
-              {BOARD_LABELS[source] ?? source}
-            </MenuItem>
-          ))}
-          <MenuItem value="__custom__">Custom domain…</MenuItem>
-        </Select>
-        <Button size="small" variant="outlined" disabled={!choice} onClick={handleAdd}>
-          Add
-        </Button>
-      </Stack>
-      {choice === "__custom__" && (
-        <Stack direction="row" spacing={1}>
-          <TextField
-            size="small"
-            label="Domain"
-            value={customDomain}
-            onChange={(e) => setCustomDomain(e.target.value)}
-          />
-          <TextField
-            size="small"
-            label="Sign-in URL (optional)"
-            value={customSigninUrl}
-            onChange={(e) => setCustomSigninUrl(e.target.value)}
-          />
-        </Stack>
-      )}
-    </Stack>
-  );
-}
-
 /** Job boards: one list, not two — every board the agent searches is also a
  * site you can sign in to. Default boards are always searched and cannot be
  * removed; the "Needs attention" queue is the agent's own experience of
@@ -374,6 +84,7 @@ export function JobBoardsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingBoard, setEditingBoard] = useState<JobBoard | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -415,9 +126,17 @@ export function JobBoardsPage() {
     if (!config) return;
     persist(
       config.jobBoards.map((b) =>
-        b.source === source ? { ...b, mode: mode as JobBoard["mode"] } : b,
+        b.source === source
+          ? { ...b, mode: mode as JobBoard["mode"], searchUrl: mode === "direct" ? b.searchUrl : "" }
+          : b,
       ),
     );
+  }
+
+  function handleEditSave(original: JobBoard, updated: JobBoard) {
+    if (!config) return;
+    setEditingBoard(null);
+    persist(config.jobBoards.map((b) => (b.source === original.source ? updated : b)));
   }
 
   if (loadError) {
@@ -459,8 +178,24 @@ export function JobBoardsPage() {
             board={board}
             onRemove={() => handleRemove(board.source)}
             onModeChange={(mode) => handleModeChange(board.source, mode)}
+            onEdit={() => setEditingBoard(board)}
           />
         ))}
+        {editingBoard && (
+          <EditBoardDialog
+            board={editingBoard}
+            existingSources={
+              new Set(
+                config.jobBoards
+                  .filter((b) => b.source !== editingBoard.source)
+                  .map((b) => sourceKey(b.source)),
+              )
+            }
+            onClose={() => setEditingBoard(null)}
+            onSave={(updated) => handleEditSave(editingBoard, updated)}
+            saving={saving}
+          />
+        )}
         <AddBoardControl
           onAdd={handleAdd}
           existing={new Set(config.jobBoards.map((b) => b.source.toLowerCase()))}

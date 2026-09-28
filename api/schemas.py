@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
+from agentconfig.boards import search_url_error
 from agentconfig.store import AgentConfig
 from screening.company import validate_company_name
 from screening.model import validate_verdict
@@ -363,11 +364,24 @@ class JobBoardModel(_Camel):
     source: str = ""
     signin_url: str = ""
     mode: str = ""
+    search_url: str = ""
     mode_locked: bool = False
     domain: str = ""
     effective_signin_url: str = ""
     is_default: bool = False
     is_api: bool = False
+
+    @field_validator("search_url")
+    @classmethod
+    def _validate_search_url(cls, v: str) -> str:
+        """Empty is fine (no search-results template configured); otherwise it
+        must be an http(s) URL carrying a ``{keywords}`` placeholder and no
+        placeholder other than ``{keywords}``/``{location}``.
+        """
+        err = search_url_error(v)
+        if err:
+            raise ValueError(err)
+        return v
 
 
 class DirectBoardProfileModel(_Camel):
@@ -385,6 +399,7 @@ class DirectBoardModel(_Camel):
 
     url: str = ""
     signin_url: str = ""
+    search_url: str = ""
     profiles: list[DirectBoardProfileModel] = Field(default_factory=list)
 
 

@@ -210,7 +210,13 @@ autonomy are unchanged. `harvest_postings` takes an optional `location`,
 typed into the board's own detected location field (never folded into
 `keywords`); a location neither it nor its known local-language aliases ever
 gets confirmed by the board's own location control comes back `blocked` with
-`blockKind: "location"`.
+`blockKind: "location"`. A board with no on-page search box instead carries
+its own `searchUrl` templated search URL (`{keywords}` required, `{location}`
+optional); the built URL replaces `url` outright, is navigated to directly,
+and the snapshot is classified with no search-box typing at all.
+`blockKind: "timeout"` means navigation timed out twice in a row (an initial
+attempt and one retry) — the page did not load — and still maps to
+`status="blocked"`; an absent `blockKind` still means an internal failure.
 
 **Narrow built-in tools.** `read_runbook_section` returns one named section of
 `RUNBOOK.md` from the image and takes no path argument, so it opens no general

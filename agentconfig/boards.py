@@ -9,6 +9,8 @@ import it without a cycle.
 
 from __future__ import annotations
 
+import re
+
 SOURCE_DOMAINS: dict[str, str] = {
     "ashby": "jobs.ashbyhq.com",
     "greenhouse": "job-boards.greenhouse.io",
@@ -163,6 +165,31 @@ def resolve_signin_url(source: str, override: str = "") -> str:
         return SIGNIN_URLS[key]
     domain = resolve_domain(source)
     return f"https://{domain}" if domain else ""
+
+
+def search_url_error(v: str) -> str | None:
+    """Validate a job board's search_url template; return an error message, or None if valid.
+
+    Empty is fine (no search-results template configured); otherwise it must
+    be an http(s) URL carrying a {keywords} placeholder, and after every
+    literal "{keywords}"/"{location}" occurrence is removed, no stray "{" or
+    "}" may remain (catches malformed/unbalanced placeholder syntax that the
+    simple placeholder-name check alone would miss).
+    """
+    if not v:
+        return None
+    if not (v.startswith("http://") or v.startswith("https://")):
+        return "search_url must start with http:// or https://"
+    if "{keywords}" not in v:
+        return "search_url must contain a {keywords} placeholder"
+    placeholders = set(re.findall(r"\{([^{}]*)\}", v))
+    unknown = placeholders - {"keywords", "location"}
+    if unknown:
+        return f"search_url has unknown placeholder(s): {', '.join(sorted(unknown))}"
+    stripped = v.replace("{keywords}", "").replace("{location}", "")
+    if "{" in stripped or "}" in stripped:
+        return "search_url has an unknown or malformed placeholder"
+    return None
 
 
 def is_default_source(source: str) -> bool:

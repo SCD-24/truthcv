@@ -277,6 +277,7 @@ def test_compose_direct_boards_shape():
         source="https://boards.acme.io/careers",
         signin_url="https://boards.acme.io/login",
         mode="direct",
+        search_url="https://boards.acme.io/search?q={keywords}",
     )
     dork_board = JobBoard(source="ashby", mode="dork")
 
@@ -287,6 +288,7 @@ def test_compose_direct_boards_shape():
     # The URL is verbatim, never normalised to a bare host.
     assert entry["url"] == "https://boards.acme.io/careers"
     assert entry["signin_url"] == "https://boards.acme.io/login"
+    assert entry["search_url"] == "https://boards.acme.io/search?q={keywords}"
     assert entry["profiles"] == [
         {
             "profile": "active",

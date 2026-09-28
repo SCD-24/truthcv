@@ -725,6 +725,40 @@ if ! grep -q 'printf .%s\\n. "\$FIRST_FAILURE_REASON" >"\$REASON_FILE"' "$DAILY_
 fi
 echo "PASS: daily-apply.sh snapshots and restores the first non-zero session's reason"
 
+# --- Direct-board searchUrl template line -----------------------------------
+# Mirrors daily-apply.sh's DIRECT_BOARDS jq expression verbatim (see "Direct-
+# search boards" there), so a divergence between this simulation and the real
+# script is a bug in one of the two, not just here.
+render_direct_boards() {
+  local job_config="$1"
+  jq -r '.directBoards[]? | "  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end) + (if (.searchUrl // "") != "" then " (search URL template: \(.searchUrl))" else "" end)' <<<"$job_config"
+}
+
+echo "Testing: direct board with a searchUrl template appends the template note..."
+DIRECT_WITH_TEMPLATE='{"directBoards":[{"url":"https://www.adzuna.de/search","searchUrl":"https://www.adzuna.de/search?q={keywords}&loc={location}"}]}'
+DIRECT_LINE_TEMPLATE="$(render_direct_boards "$DIRECT_WITH_TEMPLATE")"
+if [[ "$DIRECT_LINE_TEMPLATE" != *"(search URL template: https://www.adzuna.de/search?q={keywords}&loc={location})"* ]]; then
+  echo "FAIL: expected search URL template note, got: '$DIRECT_LINE_TEMPLATE'"
+  exit 1
+fi
+echo "PASS: direct board line appends the searchUrl template note"
+
+echo "Testing: direct board without a searchUrl renders no template note..."
+DIRECT_NO_TEMPLATE='{"directBoards":[{"url":"https://example.com/careers"}]}'
+DIRECT_LINE_NO_TEMPLATE="$(render_direct_boards "$DIRECT_NO_TEMPLATE")"
+if [[ "$DIRECT_LINE_NO_TEMPLATE" == *"search URL template"* ]]; then
+  echo "FAIL: expected no search URL template note, got: '$DIRECT_LINE_NO_TEMPLATE'"
+  exit 1
+fi
+echo "PASS: direct board line without searchUrl has no template note"
+
+echo "Testing: daily-apply.sh's DIRECT_BOARDS jq reads the camelCase searchUrl field..."
+if ! grep -q '\.searchUrl // ""' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: daily-apply.sh does not read .searchUrl from directBoards"
+  exit 1
+fi
+echo "PASS: daily-apply.sh reads .searchUrl from directBoards"
+
 echo ""
 echo "All tests passed!"
 exit 0

@@ -7,7 +7,9 @@ import zoneinfo
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from agentconfig.boards import DEFAULT_BOARD_SOURCES, catalog_mode
+import logging
+
+from agentconfig.boards import DEFAULT_BOARD_SOURCES, catalog_mode, is_custom_source, search_url_error
 from screening.company import company_identity_key
 from storage import data_dir
 
@@ -48,6 +50,7 @@ class JobBoard:
     source: str = ""
     signin_url: str = ""
     mode: str = ""
+    search_url: str = ""
 
     @classmethod
     def from_dict(cls, raw: dict) -> "JobBoard":
@@ -59,11 +62,23 @@ class JobBoard:
             kwargs["signin_url"] = raw["signin_url"]
         if "mode" in raw and isinstance(raw["mode"], str):
             kwargs["mode"] = raw["mode"]
+        if "search_url" in raw and isinstance(raw["search_url"], str):
+            if search_url_error(raw["search_url"]):
+                logging.getLogger(__name__).warning(
+                    "agent_config.json: stored job board search_url is invalid; dropping it"
+                )
+            else:
+                kwargs["search_url"] = raw["search_url"]
         return cls(**kwargs)
 
     def to_dict(self) -> dict:
         """Serialize to a dict with snake_case keys."""
-        return {"source": self.source, "signin_url": self.signin_url, "mode": self.mode}
+        return {
+            "source": self.source,
+            "signin_url": self.signin_url,
+            "mode": self.mode,
+            "search_url": self.search_url,
+        }
 
 
 @dataclass
@@ -244,16 +259,32 @@ class AgentConfig:
             seen.add(key)
             override = overrides.get(key)
             signin_url = override.signin_url if override else ""
+            search_url = override.search_url if override and is_custom_source(source) else ""
             result.append(
-                JobBoard(source=source, signin_url=signin_url, mode=catalog_mode(source) or "dork")
+                JobBoard(
+                    source=source,
+                    signin_url=signin_url,
+                    mode=catalog_mode(source) or "dork",
+                    search_url=search_url,
+                )
             )
+            # Catalog boards keep search_url "" — the template applies only to
+            # a custom board's own on-site search page.
         for board in self.job_boards:
             key = board.source.strip().casefold()
             if not key or key in seen:
                 continue
             seen.add(key)
             mode = catalog_mode(board.source) or (board.mode or "dork")
-            result.append(JobBoard(source=board.source, signin_url=board.signin_url, mode=mode))
+            search_url = board.search_url if is_custom_source(board.source) else ""
+            result.append(
+                JobBoard(
+                    source=board.source,
+                    signin_url=board.signin_url,
+                    mode=mode,
+                    search_url=search_url,
+                )
+            )
         return result
 
     @classmethod

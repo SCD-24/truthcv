@@ -44,9 +44,15 @@ def update_agent_config(sent: dict) -> agent_config_store.AgentConfig:
             source = item.get("source", "")
             signin_url = item.get("signin_url", "")
             mode = item.get("mode", "")
+            search_url = item.get("search_url", "")
             if boards.is_default_source(source) and not signin_url.strip():
                 continue
-            normalised.append({"source": source, "signin_url": signin_url, "mode": mode})
+            normalised.append({
+                "source": source,
+                "signin_url": signin_url,
+                "mode": mode,
+                "search_url": search_url,
+            })
         sent["job_boards"] = normalised
 
     merged = agent_config_store.load().to_dict()
