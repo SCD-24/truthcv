@@ -286,20 +286,21 @@ def test_preferred_sources_migrates_to_job_boards_union():
 
 
 def test_resolved_board_sources_defaults_first():
-    """The four defaults always lead; the operator's own boards follow,
+    """The five defaults always lead; the operator's own boards follow,
     without duplicating a default they happen to name."""
     assert store.AgentConfig().resolved_board_sources() == [
         "ashby",
         "greenhouse",
         "lever",
         "workday",
+        "arbeitnow",
     ]
     assert store.AgentConfig(
         job_boards=[store.JobBoard(source="linkedin")]
-    ).resolved_board_sources() == ["ashby", "greenhouse", "lever", "workday", "linkedin"]
+    ).resolved_board_sources() == ["ashby", "greenhouse", "lever", "workday", "arbeitnow", "linkedin"]
     assert store.AgentConfig(
         job_boards=[store.JobBoard(source="ashby")]
-    ).resolved_board_sources() == ["ashby", "greenhouse", "lever", "workday"]
+    ).resolved_board_sources() == ["ashby", "greenhouse", "lever", "workday", "arbeitnow"]
 
 
 def test_job_board_round_trips_source_and_signin_url():
@@ -436,7 +437,7 @@ def test_resolved_boards_defaults_first_with_effective_modes():
     )
     resolved = cfg.resolved_boards()
     sources = [b.source for b in resolved]
-    assert sources == ["ashby", "greenhouse", "lever", "workday", "custom.example.com", "linkedin"]
+    assert sources == ["ashby", "greenhouse", "lever", "workday", "arbeitnow", "custom.example.com", "linkedin"]
     by_source = {b.source: b.mode for b in resolved}
     assert by_source["ashby"] == "dork"
     assert by_source["custom.example.com"] == "direct"

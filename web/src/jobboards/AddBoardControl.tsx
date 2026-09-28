@@ -43,6 +43,7 @@ export function AddBoardControl({ onAdd, existing }: { onAdd: (board: JobBoard) 
         effectiveSigninUrl: customSigninUrl.trim(),
         isDefault: false,
         isApi: false,
+        keyRequired: false,
         searchUrl: customSearchUrl.trim(),
         postingUrlPattern: pattern,
       });
@@ -63,6 +64,7 @@ export function AddBoardControl({ onAdd, existing }: { onAdd: (board: JobBoard) 
         effectiveSigninUrl: "",
         isDefault: false,
         isApi: false,
+        keyRequired: false,
         searchUrl: "",
         postingUrlPattern: "",
       });

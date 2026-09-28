@@ -149,7 +149,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:end comp:services-layer -->
 
 <!-- generated:start comp:job-feeds -->
-- **Job Feeds** (`job-feeds`) - backend component.
+- **Job Feeds** (`job-feeds`) - backend component. API-backed job feeds pulled directly by TruthCV: Remote Rocketship (keyed, opt-in), Arbeitnow (keyless, a default board that is always searched), and per-company ATS APIs. Results are merged and de-duplicated by URL under one shared fetch deadline.
 <!-- generated:end comp:job-feeds -->
 
 <!-- generated:start comp:jev-api -->
@@ -163,3 +163,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:start comp:job-runner -->
 - **Job Runner** (`job-runner`) - backend component. Bounded background job executor (jobs/): a shared thread pool (MAX_WORKERS=4) plus an in-memory, thread-safe registry of Job records. Callers submit a zero-argument callable via submit(kind, fn); it runs on a worker thread and its outcome (result or exception) is recorded on the returned Job. get()/list_jobs() poll registry state. Registry is in-memory only - jobs are not persisted across restarts.
 <!-- generated:end comp:job-runner -->
+
+<!-- generated:start comp:arbeitnow-api -->
+- **Arbeitnow Job Board API** (`arbeitnow-api`) - custom component. External public Arbeitnow job-board API (https://www.arbeitnow.com/api/job-board-api). Job Feeds (jobfeeds/arbeitnow.py) fetches paginated postings from it on every feed refresh, because arbeitnow is a default, non-removable board (agentconfig/boards.py).
+<!-- generated:end comp:arbeitnow-api -->

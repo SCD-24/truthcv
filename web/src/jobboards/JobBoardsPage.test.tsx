@@ -32,6 +32,20 @@ const REMOTE_ROCKETSHIP: JobBoard = {
   effectiveSigninUrl: "",
   isDefault: false,
   isApi: true,
+  keyRequired: true,
+  searchUrl: "",
+};
+
+const ARBEITNOW: JobBoard = {
+  source: "arbeitnow",
+  signinUrl: "",
+  mode: "feed",
+  modeLocked: true,
+  domain: "arbeitnow.com",
+  effectiveSigninUrl: "",
+  isDefault: true,
+  isApi: true,
+  keyRequired: false,
   searchUrl: "",
   postingUrlPattern: "",
 };
@@ -42,10 +56,10 @@ afterEach(() => {
 });
 
 const DEFAULT_BOARDS: JobBoard[] = [
-  { source: "ashby", signinUrl: "", mode: "dork", modeLocked: true, domain: "jobs.ashbyhq.com", effectiveSigninUrl: "https://jobs.ashbyhq.com", isDefault: true, isApi: false, searchUrl: "", postingUrlPattern: "" },
-  { source: "greenhouse", signinUrl: "", mode: "dork", modeLocked: true, domain: "job-boards.greenhouse.io", effectiveSigninUrl: "https://job-boards.greenhouse.io", isDefault: true, isApi: false, searchUrl: "", postingUrlPattern: "" },
-  { source: "lever", signinUrl: "", mode: "dork", modeLocked: true, domain: "jobs.lever.co", effectiveSigninUrl: "https://jobs.lever.co", isDefault: true, isApi: false, searchUrl: "", postingUrlPattern: "" },
-  { source: "workday", signinUrl: "", mode: "dork", modeLocked: true, domain: "myworkdayjobs.com", effectiveSigninUrl: "https://www.myworkdayjobs.com", isDefault: true, isApi: false, searchUrl: "", postingUrlPattern: "" },
+  { source: "ashby", signinUrl: "", mode: "dork", modeLocked: true, domain: "jobs.ashbyhq.com", effectiveSigninUrl: "https://jobs.ashbyhq.com", isDefault: true, isApi: false, keyRequired: false, searchUrl: "", postingUrlPattern: "" },
+  { source: "greenhouse", signinUrl: "", mode: "dork", modeLocked: true, domain: "job-boards.greenhouse.io", effectiveSigninUrl: "https://job-boards.greenhouse.io", isDefault: true, isApi: false, keyRequired: false, searchUrl: "", postingUrlPattern: "" },
+  { source: "lever", signinUrl: "", mode: "dork", modeLocked: true, domain: "jobs.lever.co", effectiveSigninUrl: "https://jobs.lever.co", isDefault: true, isApi: false, keyRequired: false, searchUrl: "", postingUrlPattern: "" },
+  { source: "workday", signinUrl: "", mode: "dork", modeLocked: true, domain: "myworkdayjobs.com", effectiveSigninUrl: "https://www.myworkdayjobs.com", isDefault: true, isApi: false, keyRequired: false, searchUrl: "", postingUrlPattern: "" },
 ];
 
 function makeConfig(jobBoards: JobBoard[]): AgentConfig {
@@ -97,6 +111,17 @@ describe("JobBoardsPage", () => {
     expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
   });
 
+  it("shows a Default chip and no Remove, Sign in or API key controls for a keyless API board", async () => {
+    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
+    await renderPage(makeConfig([ARBEITNOW]));
+
+    await screen.findByText("Default");
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+    expect(screen.queryByLabelText("API key")).toBeNull();
+    expect(getJobBoardKey).not.toHaveBeenCalled();
+  });
+
   it("shows a remove button for a non-default board and removes it", async () => {
     vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
     const linkedin: JobBoard = {
@@ -108,6 +133,7 @@ describe("JobBoardsPage", () => {
       effectiveSigninUrl: "https://www.linkedin.com/login",
       isDefault: false,
       isApi: false,
+      keyRequired: false,
       searchUrl: "",
       postingUrlPattern: "",
     };
@@ -133,6 +159,7 @@ describe("JobBoardsPage", () => {
       effectiveSigninUrl: "",
       isDefault: false,
       isApi: false,
+      keyRequired: false,
       searchUrl: "",
       postingUrlPattern: "",
     };
@@ -165,6 +192,7 @@ describe("JobBoardsPage", () => {
             effectiveSigninUrl: "",
             isDefault: false,
             isApi: false,
+            keyRequired: false,
             searchUrl: "",
             postingUrlPattern: "",
           },
@@ -203,6 +231,7 @@ describe("JobBoardsPage", () => {
             effectiveSigninUrl: "",
             isDefault: false,
             isApi: false,
+            keyRequired: false,
             searchUrl: "https://custom.example.com/jobs?q={keywords}",
             postingUrlPattern: "https://custom.example.com/jobs/*",
           },
@@ -291,6 +320,7 @@ describe("JobBoardsPage", () => {
       effectiveSigninUrl: "",
       isDefault: false,
       isApi: false,
+      keyRequired: false,
       searchUrl: "",
       postingUrlPattern: "",
     };
@@ -364,6 +394,7 @@ describe("JobBoardsPage", () => {
       effectiveSigninUrl: "",
       isDefault: false,
       isApi: false,
+      keyRequired: false,
       searchUrl: "",
       postingUrlPattern: "",
     };
@@ -496,6 +527,7 @@ describe("JobBoardsPage", () => {
       effectiveSigninUrl: "",
       isDefault: false,
       isApi: false,
+      keyRequired: false,
       searchUrl: "https://custom.example.com/jobs?q={keywords}",
       postingUrlPattern: "",
     };
@@ -526,6 +558,7 @@ describe("JobBoardsPage", () => {
       effectiveSigninUrl: "",
       isDefault: false,
       isApi: false,
+      keyRequired: false,
       searchUrl: "https://custom.example.com/jobs?q={keywords}",
       postingUrlPattern: "https://custom.example.com/jobs/*",
     };
@@ -554,6 +587,7 @@ describe("JobBoardsPage", () => {
       effectiveSigninUrl: "",
       isDefault: false,
       isApi: false,
+      keyRequired: false,
       searchUrl: "",
       postingUrlPattern: "",
     };
@@ -582,6 +616,7 @@ describe("JobBoardsPage", () => {
       effectiveSigninUrl: "",
       isDefault: false,
       isApi: false,
+      keyRequired: false,
       searchUrl: "",
       postingUrlPattern: "",
     };
