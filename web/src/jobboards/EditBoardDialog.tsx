@@ -16,7 +16,10 @@ import { sourceKey } from "./sourceKey";
 /** Edit dialog for a single job board. Default (catalog) boards only allow a
  * sign-in URL override; custom boards can also have their source renamed and
  * their search URL template edited (shown only in "direct" mode, since a
- * dork-only board never uses it). A source rename is refused client-side
+ * dork-only board never uses it). The posting-link pattern is also shown
+ * only in "direct" mode but, unlike the search URL, is editable even for
+ * default/catalog boards since it only affects link recognition. A source
+ * rename is refused client-side
  * when it collides, casefolded and trimmed, with another board already on
  * the list — the server still enforces the rest of the searchUrl rules and
  * any 422 it returns is surfaced by the caller's own error Alert. */
@@ -36,13 +39,17 @@ export function EditBoardDialog({
   const [source, setSource] = useState(board.source);
   const [signinUrl, setSigninUrl] = useState(board.signinUrl);
   const [searchUrl, setSearchUrl] = useState(board.searchUrl);
+  const [postingUrlPattern, setPostingUrlPattern] = useState(board.postingUrlPattern);
   const [collisionError, setCollisionError] = useState("");
+  const [patternError, setPatternError] = useState("");
 
   useEffect(() => {
     setSource(board.source);
     setSigninUrl(board.signinUrl);
     setSearchUrl(board.searchUrl);
+    setPostingUrlPattern(board.postingUrlPattern);
     setCollisionError("");
+    setPatternError("");
   }, [board]);
 
   function handleSave() {
@@ -54,7 +61,16 @@ export function EditBoardDialog({
         return;
       }
     }
+    // Only direct boards expose the field; any other mode keeps its stored
+    // value untouched rather than silently clearing it on an unrelated edit.
+    const isDirect = board.mode === "direct";
+    const trimmedPattern = isDirect ? postingUrlPattern.trim() : board.postingUrlPattern;
+    if (isDirect && trimmedPattern && !/^https?:\/\//.test(trimmedPattern)) {
+      setPatternError("Must start with http:// or https://");
+      return;
+    }
     setCollisionError("");
+    setPatternError("");
     onSave({
       ...board,
       source: board.isDefault ? board.source : trimmedSource,
@@ -64,6 +80,7 @@ export function EditBoardDialog({
         : board.mode === "direct"
           ? searchUrl.trim()
           : "",
+      postingUrlPattern: trimmedPattern,
     });
   }
 
@@ -96,6 +113,16 @@ export function EditBoardDialog({
               value={searchUrl}
               onChange={(e) => setSearchUrl(e.target.value)}
               helperText="e.g. https://www.adzuna.de/search?q={keywords}&loc={location} — {keywords} required, {location} optional"
+            />
+          )}
+          {board.mode === "direct" && (
+            <TextField
+              label="Posting link pattern (optional)"
+              size="small"
+              value={postingUrlPattern}
+              onChange={(e) => setPostingUrlPattern(e.target.value)}
+              error={!!patternError}
+              helperText={patternError || "e.g. https://www.example.com/jobs/*"}
             />
           )}
         </Stack>

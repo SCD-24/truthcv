@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-29 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+30 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -187,6 +187,8 @@ Screens discovered postings against the active job profile's criteria and record
 
 <!-- generated:start comp:job-feeds -->
 ## Job Feeds (`job-feeds`, BACKEND)
+
+API-backed job feeds pulled directly by TruthCV: Remote Rocketship (keyed, opt-in), Arbeitnow (keyless, a default board that is always searched), and per-company ATS APIs. Results are merged and de-duplicated by URL under one shared fetch deadline.
 <!-- generated:end comp:job-feeds -->
 
 <!-- generated:start comp:jev-api -->
@@ -208,3 +210,11 @@ Bounded background job executor (jobs/): a shared thread pool (MAX_WORKERS=4) pl
 
 **Tech:** Python, concurrent.futures ThreadPoolExecutor
 <!-- generated:end comp:job-runner -->
+
+<!-- generated:start comp:arbeitnow-api -->
+## Arbeitnow Job Board API (`arbeitnow-api`, CUSTOM)
+
+External public Arbeitnow job-board API (https://www.arbeitnow.com/api/job-board-api). Job Feeds (jobfeeds/arbeitnow.py) fetches paginated postings from it on every feed refresh, because arbeitnow is a default, non-removable board (agentconfig/boards.py).
+
+**Tech:** Arbeitnow public REST API, HTTPS
+<!-- generated:end comp:arbeitnow-api -->

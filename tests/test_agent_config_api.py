@@ -43,13 +43,18 @@ def test_get_returns_defaults(client, data_dir):
     job_boards = got.pop("jobBoards")
     assert got == expected
     # The regression this build fixes: with no boards configured, the
-    # sign-in list used to render nothing. GET must always return the four
-    # defaults, each searchable and each with a real sign-in URL.
-    assert len(job_boards) == 4
-    assert {b["source"] for b in job_boards} == {"ashby", "greenhouse", "lever", "workday"}
+    # sign-in list used to render nothing. GET must always return the five
+    # defaults (four dork boards plus the Arbeitnow API feed), each
+    # searchable.
+    assert len(job_boards) == 5
+    assert {b["source"] for b in job_boards} == {"ashby", "greenhouse", "lever", "workday", "arbeitnow"}
     assert all(b["isDefault"] for b in job_boards)
-    assert all(b["effectiveSigninUrl"] for b in job_boards)
-    assert all(b["domain"] for b in job_boards)
+    non_api = [b for b in job_boards if b["source"] != "arbeitnow"]
+    assert all(b["effectiveSigninUrl"] for b in non_api)
+    assert all(b["domain"] for b in non_api)
+    arbeitnow = next(b for b in job_boards if b["source"] == "arbeitnow")
+    assert arbeitnow["isApi"] is True
+    assert arbeitnow["effectiveSigninUrl"] == ""
 
 
 def test_defaults_present_even_when_operator_configured_boards(client, data_dir):
@@ -57,6 +62,7 @@ def test_defaults_present_even_when_operator_configured_boards(client, data_dir)
     assert r.status_code == 200
     sources = [b["source"] for b in r.json()["jobBoards"]]
     assert sources[:4] == ["ashby", "greenhouse", "lever", "workday"]
+    assert sources[4] == "arbeitnow"
     assert "linkedin" in sources
 
 
@@ -233,6 +239,25 @@ def test_direct_boards_profile_entry_carries_remote_model_on_the_wire(client, da
     assert profile_entry["remoteModel"] == "remote"
 
 
+def test_direct_boards_carries_posting_url_pattern(client, data_dir):
+    """postingUrlPattern set on a direct-mode board reaches GET's directBoards."""
+    client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [
+                {
+                    "source": "custom-direct.example.com",
+                    "mode": "direct",
+                    "postingUrlPattern": "https://custom-direct.example.com/jobs/*",
+                }
+            ],
+        },
+    )
+    got = client.get("/api/agent/config").json()
+    board = next(b for b in got["directBoards"] if b["url"] == "custom-direct.example.com")
+    assert board["postingUrlPattern"] == "https://custom-direct.example.com/jobs/*"
+
+
 def test_old_shape_config_migrates_job_boards_on_first_get(client, data_dir):
     import json as jsonlib
     from pathlib import Path
@@ -365,6 +390,58 @@ def test_job_boards_round_trip_search_url(client, data_dir):
     assert r.status_code == 200
     got = {b["source"]: b for b in client.get("/api/agent/config").json()["jobBoards"]}
     assert got["jobs.acme.com"]["searchUrl"] == "https://jobs.acme.com/search?q={keywords}"
+
+
+def test_job_boards_round_trip_posting_url_pattern_added_board(client, data_dir):
+    """postingUrlPattern survives a PUT then GET round-trip for a custom board."""
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [
+                {
+                    "source": "jobs.acme.com",
+                    "postingUrlPattern": "https://jobs.acme.com/jobs/*",
+                },
+            ]
+        },
+    )
+    assert r.status_code == 200
+    got = {b["source"]: b for b in client.get("/api/agent/config").json()["jobBoards"]}
+    assert got["jobs.acme.com"]["postingUrlPattern"] == "https://jobs.acme.com/jobs/*"
+
+
+def test_job_boards_round_trip_posting_url_pattern_default_board_override(client, data_dir):
+    """A default-source override carrying only postingUrlPattern (no signinUrl) is kept, not dropped."""
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [
+                {
+                    "source": "linkedin",
+                    "postingUrlPattern": "https://www.linkedin.com/jobs/view/*",
+                },
+            ]
+        },
+    )
+    assert r.status_code == 200
+    got = {b["source"]: b for b in client.get("/api/agent/config").json()["jobBoards"]}
+    assert got["linkedin"]["postingUrlPattern"] == "https://www.linkedin.com/jobs/view/*"
+
+
+def test_put_rejects_posting_url_pattern_bad_scheme(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={"jobBoards": [{"source": "jobs.acme.com", "postingUrlPattern": "ftp://x/*"}]},
+    )
+    assert r.status_code == 422
+
+
+def test_put_rejects_posting_url_pattern_bad_host(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={"jobBoards": [{"source": "jobs.acme.com", "postingUrlPattern": "https://*.x.com/jobs"}]},
+    )
+    assert r.status_code == 422
 
 
 def test_put_rejects_search_url_missing_keywords_placeholder(client, data_dir):

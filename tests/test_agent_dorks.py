@@ -304,6 +304,8 @@ def test_compose_direct_boards_shape():
     )
     dork_board = JobBoard(source="ashby", mode="dork")
 
+    direct_board.posting_url_pattern = "https://boards.acme.io/jobs/*"
+
     entries = dorks.compose_direct_boards([p1, p2, p3], [direct_board, dork_board])
 
     assert len(entries) == 1
@@ -312,6 +314,7 @@ def test_compose_direct_boards_shape():
     assert entry["url"] == "https://boards.acme.io/careers"
     assert entry["signin_url"] == "https://boards.acme.io/login"
     assert entry["search_url"] == "https://boards.acme.io/search?q={keywords}"
+    assert entry["posting_url_pattern"] == "https://boards.acme.io/jobs/*"
     assert entry["profiles"] == [
         {
             "profile": "active",

@@ -22,10 +22,18 @@ export function AddBoardControl({ onAdd, existing }: { onAdd: (board: JobBoard) 
   const [customDomain, setCustomDomain] = useState("");
   const [customSigninUrl, setCustomSigninUrl] = useState("");
   const [customSearchUrl, setCustomSearchUrl] = useState("");
+  const [customPostingUrlPattern, setCustomPostingUrlPattern] = useState("");
+  const [patternError, setPatternError] = useState("");
 
   function handleAdd() {
     if (choice === "__custom__") {
       if (!customDomain.trim()) return;
+      const pattern = customPostingUrlPattern.trim();
+      if (pattern && !/^https?:\/\//.test(pattern)) {
+        setPatternError("Must start with http:// or https://");
+        return;
+      }
+      setPatternError("");
       onAdd({
         source: customDomain.trim(),
         signinUrl: customSigninUrl.trim(),
@@ -36,11 +44,14 @@ export function AddBoardControl({ onAdd, existing }: { onAdd: (board: JobBoard) 
         effectiveSigninUrl: customSigninUrl.trim(),
         isDefault: false,
         isApi: false,
+        keyRequired: false,
         searchUrl: customSearchUrl.trim(),
+        postingUrlPattern: pattern,
       });
       setCustomDomain("");
       setCustomSigninUrl("");
       setCustomSearchUrl("");
+      setCustomPostingUrlPattern("");
     } else if (choice) {
       // The response-only fields are placeholders here: the PUT strips them
       // and the GET that follows carries the server's resolved values, which
@@ -55,7 +66,9 @@ export function AddBoardControl({ onAdd, existing }: { onAdd: (board: JobBoard) 
         effectiveSigninUrl: "",
         isDefault: false,
         isApi: false,
+        keyRequired: false,
         searchUrl: "",
+        postingUrlPattern: "",
       });
     }
     setChoice("");
@@ -105,6 +118,15 @@ export function AddBoardControl({ onAdd, existing }: { onAdd: (board: JobBoard) 
             value={customSearchUrl}
             onChange={(e) => setCustomSearchUrl(e.target.value)}
             helperText="e.g. https://www.adzuna.de/search?q={keywords}&loc={location} — {keywords} required, {location} optional"
+            sx={{ minWidth: 320 }}
+          />
+          <TextField
+            size="small"
+            label="Posting link pattern (optional)"
+            value={customPostingUrlPattern}
+            onChange={(e) => setCustomPostingUrlPattern(e.target.value)}
+            error={!!patternError}
+            helperText={patternError || "e.g. https://www.example.com/jobs/*"}
             sx={{ minWidth: 320 }}
           />
         </Stack>

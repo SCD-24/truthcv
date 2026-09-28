@@ -9,7 +9,13 @@ from pathlib import Path
 
 import logging
 
-from agentconfig.boards import DEFAULT_BOARD_SOURCES, catalog_mode, is_custom_source, search_url_error
+from agentconfig.boards import (
+    DEFAULT_BOARD_SOURCES,
+    catalog_mode,
+    is_custom_source,
+    posting_url_pattern_error,
+    search_url_error,
+)
 from screening.company import company_identity_key
 from storage import data_dir
 
@@ -55,6 +61,7 @@ class JobBoard:
     # (mirrors JobProfile.enabled), so a board is only ever excluded by an
     # explicit operator action, never by a hand-edited or older config file.
     enabled: bool = True
+    posting_url_pattern: str = ""
 
     @classmethod
     def from_dict(cls, raw: dict) -> "JobBoard":
@@ -75,6 +82,13 @@ class JobBoard:
                 kwargs["search_url"] = raw["search_url"]
         if "enabled" in raw and isinstance(raw["enabled"], bool):
             kwargs["enabled"] = raw["enabled"]
+        if "posting_url_pattern" in raw and isinstance(raw["posting_url_pattern"], str):
+            if posting_url_pattern_error(raw["posting_url_pattern"]):
+                logging.getLogger(__name__).warning(
+                    "agent_config.json: stored job board posting_url_pattern is invalid; dropping it"
+                )
+            else:
+                kwargs["posting_url_pattern"] = raw["posting_url_pattern"]
         return cls(**kwargs)
 
     def to_dict(self) -> dict:
@@ -85,6 +99,7 @@ class JobBoard:
             "mode": self.mode,
             "search_url": self.search_url,
             "enabled": self.enabled,
+            "posting_url_pattern": self.posting_url_pattern,
         }
 
 
@@ -269,6 +284,7 @@ class AgentConfig:
             signin_url = override.signin_url if override else ""
             search_url = override.search_url if override and is_custom_source(source) else ""
             enabled = override.enabled if override else True
+            posting_url_pattern = override.posting_url_pattern if override else ""
             result.append(
                 JobBoard(
                     source=source,
@@ -276,6 +292,7 @@ class AgentConfig:
                     mode=catalog_mode(source) or "dork",
                     search_url=search_url,
                     enabled=enabled,
+                    posting_url_pattern=posting_url_pattern,
                 )
             )
             # Catalog boards keep search_url "" — the template applies only to
@@ -294,6 +311,7 @@ class AgentConfig:
                     mode=mode,
                     search_url=search_url,
                     enabled=board.enabled,
+                    posting_url_pattern=board.posting_url_pattern,
                 )
             )
         return result

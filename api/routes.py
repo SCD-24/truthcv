@@ -1200,11 +1200,13 @@ def _resolved_job_boards(cfg: agent_config_store.AgentConfig) -> list[dict]:
             "mode": board.mode,
             "search_url": board.search_url,
             "enabled": board.enabled,
+            "posting_url_pattern": board.posting_url_pattern,
             "mode_locked": not boards.is_custom_source(board.source),
             "domain": boards.resolve_domain(board.source) or "",
             "effective_signin_url": boards.resolve_signin_url(board.source, board.signin_url),
             "is_default": boards.is_default_source(board.source),
             "is_api": boards.is_api_source(board.source),
+            "key_required": boards.requires_key(board.source),
         })
     return result
 
@@ -1252,73 +1254,89 @@ def _merge_feed_results(*results):
     return FeedResult(postings=postings, error=" ".join(errors))
 
 
-# Combined wall-clock ceiling for BOTH the Remote Rocketship and per-company
-# ATS fetches TOGETHER, not each source's own separate budget. agent/agent-
-# config.js gives the job_config request a fixed 30s socket timeout and
-# treats a timeout as a hard failure: it destroys the request and calls
-# process.exit(1), discarding the whole config — profiles, feed, company
-# boards, and dorks. Each fetcher's own BUDGET_SECONDS (20.0s) was sized on
-# the assumption it was the ONLY fetch running; fanning out to two
-# independent fetchers with independent budgets can now approach 40s.
-# Threading this ONE shared deadline into both callers instead keeps them
-# together under a single ceiling: whatever the first fetcher spends comes
-# out of what the second is given. 25s leaves 5s of headroom under the 30s
+# Combined wall-clock ceiling for the Remote Rocketship, Arbeitnow AND
+# per-company ATS fetches TOGETHER, not each source's own separate budget.
+# agent/agent-config.js gives the job_config request a fixed 30s socket
+# timeout and treats a timeout as a hard failure: it destroys the request and
+# calls process.exit(1), discarding the whole config — profiles, feed,
+# company boards, and dorks. Each fetcher's own BUDGET_SECONDS (20.0s) was
+# sized on the assumption it was the ONLY fetch running; fanning out to three
+# independent fetchers with independent budgets can now approach 60s.
+# Threading this ONE shared deadline into every caller instead keeps them
+# together under a single ceiling: whatever the earlier fetchers spend comes
+# out of what the others are given. 25s leaves 5s of headroom under the 30s
 # socket timeout for the rest of the config route's own work.
 FEED_FETCH_BUDGET_SECONDS = 25.0
 
 
 def _fetch_feed_postings(cfg: agent_config_store.AgentConfig, company_boards: list):
-    """Pull postings for every API-backed source the operator has configured.
+    """Pull postings from Remote Rocketship, Arbeitnow, and every watchlist
+    company's own ATS API, whichever apply.
 
-    Fans out across two independent sources and merges them, de-duplicated by
-    URL (see ``_merge_feed_results``):
+    Fans out across three independent sources and merges them, de-duplicated
+    by URL (see ``_merge_feed_results``):
 
-    - Remote Rocketship, gated on the resolved-source check plus its saved
-      key. The check goes through boards.is_api_source rather than comparing
-      to the catalog key, so a board added as a raw domain reaches the feed
-      like any other.
+    - Remote Rocketship, gated on a resolved board naming it specifically
+      (via ``boards.api_source_key``, not the broader ``is_api_source`` —
+      Arbeitnow is also API-backed and always present as a default, and must
+      not switch Remote Rocketship on) plus its saved key.
+    - Arbeitnow, an always-on default board (agentconfig.boards.DEFAULT_BOARD_SOURCES)
+      with a public API — gated the same way on a resolved board naming it,
+      but never needs a key.
     - Each watchlist company's own ATS API (jobfeeds.ats), gated only on that
       company's ``CompanyBoard.ats`` naming a recognised ATS — no key needed.
 
-    Neither fetcher ever raises, and this function does not either: a source
-    that fails degrades the merged ``error`` rather than emptying the
-    response, while the other source's postings still arrive.
+    No fetcher ever raises, and this function does not either: a source that
+    fails degrades the merged ``error`` rather than emptying the response,
+    while the other sources' postings still arrive.
 
-    The two fetches share ONE wall-clock deadline (FEED_FETCH_BUDGET_SECONDS)
+    All three fetches share ONE wall-clock deadline (FEED_FETCH_BUDGET_SECONDS)
     instead of each getting its own — see that constant's comment for why.
-    They also run on two threads instead of one after another, so the slower
-    of the two governs the wall-clock cost of this function rather than their
-    sum; the shared deadline still bounds each individually exactly as when
-    they ran serially.
+    They also run on their own threads instead of one after another, so the
+    slowest of the three governs the wall-clock cost of this function rather
+    than their sum; the shared deadline still bounds each individually
+    exactly as when they ran serially.
     """
     import threading
     import time
 
     from agentconfig import boards
-    from jobfeeds import ats, remoterocketship
+    from jobfeeds import arbeitnow, ats, remoterocketship
 
     deadline = time.monotonic() + FEED_FETCH_BUDGET_SECONDS
     results: dict = {}
+    resolved_sources = cfg.resolved_board_sources()
 
     def _run_remote_rocketship() -> None:
-        if any(boards.is_api_source(source) for source in cfg.resolved_board_sources()):
+        if any(boards.api_source_key(source) == remoterocketship.SOURCE for source in resolved_sources):
             results["rr"] = remoterocketship.fetch_postings(
                 cfg.profiles, remoterocketship.api_key(), cfg.max_posting_age_days, deadline=deadline
             )
         else:
             results["rr"] = remoterocketship.FeedResult()
 
+    def _run_arbeitnow() -> None:
+        if any(boards.api_source_key(source) == arbeitnow.SOURCE for source in resolved_sources):
+            results["arbeitnow"] = arbeitnow.fetch_postings(
+                cfg.profiles, cfg.max_posting_age_days, deadline=deadline
+            )
+        else:
+            results["arbeitnow"] = arbeitnow.FeedResult()
+
     def _run_ats() -> None:
         results["ats"] = ats.fetch_ats_postings(company_boards, cfg.max_posting_age_days, deadline=deadline)
 
-    rr_thread = threading.Thread(target=_run_remote_rocketship)
-    ats_thread = threading.Thread(target=_run_ats)
-    rr_thread.start()
-    ats_thread.start()
-    rr_thread.join()
-    ats_thread.join()
+    threads = [
+        threading.Thread(target=_run_remote_rocketship),
+        threading.Thread(target=_run_arbeitnow),
+        threading.Thread(target=_run_ats),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
 
-    return _merge_feed_results(results["rr"], results["ats"])
+    return _merge_feed_results(results["rr"], results["arbeitnow"], results["ats"])
 
 
 @router.get("/job-boards/{source}/key", response_model=JobBoardKeyStatus)
@@ -1327,8 +1345,8 @@ def get_job_board_key(source: str) -> JobBoardKeyStatus:
     from agentconfig import boards
     from jobfeeds import remoterocketship
 
-    if not boards.is_api_source(source):
-        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board.")
+    if not boards.requires_key(source):
+        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board that needs a key.")
     return JobBoardKeyStatus(
         source=remoterocketship.SOURCE,
         key_set=bool(remoterocketship.api_key()),
@@ -1342,8 +1360,8 @@ def put_job_board_key(source: str, body: JobBoardKeyUpdate) -> JobBoardKeyStatus
     from agentconfig import boards
     from jobfeeds import remoterocketship
 
-    if not boards.is_api_source(source):
-        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board.")
+    if not boards.requires_key(source):
+        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board that needs a key.")
     if not secretstore.encryption_available():
         raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
     value = body.api_key.strip()
@@ -1361,8 +1379,8 @@ def test_job_board_key(source: str) -> TestResult:
     from agentconfig import boards
     from jobfeeds import remoterocketship
 
-    if not boards.is_api_source(source):
-        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board.")
+    if not boards.requires_key(source):
+        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board that needs a key.")
     ok, detail = remoterocketship.check_key(remoterocketship.api_key())
     return TestResult(ok=ok, detail=detail)
 
@@ -1578,11 +1596,11 @@ def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:
     Profiles are WHOLESALE-REPLACED (not merged) because a null or omitted
     profiles field never reaches the merge dict. job_boards is replaced the
     same way, but first NORMALISED: the response-only keys (domain,
-    effective_signin_url, is_default) are stripped — they are derived, and a
-    stored copy is a second writer that can go stale — and a default-source
+    effective_signin_url, is_default, is_api, key_required) are stripped — they are
+    derived, and a stored copy is a second writer that can go stale — and a default-source
     entry is DROPPED only when it carries neither a signin_url NOR a disabled
     flag, so a client echoing back the resolved GET list does not bloat
-    storage with the four defaults. A default-source entry WITH a signin_url
+    storage with the defaults. A default-source entry WITH a signin_url
     override or with ``enabled: false`` is kept, since both are legitimate
     per-board state that would otherwise have nowhere to live.
 

@@ -28,11 +28,11 @@ def update_agent_config(sent: dict) -> agent_config_store.AgentConfig:
     Profiles are WHOLESALE-REPLACED (not merged) because a null or omitted
     profiles field never reaches the merge dict. job_boards is replaced the
     same way, but first NORMALISED: the response-only keys (domain,
-    effective_signin_url, is_default, mode_locked) are stripped — they are
-    derived, and a stored copy is a second writer that can go stale — and a
+    effective_signin_url, is_default, is_api, key_required, mode_locked) are stripped — they
+    are derived, and a stored copy is a second writer that can go stale — and a
     default-source entry is DROPPED only when it carries a blank signin_url
     AND is enabled, so a client echoing back the resolved GET list does not
-    bloat storage with the four defaults. A default-source entry WITH a
+    bloat storage with the defaults. A default-source entry WITH a
     signin_url, or one the operator has disabled, is kept — both are
     legitimate per-board state with nowhere else to live. ``mode`` IS carried
     through (it is the one board-level field the operator can actually set)
@@ -50,7 +50,13 @@ def update_agent_config(sent: dict) -> agent_config_store.AgentConfig:
             enabled = item.get("enabled", True)
             if not isinstance(enabled, bool):
                 enabled = True
-            if boards.is_default_source(source) and not signin_url.strip() and enabled:
+            posting_url_pattern = item.get("posting_url_pattern", "")
+            if (
+                boards.is_default_source(source)
+                and not signin_url.strip()
+                and not posting_url_pattern.strip()
+                and enabled
+            ):
                 continue
             normalised.append({
                 "source": source,
@@ -58,6 +64,7 @@ def update_agent_config(sent: dict) -> agent_config_store.AgentConfig:
                 "mode": mode,
                 "search_url": search_url,
                 "enabled": enabled,
+                "posting_url_pattern": posting_url_pattern,
             })
         sent["job_boards"] = normalised
 

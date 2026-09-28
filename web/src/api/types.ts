@@ -629,8 +629,9 @@ export interface JobProfile {
  * server-side (like `companyBoards` on `AgentConfig`, readonly): `isDefault`
  * means the board is built-in and cannot be removed — it can still be
  * switched off via `enabled`. `isApi` means the board is pulled from over
- * its HTTP API with a saved key instead of being signed in to in a
- * browser — `effectiveSigninUrl` is always "" for those. */
+ * its HTTP API instead of being signed in to in a browser —
+ * `effectiveSigninUrl` is always "" for those. Not every API board needs a
+ * saved key: `keyRequired` says whether it does. */
 export interface JobBoard {
   source: string;
   signinUrl: string;
@@ -647,10 +648,21 @@ export interface JobBoard {
   readonly effectiveSigninUrl: string;
   readonly isDefault: boolean;
   readonly isApi: boolean;
+  /** Whether this API-backed board requires a saved key to work — false for
+   * a keyless, always-on API board (e.g. arbeitnow). Only meaningful when
+   * `isApi` is true; the key routes 404 for a board where this is false. */
+  readonly keyRequired: boolean;
   /** Search URL template used in "direct" mode — must contain {keywords},
    * may contain {location}. Only meaningful for custom boards; default
    * catalog boards are dork-only, so this is "" for them. */
   searchUrl: string;
+  /** Glob the agent uses to recognise posting links on a "direct" board's
+   * own site, e.g. "https://www.example.com/jobs/*". Must start with
+   * http:// or https://, is anchored at the start and open at the end, and
+   * `*` matches any run of non-whitespace characters. "" means unset. Unlike
+   * searchUrl this is editable even for default/catalog boards, since it
+   * only affects link recognition, not the search itself. */
+  postingUrlPattern: string;
 }
 
 /** Whether an API-backed board has a key saved. The key is never returned. */

@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
-from agentconfig.boards import search_url_error
+from agentconfig.boards import posting_url_pattern_error, search_url_error
 from agentconfig.store import AgentConfig
 from screening.company import validate_company_name
 from screening.model import validate_verdict
@@ -353,12 +353,14 @@ class JobBoardModel(_Camel):
     ``mode`` ("dork" or "direct") is only ever actually settable when the
     board is custom; a board dict that omits it (an older client, or a
     catalog board) still validates. ``domain``, ``effective_signin_url``,
-    ``is_default``, ``is_api`` and ``mode_locked`` are response-only, resolved
-    server-side by the routes from agentconfig/boards.py and stripped on a
-    PUT — ``is_default`` marks a board that is built-in and cannot be
-    removed (but CAN be disabled, via ``enabled``), ``is_api`` a board
-    reached with a saved API key rather than a browser sign-in
-    (``effective_signin_url`` is always "" for those), and ``mode_locked``
+    ``is_default``, ``is_api``, ``key_required`` and ``mode_locked`` are
+    response-only, resolved server-side by the routes from agentconfig/boards.py
+    and stripped on a PUT — ``is_default`` marks a board that is built-in and
+    cannot be removed (but CAN be disabled, via ``enabled``), ``is_api`` a board
+    reached via an HTTP API rather than a browser sign-in
+    (``effective_signin_url`` is always "" for those), ``key_required`` whether
+    that API board needs a saved key before its feed can run (false for a public
+    API board like Arbeitnow, and for every non-API board), and ``mode_locked``
     marks a catalog board whose ``mode`` is fixed and not operator-editable.
 
     ``enabled`` IS operator-settable, for every board including a default —
@@ -371,11 +373,13 @@ class JobBoardModel(_Camel):
     mode: str = ""
     search_url: str = ""
     enabled: bool = True
+    posting_url_pattern: str = ""
     mode_locked: bool = False
     domain: str = ""
     effective_signin_url: str = ""
     is_default: bool = False
     is_api: bool = False
+    key_required: bool = False
 
     @field_validator("search_url")
     @classmethod
@@ -385,6 +389,17 @@ class JobBoardModel(_Camel):
         placeholder other than ``{keywords}``/``{location}``.
         """
         err = search_url_error(v)
+        if err:
+            raise ValueError(err)
+        return v
+
+    @field_validator("posting_url_pattern")
+    @classmethod
+    def _validate_posting_url_pattern(cls, v: str) -> str:
+        """Empty is fine (no posting-link glob configured); otherwise it must
+        be an http(s) URL glob with a valid host and no whitespace/braces.
+        """
+        err = posting_url_pattern_error(v)
         if err:
             raise ValueError(err)
         return v
@@ -406,6 +421,7 @@ class DirectBoardModel(_Camel):
     url: str = ""
     signin_url: str = ""
     search_url: str = ""
+    posting_url_pattern: str = ""
     profiles: list[DirectBoardProfileModel] = Field(default_factory=list)
 
 

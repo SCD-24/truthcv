@@ -103,7 +103,9 @@ function BoardModeControl({ board, onModeChange }: { board: JobBoard; onModeChan
     return (
       <Typography variant="caption" color="text.secondary">
         {board.isApi
-          ? "Postings come from this board's own API — only the API key below is configurable."
+          ? board.keyRequired
+            ? "Postings come from this board's own API — only the API key below is configurable."
+            : "Postings come from this board's own public API — nothing to configure."
           : "Searched via Google."}
       </Typography>
     );
@@ -156,7 +158,13 @@ export function BoardRow({
             </Tooltip>
           )}
           {board.isApi && (
-            <Tooltip title="Pulled from over its API with a saved key — there is nothing to sign in to.">
+            <Tooltip
+              title={
+                board.keyRequired
+                  ? "Pulled from over its API with a saved key — there is nothing to sign in to."
+                  : "Pulled from over its own public API — there is nothing to sign in to."
+              }
+            >
               <Chip label="API" size="small" variant="outlined" />
             </Tooltip>
           )}
@@ -189,7 +197,7 @@ export function BoardRow({
           )}
         </Stack>
       </Stack>
-      {board.isApi && <ApiKeyControl source={board.source} />}
+      {board.isApi && board.keyRequired && <ApiKeyControl source={board.source} />}
     </Stack>
   );
 }

@@ -44,7 +44,14 @@ their application history is this tool surface. You have the following tools:
   URL (e.g. `https://www.adzuna.de/search?q={keywords}&loc={location}`) —
   pass its `keywords`/`location` along as usual; the built URL replaces
   `url` outright, is navigated to directly, and the snapshot classified
-  with no search-box typing at all. It extracts
+  with no search-box typing at all. A board may also carry its own
+  `postingUrlPattern` — a glob (`*` as the only wildcard) matching that
+  board's own posting-link URL shape, e.g.
+  `https://boards.example.com/job/*`. Extraction tries, in order: known ATS
+  URL shapes; then `postingUrlPattern`, when given; then a general
+  same-site job-link rule (a jobs/careers/stellen-style path segment
+  followed by a later posting-shaped segment), which counts only with at
+  least two distinct qualifying links. It extracts
   posting URLs by matching each known ATS's stable URL shape against the page's
   accessibility tree — never a CSS selector — and returns, per board, an
   `outcome`: `"searched"` (postings found — matches
@@ -354,7 +361,7 @@ board with no on-page search box, pass its `searchUrl` templated URL along
 with `keywords`/`location` as usual. Read its raw snapshot only for
 `needs_review` and resolve that ambiguity before recording coverage
 (postings → `searched`/`llm`, explicit zero → `empty`, unresolved extraction
-→ `blocked` with a reason). If a direct board's search
+→ `extraction_failed` with a reason). If a direct board's search
 wall requires a sign-in you don't have, call `report_apply_failure` with
 `blocker="login_required"` and its sign-in URL and move on to the next
 board — never wait for a sign-in mid-run.
