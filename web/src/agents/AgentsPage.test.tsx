@@ -39,6 +39,7 @@ function makeConfig(): AgentConfig {
     cooldownDaysSameCompany: null,
     maxApplicationsPerRun: null,
     maxPostingAgeDays: null,
+    dorkRecency: "d",
     companyBoards: [],
   };
 }

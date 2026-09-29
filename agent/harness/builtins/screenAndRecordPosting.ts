@@ -82,7 +82,8 @@ function storedResult(content: string): ScreenAndRecordResult {
     return { content: `record_screening returned an invalid record; persistence is uncertain. ${RECOVERY}`, isError: true };
   }
   const blocker = (record.screening_blocker as string | undefined) ?? '';
-  return { content: JSON.stringify({ id: record.id, verdict: record.verdict, screening_blocker: blocker,
+  const profile = typeof record.profile === 'string' ? { profile: record.profile } : {};
+  return { content: JSON.stringify({ id: record.id, ...profile, verdict: record.verdict, screening_blocker: blocker,
     created: record.created, actionable: record.created && record.verdict === 'passed' && !blocker }), isError: false };
 }
 
@@ -100,6 +101,13 @@ export async function screenAndRecordPosting(
   try { evidence = JSON.parse(screened.content) as Record<string, unknown>; } catch {
     return { content: 'screen_and_record_posting received invalid screening evidence; nothing was recorded.', isError: true };
   }
+  return persistEvidence(args, evidence, record);
+}
+
+/** Persist already-produced screening evidence via record_screening and return the stored outcome. */
+export async function persistEvidence(
+  args: Record<string, unknown>, evidence: Record<string, unknown>, record: RecordScreeningCall,
+): Promise<ScreenAndRecordResult> {
   const fields: Record<string, unknown> = {};
   for (const key of EVIDENCE_FIELDS) fields[key] = evidence[key];
   for (const key of ['url', 'role', 'company', 'profile', 'run_id', 'source', 'posted_date']) {

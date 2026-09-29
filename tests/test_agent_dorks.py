@@ -2,6 +2,8 @@
 
 from urllib.parse import unquote_plus
 
+import pytest
+
 from agentconfig import boards as boards_module
 from agentconfig import dorks
 from agentconfig.store import JobBoard, JobProfile
@@ -174,44 +176,54 @@ def test_disabled_and_keywordless_profiles_are_excluded_before_sharing_the_budge
 # Posting freshness window
 # ---------------------------------------------------------------------------
 
-def _url(days):
+def _url(recency):
     p = JobProfile(name="p", enabled=True, keywords=["backend"])
-    return dorks.compose_queries([p], days, ["ashby"])[0]["url"]
+    return dorks.compose_queries([p], recency, ["ashby"])[0]["url"]
 
 
-def test_unset_window_defaults_to_the_past_24_hours():
-    """None means Google's past-24h filter (qdr:d), not the old past week."""
+def test_unset_recency_defaults_to_the_past_24_hours():
     assert "&tbs=qdr:d" in _url(None)
+    assert "&tbs=qdr:d" in dorks.compose_queries(
+        [JobProfile(name="p", enabled=True, keywords=["backend"])]
+    )[0]["url"]
     assert "qdr:w" not in _url(None)
 
 
-def test_zero_days_disables_the_recency_filter_entirely():
-    """0 disables the window, mirroring how 0 disables a cooldown window."""
-    assert "tbs=" not in _url(0)
+def test_none_recency_omits_tbs_entirely():
+    assert "tbs=" not in _url("none")
 
 
-def test_a_window_renders_googles_n_days_form():
-    assert "&tbs=qdr:d3" in _url(3)
-    assert "&tbs=qdr:d30" in _url(30)
+@pytest.mark.parametrize("letter", ["h", "d", "w", "m", "y"])
+def test_each_recency_letter_renders_its_qdr_form(letter):
+    assert _url(letter).endswith(f"&tbs=qdr:{letter}")
 
 
-def test_negative_window_is_treated_as_disabled_not_as_a_malformed_url():
-    """The API validator rejects negatives, but the composer is called with
-    stored config too — a hand-edited -1 must not emit tbs=qdr:d-1."""
-    assert "tbs=" not in _url(-1)
+def test_invalid_recency_falls_back_to_default():
+    assert _url("bogus").endswith("&tbs=qdr:d")
 
 
 def test_recency_param_values():
+    assert dorks.recency_param("d") == "qdr:d"
+    assert dorks.recency_param("none") == ""
+    assert dorks.recency_param("y") == "qdr:y"
     assert dorks.recency_param(None) == "qdr:d"
-    assert dorks.recency_param(0) == ""
-    assert dorks.recency_param(7) == "qdr:d7"
+    assert dorks.recency_param("x") == "qdr:d"
 
 
-def test_window_applies_to_every_composed_query_not_just_the_first():
+def test_recency_applies_to_every_composed_query_not_just_the_first():
     p = JobProfile(name="p", enabled=True, keywords=["backend"])
-    entries = dorks.compose_queries([p], 5)
+    entries = dorks.compose_queries([p], "w")
     assert len(entries) == len(dorks.DEFAULT_BOARD_DOMAINS)
-    assert all("&tbs=qdr:d5" in e["url"] for e in entries)
+    assert all("&tbs=qdr:w" in e["url"] for e in entries)
+
+
+def test_duplicate_urls_merge_profiles_into_a_profiles_list():
+    p1 = JobProfile(name="a", enabled=True, keywords=["backend"])
+    p2 = JobProfile(name="b", enabled=True, keywords=["backend"])
+    entries = dorks.compose_queries([p1, p2], "d", ["ashby"])
+    assert len(entries) == 1
+    assert entries[0]["profile"] == "a"
+    assert entries[0]["profiles"] == ["a", "b"]
 
 
 def test_window_does_not_alter_the_query_string_itself():
@@ -219,7 +231,7 @@ def test_window_does_not_alter_the_query_string_itself():
     WebSearch must be unchanged, since WebSearch ignores tbs anyway."""
     p = JobProfile(name="p", enabled=True, keywords=["backend"])
     assert (
-        dorks.compose_queries([p], 5, ["ashby"])[0]["query"]
+        dorks.compose_queries([p], "w", ["ashby"])[0]["query"]
         == dorks.compose_queries([p], None, ["ashby"])[0]["query"]
     )
 

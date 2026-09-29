@@ -371,9 +371,11 @@ def bulk_set_approval(body: BulkApprovalUpdate) -> BulkApprovalResult:
     try:
         results = []
         for sid in body.ids:
-            results.append(
-                {"id": sid, "ok": screening_store.set_approval(sid, body.approval) is not None}
-            )
+            try:
+                ok = screening_store.set_approval(sid, body.approval) is not None
+            except screening_store.ApprovalConflict:
+                ok = False
+            results.append({"id": sid, "ok": ok})
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     return BulkApprovalResult(results=results)
@@ -485,6 +487,8 @@ def set_screening_approval(screening_id: str, body: ApprovalUpdate) -> Screening
         # regardless of approval value, matching the url-only branch above.
         try:
             screening = screening_store.set_approval(screening_id, body.approval)
+        except screening_store.ApprovalConflict as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
         if screening is None:
@@ -1566,7 +1570,7 @@ def get_agent_config(include_feed: bool = False) -> AgentConfigModel:
     # operator-disabled board is excluded from the dorks rather than
     # defaulting to "dork"/enabled the way a bare source string would.
     searched = cfg.searched_boards()
-    data["search_queries"] = compose_queries(cfg.profiles, cfg.max_posting_age_days, searched)
+    data["search_queries"] = compose_queries(cfg.profiles, cfg.dork_recency, searched)
 
     # One entry per direct-mode board, for the agent to search on-site.
     data["direct_boards"] = compose_direct_boards(cfg.profiles, searched)
@@ -1580,7 +1584,12 @@ def get_agent_config(include_feed: bool = False) -> AgentConfigModel:
         # re-screening postings that only come back created:false. An
         # unread-placeholder screening is not in `keys` (screened_dedupe_keys
         # excludes it), so that posting stays in the feed for a real screen.
-        keys = screening_store.screened_dedupe_keys()
+        # Only postings screened for EVERY enabled profile (or passed/deferred,
+        # or profile-less) count as screened; a rejection under one profile
+        # must not hide the posting from the others.
+        keys = screening_store.screened_dedupe_keys(
+            [p.name for p in cfg.profiles if p.enabled]
+        )
         kept = [p for p in feed.postings if posting_dedupe_key(p.url) not in keys]
         data["feed_postings"] = [p.to_dict() for p in kept]
         data["feed_error"] = feed.error
@@ -1712,15 +1721,43 @@ def get_agent_llm_credentials(x_agent_token: str = Header(default="")) -> AgentL
     if not secret or not hmac.compare_digest(given, secret.encode("utf-8")):
         raise HTTPException(status_code=404)
 
-    route = modelrouting.load().agent
+    return _credentials_for_route(modelrouting.load().agent)
+
+
+def _credentials_for_route(route: modelrouting.Route | None) -> AgentLlmCredentials:
+    """Credentials for a route (None = the claude card, default model).
+    Raises 404 when the card is unknown or has no usable credentials."""
     card = route.connection if route else "claude"
     model = route.model if route else ""
-
     resolve = _CARD_CREDENTIALS.get(card)
     if resolve is None:
         raise HTTPException(status_code=404)
-    creds = resolve(model)
-    return creds
+    return resolve(model)
+
+
+@router.get("/agent/llm-routes")
+def get_agent_llm_routes(x_agent_token: str = Header(default="")) -> dict:
+    """Guarded (404 without AGENT_API_TOKEN): credentials for the apply route
+    and each agent stage. A stage with no route resolves to null. Response-only
+    egress; tokens are never logged."""
+    if not _agent_token_ok(x_agent_token):
+        raise HTTPException(status_code=404)
+    r = modelrouting.load()
+
+    def _creds(route):
+        if route is None:
+            return None
+        # One stage whose card has no usable credentials must not blank the
+        # others: it resolves to null and the harness falls back per stages.ts.
+        try:
+            return _credentials_for_route(route).model_dump(by_alias=True)
+        except HTTPException:
+            return None
+
+    stages = {"apply": _creds(r.agent)}
+    for name in modelrouting.AGENT_STAGE_NAMES:
+        stages[name] = _creds(modelrouting.resolve_agent_stage(r, name))
+    return {"stages": stages}
 
 
 def _agent_token_ok(given: str) -> bool:
@@ -2431,6 +2468,7 @@ def get_routing() -> RoutingModel:
         tasks={k: _route_model(v) for k, v in routing.tasks.items()},
         agent=_route_model(routing.agent) if routing.agent else None,
         default=_route_model(routing.default) if routing.default else None,
+        agent_stages={k: _route_model(v) for k, v in routing.agent_stages.items()},
     )
 
 
@@ -2474,6 +2512,12 @@ def put_routing(body: RoutingUpdate) -> RoutingModel:
         stored_dict["agent"] = update_dict["agent"]
     if "default" in update_dict:
         stored_dict["default"] = update_dict["default"]
+    if "agent_stages" in update_dict:
+        for name, route in (update_dict["agent_stages"] or {}).items():
+            if route is None:
+                stored_dict["agent_stages"].pop(name, None)
+            else:
+                stored_dict["agent_stages"][name] = route
 
     # Parse back to Routing and save
     routing = modelrouting.Routing.from_dict(stored_dict)
@@ -2485,6 +2529,7 @@ def put_routing(body: RoutingUpdate) -> RoutingModel:
         tasks={k: _route_model(v) for k, v in routing.tasks.items()},
         agent=_route_model(routing.agent) if routing.agent else None,
         default=_route_model(routing.default) if routing.default else None,
+        agent_stages={k: _route_model(v) for k, v in routing.agent_stages.items()},
     )
 
 
@@ -2497,6 +2542,10 @@ def _all_routes_in_dict(d: dict) -> list[dict]:
         routes.append(d["default"])
     if "tasks" in d and isinstance(d["tasks"], dict):
         for route in d["tasks"].values():
+            if isinstance(route, dict):
+                routes.append(route)
+    if "agent_stages" in d and isinstance(d["agent_stages"], dict):
+        for route in d["agent_stages"].values():
             if isinstance(route, dict):
                 routes.append(route)
     return routes

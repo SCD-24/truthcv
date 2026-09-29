@@ -107,7 +107,7 @@ def claim_screening_for_apply(screening_id: str) -> ApplyClaimResult:
         return ApplyClaimResult(screening=screening)
     refused_screening = screening_store.get(screening_id)
     reason = (
-        screening_store._apply_refusal(refused_screening)
+        screening_store._apply_refusal(refused_screening, screening_store.load_all())
         if refused_screening
         else "already_applied"
     )

@@ -2,8 +2,13 @@ import { useEffect, useState } from "react";
 import Alert from "@mui/material/Alert";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
+import FormControl from "@mui/material/FormControl";
+import FormHelperText from "@mui/material/FormHelperText";
+import InputLabel from "@mui/material/InputLabel";
+import MenuItem from "@mui/material/MenuItem";
+import Select from "@mui/material/Select";
 import { getAgentConfig, updateAgentConfig } from "../api/client";
-import type { AgentConfigUpdate } from "../api/types";
+import type { AgentConfigUpdate, DorkRecency } from "../api/types";
 import { SettingsSection } from "./SettingsModal";
 import { SettingsAutosaveProvider, useHasSettingsAutosaveProvider, useSettingsAutosave } from "./SettingsAutosave";
 
@@ -12,8 +17,41 @@ const OWNED_KEYS = [
   "cooldownDays",
   "cooldownDaysSameRole",
   "cooldownDaysSameCompany",
+  "dorkRecency",
 ] as const satisfies readonly (keyof AgentConfigUpdate)[];
-export type JobSearchPolicyKeys = (typeof OWNED_KEYS)[number];
+export type JobSearchPolicyKeys = Exclude<(typeof OWNED_KEYS)[number], "dorkRecency">;
+
+const RECENCY_OPTIONS: { value: DorkRecency; label: string }[] = [
+  { value: "h", label: "Past hour" },
+  { value: "d", label: "Past day" },
+  { value: "w", label: "Past week" },
+  { value: "m", label: "Past month" },
+  { value: "y", label: "Past year" },
+  { value: "none", label: "Any time" },
+];
+
+function RecencyField({ value, onChange }: { value: DorkRecency; onChange: (v: DorkRecency) => void }) {
+  const autosave = useSettingsAutosave("policy:dorkRecency");
+  const label = "Google search recency";
+  function edit(next: DorkRecency) {
+    onChange(next);
+    autosave.edit(next, async (v) => { await updateAgentConfig({ dorkRecency: v }); }, { valid: true });
+  }
+  return (
+    <div>
+      <FormControl size="small" sx={{ minWidth: 280 }}>
+        <InputLabel id="dork-recency-label">{label}</InputLabel>
+        <Select labelId="dork-recency-label" label={label} value={value}
+          onChange={(e) => edit(e.target.value as DorkRecency)}>
+          {RECENCY_OPTIONS.map((o) => <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>)}
+        </Select>
+        <FormHelperText>Narrows Google dork searches only; the posting-age hard filter is separate.</FormHelperText>
+      </FormControl>
+      {autosave.status === "error" && <div role="status">{label}: save failed: {autosave.error}</div>}
+      {autosave.status === "error" && <Button onClick={autosave.retry}>Retry {label}</Button>}
+    </div>
+  );
+}
 
 function toIntOrNull(raw: string): number | null {
   if (raw.trim() === "") return null;
@@ -69,6 +107,7 @@ function JobSearchPolicyContent() {
   const [values, setValues] = useState<Record<JobSearchPolicyKeys, string>>({
     cooldownDays: "", cooldownDaysSameRole: "", cooldownDaysSameCompany: "",
   });
+  const [recency, setRecency] = useState<DorkRecency>("d");
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -82,6 +121,7 @@ function JobSearchPolicyContent() {
           cooldownDaysSameRole: cfg.cooldownDaysSameRole?.toString() ?? "",
           cooldownDaysSameCompany: cfg.cooldownDaysSameCompany?.toString() ?? "",
         });
+        setRecency(cfg.dorkRecency ?? "d");
         setLoaded(true);
       })
       .catch((e: unknown) => {
@@ -102,6 +142,7 @@ function JobSearchPolicyContent() {
         description="How long TruthCV waits before re-contacting the same company or role.">
         {error && <Alert severity="error">{error}</Alert>}
         {!loaded && !error && <span>Loading job search policy…</span>}
+        {loaded && <RecencyField value={recency} onChange={setRecency} />}
         {loaded && fields.map(({ key, label, helper }) => (
           <WindowField key={key} field={key} label={label} helper={helper} value={values[key]}
             onChange={(raw) => setValues((previous) => ({ ...previous, [key]: raw }))} />

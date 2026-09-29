@@ -79,9 +79,10 @@ import {
   type LoopOutcome,
   type LoopResult,
 } from './loop.js';
-import { checkAdvertisedBrowserTools } from './tools.js';
+import { checkAdvertisedBrowserTools, sessionDeniedTools } from './tools.js';
 import { type CompactionConfig } from './compaction.js';
 import { discoverContextWindow, type DiscoveredContextWindow } from './contextWindow.js';
+import { parseRoutes, resolveStageRoutes, type ResolvedRoutes, type RoutesDocument, type StageRoute } from './stages.js';
 
 /** The CLI's process exit codes; see the module comment for the full contract. */
 export const ExitCode = {
@@ -215,6 +216,10 @@ export interface CliConfig {
   /** Auth routing for the screening adapter. Defaults to {@link
    * CliConfig.authType} when unset. */
   screeningAuthType?: 'oauth' | 'api_key' | 'url';
+  /** Every stage's resolved route (apply/screening/extract), see stages.ts. */
+  stageRoutes?: ResolvedRoutes;
+  /** Static system prompt from `--system-prompt-file`; replaces {@link SYSTEM_PROMPT} when set. */
+  systemPrompt?: string;
 }
 
 /**
@@ -391,7 +396,7 @@ function resolvePromptCache(flag: string | undefined, envVal: string | undefined
   return raw !== 'false';
 }
 
-const FINISH_TOOL_NAMES = ['finish_run', 'finish_phase'] as const;
+const FINISH_TOOL_NAMES = ['finish_run', 'finish_phase', 'finish_application'] as const;
 
 /**
  * Parse `--finish-tool`/`AGENT_FINISH_TOOL`, defaulting to `finish_run` when
@@ -418,18 +423,46 @@ function resolveScreeningConfig(
   f: Record<string, string>,
   env: NodeJS.ProcessEnv,
   main: { model: string; provider: Provider; wire: Wire; token: string; baseUrl: string; authType?: CliConfig['authType'] },
+  routes: RoutesDocument = {},
 ): Pick<
   CliConfig,
-  'screeningModel' | 'screeningProvider' | 'screeningWire' | 'screeningToken' | 'screeningBaseUrl' | 'screeningAuthType'
+  'screeningModel' | 'screeningProvider' | 'screeningWire' | 'screeningToken' | 'screeningBaseUrl' | 'screeningAuthType' | 'stageRoutes'
 > {
+  const stageRoutes = resolveStageRoutes(routes, main as StageRoute, {
+    screening: {
+      model: f['screening-model'] ?? env.AGENT_SCREENING_MODEL,
+      provider: (f['screening-provider'] ?? env.AGENT_SCREENING_PROVIDER) as Provider | undefined,
+      wire: (f['screening-wire'] ?? env.AGENT_SCREENING_WIRE) as Wire | undefined,
+      token: f['screening-token'] ?? env.AGENT_SCREENING_API_KEY,
+      baseUrl: f['screening-base-url'] ?? env.AGENT_SCREENING_BASE_URL,
+      authType: (f['screening-auth-type'] ?? env.AGENT_SCREENING_AUTH_TYPE) as CliConfig['authType'],
+    },
+  });
+  const s = stageRoutes.screening;
   return {
-    screeningModel: f['screening-model'] ?? env.AGENT_SCREENING_MODEL ?? main.model,
-    screeningProvider: (f['screening-provider'] ?? env.AGENT_SCREENING_PROVIDER ?? main.provider) as Provider,
-    screeningWire: (f['screening-wire'] ?? env.AGENT_SCREENING_WIRE ?? main.wire) as Wire,
-    screeningToken: f['screening-token'] ?? env.AGENT_SCREENING_API_KEY ?? main.token,
-    screeningBaseUrl: f['screening-base-url'] ?? env.AGENT_SCREENING_BASE_URL ?? main.baseUrl,
-    screeningAuthType: (f['screening-auth-type'] ?? env.AGENT_SCREENING_AUTH_TYPE ?? main.authType) as CliConfig['authType'],
+    screeningModel: s.model,
+    screeningProvider: s.provider,
+    screeningWire: s.wire,
+    screeningToken: s.token,
+    screeningBaseUrl: s.baseUrl,
+    screeningAuthType: s.authType,
+    stageRoutes,
   };
+}
+
+/** Read and parse `--routes-file`/`AGENT_ROUTES_FILE`; unreadable or absent yields no routes. */
+async function loadRoutes(
+  f: Record<string, string>,
+  env: NodeJS.ProcessEnv,
+  io: { readFileText: (p: string) => Promise<string> },
+): Promise<RoutesDocument> {
+  const path = f['routes-file'] || env.AGENT_ROUTES_FILE;
+  if (!path) return {};
+  try {
+    return parseRoutes(await io.readFileText(path));
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -448,12 +481,17 @@ export async function resolveConfig(
 ): Promise<CliConfig> {
   const f = parsed.flags;
   const prompt = await resolvePrompt(parsed, io);
-  const model = f.model ?? env.AGENT_LLM_MODEL ?? '';
-  const provider = (f.provider ?? env.AGENT_LLM_PROVIDER ?? '') as Provider;
-  const wire = (f.wire ?? env.AGENT_LLM_WIRE ?? '') as Wire;
-  const token = tokenFrom(f, env);
-  const baseUrl = f['base-url'] ?? env.AGENT_LLM_BASE_URL ?? '';
-  const authType = (f['auth-type'] ?? env.AGENT_LLM_AUTH_TYPE ?? undefined) as CliConfig['authType'];
+  const routes = await loadRoutes(f, env, io);
+  // Field by field: an explicit flag/env value overrides only its own field;
+  // everything else still comes from the routes file's apply route.
+  const applyRoute = routes.apply ?? null;
+  const model = f.model ?? env.AGENT_LLM_MODEL ?? applyRoute?.model ?? '';
+  const provider = (f.provider ?? env.AGENT_LLM_PROVIDER ?? applyRoute?.provider ?? '') as Provider;
+  const wire = (f.wire ?? env.AGENT_LLM_WIRE ?? applyRoute?.wire ?? '') as Wire;
+  const token = f.token ?? env.AGENT_LLM_API_KEY ?? applyRoute?.token ?? '';
+  const baseUrl = f['base-url'] ?? env.AGENT_LLM_BASE_URL ?? applyRoute?.baseUrl ?? '';
+  const authType = (f['auth-type'] ?? env.AGENT_LLM_AUTH_TYPE ?? applyRoute?.authType ?? undefined) as CliConfig['authType'];
+  const systemPrompt = f['system-prompt-file'] ? (await io.readFileText(f['system-prompt-file'])).trim() : undefined;
   return {
     prompt,
     model,
@@ -462,7 +500,8 @@ export async function resolveConfig(
     token,
     baseUrl,
     authType,
-    ...resolveScreeningConfig(f, env, { model, provider, wire, token, baseUrl, authType }),
+    ...resolveScreeningConfig(f, env, { model, provider, wire, token, baseUrl, authType }, { ...routes, apply: null }),
+    systemPrompt: systemPrompt || undefined,
     mcpConfigPath: f['mcp-config'] ?? env.MCP_CONFIG_PATH ?? 'mcp.json',
     maxTurns: resolveMaxTurns(f['max-turns'], env.AGENT_MAX_TURNS),
     finishToolName: resolveFinishToolName(f['finish-tool'], env.AGENT_FINISH_TOOL),
@@ -524,7 +563,7 @@ export function validateConfig(config: CliConfig): string[] {
   if (!WIRES.includes(config.wire)) errors.push('a valid --wire (anthropic-messages|openai-chat-completions|openai-responses) is required');
   if (!Number.isInteger(config.maxTurns) || config.maxTurns <= 0) errors.push('--max-turns must be a positive integer');
   if (!(FINISH_TOOL_NAMES as readonly string[]).includes(config.finishToolName))
-    errors.push('--finish-tool must be one of finish_run|finish_phase');
+    errors.push('--finish-tool must be one of finish_run|finish_phase|finish_application');
   if (!Number.isInteger(config.maxToolResultChars) || config.maxToolResultChars <= 0)
     errors.push('--max-tool-result-chars must be a positive integer');
   if (!Number.isInteger(config.maxToolConcurrency) || config.maxToolConcurrency <= 0)
@@ -662,7 +701,8 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv, deps: CliDe
   }
   // From here on both credentials are known, so every write is redacted
   // against the main AND the screening token — see {@link redactAll}.
-  const tokens = [token, config.screeningToken];
+  const routeTokens = Object.values(config.stageRoutes ?? {}).map((r) => r.token);
+  const tokens = [...new Set([token, config.token, config.screeningToken, ...routeTokens])].filter(Boolean);
   return runOnce(config, env, d, buildEmitter(d, tokens), tokens);
 }
 
@@ -801,7 +841,7 @@ async function runAgent(
     const result = await runLoop({
       adapter,
       pool,
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt: config.systemPrompt ?? SYSTEM_PROMPT,
       initialMessages: [{ role: 'user', content: config.prompt }],
       config: {
         maxTurns: config.maxTurns,
@@ -810,6 +850,7 @@ async function runAgent(
         maxConsecutiveRetries: config.maxConsecutiveRetries,
         maxRetryDelayMs: config.maxRetryDelayMs,
         finishToolName: config.finishToolName,
+        deniedTools: sessionDeniedTools(config.finishToolName),
       },
       compactionConfig,
       screeningAdapter,

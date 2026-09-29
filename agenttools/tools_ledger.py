@@ -561,11 +561,13 @@ def record_screening(
     ``screening_blocker``, is exempt and keeps today's lenient behaviour — a
     posting the agent could not read takes a blocker instead of posting_text.
 
-    One posting gets one record, forever. If the store already holds a
-    screening for this ``url``, nothing is written and the EXISTING record is
-    returned with ``created: false`` — the verdict you just reached is
-    discarded, because that posting has already been judged and, if the
-    operator rejected it, re-recording it would put it back in front of them.
+    One record per posting per profile. A record without a profile, or any
+    passed/deferred record, covers the posting for every profile. If the store
+    already holds a covering screening for this ``url`` and ``profile``,
+    nothing is written and the EXISTING record is returned with
+    ``created: false`` — the verdict you just reached is discarded, because
+    that posting has already been judged and, if the operator rejected it,
+    re-recording it would put it back in front of them.
     This is a normal outcome, not an error: do not retry the call, do not
     vary the URL to get past it, and count the posting as a skip.
 

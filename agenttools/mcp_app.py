@@ -23,6 +23,10 @@ from agenttools.tools_ledger import (
     record_screening as _record_screening,
 )
 from agenttools.tools_letter import generate_cover_letter as _generate_cover_letter
+from agenttools.tools_pipeline import (
+    filter_unscreened_urls as _filter_unscreened_urls,
+    finish_application as _finish_application,
+)
 from agenttools.tools_research import (
     get_company_findings as _get_company_findings,
     record_company_finding as _record_company_finding,
@@ -63,6 +67,7 @@ _TOOL_REGISTRY = {
         "employment_country_stated (the posting's stated employment country), role_type_stated (the posting's stated role type, e.g. contract vs permanent), and eor_stated (yes, no, or unstated — whether the posting requires an EOR/PEO employer of record) — "
         "profile and remote_arrangement are required and the call is rejected without them; the rest are optional and '' means the posting stated nothing on that point. "
         "Evidence that contradicts ANY of the named profile's six hard requirements — remote model, working language, salary floor, employment country, rejected role types, or EOR — is stored as an automatic rejection (verdict downgraded to rejected), not an error to retry. "
+        "There is one record per posting per profile: a record without a profile, or any passed/deferred record, covers the posting for every profile; created:false means the posting is already covered, so count it as a skip. "
         "Pass your run_id (from start_run) on EVERY call, so this screening is attributed to your run and the run's coverage counters reflect the work you actually did.",
     ),
     "check_cooldown": (
@@ -188,6 +193,16 @@ _TOOL_REGISTRY = {
         "— reporting a blocked board as empty hides a broken channel. Pass tier (api, harvest "
         "or llm, or '' when not applicable) to record which extraction tier produced the "
         "postings.",
+    ),
+    "filter_unscreened_urls": (
+        _filter_unscreened_urls,
+        "Given candidate posting URLs (urls), returns {unscreened: [...]}: only those not already "
+        "screened, in input order, deduplicated, with URL fragments ignored. Call before opening postings.",
+    ),
+    "finish_application": (
+        _finish_application,
+        "Notes the outcome of one application (url, outcome, note) on the run record. Non-terminal: "
+        "never ends the run or changes its status. Pass your run_id.",
     ),
     "record_postings_seen": (
         _record_postings_seen,

@@ -91,7 +91,7 @@ def _expected_counts() -> dict[str, int]:
         searched = cfg.searched_boards()
         return {
             "direct": len(compose_direct_boards(cfg.profiles, searched)),
-            "dork": len(compose_queries(cfg.profiles, cfg.max_posting_age_days, searched)),
+            "dork": len(compose_queries(cfg.profiles, cfg.dork_recency, searched)),
         }
     except Exception:
         return {}

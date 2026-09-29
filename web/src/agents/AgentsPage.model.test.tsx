@@ -18,7 +18,7 @@ function makeConfig(): AgentConfig {
   return { mode: "full", enabled: true, blockedCompanies: [], runAt: ["09:00"],
     runDays: ["mon"], runTimezone: "UTC", profiles: [], jobBoards: [], targetCompanies: [],
     cooldownDays: null, cooldownDaysSameRole: null, cooldownDaysSameCompany: null,
-    maxApplicationsPerRun: null, maxPostingAgeDays: null, companyBoards: [] };
+    maxApplicationsPerRun: null, maxPostingAgeDays: null, dorkRecency: "d", companyBoards: [] };
 }
 function makeStatus(): AgentStatus {
   return { running: false, cancelling: false, lastStartedAt: null, lastFinishedAt: null,

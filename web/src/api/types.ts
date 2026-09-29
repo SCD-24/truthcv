@@ -733,8 +733,12 @@ export interface AgentConfig {
    * within this many days. null leaves it unset (the historical past-week
    * search filter); 0 disables the window entirely. */
   maxPostingAgeDays: number | null;
+  /** Google dork search recency (h/d/w/m/y); "none" means any time. */
+  dorkRecency: DorkRecency;
   readonly companyBoards: CompanyBoard[];
 }
+
+export type DorkRecency = "h" | "d" | "w" | "m" | "y" | "none";
 
 /** A partial patch of agent configuration; the PUT route merges only the
  * keys you send. Limited to what PUT /api/agent/config actually accepts
@@ -756,6 +760,7 @@ export type AgentConfigUpdate = Partial<
     | "cooldownDaysSameCompany"
     | "maxApplicationsPerRun"
     | "maxPostingAgeDays"
+    | "dorkRecency"
   >
 >;
 
@@ -821,6 +826,8 @@ export interface Routing {
   tasks: Record<string, RouteChoice>;
   agent: RouteChoice | null;
   default: RouteChoice | null;
+  /** Per-stage overrides (screening, extract); unset falls back to the agent model. */
+  agentStages?: Record<string, RouteChoice | null>;
 }
 
 /** Partial PUT /api/routing body. A task entry (or `agent`/`default`) sent
@@ -831,6 +838,7 @@ export interface RoutingUpdate {
   tasks?: Record<string, RouteChoice | null>;
   agent?: RouteChoice | null;
   default?: RouteChoice | null;
+  agentStages?: Record<string, RouteChoice | null>;
 }
 
 /** One host the agent could not get past a sign-in wall on. */

@@ -45,10 +45,11 @@ TRUTHCV_RUN_ID="${TRUTHCV_RUN_ID:-$(date +%s)-$$}"
 # direct-search boards, (3) dork queries — each closing with finish_phase
 # except the last, which closes with finish_run. single: today's one-session
 # run, byte-for-byte including the composed prompt.
-AGENT_SESSION_MODE="${AGENT_SESSION_MODE:-per-channel}"
+# pipeline (default): code discovers/screens; one short apply session per posting.
+AGENT_SESSION_MODE="${AGENT_SESSION_MODE:-pipeline}"
 case "$AGENT_SESSION_MODE" in
-  single|per-channel) ;;
-  *) echo "invalid AGENT_SESSION_MODE '$AGENT_SESSION_MODE' (expected single|per-channel)" >&2; exit 1 ;;
+  single|per-channel|pipeline) ;;
+  *) echo "invalid AGENT_SESSION_MODE '$AGENT_SESSION_MODE' (expected single|per-channel|pipeline)" >&2; exit 1 ;;
 esac
 
 mkdir -p "$RUN_LOG_DIR"
@@ -551,7 +552,7 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     # and the configured job boards. The agent may open them with WebSearch or
     # the browser as it prefers; free-form WebSearch remains available
     # alongside them.
-    QUERIES="$(jq -r '.searchQueries[]? | "  - [\(.profile)] \(.source): \(.query)\n    \(.url)"' <<<"$JOB_CONFIG")"
+    QUERIES="$(jq -r '.searchQueries[]? | "  - [\(((.profiles // []) | if length > 0 then join(", ") else null end) // .profile)] \(.source): \(.query)\n    \(.url)"' <<<"$JOB_CONFIG")"
     if [[ -n "$QUERIES" ]]; then
       DORK_SECTION="$DORK_SECTION"$'\n'"Composed search queries (deterministic entry points from keywords/locations and the configured job boards; use WebSearch or the browser, free-form search still applies too):"$'\n'
       DORK_SECTION="$DORK_SECTION"$'\n'"$QUERIES"$'\n'
@@ -574,8 +575,8 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     if [[ "$MAX_AGE" =~ ^[1-9][0-9]*$ ]] && (( MAX_AGE <= 365 )); then
       AGE_LINE="Posting freshness window: ${MAX_AGE} days. HARD FILTER — reject any posting whose stated publication date is older than this, with failing_criterion 'posting_age'. When a board states no date, do NOT infer one and do NOT reject on age."
     else
-      # Unset is NOT a rejection rule. Discovery still carries a past-week
-      # preference in the composed search URLs, but a posting arriving by any
+      # Unset is NOT a rejection rule. Dork recency is its own setting
+      # (dorkRecency, default past day) in the composed search URLs, but a posting arriving by any
       # other route is judged on the profile criteria alone — exactly what
       # happened before this setting existed.
       AGE_LINE="Posting freshness window: not configured — a posting's age is never a rejection reason on this run. Prefer recent postings when choosing what to open, but never reject one for being old."
@@ -680,6 +681,19 @@ else
   AGENT_MODEL="$AGENT_LLM_MODEL"
 fi
 
+# Per-stage routes (llm_routes) go to a 0600 temp file, removed on exit; the
+# token never reaches argv or the log.
+ROUTES_FILE=""
+PIPE_DIR=""
+cleanup_tmp() { [[ -n "$ROUTES_FILE" ]] && rm -f "$ROUTES_FILE"; [[ -n "$PIPE_DIR" ]] && rm -rf "$PIPE_DIR"; return 0; }
+trap cleanup_tmp EXIT
+if [[ -n "${AGENT_API_TOKEN:-}" ]]; then
+  ROUTES_FILE="$(umask 077; mktemp)"
+  if ! node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" llm_routes >"$ROUTES_FILE" 2>/dev/null; then
+    rm -f "$ROUTES_FILE"; ROUTES_FILE=""
+  fi
+fi
+
 # Final gate: the harness needs a known provider AND a usable credential for it.
 # claude|codex|openrouter each require a non-empty token; ollama legitimately
 # has none and requires a base URL instead.
@@ -760,8 +774,18 @@ fi
 # and its own --finish-tool (finish_phase for every non-final session,
 # finish_run for the last).
 run_harness() {
-local prompt_file="$1" finish_tool="$2"
+local prompt_file="$1" finish_tool="$2" system_prompt_file="${3:-}"
+local extra=()
+[[ -n "$ROUTES_FILE" ]] && extra+=(--routes-file "$ROUTES_FILE")
+[[ -n "$system_prompt_file" ]] && extra+=(--system-prompt-file "$system_prompt_file")
+[[ -n "${AGENT_SCREENING_MODEL:-}" ]] && extra+=(--screening-model "$AGENT_SCREENING_MODEL")
+[[ -n "${AGENT_SCREENING_PROVIDER:-}" ]] && extra+=(--screening-provider "$AGENT_SCREENING_PROVIDER")
+[[ -n "${AGENT_SCREENING_WIRE:-}" ]] && extra+=(--screening-wire "$AGENT_SCREENING_WIRE")
+[[ -n "${AGENT_SCREENING_API_KEY:-}" ]] && extra+=(--screening-token "$AGENT_SCREENING_API_KEY")
+[[ -n "${AGENT_SCREENING_BASE_URL:-}" ]] && extra+=(--screening-base-url "$AGENT_SCREENING_BASE_URL")
+[[ -n "${AGENT_SCREENING_AUTH_TYPE:-}" ]] && extra+=(--screening-auth-type "$AGENT_SCREENING_AUTH_TYPE")
 node "$HARNESS_CLI" \
+  "${extra[@]}" \
   --prompt-file "$prompt_file" \
   --model "$AGENT_MODEL" \
   --provider "$AGENT_LLM_PROVIDER" \
@@ -775,12 +799,6 @@ node "$HARNESS_CLI" \
   --max-retry-delay-ms "${AGENT_MAX_RETRY_DELAY_MS:-300000}" \
   --max-tool-result-chars "${AGENT_MAX_TOOL_RESULT_CHARS:-24000}" \
   --prompt-cache "${AGENT_PROMPT_CACHE:-true}" \
-  --screening-model "${AGENT_SCREENING_MODEL:-$AGENT_MODEL}" \
-  --screening-provider "${AGENT_SCREENING_PROVIDER:-$AGENT_LLM_PROVIDER}" \
-  --screening-wire "${AGENT_SCREENING_WIRE:-$AGENT_LLM_WIRE}" \
-  --screening-token "${AGENT_SCREENING_API_KEY:-$AGENT_LLM_API_KEY}" \
-  --screening-base-url "${AGENT_SCREENING_BASE_URL:-$AGENT_LLM_BASE_URL}" \
-  --screening-auth-type "${AGENT_SCREENING_AUTH_TYPE:-$AGENT_LLM_AUTH_TYPE}" \
   --finish-tool "$finish_tool" \
   --output-file "$RUN_OUTPUT" \
   --reason-file "$REASON_FILE" \
@@ -918,6 +936,78 @@ if [[ "$AGENT_SESSION_MODE" == "single" ]]; then
   run_session "$HARNESS_PROMPT_FILE" finish_run single
   FINAL_RC=$?
   rm -f "$HARNESS_PROMPT_FILE"
+elif [[ "$AGENT_SESSION_MODE" == "pipeline" ]]; then
+  # Pipeline: code discovers and screens; apply sessions only apply.
+  PIPELINE_CLI="${PIPELINE_CLI:-/app/agent/dist/harness/pipeline/pipelineCli.js}"
+  PIPE_DIR="$(umask 077; mktemp -d)"
+  PIPE_ISSUES=""
+  PIPE_FLAGS=(--mcp-config "$MCP_CONFIG" --run-id "$TRUTHCV_RUN_ID")
+  [[ -n "$ROUTES_FILE" ]] && PIPE_FLAGS+=(--routes-file "$ROUTES_FILE")
+  # start/finish need no model: no credentials at all. Only discover-screen
+  # (pipe_cli_model) gets them, through the environment - never argv.
+  pipe_cli() {
+    node "$PIPELINE_CLI" "$@" "${PIPE_FLAGS[@]}" </dev/null >>"$RUN_LOG" 2>&1
+  }
+  pipe_cli_model() {
+    AGENT_LLM_MODEL="$AGENT_MODEL" AGENT_LLM_PROVIDER="$AGENT_LLM_PROVIDER" AGENT_LLM_WIRE="$AGENT_LLM_WIRE" \
+      AGENT_LLM_AUTH_TYPE="$AGENT_LLM_AUTH_TYPE" AGENT_LLM_API_KEY="$AGENT_LLM_API_KEY" AGENT_LLM_BASE_URL="$AGENT_LLM_BASE_URL" \
+      pipe_cli "$@"
+  }
+  START_ARGS=(start --out "$PIPE_DIR/approved.json")
+  [[ "$APPLY_CAP" =~ ^[1-9][0-9]*$ ]] && START_ARGS+=(--limit "$APPLY_CAP")
+  note_rc() { # name rc: record the first failure and any non-zero rc
+    (( $2 == 0 )) && return 0
+    PIPE_ISSUES="${PIPE_ISSUES:+$PIPE_ISSUES | }$1 rc=$2"
+    if (( FINAL_RC_SET == 0 )); then FINAL_RC=$2; FINAL_RC_SET=1; fi
+    if [[ -z "$FIRST_FAILURE_REASON" ]]; then FIRST_FAILURE_REASON="$(cat "$REASON_FILE" 2>/dev/null || true)"; fi
+  }
+  FIRST_FAILURE_REASON=""
+  APPROVED_FILE="$PIPE_DIR/approved.json"; PASSES_FILE="$PIPE_DIR/passes.json"
+  CRITERIA_FILE="$PIPE_DIR/criteria.json"; JOB_FILE="$PIPE_DIR/job.json"
+  SYSTEM_FILE="$PIPE_DIR/apply-system.txt"
+  pipe_cli "${START_ARGS[@]}"; note_rc start $?
+  if (( FINAL_RC == 0 )); then
+    printf '%s' "$JOB_CONFIG" >"$JOB_FILE"
+    NAMES_JSON="$(jq -c '[.profiles[] | select(.enabled == true) | .name]' <<<"$JOB_CONFIG")"
+    TEXTS_JSON="$(jq -c "[$PROFILE_CRITERIA_JQ]" <<<"$JOB_CONFIG")"
+    jq -n --argjson n "$NAMES_JSON" --argjson t "$TEXTS_JSON" '[range(0; $n|length) | {key: $n[.], value: $t[.]}] | from_entries' >"$CRITERIA_FILE"
+    pipe_cli_model discover-screen --job-config "$JOB_FILE" --criteria "$CRITERIA_FILE" --out "$PASSES_FILE"; note_rc discover-screen $?
+    node "$PIPELINE_CLI" stage-prompt apply >"$SYSTEM_FILE" 2>>"$RUN_LOG"; note_rc stage-prompt $?
+  fi
+  if (( FINAL_RC == 0 || FINAL_RC == 3 )) && [[ -s "$SYSTEM_FILE" ]]; then
+    APPLY_ITEMS=()
+    if [[ -s "$APPROVED_FILE" ]]; then
+      while IFS= read -r ITEM; do [[ -n "$ITEM" ]] && APPLY_ITEMS+=("approved:$ITEM"); done < <(jq -c '(if type == "array" then .[] else ((.applications // .approved // [])[]) end) | select((.blocked_reason // "") == "")' "$APPROVED_FILE" 2>/dev/null)
+    fi
+    # Semi-auto leaves new passes for operator approval; only full auto applies to them.
+    if [[ "$AGENT_MODE" == "full" && -s "$PASSES_FILE" ]]; then
+      while IFS= read -r ITEM; do [[ -n "$ITEM" ]] && APPLY_ITEMS+=("pass:$ITEM"); done < <(jq -c '.passes[]?' "$PASSES_FILE" 2>/dev/null)
+    fi
+    LAUNCHED=0 # local budget: a failed run-count read must never exceed the cap
+    for ENTRY in "${APPLY_ITEMS[@]:-}"; do
+      [[ -z "$ENTRY" ]] && continue
+      if [[ "$APPLY_CAP" =~ ^[1-9][0-9]*$ ]] && (( LAUNCHED >= APPLY_CAP )); then break; fi
+      KIND="${ENTRY%%:*}"; POSTING="${ENTRY#*:}"
+      REMAINING_LINE="$(render_remaining_line "$APPLY_CAP")"
+      if [[ "$KIND" == pass && "$APPLY_CAP" =~ ^[1-9][0-9]*$ && "$REMAINING_LINE" == *"remaining this run: 0" ]]; then break; fi
+      POSTING_PROMPT_FILE="$(mktemp "$PIPE_DIR/posting.XXXXXX")"
+      printf 'Date: %s\nRun id: %s\nKind: %s\nPosting: %s\n%s\n' "$(date +%Y-%m-%d)" "$TRUTHCV_RUN_ID" "$KIND" "$POSTING" "$REMAINING_LINE" >"$POSTING_PROMPT_FILE"
+      LAUNCHED=$((LAUNCHED + 1))
+      log "session start: apply posting ($KIND)"
+      run_harness "$POSTING_PROMPT_FILE" finish_application "$SYSTEM_FILE"
+      SESSION_RC=$?
+      log "session end: apply rc=$SESSION_RC"
+      note_rc apply "$SESSION_RC"
+      if [[ "$SESSION_RC" == 3 || "$SESSION_RC" == 4 || "$SESSION_RC" == 5 ]]; then break; fi
+    done
+  fi
+  FINISH_ARGS=(finish --issues "$PIPE_ISSUES")
+  [[ -s "$PASSES_FILE" ]] && FINISH_ARGS+=(--state-file "$PASSES_FILE")
+  pipe_cli "${FINISH_ARGS[@]}"; FINISH_RC=$?
+  (( FINAL_RC == 0 && FINISH_RC != 0 )) && FINAL_RC=$FINISH_RC
+  if [[ -n "$FIRST_FAILURE_REASON" ]]; then
+    printf '%s\n' "$FIRST_FAILURE_REASON" >"$REASON_FILE" 2>/dev/null || true
+  fi
 else
   # Sessions in RUNBOOK order; a channel with no configured data is omitted.
   # 'feed' (approved queue + job-board feed) always runs: Phase 0 (the

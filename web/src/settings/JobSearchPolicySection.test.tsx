@@ -13,6 +13,17 @@ const mount = () => render(<SettingsAutosaveProvider><JobSearchPolicySection /><
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe("job search policy autosave", () => {
+  it("renders the recency select with its default and autosaves changes", async () => {
+    vi.mocked(getAgentConfig).mockResolvedValue({ ...config, dorkRecency: "d" });
+    vi.mocked(updateAgentConfig).mockResolvedValue(config);
+    mount();
+    const select = await screen.findByRole("combobox", { name: /google search recency/i });
+    expect(select.textContent).toBe("Past day");
+    fireEvent.mouseDown(select);
+    fireEvent.click(await screen.findByRole("option", { name: "Past week" }));
+    await vi.waitFor(() => expect(updateAgentConfig).toHaveBeenCalledWith({ dorkRecency: "w" }));
+  });
+
   it("does not edit before load or on failed load", async () => {
     let resolve!: (cfg: AgentConfig) => void;
     vi.mocked(getAgentConfig).mockImplementationOnce(() => new Promise((ok) => { resolve = ok; }));

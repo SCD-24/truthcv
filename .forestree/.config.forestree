@@ -218,6 +218,11 @@
                   "desc": "Optional turns_remaining argument supplied by the harness. While turns remain, a short or skipped coverage is refused repeatedly (max 3) instead of only once.",
                   "method": "MCP",
                   "path": "finish_run (turns_remaining)"
+                },
+                {
+                  "desc": "Per-stage (apply/screening/extract) LLM credentials for the Application Agent; requires the X-Agent-Token header.",
+                  "method": "GET",
+                  "path": "/api/agent/llm-routes"
                 }
               ]
             },
@@ -1769,6 +1774,11 @@
                   "desc": "Bound on concurrent tool calls dispatched within one turn. Browser calls remain serialised except in harvest.",
                   "example": "4",
                   "key": "AGENT_MAX_PARALLEL_TOOLS"
+                },
+                {
+                  "desc": "pipeline (default: code discovery/screening + per-posting apply sessions) | per-channel | single",
+                  "example": "pipeline",
+                  "key": "AGENT_SESSION_MODE"
                 }
               ]
             },
@@ -1991,6 +2001,12 @@
                   "name": "job_boards[].enabled",
                   "notes": "Defaults to true. False keeps the board listed but excludes it from dorks, direct boards and API feeds. Applies to default boards too.",
                   "type": "bool"
+                },
+                {
+                  "flags": "",
+                  "name": "dork_recency",
+                  "notes": "Google tbs qdr for composed dork URLs; default d; camelCase dorkRecency",
+                  "type": "\"h\"|\"d\"|\"w\"|\"m\"|\"y\"|\"none\""
                 }
               ]
             },

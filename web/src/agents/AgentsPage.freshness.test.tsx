@@ -50,6 +50,7 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     cooldownDaysSameCompany: null,
     maxApplicationsPerRun: null,
     maxPostingAgeDays: null,
+    dorkRecency: "d",
     companyBoards: [],
     ...overrides,
   };

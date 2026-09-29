@@ -293,7 +293,7 @@ describe('buildToolRegistry with screen_and_record_posting', () => {
         undefined, undefined, stubScreeningAdapter([doneWithPassingVerdict()]));
       expect(result.isError).toBe(false);
       expect(result.content.length).toBeLessThan(DEFAULT_MAX_TOOL_RESULT_CHARS);
-      expect(JSON.parse(result.content)).toEqual({ id: 'persisted-1', verdict: 'passed',
+      expect(JSON.parse(result.content)).toEqual({ id: 'persisted-1', profile: SCREEN_POSTING_ARGS.profile, verdict: 'passed',
         screening_blocker: '', created, actionable });
       expect(result.content).not.toContain('posting_text');
       expect(result.content).not.toContain('omitted');
