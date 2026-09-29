@@ -114,7 +114,7 @@ async function screenProfile(d: ScreenStageDeps, c: Candidate, text: string, met
   const screened = await screenPosting(args, d.screeningAdapter);
   let evidence: Record<string, unknown>;
   try {
-    if (screened.isError) throw new Error(screened.content.slice(0, 200));
+    if (screened.isError) throw new Error(screened.content);
     evidence = JSON.parse(screened.content) as Record<string, unknown>;
   } catch (err) {
     res.errors.push(`${c.url} [${profile}]: ${screened.isError && err instanceof Error ? err.message : 'invalid screening evidence'}`);
@@ -122,7 +122,7 @@ async function screenProfile(d: ScreenStageDeps, c: Candidate, text: string, met
   }
   const out = await persistEvidence(args, evidence, d.record);
   if (out.isError) {
-    res.errors.push(`${c.url} [${profile}]: ${out.content.slice(0, 200)}`);
+    res.errors.push(`${c.url} [${profile}]: ${out.content}`);
     return false;
   }
   if (!isActionable(out.content)) return isCovered(out.content, profile);

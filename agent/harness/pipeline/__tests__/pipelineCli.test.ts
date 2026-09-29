@@ -74,6 +74,48 @@ describe('pipelineCli', () => {
     expect(String(calls[0][1].stopped_reason)).toContain('boom');
   });
 
+  it('finish counts per-item failures without failing the run', async () => {
+    const { pool, calls } = fakePool(() => ({ content: '{}' }));
+    const { d, out } = deps(pool);
+    const items = ['u1 [P]: ' + 'e'.repeat(300), 'u2 [P]: bad'];
+    const apply = 'apply pass https://u3 rc=1: reason';
+    out['s.json'] = JSON.stringify({ ok: true, errors: [], itemErrors: items });
+    out['af.txt'] = `${apply}\n`;
+    const code = await runPipelineCli(['finish', '--run-id', 'r', '--state-file', 's.json', '--apply-failures-file', 'af.txt'], {}, d);
+    expect(code).toBe(ExitCode.Success);
+    expect(calls[0][1]).toMatchObject({ status: 'completed', stopped_reason: '', items_failed: 3, item_errors: [...items, apply] });
+  });
+
+  it('finish redacts a configured secret from item_errors', async () => {
+    const { pool, calls } = fakePool(() => ({ content: '{}' }));
+    const { d, out } = deps(pool);
+    out['s.json'] = JSON.stringify({ ok: true, errors: [], itemErrors: ['u1 [P]: leaked sekret-token-123 here'] });
+    out['af.txt'] = 'apply pass u2 rc=1: key sekret-token-123\n';
+    await runPipelineCli(['finish', '--run-id', 'r', '--state-file', 's.json', '--apply-failures-file', 'af.txt'], { AGENT_LLM_API_KEY: 'sekret-token-123' }, d);
+    const sent = JSON.stringify(calls[0][1].item_errors);
+    expect(sent).not.toContain('sekret-token-123');
+    expect(sent).toContain('<redacted>');
+  });
+
+  it('finish redacts a longer token whole when it contains a shorter one', async () => {
+    const { pool, calls } = fakePool(() => ({ content: '{}' }));
+    const { d, out } = deps(pool);
+    out['af.txt'] = 'apply pass u2 rc=1: key sk-prod-extra\n';
+    const env = { AGENT_LLM_API_KEY: 'sk-prod', AGENT_SCREENING_API_KEY: 'sk-prod-extra' };
+    await runPipelineCli(['finish', '--run-id', 'r', '--apply-failures-file', 'af.txt'], env, d);
+    const sent = JSON.stringify(calls[0][1].item_errors);
+    expect(sent).not.toContain('-extra');
+    expect(sent).toContain('<redacted>');
+  });
+
+  it('finish with a not-ok state fails the run but still passes items_failed', async () => {
+    const { pool, calls } = fakePool(() => ({ content: '{}' }));
+    const { d, out } = deps(pool);
+    out['s.json'] = JSON.stringify({ ok: false, errors: ['boom'], itemErrors: ['a', 'b'] });
+    await runPipelineCli(['finish', '--run-id', 'r', '--state-file', 's.json'], {}, d);
+    expect(calls[0][1]).toMatchObject({ status: 'failed', items_failed: 2, item_errors: ['a', 'b'] });
+  });
+
   it('stage-prompt prints the apply prompt; unknown stage exits 5', async () => {
     const { pool } = fakePool(() => ({ content: '{}' }));
     const a = deps(pool);
