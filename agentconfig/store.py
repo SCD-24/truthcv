@@ -20,6 +20,10 @@ from screening.company import company_identity_key
 from storage import data_dir
 
 
+# Google dork recency letters (tbs=qdr:<x>); "none" omits the recency param.
+DORK_RECENCIES: tuple[str, ...] = ("h", "d", "w", "m", "y", "none")
+
+
 def config_path() -> Path:
     return data_dir() / "agent_config.json"
 
@@ -230,11 +234,14 @@ class AgentConfig:
     cooldown_days_same_role: int | None = None
     cooldown_days_same_company: int | None = None
     max_applications_per_run: int | None = None
-    # Discovery freshness window: only consider postings published within this
-    # many days. None means "unset", which keeps the past-week window the dork
-    # URLs have always carried; 0 disables the window entirely (any age),
-    # mirroring how 0 disables a cooldown window.
+    # Freshness hard filter: only consider postings published within this many
+    # days. It drives ONLY the API-feed filter and the run prompt's hard-filter
+    # line; the dork URL's recency is the separate dork_recency setting. None
+    # means "unset"; 0 disables the window entirely (any age), mirroring how 0
+    # disables a cooldown window.
     max_posting_age_days: int | None = None
+    # Google dork recency (tbs=qdr:<x>): one of DORK_RECENCIES. Default past day.
+    dork_recency: str = "d"
     # The operator's OWN boards, beyond the four defaults. The defaults
     # (agentconfig.boards.DEFAULT_BOARD_SOURCES) are unioned in at resolve
     # time via resolved_board_sources(), so they cannot be lost to a bad PUT
@@ -456,6 +463,10 @@ class AgentConfig:
             )
             kwargs["max_posting_age_days"] = value if usable else None
 
+        # dork_recency: one of DORK_RECENCIES; anything else keeps the default.
+        if "dork_recency" in raw and raw["dork_recency"] in DORK_RECENCIES:
+            kwargs["dork_recency"] = raw["dork_recency"]
+
         return cls(**kwargs)
 
     def to_dict(self) -> dict:
@@ -477,6 +488,7 @@ class AgentConfig:
             "cooldown_days_same_company": self.cooldown_days_same_company,
             "max_applications_per_run": self.max_applications_per_run,
             "max_posting_age_days": self.max_posting_age_days,
+            "dork_recency": self.dork_recency,
         }
 
     def _storage_dict(self) -> dict:

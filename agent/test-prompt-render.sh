@@ -292,7 +292,7 @@ echo "PASS: SEMI-AUTO and FULL AUTO never both appear"
 
 # Case 10: searchQueries present renders both query strings and URLs.
 echo "Testing: composed search queries render into prompt..."
-QUERIES_CONFIG='{"profiles":[{"name":"Senior Python"}],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":null,"companyBoards":[],"searchQueries":[{"profile":"Senior Python","source":"jobs.ashbyhq.com","query":"site:jobs.ashbyhq.com \"platform engineer\"","url":"https://www.google.com/search?q=site%3Ajobs.ashbyhq.com+%22platform+engineer%22&tbs=qdr:w"},{"profile":"Senior Python","source":"job-boards.greenhouse.io","query":"site:job-boards.greenhouse.io \"platform engineer\"","url":"https://www.google.com/search?q=site%3Ajob-boards.greenhouse.io+%22platform+engineer%22&tbs=qdr:w"}]}'
+QUERIES_CONFIG='{"profiles":[{"name":"Senior Python"}],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":null,"companyBoards":[],"searchQueries":[{"profile":"Senior Python","source":"jobs.ashbyhq.com","query":"site:jobs.ashbyhq.com \"platform engineer\"","url":"https://www.google.com/search?q=site%3Ajobs.ashbyhq.com+%22platform+engineer%22&tbs=qdr:d"},{"profile":"Senior Python","source":"job-boards.greenhouse.io","query":"site:job-boards.greenhouse.io \"platform engineer\"","url":"https://www.google.com/search?q=site%3Ajob-boards.greenhouse.io+%22platform+engineer%22&tbs=qdr:d"}]}'
 QUERIES="$(jq -r '.searchQueries[]? | "  - [\(.profile)] \(.source): \(.query)\n    \(.url)"' <<<"$QUERIES_CONFIG")"
 if [[ -z "$QUERIES" ]]; then
   echo "FAIL: expected a rendered queries block, got none"

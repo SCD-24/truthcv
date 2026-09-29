@@ -29,6 +29,7 @@ def test_get_returns_defaults(client, data_dir):
         "cooldownDaysSameCompany": None,
         "maxApplicationsPerRun": None,
         "maxPostingAgeDays": None,
+        "dorkRecency": "d",
         "companyBoards": [],
         "mode": "full",
         "searchQueries": [],
@@ -1028,8 +1029,8 @@ class TestMaxPostingAgeDays:
     def test_defaults_to_null_when_never_configured(self, client, data_dir):
         assert client.get("/api/agent/config").json()["maxPostingAgeDays"] is None
 
-    def test_window_reaches_the_composed_search_urls(self, client, data_dir):
-        """The setting is only useful if it lands on the URLs the agent opens."""
+    def test_window_does_not_shape_the_composed_search_urls(self, client, data_dir):
+        """maxPostingAgeDays is only the hard filter; dork recency is separate."""
         client.put(
             "/api/agent/config",
             json={
@@ -1039,7 +1040,62 @@ class TestMaxPostingAgeDays:
         )
         queries = client.get("/api/agent/config").json()["searchQueries"]
         assert queries
-        assert all("tbs=qdr:d3" in q["url"] for q in queries)
+        assert all("tbs=qdr:d3" not in q["url"] for q in queries)
+        assert all(q["url"].endswith("tbs=qdr:d") for q in queries)
+
+
+def test_get_search_queries_carry_all_deduped_profiles(tmp_path, monkeypatch):
+    """Two profiles composing the same dork URL both survive the GET response."""
+    from agentconfig.dorks import compose_queries
+    from agentconfig.store import JobProfile
+
+    profiles = [
+        JobProfile(name="a", keywords=["backend"], enabled=True),
+        JobProfile(name="b", keywords=["backend"], enabled=True),
+    ]
+    queries = compose_queries(profiles, "d", ["ashby"])
+    shared = [q for q in queries if q.get("profiles") == ["a", "b"]]
+    assert shared, queries
+    from api.schemas import SearchQueryModel
+
+    dumped = SearchQueryModel.model_validate(shared[0]).model_dump(by_alias=True)
+    assert dumped["profiles"] == ["a", "b"]
+    assert dumped["profile"] == "a"
+
+
+class TestDorkRecency:
+    def test_round_trips_through_put_and_get(self, client, data_dir):
+        r = client.put("/api/agent/config", json={"dorkRecency": "w"})
+        assert r.status_code == 200
+        assert r.json()["dorkRecency"] == "w"
+        assert client.get("/api/agent/config").json()["dorkRecency"] == "w"
+
+    def test_reaches_the_composed_search_urls(self, client, data_dir):
+        client.put(
+            "/api/agent/config",
+            json={
+                "dorkRecency": "m",
+                "profiles": [{"name": "p", "enabled": True, "keywords": ["backend"]}],
+            },
+        )
+        queries = client.get("/api/agent/config").json()["searchQueries"]
+        assert queries
+        assert all(q["url"].endswith("tbs=qdr:m") for q in queries)
+
+    def test_partial_put_preserves_it(self, client, data_dir):
+        client.put("/api/agent/config", json={"dorkRecency": "y"})
+        client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
+        assert client.get("/api/agent/config").json()["dorkRecency"] == "y"
+
+    def test_invalid_value_is_rejected(self, client, data_dir):
+        assert client.put("/api/agent/config", json={"dorkRecency": "x"}).status_code == 422
+
+    def test_defaults_to_d_for_stored_config_missing_the_key(self, client, data_dir):
+        import json as _json
+        from agentconfig import store
+
+        store.config_path().write_text(_json.dumps({"mode": "full"}), encoding="utf-8")
+        assert client.get("/api/agent/config").json()["dorkRecency"] == "d"
 
     def test_omitting_the_field_leaves_a_stored_window_untouched(self, client, data_dir):
         """PUT merges: an unrelated edit must not clear the window."""

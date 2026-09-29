@@ -551,7 +551,7 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     # and the configured job boards. The agent may open them with WebSearch or
     # the browser as it prefers; free-form WebSearch remains available
     # alongside them.
-    QUERIES="$(jq -r '.searchQueries[]? | "  - [\(.profile)] \(.source): \(.query)\n    \(.url)"' <<<"$JOB_CONFIG")"
+    QUERIES="$(jq -r '.searchQueries[]? | "  - [\(((.profiles // []) | if length > 0 then join(", ") else null end) // .profile)] \(.source): \(.query)\n    \(.url)"' <<<"$JOB_CONFIG")"
     if [[ -n "$QUERIES" ]]; then
       DORK_SECTION="$DORK_SECTION"$'\n'"Composed search queries (deterministic entry points from keywords/locations and the configured job boards; use WebSearch or the browser, free-form search still applies too):"$'\n'
       DORK_SECTION="$DORK_SECTION"$'\n'"$QUERIES"$'\n'
@@ -574,8 +574,8 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
     if [[ "$MAX_AGE" =~ ^[1-9][0-9]*$ ]] && (( MAX_AGE <= 365 )); then
       AGE_LINE="Posting freshness window: ${MAX_AGE} days. HARD FILTER — reject any posting whose stated publication date is older than this, with failing_criterion 'posting_age'. When a board states no date, do NOT infer one and do NOT reject on age."
     else
-      # Unset is NOT a rejection rule. Discovery still carries a past-week
-      # preference in the composed search URLs, but a posting arriving by any
+      # Unset is NOT a rejection rule. Dork recency is its own setting
+      # (dorkRecency, default past day) in the composed search URLs, but a posting arriving by any
       # other route is judged on the profile criteria alone — exactly what
       # happened before this setting existed.
       AGE_LINE="Posting freshness window: not configured — a posting's age is never a rejection reason on this run. Prefer recent postings when choosing what to open, but never reject one for being old."

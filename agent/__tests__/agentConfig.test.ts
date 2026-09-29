@@ -68,6 +68,7 @@ describe('agent-config.js — stdout is drained before exit', () => {
       cooldownDaysSameCompany: undefined,
       maxApplicationsPerRun: undefined,
       maxPostingAgeDays: undefined,
+      dorkRecency: undefined,
       companyBoards: [],
       searchQueries: [],
       feedPostings: [],

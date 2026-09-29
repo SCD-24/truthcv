@@ -24,7 +24,7 @@ from itertools import zip_longest
 from urllib.parse import quote_plus
 
 from agentconfig.boards import DEFAULT_BOARD_DOMAINS, is_api_source, resolve_domain, resolve_signin_url
-from agentconfig.store import JobBoard, JobProfile
+from agentconfig.store import DORK_RECENCIES, JobBoard, JobProfile
 
 # Google's search box silently truncates a query beyond roughly this many
 # whitespace-separated words; discovery must keep every composed query at
@@ -53,17 +53,17 @@ TITLE_NOUNS = frozenset({
 DEFAULT_RECENCY = "qdr:d"
 
 
-def recency_param(max_posting_age_days: int | None) -> str:
-    """Google ``tbs`` recency value for a freshness window, or "" for none.
+def recency_param(dork_recency: str | None) -> str:
+    """Google ``tbs`` recency value for a dork recency letter, or "" for none.
 
-    ``None`` (unset) yields DEFAULT_RECENCY, the past 24 hours; a value <= 0
-    disables the filter (""); N days yields ``qdr:dN``.
+    One of DORK_RECENCIES: h/d/w/m/y yield ``qdr:<x>``, "none" yields "";
+    anything invalid (or None) yields DEFAULT_RECENCY.
     """
-    if max_posting_age_days is None:
-        return DEFAULT_RECENCY
-    if max_posting_age_days <= 0:
+    if dork_recency == "none":
         return ""
-    return f"qdr:d{max_posting_age_days}"
+    if dork_recency in DORK_RECENCIES:
+        return f"qdr:{dork_recency}"
+    return DEFAULT_RECENCY
 
 
 def _quote_term(term: str) -> str:
@@ -247,7 +247,7 @@ def compose_direct_boards(
 
 def compose_profile_queries(
     profile: JobProfile,
-    max_posting_age_days: int | None = None,
+    recency: str = "d",
     sources: list[JobBoard | str] | None = None,
 ) -> list[dict]:
     """Compose dork queries + URLs per resolved source for a single profile.
@@ -260,8 +260,8 @@ def compose_profile_queries(
     chunked (see ``_chunk_titles``) into several queries per source, ordered
     chunk-major (every source for chunk 1, then every source for chunk 2, ...).
 
-    ``max_posting_age_days`` sets the search URL's recency filter; see
-    ``recency_param``. ``sources`` is the operator's globally configured job
+    ``recency`` (a DORK_RECENCIES letter) sets the search URL's recency
+    filter; see ``recency_param``. ``sources`` is the operator's globally configured job
     boards — resolved, enabled JobBoard records (e.g.
     AgentConfig.searched_boards()) or bare source strings, which are treated
     as dork-mode/enabled; ``None`` means the four defaults (legacy), while an
@@ -283,7 +283,7 @@ def compose_profile_queries(
     budget = max(MAX_QUERY_WORDS - fixed_words - _word_count(negatives), 1)
     chunks = _chunk_titles(titles, budget)
 
-    recency = recency_param(max_posting_age_days)
+    recency = recency_param(recency)
     results = []
     for chunk in chunks:
         title_group = _or_group(chunk)
@@ -339,22 +339,26 @@ def _round_robin(query_lists: list[list[dict]]) -> list[dict]:
 def _dedupe_by_url(entries: list[dict]) -> list[dict]:
     """Drop entries whose ``url`` was already seen; the first occurrence wins.
 
-    Profiles with identical search intent compose identical URLs; only the
-    first keeps its ``profile`` tag. Order of survivors is preserved.
+    Profiles with identical search intent compose identical URLs; the first
+    keeps its ``profile`` tag and every survivor gets a ``profiles`` list of
+    all profiles that composed that URL. Order of survivors is preserved.
     """
-    seen: set[str] = set()
+    by_url: dict[str, dict] = {}
     unique: list[dict] = []
     for entry in entries:
-        if entry["url"] in seen:
-            continue
-        seen.add(entry["url"])
-        unique.append(entry)
+        kept = by_url.get(entry["url"])
+        if kept is None:
+            kept = {**entry, "profiles": [entry["profile"]]}
+            by_url[entry["url"]] = kept
+            unique.append(kept)
+        elif entry["profile"] not in kept["profiles"]:
+            kept["profiles"].append(entry["profile"])
     return unique
 
 
 def compose_queries(
     profiles: list[JobProfile],
-    max_posting_age_days: int | None = None,
+    recency: str = "d",
     sources: list[JobBoard | str] | None = None,
 ) -> list[dict]:
     """Compose dork queries for every enabled, keyword-bearing profile.
@@ -371,6 +375,6 @@ def compose_queries(
     """
     eligible = [p for p in profiles if p.enabled and (p.keywords or p.title_keywords)]
     per_profile = [
-        compose_profile_queries(p, max_posting_age_days, sources) for p in eligible
+        compose_profile_queries(p, recency, sources) for p in eligible
     ]
     return _dedupe_by_url(_round_robin(per_profile))

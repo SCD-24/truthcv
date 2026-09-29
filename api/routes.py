@@ -1566,7 +1566,7 @@ def get_agent_config(include_feed: bool = False) -> AgentConfigModel:
     # operator-disabled board is excluded from the dorks rather than
     # defaulting to "dork"/enabled the way a bare source string would.
     searched = cfg.searched_boards()
-    data["search_queries"] = compose_queries(cfg.profiles, cfg.max_posting_age_days, searched)
+    data["search_queries"] = compose_queries(cfg.profiles, cfg.dork_recency, searched)
 
     # One entry per direct-mode board, for the agent to search on-site.
     data["direct_boards"] = compose_direct_boards(cfg.profiles, searched)

@@ -33,6 +33,7 @@ if (process.env.FAKE_AGENT_CONFIG && field !== "llm_credentials") {
         cooldownDaysSameCompany: cfg.cooldownDaysSameCompany,
         maxApplicationsPerRun: cfg.maxApplicationsPerRun,
         maxPostingAgeDays: cfg.maxPostingAgeDays,
+        dorkRecency: cfg.dorkRecency,
         companyBoards: cfg.companyBoards || [],
         searchQueries: cfg.searchQueries || [],
         feedPostings: cfg.feedPostings || [],
@@ -138,6 +139,7 @@ const req = http.get(u, { timeout }, (res) => {
           cooldownDaysSameCompany: cfg.cooldownDaysSameCompany,
           maxApplicationsPerRun: cfg.maxApplicationsPerRun,
           maxPostingAgeDays: cfg.maxPostingAgeDays,
+          dorkRecency: cfg.dorkRecency,
           companyBoards: cfg.companyBoards || [],
           searchQueries: cfg.searchQueries || [],
           // Postings pulled from API-backed boards (Remote Rocketship). Only

@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from pydantic.alias_generators import to_camel
 
 from agentconfig.boards import posting_url_pattern_error, search_url_error
-from agentconfig.store import AgentConfig
+from agentconfig.store import DORK_RECENCIES, AgentConfig
 from screening.company import validate_company_name
 from screening.model import validate_verdict
 from screening.posting import validate_posting_text
@@ -489,6 +489,8 @@ class SearchQueryModel(_Camel):
     """Composed search query (response-only)."""
 
     profile: str
+    # Every profile that composed this (deduplicated) URL; profile is the first.
+    profiles: list[str] = []
     source: str
     query: str
     url: str
@@ -514,6 +516,7 @@ class AgentConfigModel(_Camel):
     cooldown_days_same_company: int | None = None
     max_applications_per_run: int | None = None
     max_posting_age_days: int | None = None
+    dork_recency: str = "d"
     company_boards: list[CompanyBoardModel] = Field(default_factory=list)
     search_queries: list[SearchQueryModel] = Field(default_factory=list)
     # One entry per direct-mode board (searched on-site rather than via a
@@ -557,6 +560,7 @@ class AgentConfigUpdate(_Camel):
     cooldown_days_same_company: int | None = None
     max_applications_per_run: int | None = None
     max_posting_age_days: int | None = None
+    dork_recency: str | None = None
 
     @field_validator("mode")
     @classmethod
@@ -655,6 +659,15 @@ class AgentConfigUpdate(_Camel):
             raise ValueError("maxPostingAgeDays must be >= 0 (0 disables the window)")
         if v > 365:
             raise ValueError("maxPostingAgeDays must be <= 365")
+        return v
+
+    @field_validator("dork_recency")
+    @classmethod
+    def _validate_dork_recency(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in DORK_RECENCIES:
+            raise ValueError(f"dorkRecency must be one of {', '.join(DORK_RECENCIES)}")
         return v
 
     @field_validator("profiles")
