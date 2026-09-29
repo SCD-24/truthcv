@@ -67,6 +67,7 @@ _TOOL_REGISTRY = {
         "employment_country_stated (the posting's stated employment country), role_type_stated (the posting's stated role type, e.g. contract vs permanent), and eor_stated (yes, no, or unstated — whether the posting requires an EOR/PEO employer of record) — "
         "profile and remote_arrangement are required and the call is rejected without them; the rest are optional and '' means the posting stated nothing on that point. "
         "Evidence that contradicts ANY of the named profile's six hard requirements — remote model, working language, salary floor, employment country, rejected role types, or EOR — is stored as an automatic rejection (verdict downgraded to rejected), not an error to retry. "
+        "There is one record per posting per profile: a record without a profile, or any passed/deferred record, covers the posting for every profile; created:false means the posting is already covered, so count it as a skip. "
         "Pass your run_id (from start_run) on EVERY call, so this screening is attributed to your run and the run's coverage counters reflect the work you actually did.",
     ),
     "check_cooldown": (

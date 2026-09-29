@@ -347,6 +347,37 @@ def test_an_already_screened_posting_is_omitted_and_counted(client, data_dir, mo
     assert got["feedAlreadyScreened"] == 1
 
 
+def test_a_posting_rejected_for_one_of_two_profiles_is_still_offered(client, data_dir, mock_http, monkeypatch):
+    """Screened for only profile A of enabled A and B: still in the feed and
+    not counted in feedAlreadyScreened."""
+    from screening import store as screening_store
+
+    _configure(client, monkeypatch)
+    client.put(
+        "/api/agent/config",
+        json={
+            "profiles": [
+                {"name": "A", "enabled": True, "keywords": ["backend"]},
+                {"name": "B", "enabled": True, "keywords": ["backend"]},
+            ]
+        },
+    )
+    url = "https://acme.example/jobs/1"
+    screening_store.create_or_get(
+        {"company": "Acme", "role": "Backend Engineer", "url": url, "verdict": "rejected", "profile": "A"}
+    )
+
+    def handler(request):
+        if "arbeitnow" in request.url.host:
+            return httpx.Response(200, json=_ARBEITNOW_EMPTY_PAGE)
+        return httpx.Response(200, json={"jobOpenings": [{"roleTitle": "Backend Engineer", "url": url}]})
+
+    mock_http(handler)
+    got = client.get("/api/agent/config?include_feed=true").json()
+    assert [p["url"] for p in got["feedPostings"]] == [url]
+    assert got["feedAlreadyScreened"] == 0
+
+
 def test_an_unread_placeholder_screening_does_not_hide_its_posting(client, data_dir, mock_http, monkeypatch):
     """A placeholder holds no judgement (see screened_dedupe_keys), so the
     posting it stands in for must still reach the agent to be screened for

@@ -371,9 +371,11 @@ def bulk_set_approval(body: BulkApprovalUpdate) -> BulkApprovalResult:
     try:
         results = []
         for sid in body.ids:
-            results.append(
-                {"id": sid, "ok": screening_store.set_approval(sid, body.approval) is not None}
-            )
+            try:
+                ok = screening_store.set_approval(sid, body.approval) is not None
+            except screening_store.ApprovalConflict:
+                ok = False
+            results.append({"id": sid, "ok": ok})
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     return BulkApprovalResult(results=results)
@@ -485,6 +487,8 @@ def set_screening_approval(screening_id: str, body: ApprovalUpdate) -> Screening
         # regardless of approval value, matching the url-only branch above.
         try:
             screening = screening_store.set_approval(screening_id, body.approval)
+        except screening_store.ApprovalConflict as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
         if screening is None:
@@ -1580,7 +1584,12 @@ def get_agent_config(include_feed: bool = False) -> AgentConfigModel:
         # re-screening postings that only come back created:false. An
         # unread-placeholder screening is not in `keys` (screened_dedupe_keys
         # excludes it), so that posting stays in the feed for a real screen.
-        keys = screening_store.screened_dedupe_keys()
+        # Only postings screened for EVERY enabled profile (or passed/deferred,
+        # or profile-less) count as screened; a rejection under one profile
+        # must not hide the posting from the others.
+        keys = screening_store.screened_dedupe_keys(
+            [p.name for p in cfg.profiles if p.enabled]
+        )
         kept = [p for p in feed.postings if posting_dedupe_key(p.url) not in keys]
         data["feed_postings"] = [p.to_dict() for p in kept]
         data["feed_error"] = feed.error

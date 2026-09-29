@@ -27,6 +27,33 @@ def test_filter_unscreened_urls(data_dir):
     assert filter_unscreened_urls() == {"unscreened": []}
 
 
+def _enable_profiles(*names):
+    from agentconfig.store import AgentConfig, JobProfile, save
+
+    save(AgentConfig(profiles=[JobProfile(name=n, enabled=True) for n in names]))
+
+
+def test_filter_unscreened_urls_rejected_for_one_profile_only(data_dir):
+    _enable_profiles("A", "B")
+    url = "https://example.com/jobs/9"
+    screening_store.create_or_get(
+        {"company": "Acme", "role": "E", "url": url, "verdict": "rejected", "profile": "A"}
+    )
+    assert filter_unscreened_urls([url]) == {"unscreened": [url]}
+
+
+def test_filter_unscreened_urls_pass_under_one_profile_is_screened(data_dir):
+    _enable_profiles("A", "B")
+    url = "https://example.com/jobs/9"
+    screening_store.create_or_get(
+        {
+            "company": "Acme", "role": "E", "url": url, "verdict": "deferred",
+            "profile": "A",
+        }
+    )
+    assert filter_unscreened_urls([url]) == {"unscreened": []}
+
+
 def test_filter_unscreened_urls_dedupes_on_posting_key(data_dir):
     from agenttools.tools_pipeline import filter_unscreened_urls
 

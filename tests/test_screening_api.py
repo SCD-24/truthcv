@@ -17,6 +17,19 @@ def client(data_dir):
     return TestClient(app)
 
 
+def test_applied_route_409s_when_another_record_for_the_posting_is_applied(client):
+    from screening import store
+
+    url = "https://acme.example/jobs/dup-applied"
+    fields = {"company": "Acme", "role": "Engineer", "url": url, "verdict": "rejected"}
+    a, _ = store.create_or_get({**fields, "profile": "A"})
+    b, _ = store.create_or_get({**fields, "profile": "B"})
+    store.set_approval(a.id, "applied")
+    r = client.post(f"/api/screenings/{b.id}/applied")
+    assert r.status_code == 409
+    assert "already been applied" in r.json()["detail"]
+
+
 # --- POST/GET/DELETE screenings -------------------------------------------------
 
 def test_create_list_delete_screening(client):
@@ -571,3 +584,29 @@ def test_put_answers_partial_applies_empty_string_but_preserves_omitted_field(cl
     body = r.json()
     assert body["phone"] == ""
     assert body["canonicalCvAssetId"] == "canonical_cv.pdf"
+
+
+def _two_rejected_for_one_url():
+    from screening import store
+
+    base = {"company": "Acme", "role": "Eng", "url": "https://acme.example/jobs/9",
+            "verdict": "rejected"}
+    a, _ = store.create_or_get({**base, "profile": "A"})
+    b, _ = store.create_or_get({**base, "profile": "B"})
+    return a, b
+
+
+def test_patch_second_approval_for_one_posting_is_409(client):
+    a, b = _two_rejected_for_one_url()
+    assert client.patch(f"/api/screenings/{a.id}", json={"approval": "approved"}).status_code == 200
+    r = client.patch(f"/api/screenings/{b.id}", json={"approval": "approved"})
+    assert r.status_code == 409, r.text
+    assert a.id in r.json()["detail"]
+
+
+def test_bulk_approval_reports_conflict_without_aborting(client):
+    a, b = _two_rejected_for_one_url()
+    body = client.patch(
+        "/api/screenings/approvals", json={"ids": [a.id, b.id], "approval": "approved"}
+    ).json()
+    assert body["results"] == [{"id": a.id, "ok": True}, {"id": b.id, "ok": False}]

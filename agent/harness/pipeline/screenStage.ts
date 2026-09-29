@@ -1,9 +1,8 @@
 /**
- * The screening stage: for each candidate, fetch + extract, evaluate it
- * against each of its profiles' criteria WITHOUT persisting (stopping at the
- * first actionable pass), then persist exactly one outcome per URL: the pass,
- * or, when no profile passed, a single rejection. Unreadable postings record
- * a screening_blocker instead of a verdict.
+ * The screening stage: for each candidate, fetch + extract, then screen and
+ * persist one record per profile (one per posting per profile), stopping at
+ * the first actionable pass or when the server reports the posting already
+ * covered. Unreadable postings record a screening_blocker instead of a verdict.
  */
 import { persistEvidence, type RecordScreeningCall } from '../builtins/screenAndRecordPosting.js';
 import { screenPosting } from '../builtins/screenPosting.js';
@@ -50,8 +49,6 @@ export interface ScreenStageResult {
 }
 
 interface Meta { role: string; company: string; posted_date: string }
-/** One profile's unpersisted evaluation. */
-interface Evaluation { args: Record<string, unknown>; evidence: Record<string, unknown>; profile: string }
 
 /** Serialize async work (one shared browser tab must never interleave). */
 function createMutex(): <T>(fn: () => Promise<T>) => Promise<T> {
@@ -87,48 +84,57 @@ function isActionable(content: string): boolean {
   }
 }
 
-function isPass(evidence: Record<string, unknown>): boolean {
-  return evidence.verdict === 'passed' && !evidence.screening_blocker;
+/** Profile identity as the store compares it: stripped and casefolded. */
+function normProfile(p: string): string {
+  return p.trim().toLowerCase();
 }
 
-/** Evaluate profiles in order without persisting; stop at the first pass. */
-async function evaluateProfiles(d: ScreenStageDeps, c: Candidate, text: string, meta: Meta, res: ScreenStageResult): Promise<Evaluation[]> {
-  const evals: Evaluation[] = [];
-  for (const profile of c.profiles) {
-    const criteria = d.criteria[profile];
-    if (!criteria) continue;
-    const args: Record<string, unknown> = {
-      url: c.url, role: meta.role, company: meta.company, postingText: text, profile, criteria,
-      run_id: d.runId, source: c.channel,
-    };
-    if (meta.posted_date) args.posted_date = meta.posted_date;
-    const out = await screenPosting(args, d.screeningAdapter);
-    if (out.isError) {
-      res.errors.push(`${c.url} [${profile}]: ${out.content.slice(0, 200)}`);
-      continue;
-    }
-    try {
-      evals.push({ args, profile, evidence: JSON.parse(out.content) as Record<string, unknown> });
-    } catch {
-      res.errors.push(`${c.url} [${profile}]: invalid screening evidence`);
-      continue;
-    }
-    if (isPass(evals[evals.length - 1].evidence)) break;
+/**
+ * Whether a stored result shows the posting is already covered: created:false
+ * with a URL-wide record (different profile) or a queueing (passed/deferred) one.
+ */
+function isCovered(content: string, sentProfile: string): boolean {
+  try {
+    const s = JSON.parse(content) as { created?: boolean; profile?: string; verdict?: string };
+    if (s.created !== false) return false;
+    const differs = normProfile(s.profile ?? '') !== normProfile(sentProfile);
+    return differs || s.verdict === 'passed' || s.verdict === 'deferred';
+  } catch {
+    return false;
   }
-  return evals;
 }
 
-/** Persist exactly one outcome: the pass if any, else the first evaluation. */
-async function persistOutcome(d: ScreenStageDeps, c: Candidate, meta: Meta, evals: Evaluation[], res: ScreenStageResult): Promise<void> {
-  const chosen = evals.find((e) => isPass(e.evidence)) ?? evals[0];
-  if (!chosen) return;
-  const out = await persistEvidence(chosen.args, chosen.evidence, d.record);
+/** Screen one profile and persist its evidence; true when the posting needs no further profiles. */
+async function screenProfile(d: ScreenStageDeps, c: Candidate, text: string, meta: Meta, profile: string, res: ScreenStageResult): Promise<boolean> {
+  const args: Record<string, unknown> = {
+    url: c.url, role: meta.role, company: meta.company, postingText: text, profile, criteria: d.criteria[profile],
+    run_id: d.runId, source: c.channel,
+  };
+  if (meta.posted_date) args.posted_date = meta.posted_date;
+  const screened = await screenPosting(args, d.screeningAdapter);
+  let evidence: Record<string, unknown>;
+  try {
+    if (screened.isError) throw new Error(screened.content.slice(0, 200));
+    evidence = JSON.parse(screened.content) as Record<string, unknown>;
+  } catch (err) {
+    res.errors.push(`${c.url} [${profile}]: ${screened.isError && err instanceof Error ? err.message : 'invalid screening evidence'}`);
+    return false;
+  }
+  const out = await persistEvidence(args, evidence, d.record);
   if (out.isError) {
-    res.errors.push(`${c.url} [${chosen.profile}]: ${out.content.slice(0, 200)}`);
-    return;
+    res.errors.push(`${c.url} [${profile}]: ${out.content.slice(0, 200)}`);
+    return false;
   }
-  if (isActionable(out.content)) {
-    res.passes.push({ url: c.url, title: c.title, ...meta, profile: chosen.profile, channel: c.channel });
+  if (!isActionable(out.content)) return isCovered(out.content, profile);
+  res.passes.push({ url: c.url, title: c.title, ...meta, profile, channel: c.channel });
+  return true;
+}
+
+/** Screen and record each profile with criteria in order, until a pass or existing coverage. */
+async function screenProfiles(d: ScreenStageDeps, c: Candidate, text: string, meta: Meta, res: ScreenStageResult): Promise<void> {
+  for (const profile of c.profiles) {
+    if (!d.criteria[profile]) continue;
+    if (await screenProfile(d, c, text, meta, profile, res)) return;
   }
 }
 
@@ -138,8 +144,7 @@ async function processCandidate(d: ScreenStageDeps, fetchOne: ScreenStageDeps['f
   if (fetched.unreadable) return recordBlocker(d, c, fetched.blocker, res);
   const meta = await extractMeta(d.extractAdapter, fetched.text, c.title);
   if (!meta.ok) return recordBlocker(d, c, meta.screening_blocker, res);
-  const evals = await evaluateProfiles(d, c, fetched.text, meta.meta, res);
-  await persistOutcome(d, c, meta.meta, evals, res);
+  await screenProfiles(d, c, fetched.text, meta.meta, res);
 }
 
 /**

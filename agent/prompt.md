@@ -197,15 +197,18 @@ their application history is this tool surface. You have the following tools:
   salary floor, employment country, rejected role types, or EOR) is stored
   as an automatic rejection (the verdict is downgraded to `rejected`) — not
   an error to retry, and never fabricate `remote`/`""` to get past it.
-  One posting gets ONE record, forever. If a screening already exists for the
-  `url` you pass, nothing is written and the existing record comes back with
-  `"created": false` — the verdict you reached is discarded, because that
-  posting has already been judged and, if the operator rejected it,
-  re-recording it would push it back into their queue. Trailing
+  A posting gets one record per profile. When the call comes back with
+  `"created": false`, nothing new was written and the existing record is
+  returned; your verdict is discarded. If that record is under the SAME
+  profile and its verdict is `rejected`, skip that profile only and
+  continue with the posting's other profiles. If it has no profile, a
+  different profile, or a passed/deferred verdict, the posting is already
+  covered: count it as a skip and move on. A passed/deferred record stops
+  any further passed/deferred record for that posting, while a rejection
+  under another profile may still be recorded. Trailing
   `/apply`, a trailing slash, and tracking parameters do not make it a
-  different posting. `"created": false` is a normal outcome: count the
-  posting as a skip, do not retry the call, and do not vary the URL to get
-  past it. The one exception is a posting you previously reported as a dead
+  different posting. `"created": false` is a normal outcome: do not retry
+  the call, and do not vary the URL to get past it. The one exception is a posting you previously reported as a dead
   link or an expired listing — that record holds no judgement, so a later
   real screening of the same URL replaces it.
 - `get_approved_applications` — the postings the operator approved for this

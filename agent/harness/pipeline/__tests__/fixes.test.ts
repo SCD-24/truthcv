@@ -62,26 +62,61 @@ describe('screenCandidates fixes', () => {
     expect(res.errors).toEqual([]);
   });
 
-  it('persists only B\'s pass when A rejects, in a single record call', async () => {
-    const record = recordOk();
-    const res = await screenCandidates([{ url: 'https://a.test/1', title: 'T', channel: 'dork', profiles: ['A', 'B'] }], {
+  const run = (record: ReturnType<typeof recordOk>, replies: Record<string, unknown>, extra: Partial<Parameters<typeof screenCandidates>[1]> = {}) =>
+    screenCandidates([{ url: 'https://a.test/1', title: 'T', channel: 'dork', profiles: ['A', 'B'] }], {
       runId: 'r', criteria: { A: 'CRIT-A', B: 'CRIT-B' }, fetch: async () => ({ text: 'posting text' }),
-      extractAdapter: extract, screeningAdapter: keyedAdapter({ 'CRIT-A': REJECT, 'CRIT-B': PASS }, REJECT), record,
+      extractAdapter: extract, screeningAdapter: keyedAdapter(replies, REJECT), record, ...extra,
     });
-    expect(record).toHaveBeenCalledTimes(1);
-    expect(record.mock.calls[0][0]).toMatchObject({ profile: 'B', verdict: 'passed' });
+  const profilesOf = (record: ReturnType<typeof recordOk>) => record.mock.calls.map((c) => c[0].profile);
+
+  it('(a) records A rejected then B passed as one actionable pass for B', async () => {
+    const record = recordOk();
+    const res = await run(record, { 'CRIT-A': REJECT, 'CRIT-B': PASS });
+    expect(profilesOf(record)).toEqual(['A', 'B']);
     expect(res.passes.map((p) => p.profile)).toEqual(['B']);
   });
 
-  it('persists a single rejection when no profile passes', async () => {
+  it('(b) still screens B when the server downgrades A\'s pass to rejected', async () => {
+    const record = vi.fn(async (args: Record<string, unknown>) => ({
+      content: JSON.stringify({ id: 'i', created: true, profile: args.profile, verdict: args.profile === 'A' ? 'rejected' : args.verdict, screening_blocker: '' }),
+    }));
+    const res = await run(record as ReturnType<typeof recordOk>, { 'CRIT-A': PASS, 'CRIT-B': PASS });
+    expect(profilesOf(record as ReturnType<typeof recordOk>)).toEqual(['A', 'B']);
+    expect(res.passes.map((p) => p.profile)).toEqual(['B']);
+  });
+
+  it('(c) never screens B after an actionable pass for A', async () => {
     const record = recordOk();
-    const res = await screenCandidates([{ url: 'https://a.test/1', title: 'T', channel: 'dork', profiles: ['A', 'B'] }], {
-      runId: 'r', criteria: { A: 'CRIT-A', B: 'CRIT-B' }, fetch: async () => ({ text: 'posting text' }),
-      extractAdapter: extract, screeningAdapter: keyedAdapter({}, REJECT), record,
-    });
+    const res = await run(record, { 'CRIT-A': PASS, 'CRIT-B': PASS });
+    expect(profilesOf(record)).toEqual(['A']);
+    expect(res.passes.map((p) => p.profile)).toEqual(['A']);
+  });
+
+  it('(d) stops when the store returns created:false with an existing passed record', async () => {
+    const record = vi.fn(async () => ({ content: JSON.stringify({ id: 'i', created: false, profile: '', verdict: 'passed', screening_blocker: '' }) }));
+    const res = await run(record as unknown as ReturnType<typeof recordOk>, { 'CRIT-A': PASS, 'CRIT-B': PASS });
     expect(record).toHaveBeenCalledTimes(1);
-    expect(record.mock.calls[0][0]).toMatchObject({ profile: 'A', verdict: 'rejected' });
     expect(res.passes).toEqual([]);
+  });
+
+  it('(d2) does not treat a same-profile rejected created:false record as covered despite padding/case', async () => {
+    const record = vi.fn(async () => ({ content: JSON.stringify({ id: 'i', created: false, profile: 'backend', verdict: 'rejected', screening_blocker: '' }) }));
+    const res = await screenCandidates([{ url: 'https://a.test/1', title: 'T', channel: 'dork', profiles: [' Backend ', 'B'] }], {
+      runId: 'r', criteria: { ' Backend ': 'CRIT-A', B: 'CRIT-B' }, fetch: async () => ({ text: 'posting text' }),
+      extractAdapter: extract, screeningAdapter: keyedAdapter({}, REJECT), record: record as unknown as ReturnType<typeof recordOk>,
+    });
+    expect(record).toHaveBeenCalledTimes(2);
+    expect(res.passes).toEqual([]);
+  });
+
+  it('(e) still screens B after an error on A', async () => {
+    const record = vi.fn(async (args: Record<string, unknown>) => (args.profile === 'A'
+      ? { content: 'boom', isError: true }
+      : { content: JSON.stringify({ id: 'i', created: true, profile: 'B', verdict: 'passed', screening_blocker: '' }) }));
+    const res = await run(record as unknown as ReturnType<typeof recordOk>, { 'CRIT-A': PASS, 'CRIT-B': PASS });
+    expect(record).toHaveBeenCalledTimes(2);
+    expect(res.errors[0]).toContain('[A]');
+    expect(res.passes.map((p) => p.profile)).toEqual(['B']);
   });
 });
 

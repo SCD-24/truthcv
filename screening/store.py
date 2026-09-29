@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from collections.abc import Iterable
 from pathlib import Path
 
 from agentconfig.store import load as _agent_config_load
@@ -92,8 +93,12 @@ def get(screening_id: str) -> Screening | None:
     return next((s for s in load_all() if s.id == screening_id), None)
 
 
-def find_by_url(url: str) -> Screening | None:
+def find_by_url(url: str, profile: str | None = None) -> Screening | None:
     """The existing screening for the posting ``url`` names, or None.
+
+    With ``profile``, only a non-placeholder record that would block a new
+    screening for that profile counts: a URL-wide record (no profile) or one
+    under the same profile. ``None`` keeps the first-match behaviour.
 
     Matches on ``posting_dedupe_key`` rather than the raw string, so the same
     job arriving from a board listing, a job alert and a direct link is one
@@ -104,7 +109,17 @@ def find_by_url(url: str) -> Screening | None:
     key = posting_dedupe_key(url)
     if not key:
         return None
-    return _find_by_key(load_all(), key)
+    if profile is None:
+        return _find_by_key(load_all(), key)
+    want = _profile_key(profile)
+    return next(
+        (
+            s
+            for s in _real_records(load_all(), key)
+            if _profile_key(s.profile) in ("", want)
+        ),
+        None,
+    )
 
 
 def _find_by_key(screenings: list[Screening], key: str) -> Screening | None:
@@ -137,8 +152,63 @@ def _is_unread_placeholder(screening: Screening) -> bool:
     )
 
 
-def screened_dedupe_keys() -> set[str]:
+_ACTIVE_APPROVALS = ("pending", "approved", "applied")
+
+
+def _profile_key(s: str) -> str:
+    """Comparison form of a profile name: trimmed and case-folded."""
+    return s.strip().casefold()
+
+
+def _is_queueing(screening: Screening) -> bool:
+    """Whether ``screening`` is (or would be) an approval-queue item."""
+    return (
+        screening.verdict in ("passed", "deferred")
+        or screening.screening_blocker in QUEUEING_BLOCKERS
+    )
+
+
+def _real_records(screenings: list[Screening], key: str) -> list[Screening]:
+    """Non-placeholder records whose url has dedupe key ``key``."""
+    return [
+        s
+        for s in screenings
+        if posting_dedupe_key(s.url) == key and not _is_unread_placeholder(s)
+    ]
+
+
+def _blocking_record(
+    screenings: list[Screening], key: str, new: Screening
+) -> Screening | None:
+    """The existing record that stops ``new`` being stored, or None.
+
+    Only non-placeholder records block. A URL-wide record (no profile) blocks
+    everything; a record under the same profile blocks; a queueing ``new``
+    is blocked by any queueing record; a profile-less ``new`` is blocked by
+    a record under any other profile.
+    """
+    real = _real_records(screenings, key)
+    profile = _profile_key(new.profile)
+    if new.approval:
+        active = next((s for s in real if s.approval in _ACTIVE_APPROVALS), None)
+        if active is not None:
+            return active
+    for s in real:
+        if not _profile_key(s.profile) or _profile_key(s.profile) == profile:
+            return s
+    if _is_queueing(new):
+        queued = next((s for s in real if _is_queueing(s)), None)
+        if queued is not None:
+            return queued
+    return real[0] if real and not profile else None
+
+
+def screened_dedupe_keys(enabled_profiles: Iterable[str] | None = None) -> set[str]:
     """Dedupe keys of every posting already screened, for filtering a feed.
+
+    A key counts as screened when it has a URL-wide record, any queueing
+    record, or — when ``enabled_profiles`` is non-empty — records covering
+    every enabled profile. Without profiles, any real record counts.
 
     Excludes unread placeholders (`_is_unread_placeholder`): those hold no
     judgement and `create_or_get` overwrites them in place, so a posting
@@ -146,32 +216,54 @@ def screened_dedupe_keys() -> set[str]:
     it in the feed rather than have it silently dropped as "already done".
     A screening whose url has no resolvable dedupe key contributes nothing.
     """
-    return {
-        posting_dedupe_key(s.url)
-        for s in load_all()
-        if posting_dedupe_key(s.url) and not _is_unread_placeholder(s)
-    }
+    wanted = {_profile_key(p) for p in enabled_profiles or [] if p and p.strip()}
+    by_key: dict[str, list[Screening]] = {}
+    for s in load_all():
+        key = posting_dedupe_key(s.url)
+        if key and not _is_unread_placeholder(s):
+            by_key.setdefault(key, []).append(s)
+    return {k for k, recs in by_key.items() if _covers(recs, wanted)}
+
+
+def _covers(records: list[Screening], wanted: set[str]) -> bool:
+    """Whether real ``records`` for one posting count it as screened."""
+    if not wanted:
+        return True
+    if any(
+        not _profile_key(s.profile) or _is_queueing(s) or s.approval in _ACTIVE_APPROVALS
+        for s in records
+    ):
+        return True
+    return wanted <= {_profile_key(s.profile) for s in records}
 
 
 def create_or_get(fields: dict) -> tuple[Screening, bool]:
     """Create a screening, or return the one this posting already has.
 
-    Returns ``(record, created)``. ``created`` is False when the store already
-    held a record for this posting URL, in which case that record is returned
-    untouched, nothing is written, and the screening passed in is discarded.
+    Returns ``(record, created)``. ``created`` is False when a blocking record
+    exists (URL-wide, same profile, queueing vs queueing, or a profile-less
+    new record vs any record) or a placeholder was superseded; the blocking
+    record is returned untouched, nothing is written, and the screening passed
+    in is discarded. A record under a different profile with no blocking rule
+    gives ``created=True``.
 
-    The one exception is an unread placeholder — a dead-link or expired-listing
+    The placeholder case is an unread placeholder — a dead-link or expired-listing
     blocker nobody was ever asked about (``_is_unread_placeholder``) — which is
     overwritten in place by the new screening, keeping the original record's id
     and created_at. It is still ``created=False``: no record was added. This is
     what stops a board that 404s for an afternoon from permanently suppressing
     a live posting, which would be invisible because such records never queue.
 
-    One posting, one record — forever, whatever either record's verdict or
-    approval says. That is the point: an operator who rejected a posting had
-    the same posting re-screened and re-queued on every subsequent run,
-    because the operator's rejection is recorded as ``approval`` on one record
-    and nothing anywhere compared URLs. Enforced here, at the single write
+    One record per posting per profile, whatever either record's verdict or
+    approval says. An operator who rejected a posting had it re-screened and
+    re-queued on every run, because the rejection is recorded as ``approval``
+    on one record and nothing compared URLs. A record with no profile is still
+    URL-wide (it blocks every profile, and a profile-less new record is blocked
+    by any existing one), so an operator rejection on it keeps the posting
+    out. Yet a posting rejected for profile A may still be recorded for
+    profile B. At most one *queueing* record (passed/deferred or a queueing
+    blocker) exists per posting, so the approval queue and applications stay
+    one item per posting. Enforced here, at the single write
     path all three callers share (the agent's ``record_screening``, ``POST
     /api/screenings``, and the historical importer), so no caller can route
     around it.
@@ -234,10 +326,19 @@ def create_or_get(fields: dict) -> tuple[Screening, bool]:
     with locked(screenings_path()):
         screenings = load_all()
         if key:
-            existing = _find_by_key(screenings, key)
+            blocker = _blocking_record(screenings, key, screening)
+            if blocker is not None:
+                return blocker, False
+            existing = next(
+                (
+                    s
+                    for s in screenings
+                    if posting_dedupe_key(s.url) == key
+                    and _is_unread_placeholder(s)
+                ),
+                None,
+            )
             if existing is not None:
-                if not _is_unread_placeholder(existing):
-                    return existing, False
                 # Supersede: the new screening takes the old record's identity
                 # so nothing referring to it by id is orphaned, and keeps the
                 # run that first recorded the posting when this call names
@@ -324,14 +425,44 @@ def delete_many(ids: list[str]) -> list[tuple[str, bool]]:
     return [(i, i in to_delete) for i in ids]
 
 
+class ApprovalConflict(ValueError):
+    """Another record for the same posting already holds the approval."""
+
+
+def _approval_guard(approval: str):
+    """Build a `_mutate` guard refusing a second approved/pending record."""
+
+    def guard(screening: Screening, screenings: list[Screening]) -> None:
+        key = posting_dedupe_key(screening.url)
+        if approval not in ("approved", "pending") or not key:
+            return
+        for other in screenings:
+            if (
+                other.id != screening.id
+                and posting_dedupe_key(other.url) == key
+                and other.approval in _ACTIVE_APPROVALS
+            ):
+                raise ApprovalConflict(
+                    f"Screening {other.id} already holds the approval for this posting."
+                )
+
+    return guard
+
+
 def set_approval(screening_id: str, approval: str) -> Screening | None:
     """Set a screening's approval state — the operator's decision, never the agent's.
 
-    Raises ValueError on an unknown state rather than writing it.
+    Raises ValueError on an unknown state rather than writing it, and
+    ``ApprovalConflict`` when approving/pending would give one posting two
+    holders. The check and write share one lock.
     """
     if approval not in APPROVAL_VALUES:
         raise ValueError(f"Unknown approval state '{approval}'.")
-    return _mutate(screening_id, lambda s: setattr(s, "approval", approval))
+    return _mutate(
+        screening_id,
+        lambda s: setattr(s, "approval", approval),
+        guard=_approval_guard(approval),
+    )
 
 
 def record_apply_failure(
@@ -379,7 +510,9 @@ def clear_apply_failure(screening_id: str) -> Screening | None:
     return _mutate(screening_id, _clear)
 
 
-def _apply_refusal(screening: Screening) -> str:
+def _apply_refusal(
+    screening: Screening, screenings: list[Screening] | None = None
+) -> str:
     """"" when `screening` may be applied to; a machine-readable reason otherwise.
 
     "already_applied" outranks everything else: an applied item is retired
@@ -393,8 +526,19 @@ def _apply_refusal(screening: Screening) -> str:
     that one unlocked read and take no companyresearch lock of its own,
     since holding one file's lock while acquiring another's is how two
     writers racing in opposite orders deadlock.
+
+    ``screenings`` is the caller's already-loaded record list (never re-read
+    here); when given, another record for the same posting that is already
+    ``applied`` also yields "already_applied".
     """
     if screening.approval == "applied":
+        return "already_applied"
+    key = posting_dedupe_key(screening.url)
+    if key and any(
+        o.id != screening.id and o.approval == "applied"
+        and posting_dedupe_key(o.url) == key
+        for o in screenings or []
+    ):
         return "already_applied"
     if _open_contradictions(screening.company):
         return "contradictory_research"
@@ -414,7 +558,7 @@ def _retire(screening_id: str) -> Screening | None:
     with locked(screenings_path()):
         screenings = load_all()
         screening = next((s for s in screenings if s.id == screening_id), None)
-        if screening is None or _apply_refusal(screening):
+        if screening is None or _apply_refusal(screening, screenings):
             return None
         screening.approval = "applied"
         screening.claimed_by_run = ""
@@ -507,13 +651,19 @@ def release_claim(screening_id: str) -> Screening | None:
         return screening
 
 
-def _mutate(screening_id: str, apply) -> Screening | None:
-    """Load, mutate one record outside EDITABLE, stamp, and write back."""
+def _mutate(screening_id: str, apply, guard=None) -> Screening | None:
+    """Load, mutate one record outside EDITABLE, stamp, and write back.
+
+    ``guard(screening, all_records)``, if given, runs inside the lock before
+    ``apply`` and may raise to refuse the write.
+    """
     with locked(screenings_path()):
         screenings = load_all()
         screening = next((s for s in screenings if s.id == screening_id), None)
         if screening is None:
             return None
+        if guard is not None:
+            guard(screening, screenings)
         apply(screening)
         screening.updated_at = _now()
         _write_all(screenings)

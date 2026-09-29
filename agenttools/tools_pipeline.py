@@ -8,6 +8,7 @@ marked required) and nothing here can fail a run.
 from __future__ import annotations
 
 import runs.store as _runs_store
+from agentconfig.store import load as _agent_config_load
 from screening import store as _screening_store
 from screening.url import posting_dedupe_key
 
@@ -22,7 +23,11 @@ def filter_unscreened_urls(urls: list[str] = []) -> dict:  # noqa: B006 - never 
     comparing.
     """
     try:
-        screened = _screening_store.screened_dedupe_keys()
+        profiles = [p.name for p in _agent_config_load().profiles if p.enabled]
+    except Exception:
+        profiles = None  # fail open: today's any-record behaviour
+    try:
+        screened = _screening_store.screened_dedupe_keys(profiles)
     except Exception:
         screened = set()
     seen: set[str] = set()

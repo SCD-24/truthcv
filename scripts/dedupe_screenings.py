@@ -82,7 +82,10 @@ def group_by_posting(screenings: list) -> dict:
         key = posting_dedupe_key(getattr(s, "url", ""))
         if not key:
             continue
-        groups.setdefault(key, []).append(s)
+        # Per-profile records are distinct decisions and must never merge; a
+        # profile-less record groups alone (profile ""), apart from profiled ones.
+        profile = (getattr(s, "profile", "") or "").strip()
+        groups.setdefault((key, profile), []).append(s)
     return groups
 
 
