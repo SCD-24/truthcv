@@ -5,7 +5,7 @@
  *  - `start`            start_run + check_gmail_responses + get_approved_applications -> `--out` JSON.
  *  - `discover-screen`  discover, fetch, extract, screen; writes actionable passes to `--out`.
  *  - `stage-prompt <s>` print a stage's static system prompt to stdout.
- *  - `finish`           finish_run: `completed` only when discovery/screening fully succeeded.
+ *  - `finish`           finish_run: `completed` = no systemic failure; per-item failures are counted.
  *
  * Model routing and MCP config are the same as cli.ts (`--routes-file`,
  * `--mcp-config`, `--screening-*`). Exit codes follow cli.ts: 0 ok, 3 a stage
@@ -171,9 +171,12 @@ async function cmdDiscoverScreen(a: PipelineArgs, env: NodeJS.ProcessEnv, pool: 
     screeningAdapter: stageAdapter(config, 'screening', d),
     record: (args) => mcp('record_screening', args),
   });
-  const errors = [...found.errors, ...screened.errors];
-  const ok = found.coverageComplete && errors.length === 0;
-  await d.writeOutput(out, JSON.stringify({ ok, coverageComplete: found.coverageComplete, errors, blockers: screened.blockers, passes: screened.passes }));
+  const ok = found.coverageComplete && found.errors.length === 0;
+  await d.writeOutput(out, JSON.stringify({
+    ok, coverageComplete: found.coverageComplete, errors: found.errors, itemErrors: screened.errors.map((e) => redactAll(e, tokensOf(config))),
+    blockers: screened.blockers, passes: screened.passes,
+  }));
+  d.stderr(JSON.stringify({ event: 'discover-screen', ok, itemErrors: screened.errors.length, errors: found.errors.length }));
   return ok ? ExitCode.Success : ExitCode.ProviderError;
 }
 
@@ -194,6 +197,7 @@ async function incompleteReason(a: PipelineArgs, d: Resolved): Promise<string> {
   const reasons: string[] = [];
   if (a.flags.issues) reasons.push(a.flags.issues);
   if (a.flags['state-file']) {
+    // Systemic only (s.ok / s.errors); per-item itemErrors never fail the run.
     try {
       const s = JSON.parse(await d.readFileText(a.flags['state-file'])) as { ok?: boolean; errors?: string[] };
       if (s.ok !== true) reasons.push(`discovery/screening incomplete: ${(s.errors ?? []).join('; ') || 'not ok'}`);
@@ -204,15 +208,40 @@ async function incompleteReason(a: PipelineArgs, d: Resolved): Promise<string> {
   return reasons.join(' | ').slice(0, MAX_STOPPED_REASON_CHARS);
 }
 
+/** Per-item failures recorded by discover-screen in the state file (missing/unreadable -> []). */
+async function stateItemErrors(a: PipelineArgs, d: Resolved): Promise<string[]> {
+  if (!a.flags['state-file']) return [];
+  try {
+    const s = JSON.parse(await d.readFileText(a.flags['state-file'])) as { itemErrors?: unknown };
+    return Array.isArray(s.itemErrors) ? s.itemErrors.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Per-item apply failures, one per line (file absent/empty -> []). */
+async function applyFailuresOf(a: PipelineArgs, d: Resolved): Promise<string[]> {
+  const f = a.flags['apply-failures-file'];
+  if (!f) return [];
+  try {
+    return (await d.readFileText(f)).split('\n').map((l) => l.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 /** `finish`: close the run honestly. */
-async function cmdFinish(a: PipelineArgs, mcp: McpCall, d: Resolved): Promise<number> {
+async function cmdFinish(a: PipelineArgs, mcp: McpCall, d: Resolved, env: NodeJS.ProcessEnv): Promise<number> {
   const runId = a.flags['run-id'];
   if (!runId) return fail(d, 'finish requires --run-id', ExitCode.BadConfig);
   const reason = await incompleteReason(a, d);
-  let res = await mcp('finish_run', { run_id: runId, status: reason ? 'failed' : 'completed', stopped_reason: reason });
+  const secrets = [env.AGENT_LLM_API_KEY ?? '', env.AGENT_SCREENING_API_KEY ?? ''].filter(Boolean);
+  const itemErrors = [...(await stateItemErrors(a, d)), ...(await applyFailuresOf(a, d))].map((e) => redactAll(e, secrets));
+  const counts = { items_failed: itemErrors.length, item_errors: itemErrors };
+  let res = await mcp('finish_run', { run_id: runId, status: reason ? 'failed' : 'completed', stopped_reason: reason, ...counts });
   if (failed(res) && !reason) {
     // The server's coverage guard refused `completed`: report the shortfall honestly.
-    await mcp('finish_run', { run_id: runId, status: 'failed', stopped_reason: `coverage incomplete: ${res.content}`.slice(0, MAX_STOPPED_REASON_CHARS) });
+    await mcp('finish_run', { run_id: runId, status: 'failed', stopped_reason: `coverage incomplete: ${res.content}`.slice(0, MAX_STOPPED_REASON_CHARS), ...counts });
     return ExitCode.ProviderError;
   }
   return failed(res) ? ExitCode.ProviderError : ExitCode.Success;
@@ -250,7 +279,7 @@ export async function runPipelineCli(argv: string[], env: NodeJS.ProcessEnv, dep
   if (!pool) return fail(d, 'mcp connection failure: no tools available from any configured MCP server', ExitCode.McpFailure);
   try {
     if (a.command === 'start') return await cmdStart(a, mcpCaller(pool), d);
-    if (a.command === 'finish') return await cmdFinish(a, mcpCaller(pool), d);
+    if (a.command === 'finish') return await cmdFinish(a, mcpCaller(pool), d, env);
     return await cmdDiscoverScreen(a, env, pool, d, config!);
   } catch (err) {
     return fail(d, `${a.command} failed: ${err instanceof Error ? err.message : String(err)}`, ExitCode.ProviderError);

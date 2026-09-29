@@ -542,6 +542,11 @@ export interface RunRecord {
   /** Submissions that arrived for an item this run had not claimed — flagged,
    * not refused. */
   overCapWrites: number;
+  /** Per-item failures that did not fail the run (a screening save/screen
+   * error, an apply session that did not finish). */
+  itemsFailed: number;
+  /** Full error text per failed item, up to 100 entries. */
+  itemErrors: string[];
   /** Where a partial run stopped, in the agent's own words. Empty for a run
    * that completed normally. */
   stoppedReason: string;

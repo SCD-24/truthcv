@@ -647,6 +647,50 @@ def test_old_record_without_finish_refusals_key_loads_as_zero(data_dir):
     assert record.finish_refusals == 0
 
 
+def test_finish_persists_items_failed_and_errors_with_caps(data_dir):
+    store.start("run-if-1", trigger="scheduled", apply_cap=0)
+    errors = ["x" * (store.MAX_ITEM_ERROR_CHARS + 50)] * (store.MAX_ITEM_ERRORS + 5)
+    store.finish("run-if-1", items_failed=-3, item_errors=errors)
+    assert store.get("run-if-1").items_failed == 0
+    got = store.get("run-if-1").item_errors
+    assert len(got) == store.MAX_ITEM_ERRORS
+    assert all(len(e) == store.MAX_ITEM_ERROR_CHARS for e in got)
+
+    store.start("run-if-2", trigger="scheduled", apply_cap=0)
+    store.finish("run-if-2", items_failed=2, item_errors=["a", "b"])
+    rec = store.get("run-if-2")
+    assert rec.items_failed == 2
+    assert rec.item_errors == ["a", "b"]
+
+
+def test_second_finish_without_item_fields_keeps_recorded_failures(data_dir):
+    store.start("run-if-5", trigger="scheduled", apply_cap=0)
+    store.finish("run-if-5", items_failed=1, item_errors=["screen failed"])
+    store.finish("run-if-5", status="failed", stopped_reason="browser died")
+    rec = store.get("run-if-5")
+    assert rec.status == "failed"
+    assert rec.items_failed == 1
+    assert rec.item_errors == ["screen failed"]
+
+
+def test_old_record_without_item_fields_loads_as_defaults(data_dir):
+    from runs.model import RunRecord
+
+    record = RunRecord.from_dict({"id": "run-if-3", "status": "running"})
+    assert record.items_failed == 0
+    assert record.item_errors == []
+
+
+def test_finish_run_with_items_failed_completes(data_dir):
+    tools_runs.start_run("run-if-4")
+    result = tools_runs.finish_run(
+        run_id="run-if-4", status="completed", items_failed=1, item_errors=["boom"]
+    )
+    assert result["recorded"] is True
+    assert result["items_failed"] == 1
+    assert result["item_errors"] == ["boom"]
+
+
 def test_mark_finish_refused_increments_finish_refusals(data_dir):
     store.start("run-frn-3", trigger="scheduled", apply_cap=0)
 

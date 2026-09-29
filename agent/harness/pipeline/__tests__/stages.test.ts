@@ -50,6 +50,19 @@ describe('screenCandidates', () => {
     { url: 'https://a.test/2', title: 'B', channel: 'dork', profiles: ['P1'] },
   ];
 
+  it('keeps a persistEvidence error longer than 200 chars whole', async () => {
+    const long = 'z'.repeat(400);
+    const res = await screenCandidates([cands[0]], {
+      runId: 'r', criteria: { P1: 'c1' }, fetch: async () => ({ text: 'posting text' }),
+      extractAdapter: textAdapter('{"role":"R","company":"Co"}'),
+      screeningAdapter: textAdapter(JSON.stringify({ verdict: 'passed' })),
+      record: async () => ({ content: long, isError: true }),
+    });
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors[0].startsWith('https://a.test/1 [P1]: ')).toBe(true);
+    expect(res.errors[0]).toContain(long);
+  });
+
   it('stops at the first actionable pass and records blockers for unreadable text', async () => {
     const record = vi.fn(async (args: Record<string, unknown>) => ({
       content: JSON.stringify({ id: 'i', created: true, verdict: args.verdict === '' ? '' : 'passed', screening_blocker: args.screening_blocker ?? '' }),
