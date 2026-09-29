@@ -10,7 +10,7 @@ from __future__ import annotations
 import runs.store as _runs_store
 from agentconfig.store import load as _agent_config_load
 from screening import store as _screening_store
-from screening.url import posting_dedupe_key
+from screening.url import is_posting_url, posting_dedupe_key
 
 
 def _strip_fragment(url: str) -> str:
@@ -20,7 +20,9 @@ def _strip_fragment(url: str) -> str:
 def filter_unscreened_urls(urls: list[str] = []) -> dict:  # noqa: B006 - never mutated
     """Given candidate posting URLs, return only those not already screened,
     in input order, without duplicates. URL fragments are ignored when
-    comparing.
+    comparing. LinkedIn search/listing pages (linkedin.com URLs that are not
+    /jobs/view/<id>) are not postings and are dropped; the same LinkedIn job
+    on any subdomain counts as one posting.
     """
     try:
         profiles = [p.name for p in _agent_config_load().profiles if p.enabled]
@@ -37,6 +39,8 @@ def filter_unscreened_urls(urls: list[str] = []) -> dict:  # noqa: B006 - never 
             continue
         bare = _strip_fragment(url)
         if not bare:
+            continue
+        if not is_posting_url(bare):
             continue
         # Dedupe on the store's own posting key so candidates the store
         # treats as one posting are screened once.
