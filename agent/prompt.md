@@ -41,7 +41,7 @@ their application history is this tool surface. You have the following tools:
   text; pass one location at a time via `location` instead, and it retries
   the board's own local-language spelling before giving up. A board with no
   on-page search box instead carries its own `searchUrl` templated search
-  URL (e.g. `https://www.adzuna.de/search?q={keywords}&loc={location}`) —
+  URL (e.g. `https://www.adzuna.de/search?q={keywords}&w={location}`) —
   pass its `keywords`/`location` along as usual; the built URL replaces
   `url` outright, is navigated to directly, and the snapshot classified
   with no search-box typing at all. A board may also carry its own

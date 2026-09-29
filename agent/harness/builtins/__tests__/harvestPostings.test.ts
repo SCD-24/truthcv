@@ -1404,7 +1404,7 @@ describe('harvestPostings: dispatch precedence (sessions > tabs > serial)', () =
 });
 
 describe('harvestPostings: templated searchUrl boards', () => {
-  const TEMPLATE = 'https://www.adzuna.de/search?q={keywords}&loc={location}';
+  const TEMPLATE = 'https://www.adzuna.de/search?q={keywords}&w={location}';
 
   it('navigates the built, encoded URL and never calls browser_type — single-shared-tab path', async () => {
     const calls: { toolName: string; args: Record<string, unknown> }[] = [];
@@ -1421,9 +1421,9 @@ describe('harvestPostings: templated searchUrl boards', () => {
 
     const { results } = JSON.parse(result.content);
     expect(results[0].outcome).toBe('searched');
-    expect(results[0].url).toBe('https://www.adzuna.de/search?q=backend%20dev&loc=Berlin');
+    expect(results[0].url).toBe('https://www.adzuna.de/search?q=backend%20dev&w=Berlin');
     const navigateCall = calls.find((c) => c.toolName === 'browser_navigate');
-    expect(navigateCall?.args.url).toBe('https://www.adzuna.de/search?q=backend%20dev&loc=Berlin');
+    expect(navigateCall?.args.url).toBe('https://www.adzuna.de/search?q=backend%20dev&w=Berlin');
     expect(calls.some((c) => c.toolName === 'browser_type')).toBe(false);
   });
 
@@ -1438,9 +1438,9 @@ describe('harvestPostings: templated searchUrl boards', () => {
 
     const { results } = JSON.parse(result.content);
     expect(results[0].outcome).toBe('searched');
-    expect(results[0].url).toBe('https://www.adzuna.de/search?q=backend%20dev&loc=Berlin');
+    expect(results[0].url).toBe('https://www.adzuna.de/search?q=backend%20dev&w=Berlin');
     const navigateCall = calls.find((c) => c.toolName === 'browser_navigate');
-    expect(navigateCall?.args.url).toBe('https://www.adzuna.de/search?q=backend%20dev&loc=Berlin');
+    expect(navigateCall?.args.url).toBe('https://www.adzuna.de/search?q=backend%20dev&w=Berlin');
     expect(calls.some((c) => c.toolName === 'browser_type')).toBe(false);
   });
 

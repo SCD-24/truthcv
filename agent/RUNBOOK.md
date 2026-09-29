@@ -362,7 +362,7 @@ type into the board's own search box — ONE call replaces the whole
 navigate/snapshot/type/snapshot sequence this section used to prescribe. A
 board with no on-page search box instead carries its own `searchUrl`
 templated search URL (`{keywords}` required, `{location}` optional, e.g.
-`https://www.adzuna.de/search?q={keywords}&loc={location}`) — pass its
+`https://www.adzuna.de/search?q={keywords}&w={location}`) — pass its
 `keywords`/`location` along as usual; the built URL replaces `url` outright,
 is navigated to directly, and the snapshot classified with no search-box
 typing at all. It

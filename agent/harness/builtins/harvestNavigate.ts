@@ -237,8 +237,11 @@ const LOADING_RE = new RegExp(
   'im',
 );
 
-/** Max wait+resnapshot rounds while results are still loading. */
-const RESULTS_SETTLE_ATTEMPTS = 2;
+/**
+ * Max wait+resnapshot rounds while results are still loading. Max total wait
+ * is ~15s (5 × 3s); returns as soon as the loading marker clears.
+ */
+const RESULTS_SETTLE_ATTEMPTS = 5;
 
 /** Seconds to wait per round while results are still loading. */
 const RESULTS_SETTLE_SECONDS = 3;

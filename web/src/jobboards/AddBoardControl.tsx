@@ -117,7 +117,7 @@ export function AddBoardControl({ onAdd, existing }: { onAdd: (board: JobBoard) 
             label="Search URL template (optional)"
             value={customSearchUrl}
             onChange={(e) => setCustomSearchUrl(e.target.value)}
-            helperText="e.g. https://www.adzuna.de/search?q={keywords}&loc={location} — {keywords} required, {location} optional"
+            helperText="e.g. https://www.adzuna.de/search?q={keywords}&w={location} — {keywords} required, {location} optional"
             sx={{ minWidth: 320 }}
           />
           <TextField

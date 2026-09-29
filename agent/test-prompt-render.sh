@@ -735,9 +735,9 @@ render_direct_boards() {
 }
 
 echo "Testing: direct board with a searchUrl template appends the template note..."
-DIRECT_WITH_TEMPLATE='{"directBoards":[{"url":"https://www.adzuna.de/search","searchUrl":"https://www.adzuna.de/search?q={keywords}&loc={location}"}]}'
+DIRECT_WITH_TEMPLATE='{"directBoards":[{"url":"https://www.adzuna.de/search","searchUrl":"https://www.adzuna.de/search?q={keywords}&w={location}"}]}'
 DIRECT_LINE_TEMPLATE="$(render_direct_boards "$DIRECT_WITH_TEMPLATE")"
-if [[ "$DIRECT_LINE_TEMPLATE" != *"(search URL template: https://www.adzuna.de/search?q={keywords}&loc={location})"* ]]; then
+if [[ "$DIRECT_LINE_TEMPLATE" != *"(search URL template: https://www.adzuna.de/search?q={keywords}&w={location})"* ]]; then
   echo "FAIL: expected search URL template note, got: '$DIRECT_LINE_TEMPLATE'"
   exit 1
 fi
