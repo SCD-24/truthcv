@@ -61,6 +61,13 @@ class RunRecord:
     # words (e.g. "apply cap reached", "browser session died"). Empty for a
     # run that completed normally.
     stopped_reason: str = ""
+    # Per-item failures that did not fail the run: one screening save/screen
+    # error, one apply session that did not finish. Absent from older records,
+    # which from_dict's known-field filter loads as 0.
+    items_failed: int = 0
+    # Full per-item error text for those failures (capped by runs/store.py).
+    # Absent from older records, which load as [].
+    item_errors: list[str] = field(default_factory=list)
     # Free-text note the agent can leave via record_run_note.
     note: str = ""
     # Per-source discovery coverage: what the agent actually searched this run,

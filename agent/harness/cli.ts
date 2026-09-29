@@ -612,7 +612,10 @@ export function redact(text: string, token: string): string {
  * @returns The text with every credential redacted.
  */
 export function redactAll(text: string, tokens: readonly string[]): string {
-  return tokens.reduce((acc, token) => redact(acc, token), text);
+  // Longest first: a token that contains another must be stripped whole,
+  // not left as `<redacted>` plus the longer token's tail.
+  const longestFirst = [...tokens].sort((x, y) => y.length - x.length);
+  return longestFirst.reduce((acc, token) => redact(acc, token), text);
 }
 
 /**

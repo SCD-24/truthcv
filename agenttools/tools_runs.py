@@ -189,6 +189,8 @@ def finish_run(
     stopped_reason: str = "",
     note: str = "",
     turns_remaining: int = -1,
+    items_failed: int = 0,
+    item_errors: list[str] | None = None,
 ) -> dict:
     """Close out a run record. Call this before exiting — including when
     stopping early — with ``stopped_reason`` saying honestly where you
@@ -207,13 +209,22 @@ def finish_run(
     real turn-limit stop is never blocked. Omit it (default -1) for the
     legacy one-shot behavior: refuses only the first call, a second always
     succeeds.
+
+    ``items_failed`` is the count of per-item failures that did not fail the
+    run (a screening save/screen error, an apply session that did not
+    finish); ``item_errors`` is the full error text for each.
     """
     if not run_id:
         return {"recorded": False}
     _guard_incomplete_discovery(run_id, status, turns_remaining)
     try:
         record = _runs_store.finish(
-            run_id, status=status, stopped_reason=stopped_reason, note=note
+            run_id,
+            status=status,
+            stopped_reason=stopped_reason,
+            note=note,
+            items_failed=items_failed,
+            item_errors=item_errors,
         )
     except Exception:
         return {"recorded": False}

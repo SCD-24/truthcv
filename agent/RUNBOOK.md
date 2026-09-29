@@ -300,7 +300,7 @@ deliberately does not duplicate its values.
 
 ### Discovery
 
-**Pipeline mode (`AGENT_SESSION_MODE=pipeline`, the default).** Code, not you, runs discovery, coverage recording and screening; an apply session only applies the one posting handed to it and ends with `finish_application`. The per-channel text below applies to `per-channel` and `single` sessions.
+**Pipeline mode (the only mode; any other `AGENT_SESSION_MODE` aborts).** Code, not you, runs discovery, coverage recording and screening; an apply session only applies the one posting handed to it and ends with `finish_application`.
 
 Discovery works three channels, and they are worked in a fixed order:
 **feed**, then **direct boards**, then **dork queries**. Take one full pass
