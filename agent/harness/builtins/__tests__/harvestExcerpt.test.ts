@@ -26,6 +26,40 @@ describe('compactSnapshot', () => {
   });
 });
 
+describe('compactSnapshot priority budget', () => {
+  it('keeps the Page URL and zero-hit line despite 200 nav links', () => {
+    const nav = Array.from({ length: 200 }, () => '- link "Images":\n  - /url: https://www.google.com/imghp\n').join('');
+    const s = `- Page URL: https://www.google.com/search?q=x\n${nav}Your search - x - did not match any documents.\n`;
+    const out = compactSnapshot(s, 2000);
+    expect(out.text).toContain('Page URL: https://www.google.com/search?q=x');
+    expect(out.text).toContain('did not match any documents');
+    expect(out.text.length).toBeLessThanOrEqual(2000);
+  });
+
+  it('keeps /url children with their link, not as orphan priority lines', () => {
+    const links = Array.from({ length: 200 }, (_, i) => `- link "Engineer ${i}":\n  - /url: https://acme.com/jobs/${i}\n`).join('');
+    const out = compactSnapshot(`- Page URL: https://acme.com/jobs\n${links}`, 2000);
+    const lines = out.text.split('\n');
+    const urlLines = lines.filter((l) => l.includes('/url:')).length;
+    const linkLines = lines.filter((l) => l.startsWith('- link')).length;
+    expect(linkLines).toBeGreaterThan(0);
+    expect(urlLines).toBe(linkLines);
+  });
+
+  it('keeps the Page URL even when result-text lines precede it', () => {
+    const out = compactSnapshot(`${'- text: jobs\n'.repeat(10)}- Page URL: https://a.example/\n`, 100);
+    expect(out.text).toContain('Page URL: https://a.example/');
+  });
+
+  it('result-text lines cannot crowd out an early job link', () => {
+    const link = '- link "Engineer":\n  - /url: https://acme.com/jobs/1\n';
+    const filler = '- text: jobs open for engineering positions\n'.repeat(300);
+    const out = compactSnapshot(`- Page URL: https://acme.com/careers\n${link}${filler}`, 6000);
+    expect(out.text).toContain('https://acme.com/jobs/1');
+    expect(out.text.length).toBeLessThanOrEqual(6000);
+  });
+});
+
 describe('fitRawSnapshots', () => {
   it('keeps all boards under budget', () => {
     const results: HarvestBoardResult[] = Array.from({ length: 10 }, (_, i) => ({

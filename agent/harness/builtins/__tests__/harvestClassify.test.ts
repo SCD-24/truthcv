@@ -37,6 +37,49 @@ describe('classifySnapshot dorks and excerpts', () => {
   });
 });
 
+describe('classifySnapshot Google SERP/interstitials', () => {
+  const serpUrl = 'https://www.google.com/search?q=site:jobs.lever.co+engineer';
+  const nav = [
+    '- link "Images" [ref=e1]:', '  - /url: https://www.google.com/imghp',
+    '- link "Maps" [ref=e2]:', '  - /url: https://maps.google.com/',
+  ];
+  const run = (url: string, lines: string[]) =>
+    classifySnapshot({ board: 'Dork', url }, [`- Page URL: ${url}`, ...lines].join('\n'));
+
+  it('English zero-hit SERP is empty', () => {
+    const r = run(serpUrl, [...nav, '- text: Your search - site:jobs.lever.co engineer - did not match any documents.']);
+    expect(r.outcome).toBe('empty');
+  });
+
+  it('German zero-hit SERP is empty', () => {
+    const r = run(serpUrl, [...nav, '- text: Es wurden keine mit deiner Suchanfrage site:jobs.lever.co übereinstimmenden Dokumente gefunden.']);
+    expect(r.outcome).toBe('empty');
+  });
+
+  it('consent interstitial is blocked as wall', () => {
+    const r = run('https://consent.google.com/ml?continue=https://www.google.com/search', [
+      '- heading: Before you continue to Google', `- text: ${'x'.repeat(250)}`,
+    ]);
+    expect(r.outcome).toBe('blocked');
+    expect(r.blockKind).toBe('wall');
+  });
+
+  it('/sorry page is blocked', () => {
+    const r = run('https://www.google.com/sorry/index?continue=https://www.google.com/search', [
+      '- text: Our systems have detected unusual traffic', `- text: ${'x'.repeat(250)}`,
+    ]);
+    expect(r.outcome).toBe('blocked');
+  });
+
+  it('a real site: result still wins over a zero-hit phrase', () => {
+    const r = run(serpUrl, [
+      '- link "Engineer" [ref=e9]:', '  - /url: https://jobs.lever.co/acme/abc123',
+      '- text: did not match any documents',
+    ]);
+    expect(r.outcome).toBe('searched');
+  });
+});
+
 describe('isExplicitlyEmpty', () => {
   it('is exported and recognises German phrasing', () => {
     expect(isExplicitlyEmpty('Keine Stellen gefunden')).toBe(true);

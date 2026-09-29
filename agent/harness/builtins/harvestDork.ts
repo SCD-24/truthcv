@@ -14,7 +14,7 @@ export interface DorkTarget {
 }
 
 /** Google search hosts: google.<tld> or www.google.<tld>. */
-const GOOGLE_HOST_RE = /^(?:www\.)?google\.[a-z]{2,3}(?:\.[a-z]{2})?$/i;
+export const GOOGLE_HOST_RE = /^(?:www\.)?google\.[a-z]{2,3}(?:\.[a-z]{2})?$/i;
 
 /** Hosts owned by Google, never a dork result. */
 const GOOGLE_OWNED_RE = /(?:^|\.)(?:google\.[a-z.]+|gstatic\.com|googleusercontent\.com|googleapis\.com)$/i;
