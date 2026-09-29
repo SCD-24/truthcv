@@ -63,6 +63,34 @@ def test_filter_unscreened_urls_dedupes_on_posting_key(data_dir):
     assert got == {"unscreened": ["https://EXAMPLE.com/jobs/2/"]}
 
 
+def test_filter_unscreened_urls_drops_linkedin_search():
+    spam = "https://ie.linkedin.com/jobs/%E6%B5%99-jobs?position=1&pageNum=0"
+    assert filter_unscreened_urls([spam]) == {"unscreened": []}
+
+
+def test_filter_unscreened_urls_collapses_linkedin_subdomains(data_dir):
+    got = filter_unscreened_urls(
+        [
+            "https://uk.linkedin.com/jobs/view/555",
+            "https://www.linkedin.com/jobs/view/title-555",
+        ]
+    )
+    assert got == {"unscreened": ["https://uk.linkedin.com/jobs/view/555"]}
+
+
+def test_filter_unscreened_urls_screened_www_filters_uk(data_dir):
+    screening_store.create_or_get(
+        {
+            "company": "Acme",
+            "role": "E",
+            "url": "https://www.linkedin.com/jobs/view/777",
+            "verdict": "rejected",
+        }
+    )
+    got = filter_unscreened_urls(["https://uk.linkedin.com/jobs/view/777"])
+    assert got == {"unscreened": []}
+
+
 def test_finish_application_appends_note_without_status_change(data_dir):
     runs_store.start("r1", trigger="manual", apply_cap=1)
     before = runs_store.get("r1").status

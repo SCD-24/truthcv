@@ -9,7 +9,11 @@ historical records that predate this requirement.
 
 from __future__ import annotations
 
+import re
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+_LINKEDIN_HOST = "linkedin.com"
+_LINKEDIN_JOB_PATH = re.compile(r"^/jobs/view/(?:[^/]+-)?(\d+)/?$")
 
 _APPLICATION_SEGMENTS = frozenset(
     {"apply", "application", "applications", "apply-now"}
@@ -101,6 +105,43 @@ _TRACKING_PARAMS = frozenset(
 )
 
 
+def _is_linkedin_host(host: str) -> bool:
+    """True when ``host`` is linkedin.com or any subdomain of it."""
+    host = host.lower()
+    return host == _LINKEDIN_HOST or host.endswith("." + _LINKEDIN_HOST)
+
+
+def linkedin_job_id(url: str) -> str | None:
+    """Return the numeric LinkedIn job id in ``url``, or ``None``.
+
+    Matches ``/jobs/view/<digits>`` and ``/jobs/view/<slug>-<digits>`` on
+    linkedin.com or any subdomain. Never raises.
+    """
+    try:
+        parsed = urlparse(url.strip())
+        host = parsed.hostname or ""
+    except (ValueError, AttributeError):
+        return None
+    if not _is_linkedin_host(host):
+        return None
+    match = _LINKEDIN_JOB_PATH.match(parsed.path)
+    return match.group(1) if match else None
+
+
+def is_posting_url(url: str) -> bool:
+    """False only for a LinkedIn URL that names no job (search/listing page).
+
+    Every other host, including unparseable input, is True. Never raises.
+    """
+    try:
+        host = urlparse(url.strip()).hostname or ""
+    except (ValueError, AttributeError):
+        return True
+    if not _is_linkedin_host(host):
+        return True
+    return linkedin_job_id(url) is not None
+
+
 def posting_dedupe_key(url: str) -> str:
     """Return the identity of the posting ``url`` points at, for dedupe.
 
@@ -136,6 +177,10 @@ def posting_dedupe_key(url: str) -> str:
         return ""
     if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
         return ""
+
+    job_id = linkedin_job_id(stripped)
+    if job_id:
+        return f"https://www.linkedin.com/jobs/view/{job_id}"
 
     path = parsed.path
     if path.endswith("/"):

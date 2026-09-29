@@ -51,6 +51,7 @@ from screening.criteria import evaluate_hard_requirements as _evaluate_hard_requ
 import screening.jev as _jev
 from services.screenings import create_screening as create_or_get_screening
 import services.applications as _applications_service
+from screening.url import is_posting_url as _is_posting_url
 from screening.url import validate_posting_url as _validate_posting_url
 from truth.answers import canonical_cv as _canonical_cv
 from truth.answers import load as _load_answers
@@ -607,6 +608,11 @@ def record_screening(
     only when non-empty, so an omitted one never overwrites a stored value.
     """
     validated_url = _validate_posting_url(url)
+    if not _is_posting_url(validated_url):
+        raise ValueError(
+            f"{validated_url!r} is a LinkedIn search/listing page, not a "
+            "posting. Only linkedin.com/jobs/view/<id> URLs are accepted."
+        )
     validated_role = _validate_role_title(role)
     fields["url"] = validated_url
     fields["role"] = validated_role
