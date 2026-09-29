@@ -188,15 +188,6 @@ services:
       # §1, "There is no daily quota"). Empty/unset must be treated by the
       # run loop (task t-4) as "no cap", not as zero.
       - MAX_APPLICATIONS_PER_RUN=${MAX_APPLICATIONS_PER_RUN:-}
-      # Provider-neutral credentials for the harness (agent/harness/cli.ts).
-      # GET /api/agent/llm-credentials is the primary source (read by
-      # daily-apply.sh via agent-config.js) — these are only the container-level
-      # fallback used when AGENT_API_TOKEN is unset and the app can't be asked.
-      - AGENT_LLM_PROVIDER=${AGENT_LLM_PROVIDER:-}
-      - AGENT_LLM_MODEL=${AGENT_LLM_MODEL:-}
-      - AGENT_LLM_API_KEY=${AGENT_LLM_API_KEY:-}
-      - AGENT_LLM_BASE_URL=${AGENT_LLM_BASE_URL:-}
-      - AGENT_LLM_AUTH_TYPE=${AGENT_LLM_AUTH_TYPE:-}
       # Runaway backstop on harness turns per run (agent/harness/loop.ts).
       # NOT the operational bound on how much a run does: that is
       # maxApplicationsPerRun on the Agents page, which get_approved_applications

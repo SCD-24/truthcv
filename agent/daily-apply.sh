@@ -78,6 +78,8 @@ log "=== daily-apply run $STAMP ==="
 
 [[ -r "$RUNBOOK" ]] || abort "runbook missing: $RUNBOOK"
 
+[[ -n "${AGENT_API_TOKEN:-}" ]] || abort "AGENT_API_TOKEN is not set - the agent gets its LLM credentials from the app and signs in to the browser session server with it; set it in .env (see README 'Running it by hand')"
+
 # jq builds the job-profile block of the prompt below. Without it the operator's
 # configured profiles silently never reach the agent and the run proceeds on the
 # RUNBOOK defaults as though none were configured - a wrong run is worse than no
@@ -322,52 +324,36 @@ fi
 # that reason). Only a positive integer is enforced (pipeline apply loop).
 
 # Fetch routed LLM credentials from the app (Stage 2) and export them as the
-# provider-neutral variables the harness consumes (AGENT_LLM_*). Fallback (when
-# AGENT_API_TOKEN is unset): the container's own AGENT_LLM_* environment — the
-# docker-compose-level provider-neutral vars — exactly the pre-Stage-2 spirit,
-# just no longer Anthropic-only.
+# provider-neutral variables the harness consumes (AGENT_LLM_*).
 AGENT_MODEL=""
-if [[ -n "${AGENT_API_TOKEN:-}" ]]; then
-  if CREDS="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" llm_credentials 2>/dev/null)"; then
-    # Six lines, in order: authType, token, model, baseUrl, provider, wire.
-    # An older agent-config.js emitting fewer lines yields empty values for
-    # the missing ones here (sed on a missing line prints nothing), which the
-    # final gate rejects for the required fields.
-    AUTH_TYPE="$(sed -n 1p <<<"$CREDS")"
-    AUTH_TOKEN="$(sed -n 2p <<<"$CREDS")"
-    AGENT_MODEL="$(sed -n 3p <<<"$CREDS")"
-    AGENT_BASE_URL="$(sed -n 4p <<<"$CREDS")"
-    AGENT_PROVIDER="$(sed -n 5p <<<"$CREDS")"
-    AGENT_WIRE="$(sed -n 6p <<<"$CREDS")"
+if CREDS="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" llm_credentials 2>/dev/null)"; then
+  # Six lines, in order: authType, token, model, baseUrl, provider, wire.
+  # An older agent-config.js emitting fewer lines yields empty values for
+  # the missing ones here (sed on a missing line prints nothing), which the
+  # final gate rejects for the required fields.
+  AUTH_TYPE="$(sed -n 1p <<<"$CREDS")"
+  AUTH_TOKEN="$(sed -n 2p <<<"$CREDS")"
+  AGENT_MODEL="$(sed -n 3p <<<"$CREDS")"
+  AGENT_BASE_URL="$(sed -n 4p <<<"$CREDS")"
+  AGENT_PROVIDER="$(sed -n 5p <<<"$CREDS")"
+  AGENT_WIRE="$(sed -n 6p <<<"$CREDS")"
 
-    export AGENT_LLM_PROVIDER="$AGENT_PROVIDER"
-    export AGENT_LLM_MODEL="$AGENT_MODEL"
-    # Empty token is valid for ollama; the final gate enforces the per-provider
-    # rule, so we do not reject an empty token unconditionally here.
-    export AGENT_LLM_API_KEY="$AUTH_TOKEN"
-    export AGENT_LLM_BASE_URL="$AGENT_BASE_URL"
-    export AGENT_LLM_WIRE="$AGENT_WIRE"
-    # Distinct from AGENT_LLM_PROVIDER: a claude connection can be either
-    # 'oauth' or 'api_key', and the harness must send the token via the
-    # matching wire mechanism (Bearer vs x-api-key) or an oauth token is
-    # rejected when sent as an api key. Forwarded verbatim to the harness CLI.
-    export AGENT_LLM_AUTH_TYPE="$AUTH_TYPE"
-    log "using ${AGENT_LLM_PROVIDER:-unknown} credentials from app${AGENT_LLM_BASE_URL:+ ($AGENT_LLM_BASE_URL)}"
-    unset CREDS AUTH_TOKEN AUTH_TYPE AGENT_PROVIDER AGENT_WIRE
-  else
-    abort "credential fetch failed (app returned non-zero exit)"
-  fi
+  export AGENT_LLM_PROVIDER="$AGENT_PROVIDER"
+  export AGENT_LLM_MODEL="$AGENT_MODEL"
+  # Empty token is valid for ollama; the final gate enforces the per-provider
+  # rule, so we do not reject an empty token unconditionally here.
+  export AGENT_LLM_API_KEY="$AUTH_TOKEN"
+  export AGENT_LLM_BASE_URL="$AGENT_BASE_URL"
+  export AGENT_LLM_WIRE="$AGENT_WIRE"
+  # Distinct from AGENT_LLM_PROVIDER: a claude connection can be either
+  # 'oauth' or 'api_key', and the harness must send the token via the
+  # matching wire mechanism (Bearer vs x-api-key) or an oauth token is
+  # rejected when sent as an api key. Forwarded verbatim to the harness CLI.
+  export AGENT_LLM_AUTH_TYPE="$AUTH_TYPE"
+  log "using ${AGENT_LLM_PROVIDER:-unknown} credentials from app${AGENT_LLM_BASE_URL:+ ($AGENT_LLM_BASE_URL)}"
+  unset CREDS AUTH_TOKEN AUTH_TYPE AGENT_PROVIDER AGENT_WIRE
 else
-  # No app-issued agent token: take the provider-neutral credentials straight
-  # from the container's own environment (the docker-compose-level AGENT_LLM_*
-  # vars) instead of the app.
-  export AGENT_LLM_PROVIDER="${AGENT_LLM_PROVIDER:-}"
-  export AGENT_LLM_MODEL="${AGENT_LLM_MODEL:-}"
-  export AGENT_LLM_API_KEY="${AGENT_LLM_API_KEY:-}"
-  export AGENT_LLM_BASE_URL="${AGENT_LLM_BASE_URL:-}"
-  export AGENT_LLM_WIRE="${AGENT_LLM_WIRE:-}"
-  export AGENT_LLM_AUTH_TYPE="${AGENT_LLM_AUTH_TYPE:-}"
-  AGENT_MODEL="$AGENT_LLM_MODEL"
+  abort "credential fetch failed (app returned non-zero exit)"
 fi
 
 # Per-stage routes (llm_routes) go to a 0600 temp file, removed on exit; the
@@ -376,11 +362,9 @@ ROUTES_FILE=""
 PIPE_DIR=""
 cleanup_tmp() { [[ -n "$ROUTES_FILE" ]] && rm -f "$ROUTES_FILE"; [[ -n "$PIPE_DIR" ]] && rm -rf "$PIPE_DIR"; return 0; }
 trap cleanup_tmp EXIT
-if [[ -n "${AGENT_API_TOKEN:-}" ]]; then
-  ROUTES_FILE="$(umask 077; mktemp)"
-  if ! node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" llm_routes >"$ROUTES_FILE" 2>/dev/null; then
-    rm -f "$ROUTES_FILE"; ROUTES_FILE=""
-  fi
+ROUTES_FILE="$(umask 077; mktemp)"
+if ! node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" llm_routes >"$ROUTES_FILE" 2>/dev/null; then
+  rm -f "$ROUTES_FILE"; ROUTES_FILE=""
 fi
 
 # Final gate: the harness needs a known provider AND a usable credential for it.
@@ -388,10 +372,10 @@ fi
 # has none and requires a base URL instead.
 case "$AGENT_LLM_PROVIDER" in
   claude|codex|openrouter)
-    [[ -n "$AGENT_LLM_API_KEY" ]] || abort "no usable LLM credential for provider '$AGENT_LLM_PROVIDER': set AGENT_API_TOKEN + app credentials, or AGENT_LLM_API_KEY in the container env"
+    [[ -n "$AGENT_LLM_API_KEY" ]] || abort "no usable LLM credential for provider '$AGENT_LLM_PROVIDER': save a credential for the Application agent route on the Model routing page"
     ;;
   ollama)
-    [[ -n "$AGENT_LLM_BASE_URL" ]] || abort "provider 'ollama' requires a base URL: set AGENT_LLM_BASE_URL"
+    [[ -n "$AGENT_LLM_BASE_URL" ]] || abort "provider 'ollama' requires a base URL: set the Ollama connection's base URL on the Model routing page"
     ;;
   *)
     abort "unrecognised or unset LLM provider '$AGENT_LLM_PROVIDER' (expected claude|codex|openrouter|ollama)"

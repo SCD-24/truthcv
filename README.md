@@ -164,12 +164,11 @@ screens each posting against your filters, generates the CV and cover letter
 through the same guardrailed engine the wizard uses, submits the form, and
 writes the result back into the ledger.
 
-The agent holds no provider credential of its own: when `AGENT_API_TOKEN` is
-set, it fetches the routed LLM credentials from the app at run start over a
-guarded endpoint, using the independent Application agent route (or its Claude
-fallback), not simply whichever account was connected last. The `AGENT_*`
-variables in [Configuration](#configuration) are only a container-level
-fallback.
+The agent holds no provider credential of its own: it uses `AGENT_API_TOKEN`
+to fetch the routed LLM credentials from the app at run start over a guarded
+endpoint, using the independent Application agent route (or its Claude
+fallback), not simply whichever account was connected last. Without
+`AGENT_API_TOKEN` (see [Configuration](#configuration)) every run aborts.
 
 Job boards and site sign-ins are on the **Job boards** page; the schedule and
 run history are on the **Agents** page. Target companies and search profiles
@@ -318,7 +317,7 @@ cp .env.example .env
 
 # 2. Set ENCRYPTION_KEY and AGENT_API_TOKEN (both required, both non-empty —
 #    an empty AGENT_API_TOKEN aborts every scheduled run with
-#    "session server unreachable at browser:8932"). Generate each with:
+#    "AGENT_API_TOKEN is not set"). Generate each with:
 openssl rand -hex 32
 # or, dependency-free:
 python -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
@@ -371,12 +370,12 @@ with.
 This version needs two things an older setup may not have:
 
 - **A non-empty `AGENT_API_TOKEN` in `.env`** (see step 2 above for how to
-  generate one). The browser container's session control server rejects an
-  empty token, so every scheduled run aborts with `session server unreachable
-  at browser:8932 - ... rejected the agent's X-Agent-Token`.
+  generate one). The agent uses it to fetch its model credentials from the app
+  and to sign in to the browser container's session control server, so with an
+  empty token every scheduled run aborts with `AGENT_API_TOKEN is not set`.
 - **`docker compose up --build`, not `up`.** The `browser` image gains a
   session control server; an old image does not answer on port 8932, and every
-  scheduled run aborts with the same message naming an unreachable server.
+  scheduled run aborts with `session server unreachable at browser:8932`.
 
 ### Run fully offline with Ollama
 
@@ -403,7 +402,7 @@ To generate `ENCRYPTION_KEY` or `AGENT_API_TOKEN` by hand, see step 2 of
 |---|---|
 | `APP_PORT` | Host port the app is published on (default `5627`); the launcher advances this automatically if it's taken. |
 | `ENCRYPTION_KEY` | Required — encrypts saved provider credentials at rest (`./data/secrets.enc`). The launcher generates it for you. |
-| `AGENT_API_TOKEN` | Required, non-empty — shared secret the agent, app and browser containers authenticate to each other with. The launcher generates it for you. |
+| `AGENT_API_TOKEN` | Required, non-empty — shared secret the agent, app and browser containers authenticate to each other with. The launcher generates it for you. The agent also uses it to fetch its model credentials from the app (Application agent route). |
 | `DATA_DIR` | Host path for persisted data (default `./data`). |
 | `LLM_PROVIDER` | `anthropic` \| `openai` \| `ollama` — provider fallback when neither a default/task route nor a migrated provider choice is saved (defaults to `anthropic` when unset); connecting an account alone does not override it. (`fake` is accepted for tests only.) |
 | `LLM_MODEL` | Optional model id fallback after saved routes and any migrated model choice; blank uses the provider's default. Set a route on Model routing to override it. |
@@ -411,10 +410,6 @@ To generate `ENCRYPTION_KEY` or `AGENT_API_TOKEN` by hand, see step 2 of
 | `OLLAMA_HOST` | Ollama endpoint. Compose defaults it to `http://ollama:11434`; outside Docker the provider defaults to localhost when it is absent. Leave it commented out in `.env` — an uncommented localhost value breaks the Compose ollama profile. |
 | `RUN_AT` / `RUN_DAYS` | Fallback agent schedule (defaults `09:00,15:00` and `1,2,3,4,5`, Monday–Friday), used only when the agent config API is unreachable. |
 | `TZ` | Fallback timezone the agent's schedule and logs are interpreted in (default `UTC`). The Agents page's schedule timezone takes precedence. |
-| `AGENT_LLM_PROVIDER` / `AGENT_LLM_MODEL` | Optional container-level fallback provider and model for the unattended agent's harness, read only when `AGENT_API_TOKEN` is empty (which aborts Compose runs, so no practical effect today); the real source is the app's routed credentials (Application agent route). Blank by default. |
-| `AGENT_LLM_API_KEY` | Optional fallback API key/token for the agent's provider, used only when `AGENT_API_TOKEN` is empty (which aborts Compose runs). Required by the harness for every provider except when a base URL alone suffices (Ollama needs `AGENT_LLM_BASE_URL` instead). |
-| `AGENT_LLM_BASE_URL` | Optional fallback base URL for the agent's provider; required for Ollama. |
-| `AGENT_LLM_AUTH_TYPE` | `oauth` \| `api_key` \| `url` — only needed for `AGENT_LLM_PROVIDER=claude` via an OAuth subscription; leave empty otherwise. |
 | `AGENT_MAX_TURNS` | Cap on harness turns per application session (default `400` under Compose, via `docker-compose.yml` and `agent/daily-apply.sh`; the harness's own built-in default is `40`). A runaway backstop; the operational bound is the Agents page's max-applications-per-run setting. |
 | `AGENT_MAX_RETRIES` | Cap on consecutive retryable-error retries within one turn (default `12`). |
 | `AGENT_MAX_RETRY_DELAY_MS` | Ceiling on a single retry's backoff delay in ms (default `300000`, 5 minutes). |

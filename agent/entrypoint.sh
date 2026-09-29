@@ -66,12 +66,8 @@ validate_run_at() {
 report_credentials() {
   if [[ -n "${AGENT_API_TOKEN:-}" ]]; then
     log "INFO: credentials will be fetched from app at run time"
-  elif [[ -n "${AGENT_LLM_API_KEY:-}" ]]; then
-    log "INFO: using container-level AGENT_LLM_* credentials (provider=${AGENT_LLM_PROVIDER:-unset})"
-  elif [[ "${AGENT_LLM_PROVIDER:-}" == "ollama" && -n "${AGENT_LLM_BASE_URL:-}" ]]; then
-    log "INFO: using container-level AGENT_LLM_* credentials (provider=ollama)"
   else
-    log "WARN: no LLM credential configured - runs will abort until AGENT_API_TOKEN is set and a provider key is saved on the Agents page, or AGENT_LLM_API_KEY is set in the container env"
+    log "WARN: AGENT_API_TOKEN is not set - every run will abort until it is set in .env (the agent fetches its LLM credentials from the app with it)"
   fi
   return 0
 }

@@ -60,7 +60,6 @@ no longer behind a compose profile. The agent waits for the browser to report
 healthy before its first run:
 
 ```bash
-export AGENT_LLM_PROVIDER=... AGENT_LLM_API_KEY=...           # never commit this
 docker compose up -d                            # app, browser, agent
 docker compose logs -f agent
 ```
@@ -100,8 +99,7 @@ under the operator's name. Watch it.
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `AGENT_API_TOKEN` | unset | Shared secret (generate with `openssl rand -hex 32`). When set, the agent fetches LLM credentials from the app at run start via a guarded endpoint; when unset, it uses the `AGENT_LLM_*` container env. |
-| `AGENT_LLM_API_KEY` | unset | Provider-neutral container-level fallback for LLM credentials, used only when `AGENT_API_TOKEN` is unset. Required for non-ollama providers; may be empty only for ollama (via `AGENT_LLM_BASE_URL`). Never log its value. |
+| `AGENT_API_TOKEN` | required | Shared secret (generate with `openssl rand -hex 32`). The agent always fetches its LLM credentials from the app with it at run start, via a guarded endpoint; runs abort when it is unset. |
 | `RUN_AT` | `09:00,15:00` | Comma-separated `HH:MM` (24h, container TZ). Fallback only — used when the agent config API is unreachable; see below. |
 | `RUN_DAYS` | `1,2,3,4,5` | Days to run, `1`=Mon … `7`=Sun. Fallback only — used when the agent config API is unreachable; see below. |
 | `RUN_ONCE` | unset | `1` = run immediately and exit. |
@@ -120,8 +118,7 @@ The agent runs a provider-neutral harness (`agent/harness`, compiled into the im
 ### Harness configuration surface
 
 `daily-apply.sh` invokes the harness as `node "$HARNESS_CLI"` and hands it the
-provider, wire, model, credential, and auth type it resolved from the app (or,
-absent `AGENT_API_TOKEN`, straight from the container's own environment). The
+provider, wire, model, credential, and auth type it resolved from the app. The
 knobs below are that whole surface.
 
 **Providers and wires.** The harness targets four logical **providers** —
@@ -149,7 +146,8 @@ OAuth Claude credential sent as an api key is **rejected** by the provider, so
 the auth type must match the credential's kind.
 
 **Environment variables.** The harness reads these (each has an equivalent CLI
-flag that takes precedence; `daily-apply.sh` passes the flags explicitly):
+flag that takes precedence; `daily-apply.sh` passes the flags explicitly).
+`daily-apply.sh` sets the `AGENT_LLM_*` variables from the app's credentials; set them by hand only when running the harness CLI directly.
 
 | Env var | Meaning |
 |---|---|
