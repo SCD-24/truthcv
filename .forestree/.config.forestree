@@ -210,11 +210,11 @@
                   "path": "/api/runs/{run_id}/stop"
                 },
                 {
-<<<<<<< HEAD
                   "desc": "Manually trigger a Gmail response sync (wired to the Web UI's Sync-now button); delegates to Gmail Response Sync",
                   "method": "POST",
                   "path": "/api/gmail/responses/sync"
-=======
+                },
+                {
                   "desc": "Non-terminal end of one per-channel agent session (feed|direct|dork). Refuses while that channel's coverage is short and the harness reports turns remaining (max 3 refusals). Appends the note to the run and never closes it.",
                   "method": "MCP",
                   "path": "finish_phase"
@@ -228,7 +228,6 @@
                   "desc": "Per-stage (apply/screening/extract) LLM credentials for the Application Agent; requires the X-Agent-Token header.",
                   "method": "GET",
                   "path": "/api/agent/llm-routes"
->>>>>>> origin/main
                 }
               ]
             },
