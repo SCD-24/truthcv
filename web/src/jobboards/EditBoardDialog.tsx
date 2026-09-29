@@ -112,7 +112,7 @@ export function EditBoardDialog({
               size="small"
               value={searchUrl}
               onChange={(e) => setSearchUrl(e.target.value)}
-              helperText="e.g. https://www.adzuna.de/search?q={keywords}&loc={location} — {keywords} required, {location} optional"
+              helperText="e.g. https://www.adzuna.de/search?q={keywords}&w={location} — {keywords} required, {location} optional"
             />
           )}
           {board.mode === "direct" && (

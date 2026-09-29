@@ -31,10 +31,15 @@ describe('settleIfLoading', () => {
     expect(await settleIfLoading(call, 'Finding jobs...')).toBe('results ready');
     expect(names.filter((n) => n === 'browser_wait_for')).toHaveLength(1);
   });
-  it('waits at most twice when still loading', async () => {
+  it('waits at most five times when still loading', async () => {
     const { call, names } = stub([ok('Loading...')]);
     await settleIfLoading(call, 'Loading...');
-    expect(names.filter((n) => n === 'browser_wait_for')).toHaveLength(2);
+    expect(names.filter((n) => n === 'browser_wait_for')).toHaveLength(5);
+  });
+  it('exits early once the page clears', async () => {
+    const { call, names } = stub([ok('Loading...'), ok('Loading...'), ok('results ready')]);
+    expect(await settleIfLoading(call, 'Loading...')).toBe('results ready');
+    expect(names.filter((n) => n === 'browser_wait_for')).toHaveLength(3);
   });
   it('returns previous snapshot on snapshot error', async () => {
     const { call } = stub([{ content: 'boom', isError: true }]);

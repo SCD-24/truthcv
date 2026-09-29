@@ -20,7 +20,7 @@ export interface HarvestBoardRequest {
    * with local-language aliases. */
   location?: string;
   /** A templated search-URL for boards with no on-page search box: e.g.
-   * `https://www.adzuna.de/search?q={keywords}&loc={location}`. `{keywords}`
+   * `https://www.adzuna.de/search?q={keywords}&w={location}`. `{keywords}`
    * is REQUIRED in the template (server-validated); `{location}` is optional.
    * When set, the built URL (see harvestNavigate.ts's `buildSearchUrl`) is
    * used as `board.url` and the snapshot is classified directly — no
