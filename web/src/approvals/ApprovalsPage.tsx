@@ -302,8 +302,14 @@ function PostingUrl({
     return (
       <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
         {safe ? (
-          <Link href={safe} target="_blank" rel="noreferrer" variant="body2">
-            {url}
+          <Link
+            href={safe}
+            title={url}
+            target="_blank"
+            rel="noreferrer"
+            variant="body2"
+          >
+            link
           </Link>
         ) : (
           <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>
@@ -717,8 +723,14 @@ function AppliedRow({ record }: { record: ScreeningRecord }) {
       </Typography>
       {record.url ? (
         safeUrl ? (
-          <Link href={safeUrl} target="_blank" rel="noreferrer" variant="body2">
-            {record.url}
+          <Link
+            href={safeUrl}
+            title={record.url}
+            target="_blank"
+            rel="noreferrer"
+            variant="body2"
+          >
+            link
           </Link>
         ) : (
           <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>
