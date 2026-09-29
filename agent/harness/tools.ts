@@ -29,7 +29,7 @@ import { screenAndRecordPosting, screenAndRecordPostingTool } from './builtins/s
 import { harvestPostings, harvestPostingsTool, type BrowserToolCall } from './builtins/harvestPostings.js';
 
 /**
- * The 19 truthcv tools granted individually by `daily-apply.sh`, as their bare
+ * The truthcv tools granted individually by `daily-apply.sh`, as their bare
  * (un-namespaced) tool names.
  *
  * These are enumerated one by one ON PURPOSE: naming each tool keeps the blast
