@@ -87,10 +87,13 @@ function buildHeaders(opts: AnthropicMessagesOptions): Record<string, string> {
  * An empty prompt contributes no block: the API rejects a text block whose
  * text is empty, and appending one would trade this bug for another.
  */
-function buildSystem(systemPrompt: string, opts: AnthropicMessagesOptions): unknown {
-  if (!isOauth(opts)) return systemPrompt;
+function buildSystem(systemPrompt: string, opts: AnthropicMessagesOptions, cacheEnabled = false): unknown {
+  // A non-empty prompt carries the system-side cache breakpoint (budget: tools 1 + system 1 + messages 2 = 4).
+  const promptBlock: Record<string, unknown> = { type: 'text', text: systemPrompt };
+  if (cacheEnabled) promptBlock.cache_control = { type: 'ephemeral' };
+  if (!isOauth(opts)) return systemPrompt && cacheEnabled ? [promptBlock] : systemPrompt;
   const blocks: unknown[] = [{ type: 'text', text: CLAUDE_CODE_PREAMBLE }];
-  if (systemPrompt) blocks.push({ type: 'text', text: systemPrompt });
+  if (systemPrompt) blocks.push(promptBlock);
   return blocks;
 }
 
@@ -154,8 +157,7 @@ function buildBody(request: ModelRequest, opts: AnthropicMessagesOptions): unkno
   const anthropicMessages = request.messages.map(toAnthropicMessage);
   // Anthropic prompt-caching breakpoints. A request may declare at most 4
   // `cache_control` blocks total; here that budget is spent on the tools array
-  // (1) + at most 2 message breakpoints below = 3, well under 4 (the `system`
-  // field is deliberately left uncached to keep its shape byte-identical). The
+  // (1) + a non-empty system prompt (1) + at most 2 message breakpoints below = 4, the maximum. The
   // first message anchors a stable cached prefix; the last message is a rolling
   // breakpoint that extends the cache as the conversation grows.
   //
@@ -171,7 +173,7 @@ function buildBody(request: ModelRequest, opts: AnthropicMessagesOptions): unkno
   const body: Record<string, unknown> = {
     model: opts.model,
     max_tokens: request.maxTokens ?? 4096,
-    system: buildSystem(request.systemPrompt, opts),
+    system: buildSystem(request.systemPrompt, opts, cacheEnabled),
     messages: anthropicMessages,
   };
   // Omitted entirely when there are no tools, rather than sent as `[]`: the

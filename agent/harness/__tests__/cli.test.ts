@@ -1072,3 +1072,56 @@ describe('--finish-tool', () => {
     expect(code).toBe(ExitCode.UnfinishedRun);
   });
 });
+
+describe('per-stage routes file', () => {
+  const route = (model: string, token: string) => ({
+    authType: 'api_key', token, model, baseUrl: '', provider: 'claude', wire: 'anthropic-messages',
+  });
+  const io = (doc: unknown) => ({
+    readFileText: async (p: string) => (p === 'routes.json' ? JSON.stringify(doc) : ''),
+    readStdin: async () => '',
+  });
+  const RF = ['--routes-file', 'routes.json'];
+
+  it('uses the routes file apply route when no main flags are given', async () => {
+    const c = await resolveConfig(parseArgs([...RF, 'go']), {}, io({ stages: { apply: route('ap', 'A'), screening: null, extract: null } }));
+    expect([c.model, c.token]).toEqual(['ap', 'A']);
+    expect(c.screeningModel).toBe('ap');
+    expect(c.stageRoutes?.extract.model).toBe('ap');
+  });
+
+  it('falls back extract -> screening -> apply', async () => {
+    const c = await resolveConfig(parseArgs([...RF, 'go']), {}, io({ stages: { apply: route('ap', 'A'), screening: route('sc', 'S'), extract: null } }));
+    expect(c.stageRoutes?.extract.model).toBe('sc');
+    expect(c.screeningToken).toBe('S');
+  });
+
+  it('explicit main flags beat the apply route; screening flags beat the screening route', async () => {
+    const doc = { stages: { apply: route('ap', 'A'), screening: route('sc', 'S'), extract: null } };
+    const c = await resolveConfig(
+      parseArgs([...BASE_ARGS, ...RF, '--screening-model', 'flag-sc', 'go']), { AGENT_SCREENING_MODEL: 'env-sc' }, io(doc));
+    expect(c.model).toBe('m');
+    expect(c.screeningModel).toBe('flag-sc');
+    expect(c.screeningToken).toBe('S');
+    const e = await resolveConfig(parseArgs([...BASE_ARGS, ...RF, 'go']), { AGENT_SCREENING_MODEL: 'env-sc' }, io(doc));
+    expect(e.screeningModel).toBe('env-sc');
+  });
+
+  it('redacts every resolved stage token', async () => {
+    const screenCall: ToolCall = {
+      id: 'sc1', name: 'screen_posting',
+      arguments: { url: 'https://example.com/jobs/1', role: 'E', company: 'A', postingText: 'x', profile: 'B', criteria: 'c' },
+    };
+    const leak = [{ type: 'error', message: 'boom key=ROUTE-SCREEN-TOK', retryable: false } as HarnessEvent];
+    const adapter = scriptedAdapter([
+      [{ type: 'toolCall', toolCall: screenCall }, { type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [screenCall] } }],
+      leak, leak, finishRunTurn, [doneEnd],
+    ]);
+    const doc = { stages: { apply: null, screening: route('sc', 'ROUTE-SCREEN-TOK'), extract: route('ex', 'ROUTE-EXTRACT-TOK') } };
+    const { deps, stdout, stderr } = harness(adapter, fakePool(), { readFileText: io(doc).readFileText });
+    await runCli([...BASE_ARGS, ...RF, 'go'], {}, deps);
+    const all = [...stdout, ...stderr].join('\n');
+    expect(all).not.toContain('ROUTE-SCREEN-TOK');
+    expect(all).not.toContain('ROUTE-EXTRACT-TOK');
+  });
+});

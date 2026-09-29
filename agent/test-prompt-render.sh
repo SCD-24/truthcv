@@ -259,6 +259,15 @@ for field in company verdict role url profile remote_arrangement; do
 done
 echo "PASS: daily-apply.sh names every mandatory record_screening argument"
 
+echo "Testing: daily-apply.sh pipeline branch and harness flags..."
+DA_ALL="$(cat "$DAILY_APPLY_SRC")"
+case "$DA_ALL" in *'== "pipeline" ]]'*) ;; *) echo "FAIL: no pipeline branch"; exit 1 ;; esac
+case "$DA_ALL" in *'[[ -n "${AGENT_SCREENING_MODEL:-}" ]] && extra+='*) ;; *) echo "FAIL: --screening-* not conditional"; exit 1 ;; esac
+case "$DA_ALL" in *'--screening-model "${AGENT_SCREENING_MODEL:-'*) echo "FAIL: run_harness still defaults --screening-*"; exit 1 ;; esac
+PIPE_BODY="$(sed -n '/== "pipeline" \]\]; then$/,/^else$/p' "$DAILY_APPLY_SRC" | grep 'printf .Date:' || true)"
+case "$PIPE_BODY" in *RUNBOOK*) echo "FAIL: per-posting prompt carries RUNBOOK text"; exit 1 ;; esac
+echo "PASS: pipeline branch, conditional screening flags, no RUNBOOK in posting prompt"
+
 # Case 7: semi renders SEMI-AUTO and the "Do NOT apply" line.
 echo "Testing: semi mode renders SEMI-AUTO block..."
 MODE_SEMI="$(render_mode "semi")"
@@ -496,12 +505,12 @@ echo "PASS: composed prompt inlines RUNBOOK rules + TOC, not full procedural tex
 # and the per-channel session loop there), so a divergence between this
 # simulation and the real script is a bug in one of the two, not just here.
 
-echo "Testing: AGENT_SESSION_MODE defaults to per-channel in daily-apply.sh..."
-if ! grep -q 'AGENT_SESSION_MODE="\${AGENT_SESSION_MODE:-per-channel}"' "$DAILY_APPLY_SRC"; then
-  echo "FAIL: daily-apply.sh does not default AGENT_SESSION_MODE to per-channel"
+echo "Testing: AGENT_SESSION_MODE defaults to pipeline in daily-apply.sh..."
+if ! grep -q 'AGENT_SESSION_MODE="\${AGENT_SESSION_MODE:-pipeline}"' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: daily-apply.sh does not default AGENT_SESSION_MODE to pipeline"
   exit 1
 fi
-echo "PASS: AGENT_SESSION_MODE defaults to per-channel"
+echo "PASS: AGENT_SESSION_MODE defaults to pipeline"
 
 echo "Testing: single mode still guards the byte-identical composition path..."
 if ! grep -q 'AGENT_SESSION_MODE" == "single" ]]; then' "$DAILY_APPLY_SRC"; then

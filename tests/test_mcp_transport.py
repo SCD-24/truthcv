@@ -60,7 +60,7 @@ def test_mcp_initialize_returns_json_rpc_result(client: TestClient) -> None:
 
 
 def test_mcp_tools_list_returns_seventeen_tools(client: TestClient) -> None:
-    """POST /mcp with tools/list returns exactly seventeen tools with descriptions."""
+    """POST /mcp with tools/list returns exactly the registered tools with descriptions."""
     response = client.post(
         "/mcp",
         json={
@@ -82,7 +82,7 @@ def test_mcp_tools_list_returns_seventeen_tools(client: TestClient) -> None:
     assert "tools" in result, f"Missing tools in result: {result}"
 
     tools = result["tools"]
-    assert len(tools) == 20, f"Expected 20 tools, got {len(tools)}: {[t['name'] for t in tools]}"
+    assert len(tools) == 22, f"Expected 22 tools, got {len(tools)}: {[t['name'] for t in tools]}"
 
     expected_names = {
         "generate_cover_letter",
@@ -105,6 +105,8 @@ def test_mcp_tools_list_returns_seventeen_tools(client: TestClient) -> None:
         "record_postings_seen",
         "record_discovery_coverage",
         "check_gmail_responses",
+        "filter_unscreened_urls",
+        "finish_application",
     }
     actual_names = {t["name"] for t in tools}
     assert actual_names == expected_names, f"Tool names mismatch: {actual_names} vs {expected_names}"

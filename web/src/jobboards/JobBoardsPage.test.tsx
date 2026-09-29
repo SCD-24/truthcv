@@ -81,6 +81,7 @@ function makeConfig(jobBoards: JobBoard[]): AgentConfig {
     cooldownDaysSameCompany: null,
     maxApplicationsPerRun: null,
     maxPostingAgeDays: null,
+    dorkRecency: "d",
     companyBoards: [],
   };
 }

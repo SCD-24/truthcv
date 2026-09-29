@@ -338,6 +338,8 @@ approved these postings, so apply to them before spending time on discovery.
 
 ## Phase 1: discovery
 
+In a pipeline apply session, discovery and screening were already done by code: you are handed one posting, apply to it, then call `finish_application`.
+
 The channels you work this session are named in this run prompt's own
 "## This session" block, if one is present — work ONLY that one channel, and
 call the finish tool that block names (`finish_phase` for a non-final

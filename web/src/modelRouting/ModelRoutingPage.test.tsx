@@ -49,7 +49,9 @@ describe("Model routing page", () => {
     for (const task of TASKS) expect(screen.getByText(task.description)).toBeTruthy();
     expect(screen.getByText("Application agent")).toBeTruthy();
     expect(screen.getByText(/Runs unattended job applications in the browser/)).toBeTruthy();
-    expect(screen.getAllByLabelText(/^model$/i)).toHaveLength(7);
+    expect(screen.getAllByLabelText(/^model$/i)).toHaveLength(9);
+    expect(screen.getByText("Agent screening")).toBeTruthy();
+    expect(screen.getByText("Agent extraction")).toBeTruthy();
     expect(updateRouting).not.toHaveBeenCalled();
   });
 
@@ -67,6 +69,18 @@ describe("Model routing page", () => {
     await vi.waitFor(() => expect(updateRouting).toHaveBeenCalledWith({ agent: { connection: "claude", model: "m" } }));
     fireEvent.click(screen.getAllByRole("button", { name: "Clear" })[5]);
     await vi.waitFor(() => expect(updateRouting).toHaveBeenCalledWith({ agent: null }));
+  });
+
+  it("saves an agent stage route and clears it with null", async () => {
+    setup();
+    await screen.findByText("Agent screening");
+    fireEvent.mouseDown(screen.getAllByLabelText("Connection")[7]);
+    fireEvent.click(screen.getByRole("option", { name: "claude" }));
+    fireEvent.mouseDown(screen.getAllByLabelText(/^model$/i)[7]);
+    fireEvent.click(await screen.findByRole("option", { name: "Model M" }));
+    await vi.waitFor(() => expect(updateRouting).toHaveBeenCalledWith({ agentStages: { screening: { connection: "claude", model: "m" } } }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Clear" })[6]);
+    await vi.waitFor(() => expect(updateRouting).toHaveBeenCalledWith({ agentStages: { screening: null } }));
   });
 
   it("keeps API keys manual and refreshes accounts after a save", async () => {

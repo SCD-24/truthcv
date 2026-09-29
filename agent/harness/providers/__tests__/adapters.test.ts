@@ -254,15 +254,27 @@ describe('provider adapters', () => {
       type: 'text',
       text: "You are Claude Code, Anthropic's official CLI for Claude.",
     });
-    expect(body.system[1]).toEqual({ type: 'text', text: 'you are a test' });
+    expect(body.system[1]).toEqual({ type: 'text', text: 'you are a test', cache_control: { type: 'ephemeral' } });
     expect(init.headers['anthropic-beta']).toBe('oauth-2025-04-20');
     expect(init.headers['authorization']).toBe('Bearer tok');
     expect(init.headers['x-api-key']).toBeUndefined();
   });
 
-  it('leaves an API-key request on the plain string system prompt', async () => {
+  it('caches a non-empty API-key system prompt as a block', async () => {
     stubFetch(200, { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' });
     await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    const call = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const init = call[1] as { headers: Record<string, string>; body: string };
+    expect(JSON.parse(init.body).system).toEqual([
+      { type: 'text', text: 'you are a test', cache_control: { type: 'ephemeral' } },
+    ]);
+    expect(init.headers['anthropic-beta']).toBeUndefined();
+    expect(init.headers['x-api-key']).toBe('k');
+  });
+
+  it('leaves an API-key request on the plain string system prompt when promptCache is false', async () => {
+    stubFetch(200, { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' });
+    await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude', promptCache: false }));
     const call = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
     const init = call[1] as { headers: Record<string, string>; body: string };
     expect(JSON.parse(init.body).system).toBe('you are a test');

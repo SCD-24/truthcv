@@ -54,6 +54,8 @@ const TRUTHCV_ALLOWED_TOOL_NAMES = [
   'start_run',
   'finish_run',
   'finish_phase',
+  'finish_application',
+  'filter_unscreened_urls',
   'record_run_note',
   'record_postings_seen',
   'record_discovery_coverage',

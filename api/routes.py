@@ -1738,7 +1738,12 @@ def get_agent_llm_routes(x_agent_token: str = Header(default="")) -> dict:
     def _creds(route):
         if route is None:
             return None
-        return _credentials_for_route(route).model_dump(by_alias=True)
+        # One stage whose card has no usable credentials must not blank the
+        # others: it resolves to null and the harness falls back per stages.ts.
+        try:
+            return _credentials_for_route(route).model_dump(by_alias=True)
+        except HTTPException:
+            return None
 
     stages = {"apply": _creds(r.agent)}
     for name in modelrouting.AGENT_STAGE_NAMES:
