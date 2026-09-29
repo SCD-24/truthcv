@@ -63,7 +63,7 @@ def run_preflight(tmp_path: Path, extra_env: dict[str, str]) -> subprocess.Compl
 def test_preflight_no_credential_vars(tmp_path):
     result = run_preflight(tmp_path, {})
     assert result.returncode == 0
-    assert "WARN: no LLM credential" in result.stdout
+    assert "WARN: AGENT_API_TOKEN is not set" in result.stdout
 
 
 def test_preflight_with_agent_api_token(tmp_path):
@@ -72,22 +72,18 @@ def test_preflight_with_agent_api_token(tmp_path):
     assert "fetched from app" in result.stdout
 
 
-def test_preflight_with_agent_llm_api_key(tmp_path):
-    result = run_preflight(tmp_path, {"AGENT_LLM_API_KEY": "test-key"})
-    assert result.returncode == 0
-    assert "container-level" in result.stdout
-
-
-def test_preflight_with_ollama_base_url(tmp_path):
+def test_preflight_ignores_container_llm_vars(tmp_path):
     result = run_preflight(
         tmp_path,
         {
+            "AGENT_LLM_API_KEY": "k",
             "AGENT_LLM_PROVIDER": "ollama",
-            "AGENT_LLM_BASE_URL": "http://ollama:11434",
+            "AGENT_LLM_BASE_URL": "http://x",
         },
     )
     assert result.returncode == 0
-    assert "container-level" in result.stdout
+    assert "WARN: AGENT_API_TOKEN is not set" in result.stdout
+    assert "container-level" not in result.stdout
 
 
 def test_preflight_daily_apply_not_executable(tmp_path):
