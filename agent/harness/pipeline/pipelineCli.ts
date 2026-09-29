@@ -99,16 +99,33 @@ async function connect(a: PipelineArgs, env: NodeJS.ProcessEnv, d: Resolved): Pr
   }
 }
 
+/** Whether a tool result failed: an MCP error, or a parsed `{recorded:false}` / `{ok:false}`. */
+function failed(res: { content: string; isError: boolean }): boolean {
+  if (res.isError) return true;
+  try {
+    const v = JSON.parse(res.content) as { recorded?: unknown; ok?: unknown } | null;
+    return !!v && typeof v === 'object' && (v.recorded === false || v.ok === false);
+  } catch {
+    return false;
+  }
+}
+
+/** Args for get_approved_applications: lease to this run and apply the server cap when known. */
+function approvedArgs(runId: string, limit: string | undefined): Record<string, unknown> {
+  const n = Number(limit);
+  return Number.isInteger(n) && n > 0 ? { run_id: runId, limit: n } : { run_id: runId };
+}
+
 /** `start`: open the run, check Gmail, and save the approved queue. */
 async function cmdStart(a: PipelineArgs, mcp: McpCall, d: Resolved): Promise<number> {
   const runId = a.flags['run-id'];
   const out = a.flags.out;
   if (!runId || !out) return fail(d, 'start requires --run-id and --out', ExitCode.BadConfig);
   const started = await mcp('start_run', { run_id: runId, trigger: a.flags.trigger ?? 'scheduled' });
-  if (started.isError) return fail(d, `start_run failed: ${started.content}`, ExitCode.ProviderError);
+  if (failed(started)) return fail(d, `start_run failed: ${started.content}`, ExitCode.ProviderError);
   const gmail = await mcp('check_gmail_responses', {});
   if (gmail.isError) d.stderr(`check_gmail_responses failed: ${gmail.content}`);
-  const approved = await mcp('get_approved_applications', {});
+  const approved = await mcp('get_approved_applications', approvedArgs(runId, a.flags.limit));
   if (approved.isError) return fail(d, `get_approved_applications failed: ${approved.content}`, ExitCode.ProviderError);
   await d.writeOutput(out, approved.content);
   return ExitCode.Success;
@@ -193,12 +210,12 @@ async function cmdFinish(a: PipelineArgs, mcp: McpCall, d: Resolved): Promise<nu
   if (!runId) return fail(d, 'finish requires --run-id', ExitCode.BadConfig);
   const reason = await incompleteReason(a, d);
   let res = await mcp('finish_run', { run_id: runId, status: reason ? 'failed' : 'completed', stopped_reason: reason });
-  if (res.isError && !reason) {
+  if (failed(res) && !reason) {
     // The server's coverage guard refused `completed`: report the shortfall honestly.
     await mcp('finish_run', { run_id: runId, status: 'failed', stopped_reason: `coverage incomplete: ${res.content}`.slice(0, MAX_STOPPED_REASON_CHARS) });
     return ExitCode.ProviderError;
   }
-  return res.isError ? ExitCode.ProviderError : ExitCode.Success;
+  return failed(res) ? ExitCode.ProviderError : ExitCode.Success;
 }
 
 function fail(d: Resolved, message: string, code: number): number {

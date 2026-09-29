@@ -79,7 +79,7 @@ import {
   type LoopOutcome,
   type LoopResult,
 } from './loop.js';
-import { checkAdvertisedBrowserTools } from './tools.js';
+import { checkAdvertisedBrowserTools, sessionDeniedTools } from './tools.js';
 import { type CompactionConfig } from './compaction.js';
 import { discoverContextWindow, type DiscoveredContextWindow } from './contextWindow.js';
 import { parseRoutes, resolveStageRoutes, type ResolvedRoutes, type RoutesDocument, type StageRoute } from './stages.js';
@@ -482,9 +482,9 @@ export async function resolveConfig(
   const f = parsed.flags;
   const prompt = await resolvePrompt(parsed, io);
   const routes = await loadRoutes(f, env, io);
-  // Explicit main flags/env always win over the routes file's apply route.
-  const explicitMain = [f.model, f.token, env.AGENT_LLM_MODEL, env.AGENT_LLM_API_KEY].some((v) => v !== undefined);
-  const applyRoute = explicitMain ? null : routes.apply ?? null;
+  // Field by field: an explicit flag/env value overrides only its own field;
+  // everything else still comes from the routes file's apply route.
+  const applyRoute = routes.apply ?? null;
   const model = f.model ?? env.AGENT_LLM_MODEL ?? applyRoute?.model ?? '';
   const provider = (f.provider ?? env.AGENT_LLM_PROVIDER ?? applyRoute?.provider ?? '') as Provider;
   const wire = (f.wire ?? env.AGENT_LLM_WIRE ?? applyRoute?.wire ?? '') as Wire;
@@ -850,6 +850,7 @@ async function runAgent(
         maxConsecutiveRetries: config.maxConsecutiveRetries,
         maxRetryDelayMs: config.maxRetryDelayMs,
         finishToolName: config.finishToolName,
+        deniedTools: sessionDeniedTools(config.finishToolName),
       },
       compactionConfig,
       screeningAdapter,

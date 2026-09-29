@@ -1090,6 +1090,16 @@ describe('per-stage routes file', () => {
     expect(c.stageRoutes?.extract.model).toBe('ap');
   });
 
+  it('an explicit model overrides only the model; other apply-route fields stay', async () => {
+    const doc = { stages: { apply: route('ap', 'A'), screening: null, extract: null } };
+    const env = await resolveConfig(parseArgs([...RF, 'go']), { AGENT_LLM_MODEL: 'env-m' }, io(doc));
+    expect([env.model, env.token, env.provider, env.wire]).toEqual(['env-m', 'A', 'claude', 'anthropic-messages']);
+    const flag = await resolveConfig(parseArgs([...RF, '--model', 'flag-m', 'go']), {}, io(doc));
+    expect([flag.model, flag.token]).toEqual(['flag-m', 'A']);
+    const scr = await resolveConfig(parseArgs([...RF, '--screening-model', 'sm', 'go']), {}, io({ stages: { apply: route('ap', 'A'), screening: route('sc', 'S'), extract: null } }));
+    expect([scr.screeningModel, scr.screeningToken]).toEqual(['sm', 'S']);
+  });
+
   it('falls back extract -> screening -> apply', async () => {
     const c = await resolveConfig(parseArgs([...RF, 'go']), {}, io({ stages: { apply: route('ap', 'A'), screening: route('sc', 'S'), extract: null } }));
     expect(c.stageRoutes?.extract.model).toBe('sc');

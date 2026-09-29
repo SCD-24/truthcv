@@ -65,6 +65,17 @@ const TRUTHCV_ALLOWED_TOOL_NAMES = [
 /** The MCP server key of the truthcv tool surface the named grants apply to. */
 const TRUTHCV_SERVER_NAME = 'truthcv';
 
+/** Run-lifecycle tools the launcher owns; an apply session must neither see nor call them. */
+export const APPLY_SESSION_DENIED_TOOLS: readonly string[] = ['start_run', 'finish_run', 'finish_phase'];
+
+/** Finish tool that marks a single-posting apply session. */
+const APPLY_FINISH_TOOL = 'finish_application';
+
+/** Session-scoped tool deny set for the given finish tool (empty unless it is an apply session). */
+export function sessionDeniedTools(finishToolName: string | undefined): readonly string[] {
+  return finishToolName === APPLY_FINISH_TOOL ? APPLY_SESSION_DENIED_TOOLS : [];
+}
+
 /**
  * The browser server, now granted as an enumerated allow-list of tool names
  * ({@link BROWSER_ALLOWED_TOOL_NAMES}) rather than as a whole-server grant.
@@ -323,9 +334,12 @@ const DEFAULT_RUNBOOK_PATH = join(dirname(fileURLToPath(import.meta.url)), '..',
  * @returns One {@link RegisteredTool} per allowed input tool, sorted by
  *   `namespacedName` ascending.
  */
-export function buildToolRegistry(mcpTools: ReturnType<McpClientPool['listTools']>): RegisteredTool[] {
+export function buildToolRegistry(
+  mcpTools: ReturnType<McpClientPool['listTools']>,
+  deniedTools: readonly string[] = [],
+): RegisteredTool[] {
   const mcp = mcpTools
-    .filter((tool: NamespacedTool) => isToolAllowed(tool.serverName, tool.toolName))
+    .filter((tool: NamespacedTool) => isToolAllowed(tool.serverName, tool.toolName) && !deniedTools.includes(tool.toolName))
     .map((tool: NamespacedTool) => ({
       namespacedName: tool.namespacedName,
       serverName: tool.serverName,
@@ -470,9 +484,10 @@ export async function executeToolCall(
   maxContentChars: number = DEFAULT_MAX_TOOL_RESULT_CHARS,
   runbookPath: string = DEFAULT_RUNBOOK_PATH,
   screeningAdapter?: ProviderAdapter,
+  deniedTools: readonly string[] = [],
 ): Promise<ToolResult> {
   const tool = registry.find((t) => t.namespacedName === call.name);
-  if (!tool) {
+  if (!tool || deniedTools.includes(tool.toolName)) {
     return { toolCallId: call.id, content: `Unknown tool: '${call.name}' is not registered.`, isError: true };
   }
   // The built-in RUNBOOK reader is dispatched here, BEFORE the allow-list and

@@ -263,6 +263,20 @@ type back the string it returns, verbatim.** Never invent, round, or
 otherwise compute a salary number yourself — that number is the tool's job,
 not yours.
 
+## Apply session
+
+**This section overrides any run-lifecycle instructions elsewhere in this
+prompt (including "Your tools"): `start_run`, `finish_run` and `finish_phase`
+are owned by the launcher and are not available to you.**
+
+In a pipeline apply session you are handed exactly one posting. Do not call
+`start_run` or `finish_run` — the launcher owns the run's lifecycle. End the
+session by calling `finish_application`, never `finish_run`, and keep passing
+the run id you were given on every tool call that accepts one.
+
+An approved-queue entry with a non-empty `blocked_reason` must NOT be applied
+to: report it via `finish_application` and stop.
+
 ## Run identity
 
 Your run id for this run is given to you separately (under "Run identity" in

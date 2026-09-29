@@ -231,6 +231,8 @@ export interface LoopConfig {
    * for every non-final session.
    */
   finishToolName?: string;
+  /** Bare tool names neither advertised nor dispatchable in this session. */
+  deniedTools?: readonly string[];
 }
 
 /**
@@ -525,7 +527,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
     unfinishedNudges: 0,
   };
   while (true) {
-    const registry = await diagnostic.time('registry_refresh', () => refreshRegistry(pool), { turn: state.turns });
+    const registry = await diagnostic.time('registry_refresh', () => refreshRegistry(pool, config.deniedTools), { turn: state.turns });
     state.messages = await maybeCompact(state, compactionConfig, adapter, onEvent, diagnostic);
     const tools = registry.map((r) => r.definition);
     const request: ModelRequest = { systemPrompt, messages: state.messages, tools };
@@ -553,9 +555,9 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
 }
 
 /** Refresh the live tool list and build a fresh registry for this turn. */
-async function refreshRegistry(pool: McpClientPool): Promise<RegisteredTool[]> {
+async function refreshRegistry(pool: McpClientPool, deniedTools?: readonly string[]): Promise<RegisteredTool[]> {
   await pool.refreshTools();
-  return buildToolRegistry(pool.listTools());
+  return buildToolRegistry(pool.listTools(), deniedTools);
 }
 
 /**

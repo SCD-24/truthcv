@@ -943,12 +943,18 @@ elif [[ "$AGENT_SESSION_MODE" == "pipeline" ]]; then
   PIPE_ISSUES=""
   PIPE_FLAGS=(--mcp-config "$MCP_CONFIG" --run-id "$TRUTHCV_RUN_ID")
   [[ -n "$ROUTES_FILE" ]] && PIPE_FLAGS+=(--routes-file "$ROUTES_FILE")
+  # start/finish need no model: no credentials at all. Only discover-screen
+  # (pipe_cli_model) gets them, through the environment - never argv.
   pipe_cli() {
-    node "$PIPELINE_CLI" "$@" "${PIPE_FLAGS[@]}" \
-      --model "$AGENT_MODEL" --provider "$AGENT_LLM_PROVIDER" --wire "$AGENT_LLM_WIRE" \
-      --auth-type "$AGENT_LLM_AUTH_TYPE" --token "$AGENT_LLM_API_KEY" --base-url "$AGENT_LLM_BASE_URL" \
-      </dev/null >>"$RUN_LOG" 2>&1
+    node "$PIPELINE_CLI" "$@" "${PIPE_FLAGS[@]}" </dev/null >>"$RUN_LOG" 2>&1
   }
+  pipe_cli_model() {
+    AGENT_LLM_MODEL="$AGENT_MODEL" AGENT_LLM_PROVIDER="$AGENT_LLM_PROVIDER" AGENT_LLM_WIRE="$AGENT_LLM_WIRE" \
+      AGENT_LLM_AUTH_TYPE="$AGENT_LLM_AUTH_TYPE" AGENT_LLM_API_KEY="$AGENT_LLM_API_KEY" AGENT_LLM_BASE_URL="$AGENT_LLM_BASE_URL" \
+      pipe_cli "$@"
+  }
+  START_ARGS=(start --out "$PIPE_DIR/approved.json")
+  [[ "$APPLY_CAP" =~ ^[1-9][0-9]*$ ]] && START_ARGS+=(--limit "$APPLY_CAP")
   note_rc() { # name rc: record the first failure and any non-zero rc
     (( $2 == 0 )) && return 0
     PIPE_ISSUES="${PIPE_ISSUES:+$PIPE_ISSUES | }$1 rc=$2"
@@ -959,30 +965,34 @@ elif [[ "$AGENT_SESSION_MODE" == "pipeline" ]]; then
   APPROVED_FILE="$PIPE_DIR/approved.json"; PASSES_FILE="$PIPE_DIR/passes.json"
   CRITERIA_FILE="$PIPE_DIR/criteria.json"; JOB_FILE="$PIPE_DIR/job.json"
   SYSTEM_FILE="$PIPE_DIR/apply-system.txt"
-  pipe_cli start --out "$APPROVED_FILE"; note_rc start $?
+  pipe_cli "${START_ARGS[@]}"; note_rc start $?
   if (( FINAL_RC == 0 )); then
     printf '%s' "$JOB_CONFIG" >"$JOB_FILE"
     NAMES_JSON="$(jq -c '[.profiles[] | select(.enabled == true) | .name]' <<<"$JOB_CONFIG")"
     TEXTS_JSON="$(jq -c "[$PROFILE_CRITERIA_JQ]" <<<"$JOB_CONFIG")"
     jq -n --argjson n "$NAMES_JSON" --argjson t "$TEXTS_JSON" '[range(0; $n|length) | {key: $n[.], value: $t[.]}] | from_entries' >"$CRITERIA_FILE"
-    pipe_cli discover-screen --job-config "$JOB_FILE" --criteria "$CRITERIA_FILE" --out "$PASSES_FILE"; note_rc discover-screen $?
+    pipe_cli_model discover-screen --job-config "$JOB_FILE" --criteria "$CRITERIA_FILE" --out "$PASSES_FILE"; note_rc discover-screen $?
     node "$PIPELINE_CLI" stage-prompt apply >"$SYSTEM_FILE" 2>>"$RUN_LOG"; note_rc stage-prompt $?
   fi
   if (( FINAL_RC == 0 || FINAL_RC == 3 )) && [[ -s "$SYSTEM_FILE" ]]; then
     APPLY_ITEMS=()
     if [[ -s "$APPROVED_FILE" ]]; then
-      while IFS= read -r ITEM; do [[ -n "$ITEM" ]] && APPLY_ITEMS+=("approved:$ITEM"); done < <(jq -c 'if type == "array" then .[] else ((.applications // .approved // [])[]) end' "$APPROVED_FILE" 2>/dev/null)
+      while IFS= read -r ITEM; do [[ -n "$ITEM" ]] && APPLY_ITEMS+=("approved:$ITEM"); done < <(jq -c '(if type == "array" then .[] else ((.applications // .approved // [])[]) end) | select((.blocked_reason // "") == "")' "$APPROVED_FILE" 2>/dev/null)
     fi
-    if [[ -s "$PASSES_FILE" ]]; then
+    # Semi-auto leaves new passes for operator approval; only full auto applies to them.
+    if [[ "$AGENT_MODE" == "full" && -s "$PASSES_FILE" ]]; then
       while IFS= read -r ITEM; do [[ -n "$ITEM" ]] && APPLY_ITEMS+=("pass:$ITEM"); done < <(jq -c '.passes[]?' "$PASSES_FILE" 2>/dev/null)
     fi
+    LAUNCHED=0 # local budget: a failed run-count read must never exceed the cap
     for ENTRY in "${APPLY_ITEMS[@]:-}"; do
       [[ -z "$ENTRY" ]] && continue
+      if [[ "$APPLY_CAP" =~ ^[1-9][0-9]*$ ]] && (( LAUNCHED >= APPLY_CAP )); then break; fi
       KIND="${ENTRY%%:*}"; POSTING="${ENTRY#*:}"
       REMAINING_LINE="$(render_remaining_line "$APPLY_CAP")"
       if [[ "$KIND" == pass && "$APPLY_CAP" =~ ^[1-9][0-9]*$ && "$REMAINING_LINE" == *"remaining this run: 0" ]]; then break; fi
       POSTING_PROMPT_FILE="$(mktemp "$PIPE_DIR/posting.XXXXXX")"
       printf 'Date: %s\nRun id: %s\nKind: %s\nPosting: %s\n%s\n' "$(date +%Y-%m-%d)" "$TRUTHCV_RUN_ID" "$KIND" "$POSTING" "$REMAINING_LINE" >"$POSTING_PROMPT_FILE"
+      LAUNCHED=$((LAUNCHED + 1))
       log "session start: apply posting ($KIND)"
       run_harness "$POSTING_PROMPT_FILE" finish_application "$SYSTEM_FILE"
       SESSION_RC=$?

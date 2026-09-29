@@ -45,7 +45,7 @@ export const STAGE_REGISTRY = [
       'Both documents go up — the CV **and** the letter, but never at the CV\'s cost',
       '6. The approve/deny boundary',
     ],
-    promptSections: ['Your tools', 'Run identity', 'The approve/deny boundary', 'Autonomy mode'],
+    promptSections: ['Apply session', 'Your tools', 'The approve/deny boundary', 'Autonomy mode'],
   },
   { name: 'screening', fallback: 'apply' },
   { name: 'extract', fallback: 'screening' },
