@@ -408,14 +408,16 @@ To generate `ENCRYPTION_KEY` or `AGENT_API_TOKEN` by hand, see step 2 of
 | `LLM_PROVIDER` | `anthropic` \| `openai` \| `ollama` — provider fallback when neither a default/task route nor a migrated provider choice is saved (defaults to `anthropic` when unset); connecting an account alone does not override it. (`fake` is accepted for tests only.) |
 | `LLM_MODEL` | Optional model id fallback after saved routes and any migrated model choice; blank uses the provider's default. Set a route on Model routing to override it. |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Fallback credential for the selected provider when its saved credential is unavailable. |
-| `OLLAMA_HOST` | Ollama endpoint (compose sets this automatically). |
+| `OLLAMA_HOST` | Ollama endpoint. Compose defaults it to `http://ollama:11434`; outside Docker the provider defaults to localhost when it is absent. Leave it commented out in `.env` — an uncommented localhost value breaks the Compose ollama profile. |
 | `RUN_AT` / `RUN_DAYS` | Fallback agent schedule (defaults `09:00,15:00` and `1,2,3,4,5`, Monday–Friday), used only when the agent config API is unreachable. |
 | `TZ` | Fallback timezone the agent's schedule and logs are interpreted in (default `UTC`). The Agents page's schedule timezone takes precedence. |
-| `AGENT_LLM_PROVIDER` / `AGENT_LLM_MODEL` | Optional container-level fallback provider and model for the unattended agent's harness; the primary source is the app's routed credentials (Application agent route). Blank by default. |
-| `AGENT_LLM_API_KEY` | Optional fallback API key/token for the agent's provider. Required by the harness for every provider except when a base URL alone suffices (Ollama needs `AGENT_LLM_BASE_URL` instead). |
+| `AGENT_LLM_PROVIDER` / `AGENT_LLM_MODEL` | Optional container-level fallback provider and model for the unattended agent's harness, read only when `AGENT_API_TOKEN` is empty (which aborts Compose runs, so no practical effect today); the real source is the app's routed credentials (Application agent route). Blank by default. |
+| `AGENT_LLM_API_KEY` | Optional fallback API key/token for the agent's provider, used only when `AGENT_API_TOKEN` is empty (which aborts Compose runs). Required by the harness for every provider except when a base URL alone suffices (Ollama needs `AGENT_LLM_BASE_URL` instead). |
 | `AGENT_LLM_BASE_URL` | Optional fallback base URL for the agent's provider; required for Ollama. |
 | `AGENT_LLM_AUTH_TYPE` | `oauth` \| `api_key` \| `url` — only needed for `AGENT_LLM_PROVIDER=claude` via an OAuth subscription; leave empty otherwise. |
-| `AGENT_MAX_TURNS` | Cap on harness turns per application session (default `400` under Compose, via `docker-compose.yml` and `agent/daily-apply.sh`; the harness's own built-in default is `40`). |
+| `AGENT_MAX_TURNS` | Cap on harness turns per application session (default `400` under Compose, via `docker-compose.yml` and `agent/daily-apply.sh`; the harness's own built-in default is `40`). A runaway backstop; the operational bound is the Agents page's max-applications-per-run setting. |
+| `AGENT_MAX_RETRIES` | Cap on consecutive retryable-error retries within one turn (default `12`). |
+| `AGENT_MAX_RETRY_DELAY_MS` | Ceiling on a single retry's backoff delay in ms (default `300000`, 5 minutes). |
 | `AGENT_MAX_TOOL_RESULT_CHARS` | Cap on one MCP tool result's characters before it enters the conversation (default `24000`); longer results are truncated with a marker naming how many characters were cut. Must be a positive integer. |
 | `AGENT_PROMPT_CACHE` | On/off switch for Anthropic prompt-cache breakpoints (default `true`; only the literal `false` turns it off). Anthropic wire only. |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Optional — Google OAuth client credentials backing the Gmail connection. See [Gmail response tracking](#gmail-response-tracking-optional) above for full setup steps. Unset, connecting Gmail reports "Google OAuth is not configured on the server." |
