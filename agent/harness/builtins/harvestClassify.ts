@@ -11,7 +11,7 @@
  */
 
 import type { BlockKind, HarvestBoardRequest, HarvestBoardResult, HarvestedPosting } from './harvestTypes.js';
-import { extractDorkPostings, parseDorkTarget } from './harvestDork.js';
+import { GOOGLE_HOST_RE, extractDorkPostings, parseDorkTarget } from './harvestDork.js';
 import { compactSnapshot } from './harvestExcerpt.js';
 import { globToRegExp, resolveLinks, resolveSnapshotBase, sameSiteLinkQualifies, stripHash, type ResolvedLink } from './harvestLinks.js';
 
@@ -45,6 +45,8 @@ const CONSENT_WALL_PATTERNS: readonly RegExp[] = [
   /\baccept all cookies\b/i,
   /\bwe value your privacy\b/i,
   /\bmanage (?:cookie|consent) preferences\b/i,
+  /\bbefore you continue to google\b/i,
+  /\bbevor (?:sie|du) zu google weiter/i,
 ];
 
 /** Regexes matching a bot-check interstitial's own wording — deliberately
@@ -76,6 +78,8 @@ const EMPTY_PHRASES: readonly string[] = [
   'keine jobs gefunden',
   'keine stellen gefunden',
   'keine stellenangebote gefunden',
+  'did not match any documents',
+  'übereinstimmenden dokumente gefunden',
 ];
 
 /** Matches an explicit "zero results" count on a NUMBER boundary, so "10
@@ -196,6 +200,26 @@ export function isExplicitlyEmpty(text: string): boolean {
   return containsPhrase(text, EMPTY_PHRASES) || ZERO_RESULTS_RE.test(text);
 }
 
+/** Prefix of Google's consent host (consent.google.<tld>). */
+const GOOGLE_CONSENT_PREFIX = 'consent.';
+
+/** Path prefix of Google's rate-limit interstitial. */
+const GOOGLE_SORRY_PATH = '/sorry';
+
+/** Whether `base` is a Google consent (consent.google.<tld>) or rate-limit
+ * (google.<tld>/sorry...) interstitial URL. False if `base` fails to parse. */
+export function isGoogleInterstitial(base: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(base);
+  } catch {
+    return false;
+  }
+  const host = url.hostname.toLowerCase();
+  if (host.startsWith(GOOGLE_CONSENT_PREFIX)) return GOOGLE_HOST_RE.test(host.slice(GOOGLE_CONSENT_PREFIX.length));
+  return GOOGLE_HOST_RE.test(host) && url.pathname.startsWith(GOOGLE_SORRY_PATH);
+}
+
 /** Which kind of unreadable wall `text` shows, or `undefined` if none. */
 function detectWallKind(text: string): 'login' | 'wall' | undefined {
   if (matchesAny(text, LOGIN_WALL_PATTERNS)) return 'login';
@@ -264,6 +288,9 @@ export function classifySnapshot(board: HarvestBoardRequest, snapshot: string): 
   if (postings.length > 0) {
     const note = `${postings.length} posting(s) extracted by ${tierLabel(postings[0].ats)}`;
     return { ...base, outcome: 'searched', tier: 'harvest', postings, note };
+  }
+  if (isGoogleInterstitial(resolveSnapshotBase(board, snapshot))) {
+    return blockedResult(board, 'Google consent/rate-limit interstitial blocked the search results from being read', 'wall');
   }
   if (isExplicitlyEmpty(snapshot)) {
     return { ...base, outcome: 'empty', tier: '', postings: [], note: 'search ran; the board reported no matches' };

@@ -16,7 +16,11 @@ const CHILD_URL_RE = /^\s*-\s*\/url:\s*(\S+)/;
 const PAGE_URL_RE = /^\s*-\s*Page URL:\s*(\S+)/i;
 
 /** Matches result/zero-result/count wording worth keeping. */
-const RESULT_TEXT_RE = /\b(?:results?|jobs?|openings?|positions?|matches|treffer|ergebnisse|stellen)\b/i;
+const RESULT_TEXT_RE = /\b(?:results?|jobs?|openings?|positions?|matches|treffer|ergebnisse|stellen|documents?|dokumente)\b/i;
+
+/** Max fraction of the post-Page-URL budget result-text lines may claim
+ * before link lines get their turn. */
+const RESULT_TEXT_SHARE = 0.5;
 
 /** Bytes reserved for JSON envelope growth (escaping, notes) when fitting. */
 const RESULT_SAFETY_RESERVE_CHARS = 1500;
@@ -67,23 +71,69 @@ function hardCap(text: string, max: number): string {
   return text.slice(0, end);
 }
 
+/** Line indices of a snapshot, grouped by what {@link compactSnapshot} keeps. */
+interface LineClasses {
+  pageUrl: number[][];
+  results: number[][];
+  groups: number[][];
+}
+
+/** Split line indices into the Page URL line(s), result-wording lines and
+ * link groups (link line plus its `/url:` child), each as index arrays. */
+function classifyLines(lines: string[]): LineClasses {
+  const pageUrl: number[][] = [];
+  const results: number[][] = [];
+  const groups: number[][] = [];
+  const claimed = new Set<number>();
+  lines.forEach((line, i) => {
+    if (!LINK_TAG_RE.test(line)) return;
+    const group = new Set<number>([i]);
+    keepChildUrl(lines, i, group);
+    group.forEach((j) => claimed.add(j));
+    groups.push([...group].sort((a, b) => a - b));
+  });
+  // A link's `/url:` child (e.g. ".../jobs/123") must not also take priority
+  // budget on its own, or it would crowd out the link lines it belongs to.
+  lines.forEach((line, i) => {
+    if (claimed.has(i)) return;
+    if (PAGE_URL_RE.test(line)) pageUrl.push([i]);
+    else if (RESULT_TEXT_RE.test(line)) results.push([i]);
+  });
+  return { pageUrl, results, groups };
+}
+
+/** Add each whole group not already kept to `keep` in order while it fits
+ * `budget`; returns the budget left. */
+function fillBudget(lines: string[], groups: number[][], budget: number, keep: Set<number>): number {
+  let left = budget;
+  for (const group of groups) {
+    if (group.every((i) => keep.has(i))) continue;
+    const cost = group.reduce((sum, i) => sum + lines[i].length + 1, 0);
+    if (cost > left) continue;
+    group.forEach((i) => keep.add(i));
+    left -= cost;
+  }
+  return left;
+}
+
 /**
  * Reduce `snapshot` to at most `maxChars`, keeping in original order the
- * Page URL line, every link line with its `/url:` child, and result-count
- * wording lines, then hard-capping.
+ * Page URL line, result-count wording lines and link lines with their
+ * `/url:` child. When they exceed `maxChars`, the Page URL is guaranteed
+ * first, then result-text lines up to {@link RESULT_TEXT_SHARE} of what is
+ * left (so wording cannot crowd out every link), then link lines in document
+ * order, then any remaining result-text lines. The result is then hard-capped.
  */
 export function compactSnapshot(snapshot: string, maxChars: number): CompactedSnapshot {
   if (snapshot.length <= maxChars) return { text: snapshot, truncated: false, omittedChars: 0 };
   const lines = snapshot.split('\n');
   const keep = new Set<number>();
-  lines.forEach((line, i) => {
-    if (LINK_TAG_RE.test(line)) {
-      keep.add(i);
-      keepChildUrl(lines, i, keep);
-    } else if (PAGE_URL_RE.test(line) || RESULT_TEXT_RE.test(line)) {
-      keep.add(i);
-    }
-  });
+  const { pageUrl, results, groups } = classifyLines(lines);
+  let left = fillBudget(lines, pageUrl, maxChars, keep);
+  const resultCap = Math.floor(left * RESULT_TEXT_SHARE);
+  left += fillBudget(lines, results, resultCap, keep) - resultCap;
+  left = fillBudget(lines, groups, left, keep);
+  fillBudget(lines, results, left, keep);
   const kept = lines.filter((_, i) => keep.has(i)).join('\n');
   const text = hardCap(kept, maxChars);
   return { text, truncated: true, omittedChars: snapshot.length - text.length };
