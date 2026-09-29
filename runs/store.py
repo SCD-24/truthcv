@@ -27,6 +27,10 @@ from .model import RunRecord, new_id, validate_status
 # runs.json cannot grow without bound over the life of the deployment.
 _MAX_RECORDS = 200
 
+# Caps on per-item error detail stored on a finished run.
+MAX_ITEM_ERRORS = 100
+MAX_ITEM_ERROR_CHARS = 2000
+
 
 def runs_path() -> Path:
     return data_dir() / "runs.json"
@@ -306,6 +310,8 @@ def finish(
     status: str = "completed",
     stopped_reason: str = "",
     note: str = "",
+    items_failed: int = 0,
+    item_errors: list[str] | None = None,
 ) -> RunRecord | None:
     """Close out a run record with its terminal status and coverage answer."""
     with locked(runs_path()):
@@ -318,5 +324,13 @@ def finish(
         record.stopped_reason = stopped_reason
         if note:
             record.note = note
+        # Only overwrite when reported: a later finish call that omits them
+        # (e.g. a status correction) must not erase recorded failures.
+        if items_failed or item_errors:
+            record.items_failed = max(0, int(items_failed))
+            record.item_errors = [
+                str(e)[:MAX_ITEM_ERROR_CHARS]
+                for e in (item_errors or [])[:MAX_ITEM_ERRORS]
+            ]
         _write_all(runs)
         return record

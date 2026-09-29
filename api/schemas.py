@@ -1391,6 +1391,8 @@ class RunModel(_Camel):
     blocked_count: int = 0
     applications_submitted: int = 0
     queued_for_approval: int = 0
+    items_failed: int = 0
+    item_errors: list[str] = Field(default_factory=list)
     over_cap_writes: int = 0
     stopped_reason: str = ""
     note: str = ""
