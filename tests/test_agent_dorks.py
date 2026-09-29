@@ -135,35 +135,31 @@ def test_url_is_percent_encoded_and_carries_recency_param():
     p = JobProfile(name="p", enabled=True, keywords=["platform engineer"])
     entry = dorks.compose_queries([p], None, ["ashby"])[0]
     assert "%22platform+engineer%22" in entry["url"] or "%22platform%20engineer%22" in entry["url"]
-    assert entry["url"].endswith("&tbs=qdr:w")
+    assert entry["url"].endswith("&tbs=qdr:d")
     assert unquote_plus(entry["url"].split("q=")[1].split("&tbs=")[0]) == entry["query"]
 
 
-def test_total_is_truncated_at_max_queries():
+def test_all_queries_are_returned_uncapped():
     profiles = [
-        JobProfile(name=f"p{i}", enabled=True, keywords=["backend"])
+        JobProfile(name=f"p{i}", enabled=True, keywords=[f"backend{i}"])
         for i in range(10)
     ]
     entries = dorks.compose_queries(profiles)
-    assert len(entries) <= dorks.MAX_QUERIES
-    assert len(entries) == dorks.MAX_QUERIES  # 10 profiles * 4 default sources = 40 > 24
+    assert len(entries) == 40  # 10 profiles * 4 default sources
 
 
 def test_budget_is_shared_round_robin_so_no_profile_is_starved():
-    """Regression: filling MAX_QUERIES profile-by-profile (extend, then check
-    the cap) let early profiles exhaust the whole budget before a later
-    profile ever contributed a query. With enough boards to exceed the cap,
-    every enabled, keyword-bearing profile must still get at least one."""
+    """Queries interleave round-robin, so the first round covers every profile."""
     boards = ["ashby", "greenhouse", "lever", "linkedin", "wellfound", "indeed"]
     profiles = [
-        JobProfile(name=f"p{i}", enabled=True, keywords=["backend"])
+        JobProfile(name=f"p{i}", enabled=True, keywords=[f"backend{i}"])
         for i in range(6)
     ]
     entries = dorks.compose_queries(profiles, None, boards)
 
-    assert len(entries) == dorks.MAX_QUERIES
-    profile_names = {e["profile"] for e in entries}
-    assert profile_names == {p.name for p in profiles}
+    expected = sum(len(dorks.compose_profile_queries(p, None, boards)) for p in profiles)
+    assert len(entries) == expected
+    assert {e["profile"] for e in entries[:6]} == {p.name for p in profiles}
 
 
 def test_disabled_and_keywordless_profiles_are_excluded_before_sharing_the_budget():
@@ -183,10 +179,10 @@ def _url(days):
     return dorks.compose_queries([p], days, ["ashby"])[0]["url"]
 
 
-def test_unset_window_keeps_the_historical_past_week_filter():
-    """None must not silently widen discovery on an existing config: these URLs
-    have always carried qdr:w, and introducing the setting changes nothing."""
-    assert "&tbs=qdr:w" in _url(None)
+def test_unset_window_defaults_to_the_past_24_hours():
+    """None means Google's past-24h filter (qdr:d), not the old past week."""
+    assert "&tbs=qdr:d" in _url(None)
+    assert "qdr:w" not in _url(None)
 
 
 def test_zero_days_disables_the_recency_filter_entirely():
@@ -206,7 +202,7 @@ def test_negative_window_is_treated_as_disabled_not_as_a_malformed_url():
 
 
 def test_recency_param_values():
-    assert dorks.recency_param(None) == "qdr:w"
+    assert dorks.recency_param(None) == "qdr:d"
     assert dorks.recency_param(0) == ""
     assert dorks.recency_param(7) == "qdr:d7"
 
@@ -344,8 +340,8 @@ def test_compose_direct_boards_empty_when_no_direct_boards():
 # ---------------------------------------------------------------------------
 
 
-def _big_profile():
-    keywords = [f"Skill{i} Engineer" for i in range(80)]
+def _big_profile(prefix="Skill"):
+    keywords = [f"{prefix}{i} Engineer" for i in range(80)]
     return JobProfile(
         name="big",
         enabled=True,
@@ -431,11 +427,39 @@ def test_padded_titles_are_stripped_so_budget_holds():
     assert all('"Backend Engineer"' in e["query"] for e in entries)
 
 
-def test_max_queries_cap_and_round_robin_hold_with_chunking():
-    profiles = [_big_profile() for _ in range(3)]
+def test_all_chunked_queries_returned_and_interleaved():
+    profiles = [_big_profile(f"S{i}x") for i in range(3)]
     for i, p in enumerate(profiles):
         p.name = f"big{i}"
     entries = dorks.compose_queries(profiles, None, ["ashby"])
-    assert len(entries) == dorks.MAX_QUERIES
-    profile_names = {e["profile"] for e in entries}
-    assert profile_names == {p.name for p in profiles}
+    expected = sum(len(dorks.compose_profile_queries(p, None, ["ashby"])) for p in profiles)
+    assert len(entries) == expected
+    assert [e["profile"] for e in entries[:3]] == ["big0", "big1", "big2"]
+
+
+def test_identical_profiles_dedupe_to_first_profile():
+    a = JobProfile(name="first", enabled=True, keywords=["backend"])
+    b = JobProfile(name="second", enabled=True, keywords=["backend"])
+    entries = dorks.compose_queries([a, b], None, ["ashby"])
+    assert len(entries) == 1
+    assert entries[0]["profile"] == "first"
+
+
+def test_profiles_differing_only_in_locations_are_both_kept():
+    a = JobProfile(name="a", enabled=True, keywords=["backend"], locations=["Berlin"])
+    b = JobProfile(name="b", enabled=True, keywords=["backend"], locations=["Paris"])
+    entries = dorks.compose_queries([a, b], None, ["ashby"])
+    assert [e["profile"] for e in entries] == ["a", "b"]
+
+
+def test_dedupe_preserves_surviving_order():
+    a = JobProfile(name="a", enabled=True, keywords=["backend"])
+    b = JobProfile(name="b", enabled=True, keywords=["backend"])
+    c = JobProfile(name="c", enabled=True, keywords=["frontend"])
+    entries = dorks.compose_queries([a, b, c], None, ["ashby", "greenhouse"])
+    assert [(e["profile"], e["source"]) for e in entries] == [
+        ("a", "jobs.ashbyhq.com"),
+        ("c", "jobs.ashbyhq.com"),
+        ("a", "job-boards.greenhouse.io"),
+        ("c", "job-boards.greenhouse.io"),
+    ]

@@ -26,8 +26,6 @@ from urllib.parse import quote_plus
 from agentconfig.boards import DEFAULT_BOARD_DOMAINS, is_api_source, resolve_domain, resolve_signin_url
 from agentconfig.store import JobBoard, JobProfile
 
-MAX_QUERIES = 24
-
 # Google's search box silently truncates a query beyond roughly this many
 # whitespace-separated words; discovery must keep every composed query at
 # or under it so location/remote/exclusion terms are never dropped.
@@ -51,12 +49,15 @@ TITLE_NOUNS = frozenset({
     "researcher",
 })
 
-DEFAULT_RECENCY = "qdr:w"
+# Google's past-24-hours filter: an unset window searches only fresh postings.
+DEFAULT_RECENCY = "qdr:d"
 
 
 def recency_param(max_posting_age_days: int | None) -> str:
     """Google ``tbs`` recency value for a freshness window, or "" for none.
-    ...
+
+    ``None`` (unset) yields DEFAULT_RECENCY, the past 24 hours; a value <= 0
+    disables the filter (""); N days yields ``qdr:dN``.
     """
     if max_posting_age_days is None:
         return DEFAULT_RECENCY
@@ -173,7 +174,7 @@ def _resolve_sources(boards: list[JobBoard] | None) -> list[str]:
     EFFECTIVE mode (and its ``enabled`` flag) can be honoured: a board whose
     effective mode is "direct" is skipped here entirely — the agent searches
     it on-site instead (see compose_direct_boards) and it must not also
-    consume a `site:` dork slot against MAX_QUERIES. A disabled board
+    consume a `site:` dork slot. A disabled board
     (``enabled`` False) is skipped the same way.
 
     API-backed boards (agentconfig.boards.API_BOARD_SOURCES) are SKIPPED here
@@ -320,14 +321,11 @@ def _profile_queries_for_chunk(
     return results
 
 
-def _round_robin(query_lists: list[list[dict]], limit: int) -> list[dict]:
-    """Interleave several query lists one-per-round, capped at ``limit`` total.
+def _round_robin(query_lists: list[list[dict]]) -> list[dict]:
+    """Interleave several query lists one-per-round (A q1, B q1, A q2, ...).
 
-    Filling profiles one at a time (extend, then check the cap) lets an early
-    profile with enough boards consume the whole budget before a later
-    profile ever contributes a query. Taking one query per round from each
-    list in turn instead gives every profile a fair share of its boards
-    before a well-supplied profile gets a second query.
+    Nothing is dropped; the interleave just spreads every profile's queries
+    evenly so no profile's queries are all bunched at the end.
     """
     results: list[dict] = []
     for round_group in zip_longest(*query_lists):
@@ -335,9 +333,23 @@ def _round_robin(query_lists: list[list[dict]], limit: int) -> list[dict]:
             if item is None:
                 continue
             results.append(item)
-            if len(results) >= limit:
-                return results
     return results
+
+
+def _dedupe_by_url(entries: list[dict]) -> list[dict]:
+    """Drop entries whose ``url`` was already seen; the first occurrence wins.
+
+    Profiles with identical search intent compose identical URLs; only the
+    first keeps its ``profile`` tag. Order of survivors is preserved.
+    """
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for entry in entries:
+        if entry["url"] in seen:
+            continue
+        seen.add(entry["url"])
+        unique.append(entry)
+    return unique
 
 
 def compose_queries(
@@ -345,12 +357,12 @@ def compose_queries(
     max_posting_age_days: int | None = None,
     sources: list[JobBoard | str] | None = None,
 ) -> list[dict]:
-    """Compose dork queries for every enabled, keyword-bearing profile, capped at MAX_QUERIES.
+    """Compose dork queries for every enabled, keyword-bearing profile.
 
-    The MAX_QUERIES budget is distributed round-robin across profiles (see
-    ``_round_robin``) rather than filled profile-by-profile, so a run with
-    enough boards to exceed the cap still gives every enabled, keyword-bearing
-    profile at least one query instead of starving the later ones.
+    Every composed query is returned (no cap), interleaved round-robin across
+    profiles (see ``_round_robin``), then de-duplicated by URL (see
+    ``_dedupe_by_url``) so identical searches from different profiles appear
+    once, tagged with the first profile.
 
     ``sources`` is the operator's globally configured job boards, shared
     across all profiles; ``None`` means the four defaults (legacy), while an
@@ -361,4 +373,4 @@ def compose_queries(
     per_profile = [
         compose_profile_queries(p, max_posting_age_days, sources) for p in eligible
     ]
-    return _round_robin(per_profile, MAX_QUERIES)
+    return _dedupe_by_url(_round_robin(per_profile))
