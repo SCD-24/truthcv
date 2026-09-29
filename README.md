@@ -1,5 +1,4 @@
 # TruthCV
-For the friends I made along the way.
 
 Tailor your CV and cover letter to a job posting — **without inventing anything**.
 
@@ -80,12 +79,13 @@ API key (encrypted at rest in `./data/secrets.enc`), with the corresponding
 environment credential as fallback when no saved credential is available.
 
 Routing choices autosave when you change them; account sign-ins, API keys and
-Ollama URLs still require their explicit Connect/Save action. Incomplete custom
-models stay as unsaved drafts, and failed saves show
-an error with Retry. Leaving the page keeps drafts and flushes pending edits;
-a warning protects unresolved changes before closing the tab. To abandon them,
-use **Discard routing changes**; an in-flight write finishes before a fresh
-routing reload, and routing edits remain locked until that reload succeeds.
+Ollama URLs still need their explicit Connect/Save action. Incomplete custom
+models stay as unsaved drafts, and failed saves show an error with Retry.
+Leaving the page keeps drafts and flushes pending edits, and closing the tab
+with unresolved changes triggers a warning. To abandon changes, use **Discard
+routing changes**; routing edits stay locked until the reload that follows
+succeeds.
+
 The independent **Application agent** route governs unattended browser
 applications on the next run; clearing it uses Claude, not the default task
 model, with saved Claude sign-in/API key and environment credential fallback.
@@ -100,19 +100,33 @@ steps are satisfied.
 
 ## What's in the app
 
-TruthCV is a multi-page app, not a single linear wizard:
+TruthCV is a multi-page app, not a single linear wizard. The side navigation
+lists:
 
-- **Analytics** — the landing page, with side navigation to everything else.
+- **Upload CV**, **Truth file**, **Manual**, **Writing Style** — bring in your
+  CV, review the extracted truth file, and shape how documents are written.
+- **Job boards** — the boards the agent searches (including the keyless
+  Arbeitnow feed, on by default), and **Needs attention**: the sites the
+  agent hit a sign-in wall on, each with a **Sign in to …** button. A badge on
+  the nav item counts them.
 - **Applications** — the job-application ledger (see below), including Gmail-derived employer-reply suggestions when [Gmail response tracking](#gmail-response-tracking-optional) is connected.
-- **Screenings & Approvals** — screened postings awaiting your decision,
-  including cover-letter approvals and cooldowns before an already-skipped
-  company is reconsidered.
-- **Company research** — background TruthCV has gathered on a company, with
-  its source recorded alongside each fact.
-- **Agents** — the unattended agent's run history, schedule, target companies
-  and job boards, and site sign-ins.
+- **Analytics** — the page `/` redirects to.
+- **Agents** — the unattended agent's run history and schedule.
 - **Model routing** — provider accounts, the default and task model routes, and
   the independent application-agent model route.
+- **Screenings** — screened postings and their verdicts.
+- **Company Research** — background TruthCV has gathered on a company, with
+  its source recorded alongside each fact.
+- **Approvals** — cover-letter and application approvals awaiting your
+  decision, with a badge for the pending count.
+- **Settings** — a modal (not a page) for your identity answers, Jev and
+  Gmail connections.
+
+Job postings reach the agent through API-backed **job feeds** (Remote Rocketship,
+which is keyed and opt-in; Arbeitnow, keyless and on by default but can be
+switched off on the Job boards page; and per-company ATS APIs), merged and
+de-duplicated by URL, plus whatever the agent harvests itself from any enabled
+search-type board.
 
 Documents are checked twice: the guardrail approves the *content* before
 rendering, and a separate verification pass (`render/verify.py`) extracts text
@@ -124,17 +138,89 @@ an ATS warning, even though the source HTML was fine.
 
 Beyond generating documents, TruthCV keeps a ledger of every job you're
 pursuing. The **Applications** page records each submission — company, dates,
-links, status (submitted / reached out / response received), method, notes and
-the job posting — and lets you attach the exact CV and cover letter that went
-out with it.
+links, status, method, notes and the job posting — and lets you attach the
+exact CV and cover letter that went out with it. The tracker's statuses are
+**Offer**, **Interviewing**, **Waiting**, **Applied**, **Draft** and
+**Rejected** (this is the display sort order; the status field itself is free
+text, so older rows may carry others).
 
 **Export** downloads the whole ledger as a single `applications.zip`:
 
-- `applications.csv` — every tracked application as a row, with all its fields.
+- `applications.csv` — every tracked application as a row (company,
+  application date, website, application URL, submitted, submission type,
+  reached out, to who, response received, method, notes, posting, and the
+  attached document filenames).
 - One folder per company, holding that application's rendered CV and cover-letter
   files (PDF/DOCX).
 
 The button is on the Applications page; the browser downloads the zip directly.
+
+## Unattended application agent
+
+TruthCV also runs the applications, not just the paperwork. The agent
+(`agent/`) is an unattended run of TruthCV's own provider-neutral harness
+(`agent/harness`), driven over MCP, that works through a target list,
+screens each posting against your filters, generates the CV and cover letter
+through the same guardrailed engine the wizard uses, submits the form, and
+writes the result back into the ledger.
+
+The agent holds no provider credential of its own: when `AGENT_API_TOKEN` is
+set, it fetches the routed LLM credentials from the app at run start over a
+guarded endpoint, using the independent Application agent route (or its Claude
+fallback), not simply whichever account was connected last. The `AGENT_*`
+variables in [Configuration](#configuration) are only a container-level
+fallback.
+
+Job boards and site sign-ins are on the **Job boards** page; the schedule and
+run history are on the **Agents** page. Target companies and search profiles
+live in the agent config (`companyboards/`, `agentconfig/`), not in a file you
+edit by hand.
+
+It is a **separate container from the wizard, and the browser is a third**, so
+a browser crash can never take either of them down. All three start with a
+bare `docker compose up` (the launcher runs `docker compose up -d --build` for
+you); only `ollama` sits behind a compose profile:
+
+```bash
+docker compose up -d --build      # app, browser, agent
+```
+
+The schedule is set on the Agents page (default **09:00 and 15:00** on
+weekdays; `RUN_AT`/`RUN_DAYS` are a fallback only — see
+[Configuration](#configuration)). Every capability the agent has goes through TruthCV's MCP tool
+surface — it deliberately does not mount the data volume.
+
+> **It submits from a real, headful Chromium**, running in the sibling
+> `browser` container (reached over HTTP MCP), not in the agent container.
+> Do the one-time manual login an ATS needs (SSO, CAPTCHA, SMS MFA) from the
+> **Job boards page → Needs attention → Sign in to …** button, which opens the browser's viewport in
+> the app. That login persists on the `browser-profile` volume, so it survives
+> restarts and later runs reuse it. The viewport is for signing in only — you
+> cannot watch a run in progress, because a run and a sign-in session cannot
+> hold the browser at the same time and the run wins. To see what a run did,
+> read its log and the application ledger. There is no in-container browser
+> and no fallback: that was a deliberate choice, because a fresh, logged-out
+> browser would apply as nobody. If the `browser` service is not reachable,
+> the agent aborts the run rather than proceeding blind.
+
+Configuration, the schedule, the browser precondition and the smoke test are
+documented in [`agent/README.md`](agent/README.md). [`agent/targets.example.md`](agent/targets.example.md) is a tracked example of the operator's research scratchpad and is never read by the agent; the operative queue is `targetCompanies`, `companyBoards`, and `profiles` in the agent config. What has actually been applied to, screened out or put in cooldown lives in the ledger and screening store on the data volume, not in that file.
+
+### The plain-text application log
+
+The ledger is the system of record, but a readable account is kept outside the
+application as well, at `data/log/APPLICATION_LOG.md`:
+
+```bash
+python scripts/render_application_log.py
+```
+
+It renders every application in the ledger and **refuses to write at all** if
+the rendered text does not account for each one exactly once — a log that
+silently omits an application is worse than no log, because it reads as
+complete. It is written one directory below the data volume root on purpose:
+`GET /api/download/{name}` serves that root by bare filename without
+authentication, and the log carries the same personal data the records do.
 
 ## Jev cross-checking (optional)
 
@@ -221,67 +307,6 @@ connection is only useful here for auto-applying Jev-confirmed transitions.
    the Google console entry character-for-character.
 7. Connect from **Settings → Gmail** in the app.
 
-## Unattended application agent
-
-TruthCV also runs the applications, not just the paperwork. The agent
-(`agent/`) is a headless run of TruthCV's own provider-neutral harness
-(`agent/harness`), driven over MCP, that works through a target list,
-screens each posting against your filters, generates the CV and cover letter
-through the same guardrailed engine the wizard uses, submits the form, and
-writes the result back into the ledger.
-
-The agent holds no provider credential of its own: when `AGENT_API_TOKEN` is
-set, it fetches the routed LLM credentials from the app at run start over a
-guarded endpoint, using the independent Application agent route (or its Claude fallback), not simply whichever account was connected last.
-
-Job boards, target companies and search profiles are configured on the
-**Agents page** (`companyboards/`, `agentconfig/`), not in a file you edit by
-hand.
-
-It is a **separate container from the wizard, and the browser is a third**, so
-a browser crash can never take either of them down. All three start together
-(the launcher runs this for you):
-
-```bash
-docker compose up -d --build      # app, browser, agent
-```
-
-Schedule is configured on the Agents page (default **09:00 and 15:00** weekdays); `RUN_AT`/`RUN_DAYS` are fallback only, used when the agent config API is unreachable. Every
-capability it has goes through TruthCV's MCP tool surface — it deliberately
-does not mount the data volume.
-
-> **It submits from a real Chromium**, running headful in its own `browser`
-> container, not this one. Do the one-time manual login an ATS needs (SSO,
-> CAPTCHA, SMS MFA) from the **Agents page → Site sign-ins**, which opens the
-> browser's viewport in the app. That login persists on the `browser-profile`
-> volume, so it survives restarts and later runs reuse it. The viewport is
-> for signing in only — you cannot watch a run in progress, because a run and
-> a sign-in session cannot hold the browser at the same time and the run
-> wins. To see what a run did, read its log and the application ledger.
-> There is no headless fallback:
-> that was a deliberate choice, because a fresh, logged-out browser would
-> apply as nobody. If the `browser` service is not reachable, the agent aborts
-> the run rather than proceeding blind.
-
-Configuration, the schedule, the browser precondition and the smoke test are
-documented in [`agent/README.md`](agent/README.md). [`agent/targets.example.md`](agent/targets.example.md) is a tracked example of the operator's research scratchpad and is never read by the agent; the operative queue is `targetCompanies`, `companyBoards`, and `profiles` in the agent config, edited from the Agents page. What has actually been applied to, screened out or put in cooldown lives in the ledger and screening store on the data volume, not in that file.
-
-### The plain-text application log
-
-The ledger is the system of record, but a readable account is kept outside the
-application as well, at `data/log/APPLICATION_LOG.md`:
-
-```bash
-python scripts/render_application_log.py
-```
-
-It renders every application in the ledger and **refuses to write at all** if
-the rendered text does not account for each one exactly once — a log that
-silently omits an application is worse than no log, because it reads as
-complete. It is written one directory below the data volume root on purpose:
-`GET /api/download/{name}` serves that root by bare filename without
-authentication, and the log carries the same personal data the records do.
-
 ## Running it by hand
 
 The launcher is the recommended path; this is the manual/advanced equivalent,
@@ -345,10 +370,10 @@ with.
 
 This version needs two things an older setup may not have:
 
-- **A non-empty `AGENT_API_TOKEN` in `.env`** (`openssl rand -hex 32`). The
-  browser container's session control server rejects an empty token, so every
-  scheduled run aborts with `session server unreachable at browser:8932 - ...
-  rejected the agent's X-Agent-Token`.
+- **A non-empty `AGENT_API_TOKEN` in `.env`** (see step 2 above for how to
+  generate one). The browser container's session control server rejects an
+  empty token, so every scheduled run aborts with `session server unreachable
+  at browser:8932 - ... rejected the agent's X-Agent-Token`.
 - **`docker compose up --build`, not `up`.** The `browser` image gains a
   session control server; an old image does not answer on port 8932, and every
   scheduled run aborts with the same message naming an unreachable server.
@@ -371,6 +396,8 @@ docker compose exec ollama ollama pull llama3.1
 All settings live in `.env` (copied from [`.env.example`](.env.example)). Most
 of these are fallback defaults — routing choices select providers; saved
 credentials take precedence over environment credentials for the chosen provider.
+To generate `ENCRYPTION_KEY` or `AGENT_API_TOKEN` by hand, see step 2 of
+[Running it by hand](#running-it-by-hand).
 
 | Variable | What it does |
 |---|---|
@@ -378,27 +405,23 @@ credentials take precedence over environment credentials for the chosen provider
 | `ENCRYPTION_KEY` | Required — encrypts saved provider credentials at rest (`./data/secrets.enc`). The launcher generates it for you. |
 | `AGENT_API_TOKEN` | Required, non-empty — shared secret the agent, app and browser containers authenticate to each other with. The launcher generates it for you. |
 | `DATA_DIR` | Host path for persisted data (default `./data`). |
-| `LLM_PROVIDER` | `anthropic` \| `openai` \| `ollama` — provider fallback when neither a default/task route nor a migrated provider choice is saved; connecting an account alone does not override it. |
+| `LLM_PROVIDER` | `anthropic` \| `openai` \| `ollama` — provider fallback when neither a default/task route nor a migrated provider choice is saved (defaults to `anthropic` when unset); connecting an account alone does not override it. (`fake` is accepted for tests only.) |
 | `LLM_MODEL` | Optional model id fallback after saved routes and any migrated model choice; blank uses the provider's default. Set a route on Model routing to override it. |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Fallback credential for the selected provider when its saved credential is unavailable. |
 | `OLLAMA_HOST` | Ollama endpoint (compose sets this automatically). |
-| `RUN_AT` / `RUN_DAYS` | Fallback agent schedule, used only when the Agents page's schedule is unreachable. |
+| `RUN_AT` / `RUN_DAYS` | Fallback agent schedule (defaults `09:00,15:00` and `1,2,3,4,5`, Monday–Friday), used only when the agent config API is unreachable. |
 | `TZ` | Fallback timezone the agent's schedule and logs are interpreted in (default `UTC`). The Agents page's schedule timezone takes precedence. |
+| `AGENT_LLM_PROVIDER` / `AGENT_LLM_MODEL` | Optional container-level fallback provider and model for the unattended agent's harness; the primary source is the app's routed credentials (Application agent route). Blank by default. |
+| `AGENT_LLM_API_KEY` | Optional fallback API key/token for the agent's provider. Required by the harness for every provider except when a base URL alone suffices (Ollama needs `AGENT_LLM_BASE_URL` instead). |
+| `AGENT_LLM_BASE_URL` | Optional fallback base URL for the agent's provider; required for Ollama. |
+| `AGENT_LLM_AUTH_TYPE` | `oauth` \| `api_key` \| `url` — only needed for `AGENT_LLM_PROVIDER=claude` via an OAuth subscription; leave empty otherwise. |
+| `AGENT_MAX_TURNS` | Cap on harness turns per application session (default `400` under Compose, via `docker-compose.yml` and `agent/daily-apply.sh`; the harness's own built-in default is `40`). |
+| `AGENT_MAX_TOOL_RESULT_CHARS` | Cap on one MCP tool result's characters before it enters the conversation (default `24000`); longer results are truncated with a marker naming how many characters were cut. Must be a positive integer. |
+| `AGENT_PROMPT_CACHE` | On/off switch for Anthropic prompt-cache breakpoints (default `true`; only the literal `false` turns it off). Anthropic wire only. |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Optional — Google OAuth client credentials backing the Gmail connection. See [Gmail response tracking](#gmail-response-tracking-optional) above for full setup steps. Unset, connecting Gmail reports "Google OAuth is not configured on the server." |
 | `GOOGLE_OAUTH_REDIRECT_URI` | Optional — overrides the request-derived Gmail OAuth redirect URI. Needed behind a reverse proxy or when the app is reached at a non-localhost hostname; must match the Google console's registered redirect URI character-for-character. |
 | `JEV_API_KEY` | Optional — fallback credential for [Jev cross-checking](#jev-cross-checking-optional), consulted only when no key is saved via Settings → Jev. Not present in `.env.example` by design. Supplies the key only — the use-for toggles are still set from Settings → Jev. |
-| `DIAGNOSTICS_MCP_TOKEN` | Optional — bearer token guarding the read-only `/mcp/diagnostics` endpoint. Unset/empty (the default) disables the endpoint entirely: every request to it returns 404. See "Diagnostics MCP (read-only)" below. |
-
-Generate `ENCRYPTION_KEY` or `AGENT_API_TOKEN` with either of the following:
-
-```bash
-openssl rand -hex 32
-```
-
-```bash
-# No dependencies — works with any Python 3 install, before you build anything:
-python -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
-```
+| `DIAGNOSTICS_MCP_TOKEN` | Optional — bearer token guarding the read-only `/mcp/diagnostics` endpoint. Unset/empty (the default) disables the endpoint entirely: every request to it returns 404. See [Diagnostics MCP](#diagnostics-mcp-read-only) below. |
 
 ### Operator vocabulary (`data/vocabulary/`)
 
@@ -433,9 +456,10 @@ CI/CD = Continuous Integration and Continuous Delivery
 `/mcp/diagnostics` is a second, separate MCP streamable-HTTP JSON-RPC endpoint
 on the `app` service, for a remote MCP client (Claude Desktop, an inspector,
 your own tooling) to inspect a running TruthCV without touching the
-operational `/mcp` surface the agent uses. It exposes exactly seven read-only
-tools — `list_runs`, `get_run`, `list_screenings`, `list_applications`,
-`get_status`, `get_gmail_sync_status`, `list_gmail_suggestions` — and none of
+operational `/mcp` surface the agent uses. It exposes exactly ten read-only
+tools — `list_runs`, `get_run`, `get_run_events`, `get_run_logs`,
+`get_agent_status`, `list_screenings`, `list_applications`, `get_status`,
+`get_gmail_sync_status`, `list_gmail_suggestions` — and none of
 them can start a run, record a screening or application, or generate a
 document. `get_status` reports per-store counts (including Gmail suggestion
 count and last sync time) and whether secret encryption is available; it
