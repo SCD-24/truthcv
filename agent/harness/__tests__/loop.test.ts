@@ -3,6 +3,8 @@ import { describe, it, expect, vi } from 'vitest';
 import type { McpClientPool, NamespacedTool } from '../mcp/client.js';
 import type { ConversationMessage, HarnessEvent, ModelRequest, ProviderAdapter, ToolCall } from '../providers/types.js';
 import { backoffDelay, classifyError, isRetryable, runLoop } from '../loop.js';
+import { KEEP_RECENT, PIN_LEADING, STALE_TOOL_RESULT_CHARS } from '../compaction.js';
+import type { DiagnosticBoundary } from '../diagnostics.js';
 
 /**
  * Like {@link scriptedAdapter}, but also records every request handed to
@@ -403,6 +405,156 @@ describe('wrap-up window', () => {
   });
 });
 
+describe('finish_run grace turn', () => {
+  /** A pool that also allows `finish_run`, so the loop can latch its execution. */
+  function poolWithFinishRun() {
+    const { pool } = fakePool();
+    // Typed with the pool's real (namespacedName, args) signature, so a mock
+    // implementation can tell finish_run apart from the other allowed tool.
+    const callTool = vi.fn(async (_name: string, _args: Record<string, unknown>) => ({ content: 'ok', isError: false }));
+    const tools: NamespacedTool[] = [
+      ...pool.listTools(),
+      { namespacedName: 'truthcv__finish_run', serverName: 'truthcv', toolName: 'finish_run', description: 'd', inputSchema: { type: 'object' } },
+    ];
+    return { pool: { ...pool, callTool, listTools: () => tools } as unknown as McpClientPool, callTool };
+  }
+
+  const FINISH_RUN_CALL: ToolCall = { id: 'f1', name: 'truthcv__finish_run', arguments: {} };
+
+  /** A `done` event whose single tool call is the run-closing one. */
+  function doneFinishRun(): HarnessEvent {
+    return {
+      type: 'done',
+      stopReason: 'toolCalls',
+      message: { role: 'assistant', content: '', toolCalls: [FINISH_RUN_CALL] },
+    };
+  }
+
+  it('grants one extra turn when finish_run is refused on the cap turn, then succeeds', async () => {
+    const { adapter, calls } = scriptedAdapter([[doneToolCalls()], [doneToolCalls()], [doneFinishRun()], [doneFinishRun()]]);
+    const { pool, callTool } = poolWithFinishRun();
+    callTool.mockImplementation(async (name: string) =>
+      name === FINISH_RUN_CALL.name && callTool.mock.calls.filter((c) => c[0] === FINISH_RUN_CALL.name).length === 1
+        ? { content: 'refused', isError: true }
+        : { content: 'ok', isError: false },
+    );
+    const result = await run(adapter, pool, { maxTurns: 3 });
+    expect(result.turns).toBe(4);
+    expect(result.finishRunExecuted).toBe(true);
+    expect(calls()).toBe(4);
+  });
+
+  it('does not grant a second grace when every finish_run errors', async () => {
+    const { adapter, calls } = scriptedAdapter([[doneToolCalls()], [doneToolCalls()], [doneFinishRun()], [doneFinishRun()]]);
+    const { pool, callTool } = poolWithFinishRun();
+    callTool.mockImplementation(async () => ({ content: 'refused', isError: true }));
+    const result = await run(adapter, pool, { maxTurns: 3 });
+    expect(result.stopReason).toBe('turnCapReached');
+    expect(result.turns).toBe(4);
+    expect(calls()).toBe(4);
+  });
+
+  it('does not grant grace when finish_run errors before the cap turn', async () => {
+    const { adapter, calls } = scriptedAdapter([[doneFinishRun()], [doneToolCalls()], [doneToolCalls()]]);
+    const { pool, callTool } = poolWithFinishRun();
+    callTool.mockImplementation(async (name: string) =>
+      name === FINISH_RUN_CALL.name ? { content: 'refused', isError: true } : { content: 'ok', isError: false },
+    );
+    const result = await run(adapter, pool, { maxTurns: 3 });
+    expect(result.turns).toBe(3);
+    expect(calls()).toBe(3);
+  });
+
+  it('grants no extra turn when finish_run succeeds on the cap turn', async () => {
+    const { adapter, calls } = scriptedAdapter([[doneToolCalls()], [doneToolCalls()], [doneFinishRun()]]);
+    const { pool, callTool } = poolWithFinishRun();
+    callTool.mockImplementation(async () => ({ content: 'ok', isError: false }));
+    const result = await run(adapter, pool, { maxTurns: 3 });
+    expect(result.turns).toBe(3);
+    expect(calls()).toBe(3);
+  });
+});
+
+describe('turns_remaining injection', () => {
+  /** A pool allowing `finish_run` and recording every call's args. */
+  function poolWithFinishRun() {
+    const { pool } = fakePool();
+    const callTool = vi.fn(async (_name: string, _args: Record<string, unknown>) => ({ content: 'ok', isError: false }));
+    const tools: NamespacedTool[] = [
+      ...pool.listTools(),
+      { namespacedName: 'truthcv__finish_run', serverName: 'truthcv', toolName: 'finish_run', description: 'd', inputSchema: { type: 'object' } },
+      { namespacedName: 'truthcv__finish_phase', serverName: 'truthcv', toolName: 'finish_phase', description: 'd', inputSchema: { type: 'object' } },
+    ];
+    return { pool: { ...pool, callTool, listTools: () => tools } as unknown as McpClientPool, callTool };
+  }
+
+  it('overwrites a model-supplied turns_remaining with the harness-computed value', async () => {
+    const FINISH_RUN_CALL: ToolCall = { id: 'f1', name: 'truthcv__finish_run', arguments: { turns_remaining: 999, note: 'x' } };
+    const doneFinishRun: HarnessEvent = {
+      type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [FINISH_RUN_CALL] },
+    };
+    const { adapter } = scriptedAdapter([[doneFinishRun]]);
+    const { pool, callTool } = poolWithFinishRun();
+    const result = await run(adapter, pool, { maxTurns: 5 });
+    expect(result.finishRunExecuted).toBe(true);
+    expect(callTool).toHaveBeenCalledWith('truthcv__finish_run', expect.objectContaining({ turns_remaining: 4, note: 'x' }));
+  });
+
+  it('injects turns_remaining into a namespaced finish_phase call under the configured finish tool name', async () => {
+    const FINISH_PHASE_CALL: ToolCall = { id: 'f1', name: 'truthcv__finish_phase', arguments: { channel: 'feed' } };
+    const donePhase: HarnessEvent = {
+      type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [FINISH_PHASE_CALL] },
+    };
+    const { adapter } = scriptedAdapter([[donePhase]]);
+    const { pool, callTool } = poolWithFinishRun();
+    await run(adapter, pool, { maxTurns: 5, finishToolName: 'finish_phase' } as Parameters<typeof runLoop>[0]['config']);
+    expect(callTool).toHaveBeenCalledWith('truthcv__finish_phase', expect.objectContaining({ turns_remaining: 4, channel: 'feed' }));
+  });
+
+  it('injects turns_remaining into finish_run even when the session is configured for finish_phase', async () => {
+    const FINISH_RUN_CALL: ToolCall = { id: 'f1', name: 'truthcv__finish_run', arguments: { note: 'x' } };
+    const doneFinishRun: HarnessEvent = {
+      type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [FINISH_RUN_CALL] },
+    };
+    const { adapter } = scriptedAdapter([[doneFinishRun]]);
+    const { pool, callTool } = poolWithFinishRun();
+    await run(adapter, pool, { maxTurns: 5, finishToolName: 'finish_phase' } as Parameters<typeof runLoop>[0]['config']);
+    expect(callTool).toHaveBeenCalledWith('truthcv__finish_run', expect.objectContaining({ turns_remaining: 4, note: 'x' }));
+  });
+});
+
+describe('finish_phase grace turn (configured finish tool)', () => {
+  function poolWithFinishPhase() {
+    const { pool } = fakePool();
+    const callTool = vi.fn(async (_name: string, _args: Record<string, unknown>) => ({ content: 'ok', isError: false }));
+    const tools: NamespacedTool[] = [
+      ...pool.listTools(),
+      { namespacedName: 'truthcv__finish_phase', serverName: 'truthcv', toolName: 'finish_phase', description: 'd', inputSchema: { type: 'object' } },
+    ];
+    return { pool: { ...pool, callTool, listTools: () => tools } as unknown as McpClientPool, callTool };
+  }
+
+  const FINISH_PHASE_CALL: ToolCall = { id: 'p1', name: 'truthcv__finish_phase', arguments: {} };
+
+  function doneFinishPhase(): HarnessEvent {
+    return { type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [FINISH_PHASE_CALL] } };
+  }
+
+  it('grants one extra turn when finish_phase is refused on the cap turn, then succeeds', async () => {
+    const { adapter, calls } = scriptedAdapter([[doneToolCalls()], [doneToolCalls()], [doneFinishPhase()], [doneFinishPhase()]]);
+    const { pool, callTool } = poolWithFinishPhase();
+    callTool.mockImplementation(async (name: string) =>
+      name === FINISH_PHASE_CALL.name && callTool.mock.calls.filter((c) => c[0] === FINISH_PHASE_CALL.name).length === 1
+        ? { content: 'refused', isError: true }
+        : { content: 'ok', isError: false },
+    );
+    const result = await run(adapter, pool, { maxTurns: 3, finishToolName: 'finish_phase' } as Parameters<typeof runLoop>[0]['config']);
+    expect(result.turns).toBe(4);
+    expect(result.finishRunExecuted).toBe(true);
+    expect(calls()).toBe(4);
+  });
+});
+
 describe('a turn that produced nothing at all', () => {
   // The 2026-08-30 incident: a router swapped in a reasoning model, which
   // answered with an empty `content`, no tool calls and finish_reason 'stop'.
@@ -571,6 +723,95 @@ describe('a turn that produced nothing at all', () => {
     expect(calls()).toBe(2);
     expect(userTexts(result.messages).filter((t) => t.includes('no content and no tool calls'))).toHaveLength(0);
   });
+
+  it('nudges an "end" turn that left finish_run uncalled, then lets the run finish normally', async () => {
+    const doneTextOnly: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'partial work done' },
+    };
+    const { adapter, calls } = scriptedAdapter([[doneTextOnly], [doneFinishRun()], [doneEmpty]]);
+    const { pool } = poolWithFinishRun();
+    const kinds: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: [{ role: 'user', content: 'apply to jobs' }],
+      config: { maxTurns: 10 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e) kinds.push(e.kind);
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    expect(result.finishRunExecuted).toBe(true);
+    expect(calls()).toBe(3);
+    expect(kinds).toContain('unfinishedTurn');
+    expect(userTexts(result.messages).some((t) => t.includes('without calling finish_run'))).toBe(true);
+  });
+
+  it('ends the run with UNFINISHED_STOP_DETAIL once unfinished nudges exceed the cap', async () => {
+    const doneTextOnly: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'still going' },
+    };
+    const { adapter, calls } = scriptedAdapter([[doneTextOnly]]);
+    const { pool } = poolWithFinishRun();
+    const stops: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: [{ role: 'user', content: 'apply to jobs' }],
+      config: { maxTurns: 100, maxUnfinishedNudges: 1 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e && e.kind === 'stop') stops.push(e.detail ?? '');
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    expect(result.finishRunExecuted).toBe(false);
+    expect(calls()).toBe(2); // first turn nudged, second exceeds the cap
+    expect(stops).toContain('model ended the run without calling finish_run, even after being reminded');
+  });
+
+  it('does not nudge once finish_run has already executed', async () => {
+    const doneTextOnly: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'wrapping up' },
+    };
+    const { adapter, calls } = scriptedAdapter([[doneFinishRun()], [doneTextOnly]]);
+    const { pool } = poolWithFinishRun();
+
+    const result = await run(adapter, pool, { maxTurns: 10 });
+
+    expect(result.stopReason).toBe('end');
+    expect(calls()).toBe(2);
+    expect(userTexts(result.messages).some((t) => t.includes('without calling finish_run'))).toBe(false);
+  });
+
+  it('does not nudge when no finish_run tool is registered at all', async () => {
+    const doneTextOnly: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'done, no such tool here' },
+    };
+    const { adapter, calls } = scriptedAdapter([[doneTextOnly]]);
+    const { pool } = fakePool();
+
+    const result = await run(adapter, pool, { maxTurns: 10 });
+
+    expect(result.stopReason).toBe('end');
+    expect(calls()).toBe(1);
+    expect(userTexts(result.messages).some((t) => t.includes('without calling finish_run'))).toBe(false);
+  });
 });
 
 describe('a network failure the adapter reports instead of throwing', () => {
@@ -678,6 +919,120 @@ describe('compaction the provider asks for', () => {
     // classified as a plain bad-request and also ended the run after one
     // request, so stopReason alone cannot tell the two apart.
     expect(stops).toContain('context overflow with nothing left to compact');
+  });
+
+  it('elides a stale oversized tool result and retries, rather than erroring, at the keep-minimum', async () => {
+    // History has only PIN_LEADING + KEEP_RECENT + 1 messages, so it is at or
+    // under the floor planCompaction operates on — it finds nothing to DROP
+    // (returns null) — but two oversized, non-latest tool results are still
+    // there to elide, which is progress compact() can make without shrinking
+    // the message count, so the retry must succeed via elision alone.
+    const big = 'x'.repeat(STALE_TOOL_RESULT_CHARS + 500);
+    const messages: ConversationMessage[] = [
+      { role: 'user', content: 'instructions' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c0', name: 'browser', arguments: {} }] },
+      { role: 'user', content: '', toolResults: [{ toolCallId: 'c0', content: big }] },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'browser', arguments: {} }] },
+      { role: 'user', content: '', toolResults: [{ toolCallId: 'c1', content: big }] },
+    ];
+    expect(messages.length).toBeLessThanOrEqual(PIN_LEADING + KEEP_RECENT);
+    const { adapter, calls } = scriptedAdapter([[overflow], [doneEnd]]);
+    const { pool } = fakePool();
+    const stops: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: messages,
+      config: { maxTurns: 5 },
+      sleep: async () => {},
+      onEvent: (e) => {
+        if ('kind' in e && e.kind === 'stop') stops.push(e.detail ?? '');
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    expect(calls()).toBe(2);
+    expect(stops).not.toContain('context overflow with nothing left to compact');
+  });
+
+  it('stops once elision has nothing more to elide, rather than looping forever', async () => {
+    // Same shape as the elision-only-retry case, but the provider ALWAYS
+    // overflows: after the first (real) elision succeeds and the resend also
+    // overflows, the second compaction pass finds every stale result already
+    // elided (idempotent — no new elision, no shrink) and must stop rather
+    // than resending the byte-identical request forever.
+    const big = 'x'.repeat(STALE_TOOL_RESULT_CHARS + 500);
+    const messages: ConversationMessage[] = [
+      { role: 'user', content: 'instructions' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c0', name: 'browser', arguments: {} }] },
+      { role: 'user', content: '', toolResults: [{ toolCallId: 'c0', content: big }] },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'browser', arguments: {} }] },
+      { role: 'user', content: '', toolResults: [{ toolCallId: 'c1', content: big }] },
+    ];
+    expect(messages.length).toBeLessThanOrEqual(PIN_LEADING + KEEP_RECENT);
+    const { adapter, calls } = scriptedAdapter([[overflow]]);
+    const { pool } = fakePool();
+    const stops: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: messages,
+      config: { maxTurns: 5, maxOverflowCompactions: 5 },
+      sleep: async () => {},
+      onEvent: (e) => {
+        if ('kind' in e && e.kind === 'stop') stops.push(e.detail ?? '');
+      },
+    });
+
+    expect(result.stopReason).toBe('error');
+    // Original attempt, one (real, elision-only) compaction and resend, then
+    // stop — not exhausting the maxOverflowCompactions budget of 5.
+    expect(calls()).toBe(2);
+    expect(stops).toContain('context overflow with nothing left to compact');
+  });
+
+  it('retries when compaction shrinks tokens without shrinking the message count', async () => {
+    // PIN_LEADING + KEEP_RECENT + 1 messages, with one long message sitting
+    // right after the pinned head — exactly where planCompaction drops it.
+    // dropped.length === 1 and a one-line summary message replaces it, so the
+    // total message count before and after compaction is identical; progress
+    // must be recognised via the token-estimate/non-summary-only check, not
+    // the message-count shrink.
+    const long = 'turn '.repeat(2000);
+    const messages: ConversationMessage[] = [
+      { role: 'user', content: 'instructions' },
+      { role: 'user', content: long },
+      { role: 'assistant', content: 'ok 1' },
+      { role: 'user', content: 'ok 2' },
+      { role: 'assistant', content: 'ok 3' },
+      { role: 'user', content: 'ok 4' },
+      { role: 'assistant', content: 'ok 5' },
+      { role: 'user', content: 'ok 6' },
+    ];
+    expect(messages.length).toBe(PIN_LEADING + KEEP_RECENT + 1);
+    const { adapter, calls } = scriptedAdapter([[overflow], [doneEnd]]);
+    const { pool } = fakePool();
+    const stops: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: messages,
+      config: { maxTurns: 5 },
+      sleep: async () => {},
+      onEvent: (e) => {
+        if ('kind' in e && e.kind === 'stop') stops.push(e.detail ?? '');
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    expect(calls()).toBe(2);
+    expect(stops).not.toContain('context overflow with nothing left to compact');
   });
 
   it('stops once compacting stops helping, without exhausting the cap', () => {
@@ -818,6 +1173,188 @@ describe('model-generated compaction summaries', () => {
     expect(calls()).toBe(2);
     expect(events).toHaveLength(1);
     expect(events[0]).toContain('Summarized');
+  });
+
+  it('suspends proactive compaction once the floor is hit, instead of re-firing every remaining turn', async () => {
+    const summaryDone: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'MODEL SUMMARY: first pass.' },
+    };
+    const { adapter, calls, requests } = scriptedAdapterCapturing([
+      [summaryDone],
+      [doneToolCalls()],
+      [doneToolCalls()],
+      [doneEnd],
+    ]);
+    const { pool } = fakePool();
+    const kinds: string[] = [];
+    const compactionDetails: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: longConversation(),
+      config: { maxTurns: 5 },
+      compactionConfig: { contextWindow: 1000 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e) {
+          kinds.push(e.kind);
+          if (e.kind === 'compaction') compactionDetails.push(e.detail ?? '');
+        }
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    // The pinned lead plus kept tail alone still exceed the trigger after the
+    // first compaction, so the conversation is at its floor: no further
+    // 'compaction' event fires on the remaining turns, even though nothing
+    // shrank them.
+    expect(calls()).toBe(4);
+    expect(kinds.filter((k) => k === 'compaction')).toHaveLength(1);
+    // Reported exactly once, alongside the compaction that hit the floor.
+    expect(kinds.filter((k) => k === 'compactionFloor')).toHaveLength(1);
+    expect(compactionDetails.some((d) => d.includes('MODEL SUMMARY'))).toBe(true);
+    // Only the first (summarizer-backed) compaction issued a summarizer
+    // request — identified by its shape (no tools, unlike an ordinary turn
+    // request which carries the pool's tools) rather than by raw count,
+    // since scriptedAdapterCapturing records every request (summarizer plus
+    // all three ordinary turns).
+    const summarizerRequests = requests.filter((r) => r.tools.length === 0);
+    expect(summarizerRequests).toHaveLength(1);
+  });
+
+  it('does not suspend a proactive compaction that gets comfortably under the trigger', async () => {
+    // A generous window: the first compaction drops well under the trigger,
+    // so growth over the following turns can legitimately push it back over
+    // and earn a second, independent proactive compaction.
+    const summary1: HarnessEvent = { type: 'done', stopReason: 'end', message: { role: 'assistant', content: 'MODEL SUMMARY: pass one.' } };
+    const growth: HarnessEvent = {
+      type: 'done',
+      stopReason: 'toolCalls',
+      message: { role: 'assistant', content: 'x'.repeat(3000), toolCalls: [{ id: 'g1', name: 'truthcv__start_run', arguments: {} }] },
+    };
+    const summary2: HarnessEvent = { type: 'done', stopReason: 'end', message: { role: 'assistant', content: 'MODEL SUMMARY: pass two.' } };
+    const { adapter } = scriptedAdapterCapturing([[summary1], [doneToolCalls()], [growth], [growth], [summary2], [doneEnd]]);
+    const { pool } = fakePool();
+    const kinds: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: longConversation(),
+      config: { maxTurns: 10 },
+      compactionConfig: { contextWindow: 5000 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e) kinds.push(e.kind);
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    expect(kinds.filter((k) => k === 'compaction')).toHaveLength(2);
+    expect(kinds.filter((k) => k === 'compactionFloor')).toHaveLength(0);
+  });
+
+  it('still lets a reactive compaction fire after a proactive one has been suspended', async () => {
+    // First turn hits the floor (contextWindow 1000, same as the suspension
+    // test above) and proactive compaction suspends itself. The very next
+    // adapter call then reports a context-overflow error — a DIFFERENT path
+    // (compactAndRetry), which must still fire and rescue the run.
+    const summaryDone: HarnessEvent = { type: 'done', stopReason: 'end', message: { role: 'assistant', content: 'MODEL SUMMARY: first pass.' } };
+    const overflow: HarnessEvent = {
+      type: 'error',
+      message: 'Anthropic request failed with status 400: prompt is too long: 214000 tokens > 200000 maximum',
+      retryable: false,
+    };
+    // Three small no-op turns after the floor is hit, growing the (suspended,
+    // so untouched) history past PIN_LEADING + KEEP_RECENT — otherwise the
+    // reactive pass would find nothing left to drop either, and the test
+    // would not distinguish it from the (already covered) genuinely-stuck case.
+    const { adapter, calls } = scriptedAdapterCapturing([
+      [summaryDone],
+      [doneToolCalls()],
+      [doneToolCalls()],
+      [doneToolCalls()],
+      [overflow],
+      [doneEnd],
+    ]);
+    const { pool } = fakePool();
+    const kinds: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: longConversation(),
+      config: { maxTurns: 10 },
+      compactionConfig: { contextWindow: 1000 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e) kinds.push(e.kind);
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    expect(calls()).toBe(6);
+    expect(kinds.filter((k) => k === 'compactionFloor')).toHaveLength(1);
+    // The proactive compaction (before the overflowing turn) plus the
+    // reactive one (after it) — both are 'compaction' events.
+    expect(kinds.filter((k) => k === 'compaction')).toHaveLength(2);
+  });
+
+  it('suspends proactive compaction when reported usage overhead re-triggers back-to-back, even though the messages estimate alone is under trigger', async () => {
+    // First compaction leaves the messages estimate comfortably under the
+    // trigger (like the "does not suspend" case above), but the adapter's
+    // reported inputTokens on that same turn is large enough — covering
+    // system prompt + tool schema overhead the messages estimate never sees —
+    // that the very next turn's check trips again anyway. That back-to-back
+    // firing (atFloor) must suspend proactive compaction just as surely as
+    // the messages-estimate floor does, and must do so without a second
+    // summarizer request (atFloor skips the summarizer).
+    const summary1: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'MODEL SUMMARY: first pass.' },
+    };
+    const bigUsage: HarnessEvent = { type: 'usage', inputTokens: 3000, outputTokens: 0 };
+    const { adapter, calls, requests } = scriptedAdapterCapturing([
+      [summary1],
+      [bigUsage, doneToolCalls()],
+      // Keep reporting the same overhead after the floor, so only the
+      // suspension flag (not a quiet estimate) stops further compactions.
+      [bigUsage, doneToolCalls()],
+      [bigUsage, doneToolCalls()],
+      [bigUsage, doneToolCalls()],
+      [doneEnd],
+    ]);
+    const { pool } = fakePool();
+    const kinds: string[] = [];
+
+    const result = await runLoop({
+      adapter,
+      pool,
+      systemPrompt: 'you are an agent',
+      initialMessages: longConversation(),
+      config: { maxTurns: 10 },
+      compactionConfig: { contextWindow: 5000 },
+      sleep: noSleep,
+      onEvent: (e) => {
+        if ('kind' in e) kinds.push(e.kind);
+      },
+    });
+
+    expect(result.stopReason).toBe('end');
+    expect(calls()).toBe(6);
+    // First (summarizer-backed) compaction, then the back-to-back one caused
+    // by reported usage overhead — exactly two, none after that.
+    expect(kinds.filter((k) => k === 'compaction')).toHaveLength(2);
+    expect(kinds.filter((k) => k === 'compactionFloor')).toHaveLength(1);
+    const summarizerRequests = requests.filter((r) => r.tools.length === 0);
+    expect(summarizerRequests).toHaveLength(1);
   });
 });
 
@@ -1004,6 +1541,49 @@ describe('executeTurnToolCalls concurrency (via runLoop)', () => {
     stderrSpy.mockRestore();
   });
 
+  it('serializes two whole multi-board harvests and model browser calls even with tab tools advertised', async () => {
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const click = toolAndCall('browser', 'browser_click', 'c1');
+    const navigate = toolAndCall('browser', 'browser_navigate', 'c3');
+    const harvest = (id: string, prefix: string): ToolCall => ({
+      id, name: 'harvest_postings', arguments: { boards: [
+        { board: `${prefix}1`, url: `https://example.com/${prefix}1` },
+        { board: `${prefix}2`, url: `https://example.com/${prefix}2` },
+      ] },
+    });
+    const tools = ['browser_navigate', 'browser_snapshot', 'browser_click',
+      'browser_tab_list', 'browser_tab_new', 'browser_tab_select', 'browser_tab_close',
+    ].map((name) => toolAndCall('browser', name, name).tool);
+    const { pool, callTool, release, peak } = controllablePool(tools);
+    const { adapter } = scriptedAdapter(turnRequesting([harvest('c0', 'a'), click.call, harvest('c2', 'b'), navigate.call]));
+    const expected = [
+      'browser__browser_navigate', 'browser__browser_snapshot',
+      'browser__browser_navigate', 'browser__browser_snapshot',
+      'browser__browser_click',
+      'browser__browser_navigate', 'browser__browser_snapshot',
+      'browser__browser_navigate', 'browser__browser_snapshot',
+      'browser__browser_navigate',
+    ];
+    try {
+      const resultPromise = run(adapter, pool, { maxTurns: 5 });
+      for (let i = 0; i < expected.length; i++) {
+        await waitUntilCalled(callTool, i + 1);
+        expect(callTool.mock.calls.map(([name]) => name)).toEqual(expected.slice(0, i + 1));
+        expect(peak.get('browser')).toBe(1);
+        release(expected[i], { content: expected[i].endsWith('snapshot')
+          ? '- link "Engineer" [ref=e1]: https://jobs.lever.co/acme/role-1' : 'ok', isError: false });
+      }
+      const result = await resultPromise;
+      const outputs = result.messages.find((m) => m.role === 'tool')?.toolResults ?? [];
+      expect(outputs.map((r) => r.toolCallId)).toEqual(['c0', 'c1', 'c2', 'c3']);
+      expect(JSON.parse(outputs[0].content).results.map((r: { board: string }) => r.board)).toEqual(['a1', 'a2']);
+      expect(JSON.parse(outputs[2].content).results.map((r: { board: string }) => r.board)).toEqual(['b1', 'b2']);
+      expect(callTool.mock.calls.some(([name]) => String(name).includes('browser_tab_'))).toBe(false);
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+
   it('still returns results for the other calls when one call rejects', async () => {
     const pairs = ['check_cooldown', 'get_job_profiles'].map((n, i) => toolAndCall('truthcv', n, `c${i}`));
     const callTool = vi.fn((namespacedName: string) =>
@@ -1023,6 +1603,95 @@ describe('executeTurnToolCalls concurrency (via runLoop)', () => {
     expect(toolMessage?.toolResults?.[0]).toMatchObject({ toolCallId: 'c0', isError: true });
     expect(toolMessage?.toolResults?.[0]?.content).toContain('boom');
     expect(toolMessage?.toolResults?.[1]).toMatchObject({ toolCallId: 'c1', isError: false });
+  });
+
+  it('saves a feed posting before same-turn browser work and keeps it after a later failure', async () => {
+    const feed = { title: 'Engineer', company: 'Acme', url: 'https://jobs.example/123', source: 'api' };
+    const postingText = 'Engineer at Acme. Fully remote role. English required.';
+    const compound: ToolCall = { id: 'feed1', name: 'screen_and_record_posting', arguments: {
+      url: feed.url, role: feed.title, company: feed.company, postingText,
+      profile: 'Backend', criteria: 'fully remote, English', run_id: 'run-1', source: feed.source,
+    } };
+    const browser: ToolCall = { id: 'browser1', name: 'browser__browser_navigate', arguments: { url: 'https://boards.example/' } };
+    const sequence: string[] = [];
+    const callTool = vi.fn(async (name: string, args: Record<string, unknown>) => {
+      sequence.push(name);
+      if (name === 'truthcv__record_screening') {
+        expect(args).toMatchObject({ url: feed.url, role: feed.title, posting_text: postingText, run_id: 'run-1' });
+        return { content: JSON.stringify({ id: 'saved-1', created: true, verdict: 'passed' }), isError: false };
+      }
+      return { content: 'browser failed', isError: true };
+    });
+    const pool = { callTool, refreshTools: vi.fn(async () => {}), listTools: () => [
+      toolAndCall('truthcv', 'record_screening', 'rs').tool,
+      toolAndCall('browser', 'browser_navigate', 'bn').tool,
+    ] } as unknown as McpClientPool;
+    const screeningAdapter: ProviderAdapter = { async *sendMessage() {
+      yield { type: 'done', stopReason: 'end', message: { role: 'assistant', content: JSON.stringify({
+        verdict: 'passed', screeningBlocker: '', reason: 'fits', remoteArrangement: 'remote',
+      }) } };
+    } };
+    const { adapter } = scriptedAdapter([turnRequesting([browser, compound])[0], [fatalError]]);
+    const result = await runLoop({ adapter, pool, screeningAdapter, systemPrompt: 's',
+      initialMessages: [{ role: 'user', content: 'feed first' }], config: { maxTurns: 5 }, sleep: noSleep });
+    expect(sequence).toEqual(['truthcv__record_screening', 'browser__browser_navigate']);
+    expect(result.stopReason).toBe('error');
+    const outputs = result.messages.find((m) => m.role === 'tool')?.toolResults ?? [];
+    expect(outputs.map((r) => r.toolCallId)).toEqual(['browser1', 'feed1']);
+    expect(outputs[0]).toMatchObject({ isError: true, content: 'browser failed' });
+    expect(JSON.parse(outputs[1].content)).toMatchObject({ id: 'saved-1', verdict: 'passed', created: true, actionable: true });
+    expect(callTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('emits a model start before the first response and a terminal boundary on failure', async () => {
+    const boundaries: DiagnosticBoundary[] = [];
+    let resume: (() => void) | undefined;
+    const adapter: ProviderAdapter = { async *sendMessage() {
+      await new Promise<void>((resolve) => { resume = resolve; });
+      yield { type: 'error', message: 'secret https://example.test', retryable: false };
+    } };
+    const { pool } = fakePool();
+    const result = runLoop({ adapter, pool, systemPrompt: '', initialMessages: [], config: { maxTurns: 2 },
+      onDiagnostic: (boundary) => boundaries.push(boundary) });
+    for (let i = 0; i < 20 && !resume; i++) await Promise.resolve();
+    expect(boundaries.map((b) => `${b.phase}:${b.status}`)).toEqual([
+      'registry_refresh:start', 'registry_refresh:success', 'model:start',
+    ]);
+    resume?.();
+    expect((await result).stopReason).toBe('error');
+    expect(boundaries.at(-1)).toMatchObject({ phase: 'model', status: 'error' });
+    expect(JSON.stringify(boundaries)).not.toContain('secret');
+  });
+
+  it('records independent overlapping tool boundaries with registered names only', async () => {
+    const pairs = ['check_cooldown', 'get_job_profiles'].map((n, i) => toolAndCall('truthcv', n, `c${i}`));
+    const { pool, callTool, release } = controllablePool(pairs.map((p) => p.tool));
+    const { adapter } = scriptedAdapter(turnRequesting(pairs.map((p) => p.call)));
+    const boundaries: DiagnosticBoundary[] = [];
+    const result = runLoop({ adapter, pool, systemPrompt: '', initialMessages: [], config: { maxTurns: 5 },
+      onDiagnostic: (boundary) => boundaries.push(boundary) });
+    await waitUntilCalled(callTool, 2);
+    const starts = boundaries.filter((b) => b.phase === 'tool');
+    expect(starts).toHaveLength(2);
+    expect(starts.map((b) => b.toolName)).toEqual(pairs.map((p) => p.call.name));
+    expect(new Set(starts.map((b) => b.operationId)).size).toBe(2);
+    release(pairs[1].call.name);
+    release(pairs[0].call.name);
+    await result;
+    expect(boundaries.filter((b) => b.phase === 'tool' && b.status === 'success')).toHaveLength(2);
+  });
+
+  it('records numeric retries/backoff and reactive compaction without provider text', async () => {
+    const overflow: HarnessEvent = { type: 'error', retryable: false, message: 'prompt is too long: secret' };
+    const { adapter } = scriptedAdapter([[retryableError], [overflow], [doneEnd]]);
+    const { pool } = fakePool();
+    const boundaries: DiagnosticBoundary[] = [];
+    await runLoop({ adapter, pool, systemPrompt: '',
+      initialMessages: Array.from({ length: 40 }, (_, i) => ({ role: 'user', content: `secret${i}` })),
+      config: { maxTurns: 5 }, sleep: noSleep, onDiagnostic: (boundary) => boundaries.push(boundary) });
+    expect(boundaries).toContainEqual(expect.objectContaining({ phase: 'backoff', status: 'start', retryAttempt: 1 }));
+    expect(boundaries).toContainEqual(expect.objectContaining({ phase: 'compaction', status: 'success' }));
+    expect(JSON.stringify(boundaries)).not.toContain('secret');
   });
 
   it('still latches finish_run when its result arrives after another call completes', async () => {

@@ -72,6 +72,17 @@ describe("TaskModelsSection", () => {
     expect(screen.getByText("CV tailoring")).toBeTruthy();
     expect(screen.getByText("Inference detection")).toBeTruthy();
     expect(screen.getByText("Cover letter")).toBeTruthy();
+    const descriptions = [
+      "Extracts factual career information from your uploaded profile.",
+      "Identifies relevant skills and keywords in the job posting.",
+      "Selects and rephrases your verified experience for the target role.",
+      "Suggests claims not yet in your verified profile for you to review.",
+      "Drafts a cover letter tailored to the job posting.",
+    ];
+    TASKS.forEach((task, index) => {
+      const heading = screen.getByText(task.label);
+      expect(heading.parentElement?.textContent).toContain(descriptions[index]);
+    });
   });
 
   it("saving the first row calls updateRouting with {tasks: {truth_extract: route}}", async () => {
@@ -95,7 +106,7 @@ describe("TaskModelsSection", () => {
     fireEvent.mouseDown(screen.getAllByLabelText(/^model$/i)[0]);
     fireEvent.click(await screen.findAllByRole("option", { name: "Opus 5" }).then((o) => o[0]));
 
-    fireEvent.click(screen.getAllByRole("button", { name: /^save$/i })[0]);
+    expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
 
     await vi.waitFor(() => {
       expect(updateRouting).toHaveBeenCalledWith({

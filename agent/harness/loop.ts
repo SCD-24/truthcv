@@ -21,6 +21,7 @@ import type {
   ToolResult,
 } from './providers/types.js';
 import type { McpClientPool } from './mcp/client.js';
+import type { DiagnosticBoundary, DiagnosticPhase } from './diagnostics.js';
 import {
   buildToolRegistry,
   executeToolCall,
@@ -34,7 +35,9 @@ import {
   shouldCompact,
   planCompaction,
   renderDroppedTranscript,
+  estimateConversationTokens,
   type CompactionConfig,
+  type CompactionRecord,
   type TokenUsage,
 } from './compaction.js';
 
@@ -48,7 +51,7 @@ type DoneEvent = Extract<HarnessEvent, { type: 'done' }>;
 const DEFAULT_MAX_REFLECTIONS = 3;
 
 /** Default ceiling on a single retry backoff, so a "retry in hours" fails fast. */
-const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
+export const DEFAULT_MAX_RETRY_DELAY_MS = 300_000;
 
 /**
  * Default cap on consecutive retryable-error retries within one turn. Capping
@@ -56,7 +59,7 @@ const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
  * error (e.g. a sustained rate limit) would otherwise retry forever without
  * ever advancing a turn or a reflection, defeating the loop's own turn cap.
  */
-const DEFAULT_MAX_RETRIES = 8;
+export const DEFAULT_MAX_RETRIES = 12;
 
 /**
  * Default cap on CONSECUTIVE compactions forced by a provider context-overflow
@@ -148,6 +151,37 @@ const EMPTY_TURN_MESSAGE =
   'of your task and make the tool call it needs.';
 
 /**
+ * Default cap on CONSECUTIVE turns that produced content but still ended the
+ * run (`stopReason: 'end'`) without calling `finish_run`, each of which is
+ * nudged instead of ended on — matching {@link DEFAULT_MAX_EMPTY_TURNS}'s
+ * shape for a model that stops producing usable output. Distinct from that
+ * counter because this only fires when there IS a `finish_run` tool the model
+ * could have called and did not.
+ */
+export const DEFAULT_MAX_UNFINISHED_NUDGES = 2;
+
+/** The finish tool the loop nudges/watches for when {@link LoopConfig.finishToolName}
+ * is unset — today's single-session `finish_run`. */
+export const DEFAULT_FINISH_TOOL_NAME = 'finish_run';
+
+/**
+ * The stop detail recorded when the unfinished-turn nudge cap is what ended
+ * the run: the model kept ending turns without calling `finish_run` even
+ * after being reminded to. Exported so cli.ts can name it as a distinct cause
+ * from {@link EMPTY_TURN_STOP_DETAIL}.
+ */
+export const UNFINISHED_STOP_DETAIL = 'model ended the run without calling finish_run, even after being reminded';
+
+/**
+ * What the model is told after an "end" turn that left `finish_run`
+ * uncalled, while the run still has a `finish_run` tool available.
+ */
+const UNFINISHED_TURN_MESSAGE =
+  'Your last turn ended the run without calling finish_run. If work remains, make the next tool ' +
+  'call. If you are finished, or unable to continue, call finish_run now with an honest ' +
+  'stopped_reason describing what you did and what you left undone.';
+
+/**
  * Loop tuning. `maxTurns` is REQUIRED and is the hard cap: there is deliberately
  * no unbounded default, because this loop runs unattended overnight and must
  * stop on its own.
@@ -166,6 +200,10 @@ export interface LoopConfig {
   /** Cap on CONSECUTIVE turns that returned no content and no tool calls,
    * each of which is nudged rather than ended on. Defaults to 3. */
   maxConsecutiveEmptyTurns?: number;
+  /** Cap on CONSECUTIVE "end" turns that left `finish_run` uncalled while a
+   * `finish_run` tool is registered, each of which is nudged rather than
+   * ended on. Defaults to {@link DEFAULT_MAX_UNFINISHED_NUDGES}. */
+  maxUnfinishedNudges?: number;
   /**
    * Turns reserved at the end of `maxTurns` for the model to wind up in.
    * Defaults to 2. Zero disables the warning entirely — the loop then stops
@@ -183,6 +221,18 @@ export interface LoopConfig {
    * {@link BROWSER_SERVER_NAME}. Defaults to `DEFAULT_TOOL_CONCURRENCY` (4).
    */
   maxToolConcurrency?: number;
+  /**
+   * The tool name the loop treats as the run's outcome-reporting call — the
+   * one it injects `turns_remaining` into before dispatch, nudges the model
+   * to call, and watches for execution/refusal to decide `finishRunExecuted`
+   * and the once-per-run refusal grace turn. Matches a bare or namespaced
+   * (`*__<name>`) tool call. Defaults to {@link DEFAULT_FINISH_TOOL_NAME}
+   * (`finish_run`) — per-channel-session harnesses set this to `finish_phase`
+   * for every non-final session.
+   */
+  finishToolName?: string;
+  /** Bare tool names neither advertised nor dispatchable in this session. */
+  deniedTools?: readonly string[];
 }
 
 /**
@@ -211,7 +261,17 @@ export interface LoopEvent {
   /** Discriminant marking this as a loop event to an `onEvent` consumer. */
   type: 'loopEvent';
   /** What happened. */
-  kind: 'compaction' | 'retry' | 'reflection' | 'emptyTurn' | 'turnCapReached' | 'wrapUp' | 'stop';
+  kind:
+    | 'compaction'
+    | 'retry'
+    | 'reflection'
+    | 'emptyTurn'
+    | 'unfinishedTurn'
+    | 'compactionFloor'
+    | 'turnCapReached'
+    | 'wrapUp'
+    | 'finishRunGrace'
+    | 'stop';
   /** The turn number this event relates to, when applicable. */
   turn?: number;
   /** Human-readable detail for a log line. */
@@ -241,6 +301,8 @@ export interface RunLoopOptions {
   screeningAdapter?: ProviderAdapter;
   /** Optional per-event hook so a CLI can stream progress. Never required. */
   onEvent?: (event: HarnessEvent | LoopEvent) => void;
+  /** Separate metadata-only execution boundary; failures are ignored. */
+  onDiagnostic?: (event: DiagnosticBoundary) => void;
   /** Injectable sleep so tests need not wait on real timers. Defaults to setTimeout. */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -302,6 +364,28 @@ interface LoopState {
    * {@link LoopResult.finishRunExecuted}. Latched at the execution choke point
    * rather than derived from the transcript afterwards. */
   finishRunExecuted: boolean;
+  /** CONSECUTIVE "end" turns that left `finish_run` uncalled while a
+   * `finish_run` tool is registered. Reset whenever tools actually execute
+   * (see {@link continueWithTools}), mirroring `emptyTurns`. */
+  unfinishedNudges: number;
+  /** The turn number the last PROACTIVE compaction happened on, if any — used
+   * to detect back-to-back proactive compactions (see {@link applyCompaction}).
+   * Never set by the reactive overflow path in {@link compactAndRetry}. */
+  lastProactiveCompactionTurn?: number;
+  /** Whether the `compactionFloor` event has already been emitted once this
+   * run — a third (or later) back-to-back proactive compaction still falls
+   * back to the mechanical summary, but must not report the floor again. */
+  compactionFloorReported?: boolean;
+  /** Set once a PROACTIVE compaction still leaves the conversation over the
+   * trigger (pinned lead + kept tail alone exceed it) — the floor has been
+   * reached and further proactive compactions can only re-fire every turn
+   * for no gain. {@link maybeCompact} short-circuits while this is set.
+   * Never touched by the reactive overflow path in {@link compactAndRetry}. */
+  proactiveCompactionSuspended?: boolean;
+  /** Whether the one-time grace turn for a refused `finish_run` on the cap
+   * turn has already been granted — bounded to once per run so a model that
+   * keeps erroring `finish_run` cannot extend the budget indefinitely. */
+  finishRunGraceUsed: boolean;
 }
 
 /** Per-iteration context handed to the outcome handlers. */
@@ -316,6 +400,7 @@ interface LoopContext {
    * {@link RunLoopOptions.screeningAdapter}. */
   screeningAdapter?: ProviderAdapter;
   onEvent?: (event: HarnessEvent | LoopEvent) => void;
+  diagnostic: DiagnosticTimer;
   sleep: (ms: number) => Promise<void>;
 }
 
@@ -391,6 +476,31 @@ export function backoffDelay(attempt: number, maxRetryDelayMs: number): number {
   return Math.min(base + jitter, maxRetryDelayMs);
 }
 
+/** Own operation IDs locally; never pass provider strings through telemetry. */
+class DiagnosticTimer {
+  private nextId = 0;
+  constructor(private readonly callback?: (event: DiagnosticBoundary) => void) {}
+
+  private send(event: DiagnosticBoundary): void {
+    try { this.callback?.(event); } catch { /* telemetry must not affect the run */ }
+  }
+
+  async time<T>(phase: DiagnosticPhase, work: () => Promise<T>, metadata: Partial<DiagnosticBoundary> = {},
+    failed: (result: T) => boolean = () => false): Promise<T> {
+    const operationId = `op_${++this.nextId}`;
+    const base = { operationId, phase, ...metadata };
+    this.send({ ...base, status: 'start' });
+    let status: 'success' | 'error' = 'error';
+    try {
+      const result = await work();
+      status = failed(result) ? 'error' : 'success';
+      return result;
+    } finally {
+      this.send({ ...base, status });
+    }
+  }
+}
+
 /**
  * Run the agent loop to termination.
  *
@@ -402,6 +512,7 @@ export function backoffDelay(attempt: number, maxRetryDelayMs: number): number {
 export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
   const { adapter, pool, systemPrompt, initialMessages, config, compactionConfig, onEvent, screeningAdapter } = opts;
   const sleep = opts.sleep ?? defaultSleep;
+  const diagnostic = new DiagnosticTimer(opts.onDiagnostic);
   const state: LoopState = {
     messages: [...initialMessages],
     turns: 0,
@@ -412,14 +523,17 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
     emptyTurns: 0,
     wrapUpSent: false,
     finishRunExecuted: false,
+    finishRunGraceUsed: false,
+    unfinishedNudges: 0,
   };
   while (true) {
-    const registry = await refreshRegistry(pool);
-    state.messages = await maybeCompact(state, compactionConfig, adapter, onEvent);
+    const registry = await diagnostic.time('registry_refresh', () => refreshRegistry(pool, config.deniedTools), { turn: state.turns });
+    state.messages = await maybeCompact(state, compactionConfig, adapter, onEvent, diagnostic);
     const tools = registry.map((r) => r.definition);
     const request: ModelRequest = { systemPrompt, messages: state.messages, tools };
     const sentMessageCount = state.messages.length;
-    const { outcome, usage } = await runOneTurn(adapter, request, onEvent);
+    const { outcome, usage } = await diagnostic.time('model', () => runOneTurn(adapter, request, onEvent),
+      { turn: state.turns, retryAttempt: state.retries }, (reply) => reply.outcome.kind === 'error');
     if (usage) {
       // Anchor the next estimate: this count describes exactly the messages
       // that were sent, so only what is appended after it needs estimating.
@@ -433,6 +547,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
       compactionConfig,
       screeningAdapter,
       onEvent,
+      diagnostic,
       sleep,
     });
     if (result) return result;
@@ -440,9 +555,9 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
 }
 
 /** Refresh the live tool list and build a fresh registry for this turn. */
-async function refreshRegistry(pool: McpClientPool): Promise<RegisteredTool[]> {
+async function refreshRegistry(pool: McpClientPool, deniedTools?: readonly string[]): Promise<RegisteredTool[]> {
   await pool.refreshTools();
-  return buildToolRegistry(pool.listTools());
+  return buildToolRegistry(pool.listTools(), deniedTools);
 }
 
 /**
@@ -465,12 +580,14 @@ async function maybeCompact(
   state: LoopState,
   config: CompactionConfig | undefined,
   adapter: ProviderAdapter,
-  onEvent?: (event: HarnessEvent | LoopEvent) => void,
+  onEvent: ((event: HarnessEvent | LoopEvent) => void) | undefined,
+  diagnostic: DiagnosticTimer,
 ): Promise<ConversationMessage[]> {
   if (!config || !config.contextWindow) return state.messages;
+  if (state.proactiveCompactionSuspended) return state.messages;
   const untracked = state.messages.slice(state.usageCoveredMessages);
   if (!shouldCompact(untracked, state.usage, config)) return state.messages;
-  return applyCompaction(state, config, adapter, onEvent, 'approaching the context window');
+  return diagnostic.time('compaction', () => applyCompaction(state, config, adapter, onEvent, 'approaching the context window'), { turn: state.turns });
 }
 
 /**
@@ -518,6 +635,29 @@ async function summarizeDropped(adapter: ProviderAdapter, dropped: ConversationM
 }
 
 /**
+ * Suspend proactive compaction (once) and emit 'compactionFloor' (once,
+ * guarded by compactionFloorReported) when a compaction has landed at its
+ * floor — either by the messages estimate still exceeding the trigger, or
+ * by having fired back-to-back with the previous one.
+ */
+function suspendAtFloor(
+  state: LoopState,
+  config: CompactionConfig,
+  onEvent: ((event: HarnessEvent | LoopEvent) => void) | undefined,
+): void {
+  state.proactiveCompactionSuspended = true;
+  if (state.compactionFloorReported) return;
+  onEvent?.(
+    loopEvent(
+      'compactionFloor',
+      state.turns,
+      `context window in use: ${config.contextWindow} — proactive compaction suspended`,
+    ),
+  );
+  state.compactionFloorReported = true;
+}
+
+/**
  * Compact, reset the usage anchor, and report it. PROACTIVE path only — the
  * reactive path (`compactAndRetry`) compacts mechanically and never reaches
  * here, because it fires exactly when the context has just overflowed, the
@@ -536,13 +676,31 @@ async function applyCompaction(
   onEvent: ((event: HarnessEvent | LoopEvent) => void) | undefined,
   why: string,
 ): Promise<ConversationMessage[]> {
+  // Back-to-back proactive compactions mean the last one did not buy enough
+  // headroom to survive a single turn — the conversation is at its floor.
+  // Asking the model to summarize again there is wasted work (another request
+  // against the same tight budget), so fall back straight to the mechanical
+  // summary instead.
+  const atFloor = state.lastProactiveCompactionTurn === state.turns - 1;
   const plan = planCompaction(state.messages);
-  const summaryText = plan ? await summarizeDropped(adapter, plan.dropped) : undefined;
+  const summaryText = plan && !atFloor ? await summarizeDropped(adapter, plan.dropped) : undefined;
   const { messages: compacted, record } = compact(state.messages, config, summaryText);
   if (record) {
     state.usage = undefined;
     state.usageCoveredMessages = 0;
     onEvent?.(loopEvent('compaction', state.turns, `${why}: ${record.summary}`));
+    // Suspend proactive compaction once it can no longer help, on either of
+    // two signals: (1) the pinned lead plus the kept tail alone still exceed
+    // the trigger by the messages estimate alone, or (2) this compaction
+    // followed immediately on the heels of the previous one (atFloor) —
+    // which covers provider-reported usage overhead (system prompt + tool
+    // schemas counted in inputTokens but not in the messages estimate) that
+    // compaction cannot remove, and which would otherwise keep re-firing
+    // every turn without ever showing up in the messages-only check.
+    if (shouldCompact(compacted, undefined, config) || atFloor) {
+      suspendAtFloor(state, config, onEvent);
+    }
+    state.lastProactiveCompactionTurn = state.turns;
   }
   return compacted;
 }
@@ -594,6 +752,26 @@ async function applyError(error: ErrorEvent, state: LoopState, ctx: LoopContext)
 }
 
 /**
+ * Whether a reactive compaction actually made the next request smaller.
+ *
+ * Fewer messages or a new elision is progress. So is a same-count compaction
+ * that shrank the estimated size — one long message folded into a short
+ * summary — UNLESS everything it dropped was an earlier `[compaction]`
+ * summary: re-summarising a summary cannot free meaningful room, and
+ * resending that would spin until the overflow budget ran out.
+ */
+function compactionShrank(
+  before: ConversationMessage[],
+  after: ConversationMessage[],
+  record: CompactionRecord,
+): boolean {
+  if (after.length < before.length || (record.elidedToolResultCount ?? 0) > 0) return true;
+  const dropped = planCompaction(before)?.dropped ?? [];
+  const onlySummaries = dropped.every((m) => m.role === 'system' && m.content.startsWith('[compaction]'));
+  return !onlySummaries && estimateConversationTokens(after) < estimateConversationTokens(before);
+}
+
+/**
  * Compact in response to the provider saying the context is too long, and let
  * the loop resend the same turn.
  *
@@ -616,12 +794,18 @@ async function compactAndRetry(state: LoopState, ctx: LoopContext): Promise<Loop
   if (state.overflowCompactions >= max) {
     return finish('error', state, ctx, 'context overflow persisted after compaction');
   }
-  const before = state.messages.length;
-  const { messages: compacted, record } = compact(state.messages, ctx.compactionConfig ?? { contextWindow: 0 });
+  const { messages: compacted, record } = await ctx.diagnostic.time('compaction',
+    async () => compact(state.messages, ctx.compactionConfig ?? { contextWindow: 0 }), { turn: state.turns });
   // Checked before anything is reported or reset: a compaction that removed
   // nothing must not appear in the run log, and must not clear the usage
-  // anchor on its way out.
-  if (!record || compacted.length >= before) {
+  // anchor on its way out. A null record means nothing was left to compact
+  // at all. But a non-null record is not automatically progress either: a
+  // second pass over already-elided content, or a pass at the compaction
+  // floor that finds nothing new to drop or elide, can still return a record
+  // whose message count and content are byte-identical to what was just
+  // sent — resending that would spin forever. See compactionShrank for what
+  // counts as progress.
+  if (!record || !compactionShrank(state.messages, compacted, record)) {
     return finish('error', state, ctx, 'context overflow with nothing left to compact');
   }
   state.messages = compacted;
@@ -663,7 +847,8 @@ async function backoff(state: LoopState, ctx: LoopContext, error: ErrorEvent): P
   const source = asked === undefined ? '' : ' (provider Retry-After)';
   state.retries += 1;
   ctx.onEvent?.(loopEvent('retry', state.turns, `retrying after ${Math.round(delay)}ms${source}`));
-  await ctx.sleep(delay);
+  await ctx.diagnostic.time('backoff', () => ctx.sleep(delay),
+    { turn: state.turns, retryAttempt: state.retries, delayMs: Math.round(delay) });
 }
 
 /** Handle a `done` event by advancing the turn and dispatching its stop reason. */
@@ -713,9 +898,43 @@ async function dispatchStopReason(done: DoneEvent, state: LoopState, ctx: LoopCo
  * could restart work that is finished and submit duplicate job applications
  * under a real person's name.
  */
+/** True when `registry` carries a `finish_run` tool the model could call —
+ * the built-in's own or an MCP server's namespaced one. */
+function hasFinishRunTool(registry: RegisteredTool[], finishToolName: string): boolean {
+  return registry.some((tool) => tool.toolName === finishToolName || tool.namespacedName.endsWith(`__${finishToolName}`));
+}
+
+/** Whether `call.name` is the configured finish tool, bare or namespaced
+ * (`*__<name>`). Shared by injection, execution-latching and refusal checks
+ * so all three agree on what "the finish tool" means for this run. */
+function isFinishToolCall(name: string, finishToolName: string): boolean {
+  return name === finishToolName || name.endsWith(`__${finishToolName}`);
+}
+
 function handleEnd(done: DoneEvent, state: LoopState, ctx: LoopContext): LoopResult | undefined {
-  if (!isEmptyTurn(done.message) || state.finishRunExecuted) {
+  // Once finish_run has executed successfully, any further "end" turn —
+  // empty or not — is a genuine stop: nudging the model to call it again
+  // would be pointless and risks a duplicate action under a real identity.
+  if (state.finishRunExecuted) {
     return finish('end', state, ctx, 'model ended the turn');
+  }
+  const finishToolName = ctx.config.finishToolName ?? DEFAULT_FINISH_TOOL_NAME;
+  if (!isEmptyTurn(done.message)) {
+    // A run with no finish_run tool registered at all has nothing to nudge
+    // it towards.
+    if (!hasFinishRunTool(ctx.registry, finishToolName)) {
+      return finish('end', state, ctx, 'model ended the turn');
+    }
+    state.unfinishedNudges += 1;
+    const maxUnfinished = ctx.config.maxUnfinishedNudges ?? DEFAULT_MAX_UNFINISHED_NUDGES;
+    if (state.unfinishedNudges > maxUnfinished) {
+      return finish('end', state, ctx, UNFINISHED_STOP_DETAIL);
+    }
+    state.messages.push({ role: 'user', content: UNFINISHED_TURN_MESSAGE });
+    ctx.onEvent?.(
+      loopEvent('unfinishedTurn', state.turns, `unfinished turn ${state.unfinishedNudges} of ${maxUnfinished} — nudged the model`),
+    );
+    return capOrContinue(state, ctx);
   }
   state.emptyTurns += 1;
   const max = ctx.config.maxConsecutiveEmptyTurns ?? DEFAULT_MAX_EMPTY_TURNS;
@@ -742,6 +961,7 @@ function isEmptyTurn(message: ConversationMessage): boolean {
 /** Execute every tool call this turn requested, then continue or hit the cap. */
 async function continueWithTools(done: DoneEvent, state: LoopState, ctx: LoopContext): Promise<LoopResult | undefined> {
   const calls = done.message.toolCalls ?? [];
+  injectTurnsRemaining(calls, state, ctx);
   const results = await executeTurnToolCalls(
     ctx.pool,
     calls,
@@ -749,14 +969,58 @@ async function continueWithTools(done: DoneEvent, state: LoopState, ctx: LoopCon
     ctx.config.maxToolResultChars ?? DEFAULT_MAX_TOOL_RESULT_CHARS,
     ctx.config.maxToolConcurrency ?? DEFAULT_TOOL_CONCURRENCY,
     ctx.screeningAdapter,
+    ctx.diagnostic,
+    state.turns,
   );
   state.messages.push(toolResultsMessage(results));
   // Latch the run's outcome-reporting call here, at the only place a tool is
   // actually run: an emitted call proves nothing, since a call recovered from a
   // truncated response is pushed into the history and then failed unexecuted by
   // handleLength(), and an errored call closed no run either.
-  if (!state.finishRunExecuted) state.finishRunExecuted = executedFinishRun(calls, results);
+  if (!state.finishRunExecuted) state.finishRunExecuted = executedFinishRun(calls, results, ctx.config.finishToolName ?? DEFAULT_FINISH_TOOL_NAME);
+  maybeGrantFinishRunGrace(calls, results, state, ctx);
+  // Tools actually ran this turn, so any prior unfinished-turn nudges are
+  // moot — the model is doing work again, not repeatedly ending with nothing
+  // done. Mirrors emptyTurns resetting on the first non-empty turn.
+  state.unfinishedNudges = 0;
   return capOrContinue(state, ctx);
+}
+
+/**
+ * Harness-owned: before dispatch, stamp every call to `finish_run` or
+ * `finish_phase` (bare or namespaced `*__<name>`) with how many turns
+ * remain, so the server's coverage guard knows whether it may still hold the
+ * run open. Both are stamped regardless of which one is this session's
+ * *configured* finish tool: a per-channel session's model may legitimately
+ * call the other (e.g. a `finish_phase` session's model calling `finish_run`
+ * because it believes the run is over), and that call still needs an honest
+ * turns_remaining for the guard to reason about. This OVERWRITES any
+ * `turns_remaining` value the model supplied — the model has no reliable way
+ * to know the harness's own turn budget, and a stale or fabricated value
+ * would defeat the guard.
+ */
+function injectTurnsRemaining(calls: ToolCall[], state: LoopState, ctx: LoopContext): void {
+  const turnsRemaining = ctx.config.maxTurns - state.turns;
+  for (const call of calls) {
+    if (isFinishToolCall(call.name, 'finish_run') || isFinishToolCall(call.name, 'finish_phase')) {
+      call.arguments = { ...call.arguments, turns_remaining: turnsRemaining };
+    }
+  }
+}
+
+/**
+ * Grant a single extra turn when `finish_run` was refused on the very turn
+ * that reached the hard cap — the server's discovery-coverage guard rejects a
+ * first `finish_run` call but always accepts the retry, so without this a run
+ * caught on the cap turn could never close itself. Bounded to once per run by
+ * {@link LoopState.finishRunGraceUsed}.
+ */
+function maybeGrantFinishRunGrace(calls: ToolCall[], results: ToolResult[], state: LoopState, ctx: LoopContext): void {
+  if (state.finishRunExecuted || state.finishRunGraceUsed) return;
+  if (state.turns < ctx.config.maxTurns) return;
+  if (!refusedFinishRun(calls, results, ctx.config.finishToolName ?? DEFAULT_FINISH_TOOL_NAME)) return;
+  state.finishRunGraceUsed = true;
+  ctx.onEvent?.(loopEvent('finishRunGrace', state.turns, 'finish_run was refused on the last turn — granted one extra turn'));
 }
 
 /**
@@ -777,8 +1041,9 @@ async function handleLength(done: DoneEvent, state: LoopState, ctx: LoopContext)
 /** Stop with `turnCapReached` if the hard cap is now met, else continue —
  * warning the model once when it enters the wrap-up window. */
 function capOrContinue(state: LoopState, ctx: LoopContext): LoopResult | undefined {
-  if (state.turns >= ctx.config.maxTurns) {
-    ctx.onEvent?.(loopEvent('turnCapReached', state.turns, `hard turn cap of ${ctx.config.maxTurns} reached`));
+  const effectiveMaxTurns = ctx.config.maxTurns + (state.finishRunGraceUsed ? 1 : 0);
+  if (state.turns >= effectiveMaxTurns) {
+    ctx.onEvent?.(loopEvent('turnCapReached', state.turns, `hard turn cap of ${effectiveMaxTurns} reached`));
     return {
       stopReason: 'turnCapReached',
       messages: state.messages,
@@ -800,7 +1065,9 @@ function capOrContinue(state: LoopState, ctx: LoopContext): LoopResult | undefin
  *
  * The warning does not extend the budget — `maxTurns` still stops the loop. It
  * only buys the model notice, so its last turns are a deliberate wind-down
- * instead of an arbitrary cut.
+ * instead of an arbitrary cut. The one exception is the single finish_run
+ * grace turn granted in {@link continueWithTools} when `finish_run` is
+ * refused on the cap turn itself.
  */
 function maybeWarnWrapUp(state: LoopState, ctx: LoopContext): void {
   const reserved = ctx.config.wrapUpTurns ?? DEFAULT_WRAP_UP_TURNS;
@@ -820,10 +1087,13 @@ function maybeWarnWrapUp(state: LoopState, ctx: LoopContext): void {
  * Execute this turn's tool calls with bounded concurrency, every one through
  * the single choke point {@link executeToolCall}. Calls are partitioned by
  * server: browser-owned calls (and `harvest_postings`, which drives the
- * browser internally — see {@link partitionByServer}) run strictly one at a
- * time (one Chromium profile, one holder), while every other call may
- * overlap up to `concurrency` at once. Results land at each call's own
- * original index, so
+ * browser internally — see {@link partitionByServer}) still run strictly one
+ * at a time AT THIS TURN LEVEL, while every other call may overlap up to
+ * `concurrency` at once. Compound screening/recording calls finish first,
+ * before any browser work in the same turn begins. Each `harvest_postings`
+ * call also works its boards serially on the same primary browser connection, so neither its boards nor
+ * separate browser-driving tool calls in the turn can interleave. Results
+ * land at each call's original index, so
  * the returned array matches REQUEST order regardless of completion order —
  * that is what keeps {@link executedFinishRun} and the tool-results message
  * sent back to the provider correct even when calls finish out of order.
@@ -835,12 +1105,19 @@ async function executeTurnToolCalls(
   maxContentChars: number,
   concurrency: number = DEFAULT_TOOL_CONCURRENCY,
   screeningAdapter?: ProviderAdapter,
+  diagnostic?: DiagnosticTimer,
+  turn?: number,
 ): Promise<ToolResult[]> {
   const results: ToolResult[] = new Array(calls.length);
   const { browser, other } = partitionByServer(calls, registry);
+  const compound = other.filter((i) => calls[i].name === 'screen_and_record_posting');
+  const remaining = other.filter((i) => calls[i].name !== 'screen_and_record_posting');
   const runOne = (i: number): Promise<void> =>
-    runToolCall(pool, calls, registry, maxContentChars, results, i, screeningAdapter);
-  await Promise.all([runPool(browser, 1, runOne), runPool(other, concurrency, runOne)]);
+    runToolCall(pool, calls, registry, maxContentChars, results, i, screeningAdapter, diagnostic, turn);
+  // A saved feed screening must not wait behind a later browser harvest in the
+  // same model turn. Errors remain per-call results; they cannot erase saves.
+  await runPool(compound, concurrency, runOne);
+  await Promise.all([runPool(browser, 1, runOne), runPool(remaining, concurrency, runOne)]);
   return results;
 }
 
@@ -858,12 +1135,19 @@ async function runToolCall(
   results: ToolResult[],
   i: number,
   screeningAdapter?: ProviderAdapter,
+  diagnostic?: DiagnosticTimer,
+  turn?: number,
 ): Promise<void> {
-  try {
-    results[i] = await executeToolCall(pool, calls[i], registry, maxContentChars, undefined, screeningAdapter);
-  } catch (err) {
-    results[i] = { toolCallId: calls[i].id, content: err instanceof Error ? err.message : String(err), isError: true };
-  }
+  const registered = registry.find((tool) => tool.namespacedName === calls[i].name);
+  const toolName = registered?.namespacedName ?? 'unknown';
+  await diagnostic!.time('tool', async () => {
+    try {
+      results[i] = await executeToolCall(pool, calls[i], registry, maxContentChars, undefined, screeningAdapter);
+    } catch (err) {
+      results[i] = { toolCallId: calls[i].id, content: err instanceof Error ? err.message : String(err), isError: true };
+    }
+    return results[i];
+  }, { toolName, turn }, (result) => Boolean(result.isError));
 }
 
 /** Split call indices into the browser-server group (must stay serial) and
@@ -871,10 +1155,10 @@ async function runToolCall(
  * server and falls into the concurrent group — executeToolCall reports
  * "unknown tool" for it regardless of grouping. `harvest_postings` is routed
  * into the SAME serial group as `browser__*` calls even though it is a
- * `builtin`-server tool: its execution drives the browser internally over the
- * one shared MCP connection, so it must never overlap a model-issued browser
- * call or another harvest_postings call in the same turn — see tools.ts's
- * `HARVEST_POSTINGS_TOOL_NAME` doc. */
+ * `builtin`-server tool: its execution drives the browser internally over
+ * the same primary MCP connection used by model-issued `browser__*` calls,
+ * so it must never overlap a model-issued browser call or another harvest call
+ * in the same turn — see tools.ts's `HARVEST_POSTINGS_TOOL_NAME` doc. */
 function partitionByServer(calls: ToolCall[], registry: RegisteredTool[]): { browser: number[]; other: number[] } {
   const browser: number[] = [];
   const other: number[] = [];
@@ -925,11 +1209,28 @@ async function runPool(indices: number[], limit: number, task: (i: number) => Pr
  * @param results Their results, in any order.
  * @returns True if a `finish_run` call returned a non-error result.
  */
-function executedFinishRun(calls: ToolCall[], results: ToolResult[]): boolean {
+function executedFinishRun(calls: ToolCall[], results: ToolResult[], finishToolName: string): boolean {
   return calls.some(
     (call) =>
-      (call.name === 'finish_run' || call.name.endsWith('__finish_run')) &&
+      isFinishToolCall(call.name, finishToolName) &&
       results.some((result) => result.toolCallId === call.id && !result.isError),
+  );
+}
+
+/**
+ * Did this turn call `finish_run` and have it refused (returned `isError`)?
+ * Mirrors {@link executedFinishRun}'s name-matching and by-id result lookup,
+ * but for the opposite outcome — used to grant the one-time grace turn.
+ *
+ * @param calls The tool calls this turn requested.
+ * @param results Their results, in any order.
+ * @returns True if a `finish_run` call returned an error result.
+ */
+function refusedFinishRun(calls: ToolCall[], results: ToolResult[], finishToolName: string): boolean {
+  return calls.some(
+    (call) =>
+      isFinishToolCall(call.name, finishToolName) &&
+      results.some((result) => result.toolCallId === call.id && result.isError),
   );
 }
 

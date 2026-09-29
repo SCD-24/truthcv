@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 
@@ -405,13 +406,15 @@ def test_a_trickling_response_cannot_outlive_the_shared_deadline(mock_http, monk
     pins that ``fetch_ats_postings`` still cuts the request off at the
     absolute shared deadline, deterministically, via a pinned clock (no real
     sleeping or network)."""
-    # Deadline is 21s out. The clock ticks: 20.0 at the top of the fetch loop
-    # (remaining = 1.0s, still positive, so the request is attempted), then
-    # 22.0 and 24.0 as each streamed chunk is read — each read individually
-    # would satisfy a generous per-chunk timeout, but the second one is
-    # already past the absolute deadline of 21.0.
-    ticks = iter([20.0, 22.0, 24.0])
-    monkeypatch.setattr(ats.time, "monotonic", lambda: next(ticks, 24.0))
+    # Deadline is 21s out. The clock ticks: 20.0 at the submission loop's own
+    # deadline check (remaining = 1.0s, still positive, so the board is
+    # queued), 20.5 at the worker's own re-check right before it fetches
+    # (still positive, so the request is actually attempted), then 20.9 and
+    # 22.0 as each streamed chunk is read — the first would satisfy a
+    # generous per-chunk timeout, but the second is already past the
+    # absolute deadline of 21.0.
+    ticks = iter([20.0, 20.5, 20.9, 22.0])
+    monkeypatch.setattr(ats.time, "monotonic", lambda: next(ticks, 22.0))
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, stream=_TricklingStream())
@@ -420,6 +423,97 @@ def test_a_trickling_response_cannot_outlive_the_shared_deadline(mock_http, monk
     result = ats.fetch_ats_postings([_board(ats="greenhouse")], now=NOW, deadline=21.0)
     assert result.postings == []
     assert "exceeded the shared feed deadline" in result.error
+
+
+# --- concurrency --------------------------------------------------------------
+
+
+def test_several_boards_are_fetched_concurrently_and_merged_in_submission_order(mock_http):
+    """Task t-2: individual board fetches now run on a worker thread pool
+    instead of one after another. Proven with a three-party Barrier that only
+    releases once every board's request has actually arrived — a serial
+    implementation would leave the barrier a lone party and time out waiting
+    for partners that never show up (BrokenBarrierError), which would surface
+    as a per-board fetch failure and leave ``result.error`` non-empty here.
+    The merge is checked against submission order (Alpha, Bravo, Charlie),
+    which the implementation preserves regardless of which request happens to
+    finish first — see ``fetch_ats_postings``'s docstring."""
+    boards = [
+        _board(company="Alpha", careers_url="https://boards.greenhouse.io/alpha", ats="greenhouse"),
+        _board(company="Bravo", careers_url="https://jobs.lever.co/bravo", ats="lever"),
+        _board(company="Charlie", careers_url="https://jobs.ashbyhq.com/charlie", ats="ashby"),
+    ]
+    barrier = threading.Barrier(len(boards), timeout=5)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        barrier.wait()
+        if host == "boards-api.greenhouse.io":
+            return httpx.Response(
+                200, json={"jobs": [{"title": "Alpha Role", "absolute_url": "https://alpha.example/1"}]}
+            )
+        if host == "api.lever.co":
+            return httpx.Response(200, json=[{"text": "Bravo Role", "hostedUrl": "https://bravo.example/1"}])
+        if host == "api.ashbyhq.com":
+            return httpx.Response(
+                200, json={"jobs": [{"title": "Charlie Role", "jobUrl": "https://charlie.example/1"}]}
+            )
+        return httpx.Response(404, text="not found")  # pragma: no cover — every host above is handled
+
+    mock_http(handler)
+    result = ats.fetch_ats_postings(boards, now=NOW)
+
+    assert result.error == ""
+    assert [p.url for p in result.postings] == [
+        "https://alpha.example/1",
+        "https://bravo.example/1",
+        "https://charlie.example/1",
+    ]
+
+
+def test_queued_boards_are_not_fetched_once_the_deadline_expires_while_queued(mock_http, monkeypatch):
+    """Fix: submitting a board to the worker pool decides nothing about the
+    deadline — ``executor.submit`` returns near-instantly, so a submission-time
+    check alone would let every eligible board (up to MAX_REQUESTS) get
+    queued while the deadline is still comfortably in the future, with
+    nothing re-checking it before a queued worker actually issues its
+    request. ``_fetch_worker`` must re-check the absolute deadline itself,
+    right before it would call ``_fetch_one``, and skip the request entirely
+    once it is gone.
+
+    Simulated deterministically, with no real sleeping: ``time.monotonic`` is
+    patched to answer by CALLING THREAD rather than by call count, which
+    stays correct regardless of how the submission loop and the worker
+    threads happen to interleave. The main thread (running the serial
+    submission loop) always sees a time comfortably before the deadline, so
+    every board is dispatched and queued; any worker thread (running
+    ``_fetch_worker``) always sees a time long past it, so every worker must
+    find the deadline already gone the instant it starts, before ever
+    touching the transport.
+    """
+    main_thread = threading.main_thread()
+
+    def fake_monotonic() -> float:
+        return 0.0 if threading.current_thread() is main_thread else 1_000.0
+
+    monkeypatch.setattr(ats.time, "monotonic", fake_monotonic)
+
+    fetch_attempts = []
+
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover — must never run
+        fetch_attempts.append(request.url.host)
+        return httpx.Response(200, json=_GREENHOUSE_BODY)
+
+    mock_http(handler)
+    boards = [
+        _board(company=f"Company{i}", careers_url=f"https://boards.greenhouse.io/company{i}") for i in range(8)
+    ]
+
+    result = ats.fetch_ats_postings(boards, now=NOW, deadline=10.0)
+
+    assert fetch_attempts == []
+    assert result.postings == []
+    assert result.error.count("ATS fetch was too slow; some companies were skipped.") == 1
 
 
 # --- dispatch / skipping -----------------------------------------------------

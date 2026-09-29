@@ -13,7 +13,8 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
-from agentconfig.store import AgentConfig
+from agentconfig.boards import posting_url_pattern_error, search_url_error
+from agentconfig.store import DORK_RECENCIES, AgentConfig
 from screening.company import validate_company_name
 from screening.model import validate_verdict
 from screening.posting import validate_posting_text
@@ -296,6 +297,7 @@ class JobProfileModel(_Camel):
     name: str = ""
     enabled: bool = True
     keywords: list[str] = Field(default_factory=list)
+    title_keywords: list[str] = Field(default_factory=list)
     locations: list[str] = Field(default_factory=list)
     remote_model: str | None = None
     employment_country: str | None = None
@@ -334,7 +336,7 @@ class JobProfileModel(_Camel):
             raise ValueError("glassdoor_min_reviews must be >= 0")
         return v
 
-    @field_validator("keywords", "locations", "accepted_role_types", "rejected_role_types", mode="before")
+    @field_validator("keywords", "title_keywords", "locations", "accepted_role_types", "rejected_role_types", mode="before")
     @classmethod
     def _split_comma_delimited_lists(cls, v):
         if isinstance(v, str):
@@ -351,23 +353,56 @@ class JobBoardModel(_Camel):
     ``mode`` ("dork" or "direct") is only ever actually settable when the
     board is custom; a board dict that omits it (an older client, or a
     catalog board) still validates. ``domain``, ``effective_signin_url``,
-    ``is_default``, ``is_api`` and ``mode_locked`` are response-only, resolved
-    server-side by the routes from agentconfig/boards.py and stripped on a
-    PUT — ``is_default`` marks a board that is always searched and cannot be
-    removed, ``is_api`` a board reached with a saved API key rather than a
-    browser sign-in (``effective_signin_url`` is always "" for those), and
-    ``mode_locked`` marks a catalog board whose ``mode`` is fixed and not
-    operator-editable.
+    ``is_default``, ``is_api``, ``key_required`` and ``mode_locked`` are
+    response-only, resolved server-side by the routes from agentconfig/boards.py
+    and stripped on a PUT — ``is_default`` marks a board that is built-in and
+    cannot be removed (but CAN be disabled, via ``enabled``), ``is_api`` a board
+    reached via an HTTP API rather than a browser sign-in
+    (``effective_signin_url`` is always "" for those), ``key_required`` whether
+    that API board needs a saved key before its feed can run (false for a public
+    API board like Arbeitnow, and for every non-API board), and ``mode_locked``
+    marks a catalog board whose ``mode`` is fixed and not operator-editable.
+
+    ``enabled`` IS operator-settable, for every board including a default —
+    a disabled board stays listed (re-enableable) but drops out of
+    discovery, dorks, direct boards, and API feeds.
     """
 
     source: str = ""
     signin_url: str = ""
     mode: str = ""
+    search_url: str = ""
+    enabled: bool = True
+    posting_url_pattern: str = ""
     mode_locked: bool = False
     domain: str = ""
     effective_signin_url: str = ""
     is_default: bool = False
     is_api: bool = False
+    key_required: bool = False
+
+    @field_validator("search_url")
+    @classmethod
+    def _validate_search_url(cls, v: str) -> str:
+        """Empty is fine (no search-results template configured); otherwise it
+        must be an http(s) URL carrying a ``{keywords}`` placeholder and no
+        placeholder other than ``{keywords}``/``{location}``.
+        """
+        err = search_url_error(v)
+        if err:
+            raise ValueError(err)
+        return v
+
+    @field_validator("posting_url_pattern")
+    @classmethod
+    def _validate_posting_url_pattern(cls, v: str) -> str:
+        """Empty is fine (no posting-link glob configured); otherwise it must
+        be an http(s) URL glob with a valid host and no whitespace/braces.
+        """
+        err = posting_url_pattern_error(v)
+        if err:
+            raise ValueError(err)
+        return v
 
 
 class DirectBoardProfileModel(_Camel):
@@ -385,6 +420,8 @@ class DirectBoardModel(_Camel):
 
     url: str = ""
     signin_url: str = ""
+    search_url: str = ""
+    posting_url_pattern: str = ""
     profiles: list[DirectBoardProfileModel] = Field(default_factory=list)
 
 
@@ -452,6 +489,8 @@ class SearchQueryModel(_Camel):
     """Composed search query (response-only)."""
 
     profile: str
+    # Every profile that composed this (deduplicated) URL; profile is the first.
+    profiles: list[str] = []
     source: str
     query: str
     url: str
@@ -477,6 +516,7 @@ class AgentConfigModel(_Camel):
     cooldown_days_same_company: int | None = None
     max_applications_per_run: int | None = None
     max_posting_age_days: int | None = None
+    dork_recency: str = "d"
     company_boards: list[CompanyBoardModel] = Field(default_factory=list)
     search_queries: list[SearchQueryModel] = Field(default_factory=list)
     # One entry per direct-mode board (searched on-site rather than via a
@@ -490,6 +530,11 @@ class AgentConfigModel(_Camel):
     # is empty instead of implying there are no matching jobs.
     feed_postings: list[FeedPostingModel] = Field(default_factory=list)
     feed_error: str = ""
+    # Count of feed postings dropped because the ledger already has a
+    # screening for them (see screening.store.screened_dedupe_keys), so the
+    # agent can see it stopped re-screening postings that return
+    # created:false instead of silently getting a shorter feed.
+    feed_already_screened: int = 0
 
 
 class AgentConfigUpdate(_Camel):
@@ -515,6 +560,7 @@ class AgentConfigUpdate(_Camel):
     cooldown_days_same_company: int | None = None
     max_applications_per_run: int | None = None
     max_posting_age_days: int | None = None
+    dork_recency: str | None = None
 
     @field_validator("mode")
     @classmethod
@@ -613,6 +659,15 @@ class AgentConfigUpdate(_Camel):
             raise ValueError("maxPostingAgeDays must be >= 0 (0 disables the window)")
         if v > 365:
             raise ValueError("maxPostingAgeDays must be <= 365")
+        return v
+
+    @field_validator("dork_recency")
+    @classmethod
+    def _validate_dork_recency(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in DORK_RECENCIES:
+            raise ValueError(f"dorkRecency must be one of {', '.join(DORK_RECENCIES)}")
         return v
 
     @field_validator("profiles")
@@ -1241,7 +1296,6 @@ class RouteModel(_Camel):
     connection: str
     model: str = ""
     effort: str = ""
-    context_window: int = 0
 
 
 class RoutingModel(_Camel):
@@ -1250,6 +1304,7 @@ class RoutingModel(_Camel):
     tasks: dict[str, RouteModel] = Field(default_factory=dict)
     agent: RouteModel | None = None
     default: RouteModel | None = None
+    agent_stages: dict[str, RouteModel] = Field(default_factory=dict)
 
 
 class AgentLlmCredentials(_Camel):
@@ -1274,9 +1329,6 @@ class AgentLlmCredentials(_Camel):
     # The wire dialect to speak: "anthropic-messages", "openai-chat-completions",
     # or "openai-responses" (ChatGPT subscription).
     wire: str = ""
-    # The model's input context capacity in tokens, from the routed connection's
-    # stored route. 0 means unknown.
-    context_window: int = 0
 
 
 class AgentStatus(_Camel):
@@ -1339,6 +1391,8 @@ class RunModel(_Camel):
     blocked_count: int = 0
     applications_submitted: int = 0
     queued_for_approval: int = 0
+    items_failed: int = 0
+    item_errors: list[str] = Field(default_factory=list)
     over_cap_writes: int = 0
     stopped_reason: str = ""
     note: str = ""
@@ -1522,3 +1576,16 @@ class RoutingUpdate(_Camel):
     tasks: dict[str, RouteModel | None] | None = None
     agent: RouteModel | None = None
     default: RouteModel | None = None
+    # Per-agent-stage routes; a null entry clears that stage. Unknown stage
+    # names are rejected (422) rather than silently dropped.
+    agent_stages: dict[str, RouteModel | None] | None = None
+
+    @field_validator("agent_stages")
+    @classmethod
+    def _known_stages(cls, v):
+        from modelrouting.store import AGENT_STAGE_NAMES
+
+        for name in v or {}:
+            if name not in AGENT_STAGE_NAMES:
+                raise ValueError(f"unknown agent stage: {name}")
+        return v

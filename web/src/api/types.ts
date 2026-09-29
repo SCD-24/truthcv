@@ -542,6 +542,11 @@ export interface RunRecord {
   /** Submissions that arrived for an item this run had not claimed — flagged,
    * not refused. */
   overCapWrites: number;
+  /** Per-item failures that did not fail the run (a screening save/screen
+   * error, an apply session that did not finish). */
+  itemsFailed: number;
+  /** Full error text per failed item, up to 100 entries. */
+  itemErrors: string[];
   /** Where a partial run stopped, in the agent's own words. Empty for a run
    * that completed normally. */
   stoppedReason: string;
@@ -554,7 +559,7 @@ export interface RunRecord {
 export interface DiscoveryCoverage {
   channel: "feed" | "direct" | "dork";
   board: string;
-  status: "searched" | "empty" | "login_walled" | "skipped" | "blocked";
+  status: "searched" | "empty" | "login_walled" | "skipped" | "blocked" | "extraction_failed";
   postingsFound: number;
   reason: string;
   tier?: string;
@@ -601,6 +606,7 @@ export interface JobProfile {
   name: string;
   enabled: boolean;
   keywords: string[];
+  titleKeywords: string[];
   locations: string[];
   remoteModel: string | null;
   employmentCountry: string | null;
@@ -626,12 +632,18 @@ export interface JobProfile {
  * `source`/`signinUrl` are the operator's stored input (an override, if
  * set). `domain`, `effectiveSigninUrl` and `isDefault` are resolved
  * server-side (like `companyBoards` on `AgentConfig`, readonly): `isDefault`
- * means the board is always searched and cannot be removed, `isApi` means the
- * board is pulled from over its HTTP API with a saved key instead of being
- * signed in to in a browser — `effectiveSigninUrl` is always "" for those. */
+ * means the board is built-in and cannot be removed — it can still be
+ * switched off via `enabled`. `isApi` means the board is pulled from over
+ * its HTTP API instead of being signed in to in a browser —
+ * `effectiveSigninUrl` is always "" for those. Not every API board needs a
+ * saved key: `keyRequired` says whether it does. */
 export interface JobBoard {
   source: string;
   signinUrl: string;
+  /** Whether this board is searched. Operator-settable for every board,
+   * including default ones — a default board can be switched off but not
+   * removed. */
+  enabled: boolean;
   /** "dork" (Google site: search) or "direct" (search the board's own site).
    * Only meaningful — and only operator-settable — for a custom board;
    * `modeLocked` says whether this board's mode can be changed at all. */
@@ -641,6 +653,21 @@ export interface JobBoard {
   readonly effectiveSigninUrl: string;
   readonly isDefault: boolean;
   readonly isApi: boolean;
+  /** Whether this API-backed board requires a saved key to work — false for
+   * a keyless, always-on API board (e.g. arbeitnow). Only meaningful when
+   * `isApi` is true; the key routes 404 for a board where this is false. */
+  readonly keyRequired: boolean;
+  /** Search URL template used in "direct" mode — must contain {keywords},
+   * may contain {location}. Only meaningful for custom boards; default
+   * catalog boards are dork-only, so this is "" for them. */
+  searchUrl: string;
+  /** Glob the agent uses to recognise posting links on a "direct" board's
+   * own site, e.g. "https://www.example.com/jobs/*". Must start with
+   * http:// or https://, is anchored at the start and open at the end, and
+   * `*` matches any run of non-whitespace characters. "" means unset. Unlike
+   * searchUrl this is editable even for default/catalog boards, since it
+   * only affects link recognition, not the search itself. */
+  postingUrlPattern: string;
 }
 
 /** Whether an API-backed board has a key saved. The key is never returned. */
@@ -711,8 +738,12 @@ export interface AgentConfig {
    * within this many days. null leaves it unset (the historical past-week
    * search filter); 0 disables the window entirely. */
   maxPostingAgeDays: number | null;
+  /** Google dork search recency (h/d/w/m/y); "none" means any time. */
+  dorkRecency: DorkRecency;
   readonly companyBoards: CompanyBoard[];
 }
+
+export type DorkRecency = "h" | "d" | "w" | "m" | "y" | "none";
 
 /** A partial patch of agent configuration; the PUT route merges only the
  * keys you send. Limited to what PUT /api/agent/config actually accepts
@@ -734,6 +765,7 @@ export type AgentConfigUpdate = Partial<
     | "cooldownDaysSameCompany"
     | "maxApplicationsPerRun"
     | "maxPostingAgeDays"
+    | "dorkRecency"
   >
 >;
 
@@ -792,8 +824,6 @@ export interface RouteChoice {
   model: string;
   /** Chosen effort level for models that support it; omit or "" for provider default. */
   effort?: string;
-  /** Context window size in tokens, when known. */
-  contextWindow?: number;
 }
 
 /** Routing configuration for tasks and defaults. */
@@ -801,6 +831,8 @@ export interface Routing {
   tasks: Record<string, RouteChoice>;
   agent: RouteChoice | null;
   default: RouteChoice | null;
+  /** Per-stage overrides (screening, extract); unset falls back to the agent model. */
+  agentStages?: Record<string, RouteChoice | null>;
 }
 
 /** Partial PUT /api/routing body. A task entry (or `agent`/`default`) sent
@@ -811,6 +843,7 @@ export interface RoutingUpdate {
   tasks?: Record<string, RouteChoice | null>;
   agent?: RouteChoice | null;
   default?: RouteChoice | null;
+  agentStages?: Record<string, RouteChoice | null>;
 }
 
 /** One host the agent could not get past a sign-in wall on. */

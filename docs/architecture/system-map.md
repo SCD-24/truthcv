@@ -7,6 +7,7 @@ graph TD
     api["API <br/> <small>(BACKEND)</small>"]
     application-agent["Application Agent <br/> <small>(BACKEND)</small>"]
     application-tracker["Application Tracker <br/> <small>(BACKEND)</small>"]
+    arbeitnow-api["Arbeitnow Job Board API <br/> <small>(CUSTOM)</small>"]
     browser-service["Browser Service <br/> <small>(BACKEND)</small>"]
     company-research["Company Research <br/> <small>(BACKEND)</small>"]
     connections["Connections <br/> <small>(BACKEND)</small>"]
@@ -16,6 +17,7 @@ graph TD
     guardrail-validator["Guardrail Validator <br/> <small>(BACKEND)</small>"]
     jev-api["Jev (TypeSafe System One) API <br/> <small>(CUSTOM)</small>"]
     job-feeds["Job Feeds <br/> <small>(BACKEND)</small>"]
+    job-runner["Job Runner <br/> <small>(BACKEND)</small>"]
     keyword-vocabulary["Keyword Vocabulary <br/> <small>(BACKEND)</small>"]
     llm-provider-layer["LLM Provider Layer <br/> <small>(BACKEND)</small>"]
     llm-provider-service["LLM Provider Service <br/> <small>(CUSTOM)</small>"]
@@ -44,6 +46,7 @@ graph TD
     api -->|in-process| gmail-response-sync
     api -->|in-process| guardrail-validator
     api -->|in-process| job-feeds
+    api -->|in-process| job-runner
     api -->|in-process| onboarding-store
     api -->|in-process| prompt-store
     api -->|in-process| renderer
@@ -76,13 +79,16 @@ graph TD
     gmail-response-sync -->|in-process| application-tracker
     gmail-response-sync -->|in-process| connections
     gmail-response-sync -->|HTTPS| gmail-api
-    gmail-response-sync -->|in-process| llm-provider-layer
+    gmail-response-sync -->|HTTPS| jev-api
     gmail-response-sync -->|file I/O| truth-data-volume
     guardrail-validator -->|in-process| keyword-vocabulary
     guardrail-validator -->|in-process| storage-leaf
     guardrail-validator -->|in-process| truth-store
+    job-feeds -->|HTTPS| arbeitnow-api
     job-feeds -->|in-process| company-research
     job-feeds -->|in-process| secret-store
+    job-runner -->|in-process| gmail-response-sync
+    job-runner -->|in-process| job-feeds
     keyword-vocabulary -->|in-process| storage-leaf
     keyword-vocabulary -->|file I/O| truth-data-volume
     llm-provider-layer -->|HTTPS| llm-provider-service
@@ -137,6 +143,7 @@ graph TD
 - [API](overview.md) (`api`, backend)
 - [Application Agent](overview.md) (`application-agent`, backend)
 - [Application Tracker](overview.md) (`application-tracker`, backend)
+- [Arbeitnow Job Board API](overview.md) (`arbeitnow-api`, custom)
 - [Browser Service](overview.md) (`browser-service`, backend)
 - [Company Research](overview.md) (`company-research`, backend)
 - [Connections](overview.md) (`connections`, backend)
@@ -146,6 +153,7 @@ graph TD
 - [Guardrail Validator](overview.md) (`guardrail-validator`, backend)
 - [Jev (TypeSafe System One) API](overview.md) (`jev-api`, custom)
 - [Job Feeds](overview.md) (`job-feeds`, backend)
+- [Job Runner](overview.md) (`job-runner`, backend)
 - [Keyword Vocabulary](overview.md) (`keyword-vocabulary`, backend)
 - [LLM Provider Layer](overview.md) (`llm-provider-layer`, backend)
 - [LLM Provider Service](overview.md) (`llm-provider-service`, custom)
@@ -177,6 +185,7 @@ graph TD
 - [api → gmail-response-sync](interactions/api--gmail-response-sync.md) via `in-process`
 - [api → guardrail-validator](interactions/api--guardrail-validator.md) via `in-process`
 - [api → job-feeds](interactions/api--job-feeds.md) via `in-process`
+- [api → job-runner](interactions/api--job-runner.md) via `in-process`
 - [api → onboarding-store](interactions/api--onboarding-store.md) via `in-process`
 - [api → prompt-store](interactions/api--prompt-store.md) via `in-process`
 - [api → renderer](interactions/api--renderer.md) via `in-process`
@@ -209,13 +218,16 @@ graph TD
 - [gmail-response-sync → application-tracker](interactions/gmail-response-sync--application-tracker.md) via `in-process`
 - [gmail-response-sync → connections](interactions/gmail-response-sync--connections.md) via `in-process`
 - [gmail-response-sync → gmail-api](interactions/gmail-response-sync--gmail-api.md) via `HTTPS`
-- [gmail-response-sync → llm-provider-layer](interactions/gmail-response-sync--llm-provider-layer.md) via `in-process`
+- [gmail-response-sync → jev-api](interactions/gmail-response-sync--jev-api.md) via `HTTPS`
 - [gmail-response-sync → truth-data-volume](interactions/gmail-response-sync--truth-data-volume.md) via `file I/O`
 - [guardrail-validator → keyword-vocabulary](interactions/guardrail-validator--keyword-vocabulary.md) via `in-process`
 - [guardrail-validator → storage-leaf](interactions/guardrail-validator--storage-leaf.md) via `in-process`
 - [guardrail-validator → truth-store](interactions/guardrail-validator--truth-store.md) via `in-process`
+- [job-feeds → arbeitnow-api](interactions/job-feeds--arbeitnow-api.md) via `HTTPS`
 - [job-feeds → company-research](interactions/job-feeds--company-research.md) via `in-process`
 - [job-feeds → secret-store](interactions/job-feeds--secret-store.md) via `in-process`
+- [job-runner → gmail-response-sync](interactions/job-runner--gmail-response-sync.md) via `in-process`
+- [job-runner → job-feeds](interactions/job-runner--job-feeds.md) via `in-process`
 - [keyword-vocabulary → storage-leaf](interactions/keyword-vocabulary--storage-leaf.md) via `in-process`
 - [keyword-vocabulary → truth-data-volume](interactions/keyword-vocabulary--truth-data-volume.md) via `file I/O`
 - [llm-provider-layer → llm-provider-service](interactions/llm-provider-layer--llm-provider-service.md) via `HTTPS`
@@ -265,5 +277,5 @@ graph TD
 
 ## Groups
 
-- [TruthCV Container (single Docker image)](groups/truthcv-container-single-docker-image.md) (`truthcv-container-single-docker-image`, 17 member(s))
+- [TruthCV Container (single Docker image)](groups/truthcv-container-single-docker-image.md) (`truthcv-container-single-docker-image`, 18 member(s))
 <!-- generated:end file:system-map -->

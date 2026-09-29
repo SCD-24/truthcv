@@ -42,6 +42,7 @@ COPY screening/ ./screening/
 COPY runs/ ./runs/
 COPY agentconfig/ ./agentconfig/
 COPY jobfeeds/ ./jobfeeds/
+COPY jobs/ ./jobs/
 COPY companyboards/ ./companyboards/
 COPY companyresearch/ ./companyresearch/
 COPY connections/ ./connections/

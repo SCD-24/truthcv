@@ -59,24 +59,36 @@ stays in `./data` either way.
 ## Connecting a model provider
 
 TruthCV needs an LLM provider to extract, tailor and guardrail your CV, but it
-does not require you to bring your own API key. Connect one from **Settings →
+does not require you to bring your own API key. Connect one from **Model routing →
 Accounts** (or during onboarding, see below) — TruthCV supports four:
 
 - **Claude (Anthropic)** — sign in with a Claude Pro/Max subscription (OAuth,
   no API key needed), or paste an Anthropic API key.
-- **ChatGPT (OpenAI)** — an OpenAI API key.
+- **ChatGPT (OpenAI)** — sign in with a ChatGPT subscription using a device code, or paste an OpenAI API key.
 - **OpenRouter** — an OpenRouter API key.
 - **Ollama** — no credential; point it at a local (or remote) Ollama URL.
 
-Connected credentials are encrypted at rest into `./data/secrets.enc`. The
-`LLM_PROVIDER` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` variables in `.env`
-are a **fallback only**, used when no connection has been made — whatever is
-connected in the app always takes precedence.
+Connecting an account supplies credentials; it does **not** select the provider
+used for CV tasks. Choose a **Default model** separately under **Model routing**;
+optional per-task overrides for truth extraction, keywords, tailoring,
+inference and cover letter generation take priority, and cleared tasks use the
+default. Without a saved route, provider selection preserves any migrated
+provider choice from an older installation, then falls back to `LLM_PROVIDER`
+in `.env`. Save a new Default model to override that migrated choice.
+Credentials for a selected connection come from the saved sign-in or
+API key (encrypted at rest in `./data/secrets.enc`), with the corresponding
+environment credential as fallback when no saved credential is available.
 
-Per-task model routing is available in **Settings → Task models**, where you
-can override the default provider and model for specific operations: truth
-extraction, keywords, tailoring, inference, and cover letter generation.
-Cleared tasks use the default model.
+Routing choices autosave when you change them; account sign-ins, API keys and
+Ollama URLs still require their explicit Connect/Save action. Incomplete custom
+models stay as unsaved drafts, and failed saves show
+an error with Retry. Leaving the page keeps drafts and flushes pending edits;
+a warning protects unresolved changes before closing the tab. To abandon them,
+use **Discard routing changes**; an in-flight write finishes before a fresh
+routing reload, and routing edits remain locked until that reload succeeds.
+The independent **Application agent** route governs unattended browser
+applications on the next run; clearing it uses Claude, not the default task
+model, with saved Claude sign-in/API key and environment credential fallback.
 
 ### Onboarding
 
@@ -99,6 +111,8 @@ TruthCV is a multi-page app, not a single linear wizard:
   its source recorded alongside each fact.
 - **Agents** — the unattended agent's run history, schedule, target companies
   and job boards, and site sign-ins.
+- **Model routing** — provider accounts, the default and task model routes, and
+  the independent application-agent model route.
 
 Documents are checked twice: the guardrail approves the *content* before
 rendering, and a separate verification pass (`render/verify.py`) extracts text
@@ -124,10 +138,11 @@ The button is on the Applications page; the browser downloads the zip directly.
 
 ## Jev cross-checking (optional)
 
-TruthCV can optionally cross-check its own screening decisions and Gmail-derived
-status changes against Jev (TypeSafe System One), a third-party verification
-API. It's opt-in and used only as a secondary check on top of TruthCV's own
-judgment — nothing in the app requires it.
+TruthCV can optionally cross-check its own screening decisions against Jev
+(TypeSafe System One), a third-party verification API, and — for
+[Gmail response tracking](#gmail-response-tracking-optional) — use it as the
+classifier itself rather than a secondary check. It's opt-in; nothing in the
+app requires it.
 
 Connect it from **Settings → Jev**, which saves the key into the same
 encrypted secret store as your other credentials. There's no `.env` variable
@@ -142,9 +157,11 @@ Two independent toggles control where Jev is consulted:
 - **useForScreening** — cross-checks a posting's hard requirements (role
   type, salary floor, employment country, EOR, remote model) against Jev
   before rejecting or passing it during screening.
-- **useForEmailTracking** — required before an employer-reply classification
-  from [Gmail response tracking](#gmail-response-tracking-optional) is
-  allowed to auto-apply a status change; see below.
+- **useForEmailTracking** — required before Gmail can be connected at all;
+  with it off, `jev.confirm` fails open to `False` for every employer-reply
+  classification, so each synced message is left an unclassified pending
+  suggestion instead of being classified or auto-applied; see
+  [Gmail response tracking](#gmail-response-tracking-optional) below.
 
 A Jev answer is only treated as a confirmation at or above a confidence
 (Noul) score of **0.8**; anything lower is treated as inconclusive. Jev
@@ -157,25 +174,28 @@ transport error.
 ## Gmail response tracking (optional)
 
 Connect Gmail from **Settings → Gmail** to have TruthCV watch your inbox for
-employer replies to open applications (status `Applied` or `Waiting`) and
-suggest — or, when confirmed, apply — a status update.
+employer replies to every application that isn't already **Interviewing**,
+**Offer**, or **Rejected**, and suggest — or, when classified, apply — a
+status update. A sync runs at most once every 5 minutes.
 
-Each sync issues one scoped query per open application, built from that
+Each sync issues one scoped query per application, built from that
 application's website/application-URL domains plus the first word of the
-company name, so it only fetches messages that look related to an
-application you're tracking (a broad company name can still match some
-unrelated senders). Any
-match is classified by the LLM as a rejection, interview invite, offer,
-confirmation, or other. Only a **rejection** or **interview** classification
-can auto-apply anything, and even then only after it's cross-checked with
-[Jev](#jev-cross-checking-optional): the classification is put to Jev as a
-yes/no question, and the application's status is only moved to **Rejected**
-or **Interviewing** if Jev confirms it. When it does, an evidence note
-(message id, sender, subject, date) is appended to the application's notes.
-Every other case — Jev declines to confirm, or the classification is offer,
-confirmation, or other — is left as a pending suggestion for you to review
-and apply by hand; nothing is auto-applied without a confirmed
-rejection/interview.
+company name, OR'd with a quoted full-text search on the company name
+itself, so it only fetches messages that look related to an application
+you're tracking (a broad company name can still match some unrelated
+senders) even when an application has no usable domain to search on.
+
+Classification is done entirely by [Jev](#jev-cross-checking-optional) —
+there's no LLM call involved. Each match is put to Jev as two yes/no
+questions in turn, asking whether the email is a rejection and then whether
+it's an interview invite; the first one Jev confirms wins the
+classification. Only a **rejection** or **interview** classification
+auto-applies anything, moving the application's status to **Rejected** or
+**Interviewing** respectively and appending an evidence note (message id,
+sender, subject, date) to its notes. Everything else — Jev confirms neither
+question — is classified unrelated and left as a pending suggestion for you
+to review and apply by hand; nothing is auto-applied without a Jev
+confirmation.
 
 Connecting Gmail itself requires a saved Jev key with **useForEmailTracking**
 enabled — the connect button is blocked until that's set, since a Gmail
@@ -212,7 +232,7 @@ writes the result back into the ledger.
 
 The agent holds no provider credential of its own: when `AGENT_API_TOKEN` is
 set, it fetches the routed LLM credentials from the app at run start over a
-guarded endpoint, so it always uses whatever provider you've connected.
+guarded endpoint, using the independent Application agent route (or its Claude fallback), not simply whichever account was connected last.
 
 Job boards, target companies and search profiles are configured on the
 **Agents page** (`companyboards/`, `agentconfig/`), not in a file you edit by
@@ -336,7 +356,7 @@ This version needs two things an older setup may not have:
 ### Run fully offline with Ollama
 
 No cloud API key required — TruthCV talks to a local Ollama container instead.
-Select **Ollama** in **Settings → Accounts** (or set `LLM_PROVIDER=ollama` in
+Connect **Ollama** in **Model routing → Accounts** and choose it as the Default model (or set `LLM_PROVIDER=ollama` in
 `.env` as a fallback), then:
 
 ```bash
@@ -349,8 +369,8 @@ docker compose exec ollama ollama pull llama3.1
 ## Configuration
 
 All settings live in `.env` (copied from [`.env.example`](.env.example)). Most
-of these are fallback defaults — the app-side connections above take
-precedence once configured.
+of these are fallback defaults — routing choices select providers; saved
+credentials take precedence over environment credentials for the chosen provider.
 
 | Variable | What it does |
 |---|---|
@@ -358,9 +378,9 @@ precedence once configured.
 | `ENCRYPTION_KEY` | Required — encrypts saved provider credentials at rest (`./data/secrets.enc`). The launcher generates it for you. |
 | `AGENT_API_TOKEN` | Required, non-empty — shared secret the agent, app and browser containers authenticate to each other with. The launcher generates it for you. |
 | `DATA_DIR` | Host path for persisted data (default `./data`). |
-| `LLM_PROVIDER` | `anthropic` \| `openai` \| `ollama` — fallback only; overridden by whatever is connected in Settings → Accounts. |
-| `LLM_MODEL` | Optional model id override; blank uses each provider's default — fallback only, also settable in Settings → Task models. |
-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Fallback credential for the selected provider, used only when nothing is connected in the app. |
+| `LLM_PROVIDER` | `anthropic` \| `openai` \| `ollama` — provider fallback when neither a default/task route nor a migrated provider choice is saved; connecting an account alone does not override it. |
+| `LLM_MODEL` | Optional model id fallback after saved routes and any migrated model choice; blank uses the provider's default. Set a route on Model routing to override it. |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Fallback credential for the selected provider when its saved credential is unavailable. |
 | `OLLAMA_HOST` | Ollama endpoint (compose sets this automatically). |
 | `RUN_AT` / `RUN_DAYS` | Fallback agent schedule, used only when the Agents page's schedule is unreachable. |
 | `TZ` | Fallback timezone the agent's schedule and logs are interpreted in (default `UTC`). The Agents page's schedule timezone takes precedence. |
@@ -413,12 +433,13 @@ CI/CD = Continuous Integration and Continuous Delivery
 `/mcp/diagnostics` is a second, separate MCP streamable-HTTP JSON-RPC endpoint
 on the `app` service, for a remote MCP client (Claude Desktop, an inspector,
 your own tooling) to inspect a running TruthCV without touching the
-operational `/mcp` surface the agent uses. It exposes exactly five read-only
+operational `/mcp` surface the agent uses. It exposes exactly seven read-only
 tools — `list_runs`, `get_run`, `list_screenings`, `list_applications`,
-`get_status` — and none of them can start a run, record a screening or
-application, or generate a document. `get_status` reports per-store counts
-and whether secret encryption is available; it never returns any secret
-material.
+`get_status`, `get_gmail_sync_status`, `list_gmail_suggestions` — and none of
+them can start a run, record a screening or application, or generate a
+document. `get_status` reports per-store counts (including Gmail suggestion
+count and last sync time) and whether secret encryption is available; it
+never returns any secret material.
 
 To enable it, set a non-empty `DIAGNOSTICS_MCP_TOKEN` in `.env` (e.g.
 `openssl rand -hex 32`) and restart the `app` service. Every request must
@@ -455,7 +476,7 @@ Backend:
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env        # then set your provider + key, or connect one in Settings
+cp .env.example .env        # then set your provider + key, or connect one in Model routing
 python -m api.main          # serves on http://localhost:8080
 ```
 

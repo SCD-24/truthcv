@@ -236,6 +236,24 @@ def test_non_int_window_value_falls_back_to_none():
     assert cfg.cooldown_days_same_company is None
 
 
+def test_title_keywords_round_trip():
+    profile = store.JobProfile(title_keywords=["Data Engineer", "Backend Engineer"])
+    restored = store.JobProfile.from_dict(profile.to_dict())
+    assert restored.title_keywords == ["Data Engineer", "Backend Engineer"]
+
+
+def test_title_keywords_missing_key_defaults_to_empty():
+    cfg = store.JobProfile.from_dict({"name": "p"})
+    assert cfg.title_keywords == []
+
+
+def test_title_keywords_wrong_type_defaults_to_empty():
+    cfg = store.JobProfile.from_dict({"title_keywords": "not-a-list"})
+    assert cfg.title_keywords == []
+    cfg2 = store.JobProfile.from_dict({"title_keywords": [1, 2, 3]})
+    assert cfg2.title_keywords == []
+
+
 def test_job_profile_currency_defaults_to_none():
     """JobProfile has no regional default currency; the user states their own."""
     profile = store.JobProfile()
@@ -268,20 +286,21 @@ def test_preferred_sources_migrates_to_job_boards_union():
 
 
 def test_resolved_board_sources_defaults_first():
-    """The four defaults always lead; the operator's own boards follow,
+    """The five defaults always lead; the operator's own boards follow,
     without duplicating a default they happen to name."""
     assert store.AgentConfig().resolved_board_sources() == [
         "ashby",
         "greenhouse",
         "lever",
         "workday",
+        "arbeitnow",
     ]
     assert store.AgentConfig(
         job_boards=[store.JobBoard(source="linkedin")]
-    ).resolved_board_sources() == ["ashby", "greenhouse", "lever", "workday", "linkedin"]
+    ).resolved_board_sources() == ["ashby", "greenhouse", "lever", "workday", "arbeitnow", "linkedin"]
     assert store.AgentConfig(
         job_boards=[store.JobBoard(source="ashby")]
-    ).resolved_board_sources() == ["ashby", "greenhouse", "lever", "workday"]
+    ).resolved_board_sources() == ["ashby", "greenhouse", "lever", "workday", "arbeitnow"]
 
 
 def test_job_board_round_trips_source_and_signin_url():
@@ -290,6 +309,71 @@ def test_job_board_round_trips_source_and_signin_url():
     )
     restored = store.AgentConfig.from_dict(cfg.to_dict())
     assert restored.job_boards == cfg.job_boards
+
+
+def test_job_board_search_url_round_trips_and_defaults_to_empty():
+    cfg = store.AgentConfig(
+        job_boards=[store.JobBoard(source="jobs.acme.com", search_url="https://jobs.acme.com/search?q={keywords}")]
+    )
+    restored = store.AgentConfig.from_dict(cfg.to_dict())
+    assert restored.job_boards == cfg.job_boards
+    assert restored.job_boards[0].search_url == "https://jobs.acme.com/search?q={keywords}"
+    assert store.JobBoard.from_dict({"source": "x"}).search_url == ""
+
+
+def test_invalid_stored_search_url_loads_as_empty(data_dir):
+    (data_dir / "agent_config.json").write_text(
+        '{"job_boards": [{"source": "jobs.acme.com", "search_url": "ftp://x/?q={keywords}"}]}',
+        encoding="utf-8",
+    )
+    cfg = store.load()
+    assert cfg.job_boards[0].search_url == ""
+
+
+def test_resolved_boards_catalog_source_in_job_boards_has_empty_search_url():
+    cfg = store.AgentConfig(job_boards=[store.JobBoard(source="linkedin", search_url="")])
+    resolved = {b.source: b for b in cfg.resolved_boards()}
+    assert resolved["linkedin"].search_url == ""
+
+
+def test_resolved_boards_carries_search_url_for_custom_boards_only():
+    cfg = store.AgentConfig(
+        job_boards=[store.JobBoard(source="jobs.acme.com", search_url="https://jobs.acme.com/search?q={keywords}")]
+    )
+    resolved = {b.source: b for b in cfg.resolved_boards()}
+    assert resolved["jobs.acme.com"].search_url == "https://jobs.acme.com/search?q={keywords}"
+    assert resolved["ashby"].search_url == ""
+
+
+def test_job_board_posting_url_pattern_round_trips_and_defaults_to_empty():
+    cfg = store.AgentConfig(
+        job_boards=[store.JobBoard(source="jobs.acme.com", posting_url_pattern="https://jobs.acme.com/jobs/*")]
+    )
+    restored = store.AgentConfig.from_dict(cfg.to_dict())
+    assert restored.job_boards == cfg.job_boards
+    assert restored.job_boards[0].posting_url_pattern == "https://jobs.acme.com/jobs/*"
+    assert store.JobBoard.from_dict({"source": "x"}).posting_url_pattern == ""
+
+
+def test_invalid_stored_posting_url_pattern_loads_as_empty(data_dir):
+    (data_dir / "agent_config.json").write_text(
+        '{"job_boards": [{"source": "jobs.acme.com", "posting_url_pattern": "ftp://x/jobs/*"}]}',
+        encoding="utf-8",
+    )
+    cfg = store.load()
+    assert cfg.job_boards[0].posting_url_pattern == ""
+
+
+def test_resolved_boards_carries_posting_url_pattern_for_default_and_added_boards():
+    cfg = store.AgentConfig(
+        job_boards=[
+            store.JobBoard(source="ashby", posting_url_pattern="https://jobs.ashbyhq.com/*/jobs/*"),
+            store.JobBoard(source="jobs.acme.com", posting_url_pattern="https://jobs.acme.com/jobs/*"),
+        ]
+    )
+    resolved = {b.source: b for b in cfg.resolved_boards()}
+    assert resolved["ashby"].posting_url_pattern == "https://jobs.ashbyhq.com/*/jobs/*"
+    assert resolved["jobs.acme.com"].posting_url_pattern == "https://jobs.acme.com/jobs/*"
 
 
 def test_malformed_job_boards_yields_empty_list():
@@ -353,7 +437,7 @@ def test_resolved_boards_defaults_first_with_effective_modes():
     )
     resolved = cfg.resolved_boards()
     sources = [b.source for b in resolved]
-    assert sources == ["ashby", "greenhouse", "lever", "workday", "custom.example.com", "linkedin"]
+    assert sources == ["ashby", "greenhouse", "lever", "workday", "arbeitnow", "custom.example.com", "linkedin"]
     by_source = {b.source: b.mode for b in resolved}
     assert by_source["ashby"] == "dork"
     assert by_source["custom.example.com"] == "direct"
@@ -366,6 +450,56 @@ def test_resolved_boards_skips_a_default_reconfigured_by_the_operator():
     ashby_entries = [b for b in resolved if b.source.strip().casefold() == "ashby"]
     assert len(ashby_entries) == 1
     assert ashby_entries[0].mode == "dork"
+
+
+# --- Board enabled flag -----------------------------------------------------
+
+
+def test_job_board_enabled_round_trips():
+    board = store.JobBoard(source="jobs.acme.com", enabled=False)
+    restored = store.JobBoard.from_dict(board.to_dict())
+    assert restored.enabled is False
+
+
+def test_job_board_non_bool_enabled_ignored():
+    board = store.JobBoard.from_dict({"source": "jobs.acme.com", "enabled": "no"})
+    assert board.enabled is True
+
+
+def test_job_board_missing_enabled_key_defaults_true():
+    board = store.JobBoard.from_dict({"source": "jobs.acme.com"})
+    assert board.enabled is True
+
+
+def test_disabled_default_kept_in_resolved_boards_but_not_searched():
+    cfg = store.AgentConfig(job_boards=[store.JobBoard(source="ashby", enabled=False)])
+    resolved_sources = [b.source for b in cfg.resolved_boards()]
+    assert "ashby" in resolved_sources
+    searched_sources = [b.source for b in cfg.searched_boards()]
+    assert "ashby" not in searched_sources
+    assert "ashby" not in cfg.resolved_board_sources()
+
+
+def test_disabled_custom_board_excluded_from_searched_and_sources():
+    cfg = store.AgentConfig(
+        job_boards=[store.JobBoard(source="custom.example.com", enabled=False)]
+    )
+    resolved_sources = [b.source for b in cfg.resolved_boards()]
+    assert "custom.example.com" in resolved_sources
+    searched_sources = [b.source for b in cfg.searched_boards()]
+    assert "custom.example.com" not in searched_sources
+    assert "custom.example.com" not in cfg.resolved_board_sources()
+
+
+def test_enabled_boards_all_present_in_searched_boards():
+    cfg = store.AgentConfig()
+    assert [b.source for b in cfg.searched_boards()] == [
+        "ashby",
+        "greenhouse",
+        "lever",
+        "workday",
+        "arbeitnow",
+    ]
 
 
 # --- board_for_url: URL-to-board derivation --------------------------------
@@ -411,6 +545,52 @@ def test_board_for_url_port_stripped():
 
     assert board_for_url("https://linkedin.com:8080/jobs") == "linkedin"
     assert board_for_url("careers.example.com:9000") == "careers.example.com"
+
+
+def test_search_url_error_valid_and_empty():
+    from agentconfig.boards import search_url_error
+
+    assert search_url_error("") is None
+    assert search_url_error("https://jobs.acme.com/search?q={keywords}") is None
+    assert search_url_error("https://jobs.acme.com/search?q={keywords}&l={location}") is None
+
+
+def test_search_url_error_rejects_bad_scheme_and_missing_keywords():
+    from agentconfig.boards import search_url_error
+
+    assert search_url_error("ftp://x/?q={keywords}") is not None
+    assert search_url_error("https://x/?q=x") is not None
+
+
+def test_search_url_error_rejects_unknown_and_malformed_placeholders():
+    from agentconfig.boards import search_url_error
+
+    assert search_url_error("https://x/s?q={keywords}&f={foo}") is not None
+    assert search_url_error("https://x/s?q={keywords}&f={foo{location}}") is not None
+    assert search_url_error("https://x/s?q={keywords}}") is not None
+
+
+def test_posting_url_pattern_error_valid_and_empty():
+    from agentconfig.boards import posting_url_pattern_error
+
+    assert posting_url_pattern_error("") is None
+    assert posting_url_pattern_error("https://www.example.com/jobs/*") is None
+    assert posting_url_pattern_error("http://example.com/careers/*") is None
+
+
+def test_posting_url_pattern_error_rejects_bad_scheme_and_empty_host():
+    from agentconfig.boards import posting_url_pattern_error
+
+    assert posting_url_pattern_error("ftp://example.com/jobs/*") is not None
+    assert posting_url_pattern_error("https:///jobs/*") is not None
+    assert posting_url_pattern_error("https://*/jobs/*") is not None
+
+
+def test_posting_url_pattern_error_rejects_whitespace_and_braces():
+    from agentconfig.boards import posting_url_pattern_error
+
+    assert posting_url_pattern_error("https://example.com/jobs/ *") is not None
+    assert posting_url_pattern_error("https://example.com/{id}/jobs") is not None
 
 
 def test_board_for_url_empty_or_unparseable():

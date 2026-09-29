@@ -1,7 +1,7 @@
 <!-- generated:start group:truthcv-container-single-docker-image -->
 # Logical Group: TruthCV Container (single Docker image)
 - **Identifier**: `truthcv-container-single-docker-image`
-- **Members**: 17
+- **Members**: 18
 
 > A logical grouping of components (deployment boundary, bounded context, or scope marker). Groups have no connections of their own.
 
@@ -24,6 +24,7 @@
 - **Services Layer** (`services-layer`)
 - **Job Feeds** (`job-feeds`)
 - **Gmail Response Sync** (`gmail-response-sync`)
+- **Job Runner** (`job-runner`)
 
 *No specific widgets have been placed in this group yet. Define guidelines, stack tech, or schemas in the workspace.*
 <!-- generated:end group:truthcv-container-single-docker-image -->

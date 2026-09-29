@@ -142,6 +142,30 @@ export class McpClientPool {
     this.rebuildIndex();
   }
 
+  /**
+   * Open one ADDITIONAL, independently-owned connection to a server that is
+   * already configured in this pool — for a caller that wants several
+   * separate MCP sessions to ONE server (agent/harness/mcp/sessionPool.ts's
+   * per-worker browser session pool) rather than the pool's own single
+   * shared connection per server. Reuses this pool's own connector (the real
+   * SDK connector in production, the injected fake in tests) so the two
+   * paths never diverge.
+   *
+   * The returned client is NOT registered in this pool's own server map or
+   * tool index — the caller owns its whole lifecycle, including closing it.
+   * This rejects with whatever the connector itself throws; degrading a
+   * connect failure into "fewer sessions" rather than propagating it is the
+   * CALLER's job (see sessionPool.ts), not this pool's.
+   *
+   * @param serverName The already-configured server to open another session to.
+   * @returns A freshly connected client, independent of the pool's own.
+   */
+  async connectExtra(serverName: string): Promise<ConnectedClient> {
+    const entry = this.servers.get(serverName);
+    if (!entry) throw new Error(`Unknown MCP server: ${serverName}`);
+    return this.connect({ name: entry.name, url: entry.url });
+  }
+
   /** Re-list tools from all connected servers and rebuild the tool index. */
   async refreshTools(): Promise<void> {
     await Promise.all(this.connectedEntries().map((e) => this.relistTools(e)));
@@ -288,8 +312,13 @@ function adaptCallResult(res: unknown): { content: unknown; isError?: boolean } 
   return { content: res.content, isError: typeof res.isError === 'boolean' ? res.isError : undefined };
 }
 
-/** Render MCP content blocks (or arbitrary content) to a single string. */
-function stringifyContent(content: unknown): string {
+/** Render MCP content blocks (or arbitrary content) to a single string.
+ * Exported for agent/harness/builtins/harvestSessions.ts, which calls a
+ * leased session's raw `ConnectedClient.callTool` directly (no `McpClientPool`
+ * in between) and needs the exact same flattening `dispatch` uses above, so
+ * a session-leased browser call renders identically to a pool-dispatched
+ * one. */
+export function stringifyContent(content: unknown): string {
   if (!Array.isArray(content)) return typeof content === 'string' ? content : JSON.stringify(content ?? '');
   return content.map(blockToText).join('');
 }

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createAnthropicMessagesAdapter } from '../anthropicMessages.js';
 import { createOpenAiChatCompletionsAdapter } from '../openaiChatCompletions.js';
+import { createOpenAiResponsesAdapter } from '../openaiResponses.js';
 import type { HarnessEvent, ModelRequest, ProviderAdapter } from '../types.js';
 
 /** A minimal request; the canned responses ignore its contents. */
@@ -76,6 +77,18 @@ function stubFetchBodyDying(): void {
   );
 }
 
+/** Build a fetch stub that rejects the way `AbortSignal.timeout` does: a
+ * `DOMException` named `TimeoutError`, as if the request never got a response
+ * within its deadline. */
+function stubFetchTimingOut(): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => {
+      throw new DOMException('signal timed out', 'TimeoutError');
+    }),
+  );
+}
+
 /** Drive an adapter to completion and collect every yielded event. */
 async function collect(adapter: ProviderAdapter): Promise<HarnessEvent[]> {
   const events: HarnessEvent[] = [];
@@ -85,6 +98,42 @@ async function collect(adapter: ProviderAdapter): Promise<HarnessEvent[]> {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('provider request timeouts', () => {
+  it('reports a timed-out Anthropic fetch as a retryable network error', async () => {
+    stubFetchTimingOut();
+    const events = await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    expect(events).toContainEqual({
+      type: 'error',
+      message: expect.stringMatching(/^Anthropic request could not be sent:.*timed out/),
+      retryable: true,
+    });
+  });
+
+  it('reports a timed-out OpenAI Chat Completions fetch as a retryable network error', async () => {
+    stubFetchTimingOut();
+    const events = await collect(
+      createOpenAiChatCompletionsAdapter({ apiKey: 'k', baseUrl: 'http://x', model: 'gpt' }),
+    );
+    expect(events).toContainEqual({
+      type: 'error',
+      message: expect.stringMatching(/^OpenAI request could not be sent:.*timed out/),
+      retryable: true,
+    });
+  });
+
+  it('reports a timed-out OpenAI Responses fetch as a retryable network error', async () => {
+    stubFetchTimingOut();
+    const events = await collect(
+      createOpenAiResponsesAdapter({ token: 'header.eyJ9.sig', model: 'gpt-5' }),
+    );
+    expect(events).toContainEqual({
+      type: 'error',
+      message: expect.stringMatching(/^OpenAI Responses request could not be sent:.*timed out/),
+      retryable: true,
+    });
+  });
 });
 
 describe('provider adapters', () => {
@@ -205,15 +254,27 @@ describe('provider adapters', () => {
       type: 'text',
       text: "You are Claude Code, Anthropic's official CLI for Claude.",
     });
-    expect(body.system[1]).toEqual({ type: 'text', text: 'you are a test' });
+    expect(body.system[1]).toEqual({ type: 'text', text: 'you are a test', cache_control: { type: 'ephemeral' } });
     expect(init.headers['anthropic-beta']).toBe('oauth-2025-04-20');
     expect(init.headers['authorization']).toBe('Bearer tok');
     expect(init.headers['x-api-key']).toBeUndefined();
   });
 
-  it('leaves an API-key request on the plain string system prompt', async () => {
+  it('caches a non-empty API-key system prompt as a block', async () => {
     stubFetch(200, { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' });
     await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    const call = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const init = call[1] as { headers: Record<string, string>; body: string };
+    expect(JSON.parse(init.body).system).toEqual([
+      { type: 'text', text: 'you are a test', cache_control: { type: 'ephemeral' } },
+    ]);
+    expect(init.headers['anthropic-beta']).toBeUndefined();
+    expect(init.headers['x-api-key']).toBe('k');
+  });
+
+  it('leaves an API-key request on the plain string system prompt when promptCache is false', async () => {
+    stubFetch(200, { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' });
+    await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude', promptCache: false }));
     const call = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
     const init = call[1] as { headers: Record<string, string>; body: string };
     expect(JSON.parse(init.body).system).toBe('you are a test');
@@ -538,6 +599,70 @@ describe('an empty tools list is omitted from the wire, not sent as []', () => {
     const fullBody = JSON.parse((fullCall[1] as { body: string }).body);
     expect(fullBody.tools).toBeDefined();
     expect(fullBody.tools.length).toBeGreaterThan(0);
+  });
+});
+
+describe('an unrecognised finish_reason', () => {
+  /** Drive the OpenAI adapter over one canned 200 body. */
+  async function openaiFinishReasonEvents(choice: Record<string, unknown>): Promise<HarnessEvent[]> {
+    stubFetch(200, { choices: [choice], usage: { prompt_tokens: 1, completion_tokens: 1 } });
+    return collect(createOpenAiChatCompletionsAdapter({ apiKey: 'k', baseUrl: 'http://x', model: 'gpt' }));
+  }
+
+  it('reports a retryable error naming the reason and the choice-level detail', async () => {
+    const events = await openaiFinishReasonEvents({
+      message: { content: 'partial' },
+      finish_reason: 'error',
+      error: { message: 'upstream timed out' },
+    });
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toMatchObject({ type: 'error', retryable: true });
+    expect(error?.type === 'error' && error.message).toContain('"error"');
+    expect(error?.type === 'error' && error.message).toContain('upstream timed out');
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+  });
+
+  it('reports a retryable error for a null finish_reason with text but no detail', async () => {
+    const events = await openaiFinishReasonEvents({ message: { content: 'hi' }, finish_reason: null });
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toMatchObject({ type: 'error', retryable: true });
+    expect(error?.type === 'error' && error.message).toContain('null');
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+  });
+
+  it('reports content_filter as non-retryable', async () => {
+    const events = await openaiFinishReasonEvents({ message: { content: '' }, finish_reason: 'content_filter' });
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toMatchObject({ type: 'error', retryable: false });
+  });
+
+  it('reports content_filter as non-retryable even when tool_calls were parsed', async () => {
+    const events = await openaiFinishReasonEvents({
+      message: { tool_calls: [{ id: 'a', function: { name: 'foo', arguments: '{}' } }] },
+      finish_reason: 'content_filter',
+    });
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toMatchObject({ type: 'error', retryable: false });
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+  });
+
+  it('yields done with the parsed tool calls when the reason is unknown but tools were requested', async () => {
+    const events = await openaiFinishReasonEvents({
+      message: { tool_calls: [{ id: 'a', function: { name: 'foo', arguments: '{}' } }] },
+      finish_reason: 'weird_reason',
+    });
+
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+    const done = events.find((e) => e.type === 'done');
+    expect(done).toMatchObject({
+      type: 'done',
+      stopReason: 'toolCalls',
+      message: { toolCalls: [{ id: 'a', name: 'foo', arguments: {} }] },
+    });
   });
 });
 

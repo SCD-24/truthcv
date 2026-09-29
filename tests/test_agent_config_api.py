@@ -29,6 +29,7 @@ def test_get_returns_defaults(client, data_dir):
         "cooldownDaysSameCompany": None,
         "maxApplicationsPerRun": None,
         "maxPostingAgeDays": None,
+        "dorkRecency": "d",
         "companyBoards": [],
         "mode": "full",
         "searchQueries": [],
@@ -36,19 +37,25 @@ def test_get_returns_defaults(client, data_dir):
         # empty shape and never calls out to an API-backed board.
         "feedPostings": [],
         "feedError": "",
+        "feedAlreadyScreened": 0,
         "directBoards": [],
     }
     got = r.json()
     job_boards = got.pop("jobBoards")
     assert got == expected
     # The regression this build fixes: with no boards configured, the
-    # sign-in list used to render nothing. GET must always return the four
-    # defaults, each searchable and each with a real sign-in URL.
-    assert len(job_boards) == 4
-    assert {b["source"] for b in job_boards} == {"ashby", "greenhouse", "lever", "workday"}
+    # sign-in list used to render nothing. GET must always return the five
+    # defaults (four dork boards plus the Arbeitnow API feed), each
+    # searchable.
+    assert len(job_boards) == 5
+    assert {b["source"] for b in job_boards} == {"ashby", "greenhouse", "lever", "workday", "arbeitnow"}
     assert all(b["isDefault"] for b in job_boards)
-    assert all(b["effectiveSigninUrl"] for b in job_boards)
-    assert all(b["domain"] for b in job_boards)
+    non_api = [b for b in job_boards if b["source"] != "arbeitnow"]
+    assert all(b["effectiveSigninUrl"] for b in non_api)
+    assert all(b["domain"] for b in non_api)
+    arbeitnow = next(b for b in job_boards if b["source"] == "arbeitnow")
+    assert arbeitnow["isApi"] is True
+    assert arbeitnow["effectiveSigninUrl"] == ""
 
 
 def test_defaults_present_even_when_operator_configured_boards(client, data_dir):
@@ -56,6 +63,7 @@ def test_defaults_present_even_when_operator_configured_boards(client, data_dir)
     assert r.status_code == 200
     sources = [b["source"] for b in r.json()["jobBoards"]]
     assert sources[:4] == ["ashby", "greenhouse", "lever", "workday"]
+    assert sources[4] == "arbeitnow"
     assert "linkedin" in sources
 
 
@@ -97,6 +105,56 @@ def test_put_default_board_with_signin_override_is_persisted(client, data_dir):
 
     stored = jsonlib.loads((Path(data_dir) / "agent_config.json").read_text())
     assert any(b["source"] == "ashby" for b in stored["job_boards"])
+
+
+def test_put_disabling_a_default_board_persists_and_drops_it_from_search_queries(client, data_dir):
+    r = client.put("/api/agent/config", json={"jobBoards": [{"source": "ashby", "enabled": False}]})
+    assert r.status_code == 200
+    ashby = next(b for b in r.json()["jobBoards"] if b["source"] == "ashby")
+    assert ashby["enabled"] is False
+    assert ashby["isDefault"] is True
+
+    import json as jsonlib
+    from pathlib import Path
+
+    stored = jsonlib.loads((Path(data_dir) / "agent_config.json").read_text())
+    assert any(b["source"] == "ashby" and b["enabled"] is False for b in stored["job_boards"])
+
+    client.put(
+        "/api/agent/config",
+        json={"profiles": [{"name": "p", "enabled": True, "keywords": ["backend"]}]},
+    )
+    got = client.get("/api/agent/config").json()
+    sources = {q["source"] for q in got["searchQueries"]}
+    assert "jobs.ashbyhq.com" not in sources
+    urls = [b["url"] for b in got["directBoards"]]
+    assert "jobs.ashbyhq.com" not in urls
+
+
+def test_put_reenabling_a_default_board_drops_the_stored_entry(client, data_dir):
+    client.put("/api/agent/config", json={"jobBoards": [{"source": "ashby", "enabled": False}]})
+    r = client.put("/api/agent/config", json={"jobBoards": [{"source": "ashby", "enabled": True}]})
+    assert r.status_code == 200
+
+    import json as jsonlib
+    from pathlib import Path
+
+    stored = jsonlib.loads((Path(data_dir) / "agent_config.json").read_text())
+    assert stored["job_boards"] == []
+
+
+def test_disabled_direct_custom_board_absent_from_direct_boards(client, data_dir):
+    client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [
+                {"source": "custom-direct.example.com", "mode": "direct", "enabled": False}
+            ],
+            "profiles": [{"name": "p", "enabled": True, "keywords": ["backend"]}],
+        },
+    )
+    got = client.get("/api/agent/config").json()
+    assert got["directBoards"] == []
 
 
 def test_search_queries_source_follows_resolved_boards_not_profile(client, data_dir):
@@ -182,6 +240,25 @@ def test_direct_boards_profile_entry_carries_remote_model_on_the_wire(client, da
     assert profile_entry["remoteModel"] == "remote"
 
 
+def test_direct_boards_carries_posting_url_pattern(client, data_dir):
+    """postingUrlPattern set on a direct-mode board reaches GET's directBoards."""
+    client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [
+                {
+                    "source": "custom-direct.example.com",
+                    "mode": "direct",
+                    "postingUrlPattern": "https://custom-direct.example.com/jobs/*",
+                }
+            ],
+        },
+    )
+    got = client.get("/api/agent/config").json()
+    board = next(b for b in got["directBoards"] if b["url"] == "custom-direct.example.com")
+    assert board["postingUrlPattern"] == "https://custom-direct.example.com/jobs/*"
+
+
 def test_old_shape_config_migrates_job_boards_on_first_get(client, data_dir):
     import json as jsonlib
     from pathlib import Path
@@ -218,6 +295,38 @@ def test_search_queries_populated_after_put_of_enabled_profile(client, data_dir)
     got = client.get("/api/agent/config").json()
     assert got["searchQueries"] != []
     assert got["searchQueries"][0]["query"].startswith("site:jobs.ashbyhq.com")
+
+
+def test_title_keywords_round_trip_and_drive_search_queries(client, data_dir):
+    """titleKeywords survives PUT/GET round-trip, and searchQueries built from
+    it use the title keyword — not the non-title keywords — in the query."""
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "profiles": [
+                {
+                    "name": "Data Roles",
+                    "enabled": True,
+                    "keywords": ["SQL", "Airflow"],
+                    "titleKeywords": ["Data Engineer"],
+                    "locations": ["Berlin"],
+                }
+            ]
+        },
+    )
+    assert r.status_code == 200
+    profile = r.json()["profiles"][0]
+    assert profile["titleKeywords"] == ["Data Engineer"]
+
+    got = client.get("/api/agent/config").json()
+    got_profile = got["profiles"][0]
+    assert got_profile["titleKeywords"] == ["Data Engineer"]
+
+    queries = [q["query"] for q in got["searchQueries"]]
+    assert queries
+    assert any("Data Engineer" in q for q in queries)
+    assert not any("SQL" in q for q in queries)
+    assert not any("Airflow" in q for q in queries)
 
 
 def test_profile_search_fields_round_trip_through_put_and_get(client, data_dir):
@@ -264,6 +373,141 @@ def test_job_boards_round_trip_source_and_signin_url(client, data_dir):
     assert got["linkedin"]["isDefault"] is False
     assert got["jobs.acme.com"]["signinUrl"] == "https://acme.com/login"
     assert got["jobs.acme.com"]["effectiveSigninUrl"] == "https://acme.com/login"
+
+
+def test_job_boards_round_trip_search_url(client, data_dir):
+    """searchUrl survives a PUT then GET round-trip for a custom board."""
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [
+                {
+                    "source": "jobs.acme.com",
+                    "searchUrl": "https://jobs.acme.com/search?q={keywords}",
+                },
+            ]
+        },
+    )
+    assert r.status_code == 200
+    got = {b["source"]: b for b in client.get("/api/agent/config").json()["jobBoards"]}
+    assert got["jobs.acme.com"]["searchUrl"] == "https://jobs.acme.com/search?q={keywords}"
+
+
+def test_job_boards_round_trip_posting_url_pattern_added_board(client, data_dir):
+    """postingUrlPattern survives a PUT then GET round-trip for a custom board."""
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [
+                {
+                    "source": "jobs.acme.com",
+                    "postingUrlPattern": "https://jobs.acme.com/jobs/*",
+                },
+            ]
+        },
+    )
+    assert r.status_code == 200
+    got = {b["source"]: b for b in client.get("/api/agent/config").json()["jobBoards"]}
+    assert got["jobs.acme.com"]["postingUrlPattern"] == "https://jobs.acme.com/jobs/*"
+
+
+def test_job_boards_round_trip_posting_url_pattern_default_board_override(client, data_dir):
+    """A default-source override carrying only postingUrlPattern (no signinUrl) is kept, not dropped."""
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [
+                {
+                    "source": "linkedin",
+                    "postingUrlPattern": "https://www.linkedin.com/jobs/view/*",
+                },
+            ]
+        },
+    )
+    assert r.status_code == 200
+    got = {b["source"]: b for b in client.get("/api/agent/config").json()["jobBoards"]}
+    assert got["linkedin"]["postingUrlPattern"] == "https://www.linkedin.com/jobs/view/*"
+
+
+def test_put_rejects_posting_url_pattern_bad_scheme(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={"jobBoards": [{"source": "jobs.acme.com", "postingUrlPattern": "ftp://x/*"}]},
+    )
+    assert r.status_code == 422
+
+
+def test_put_rejects_posting_url_pattern_bad_host(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={"jobBoards": [{"source": "jobs.acme.com", "postingUrlPattern": "https://*.x.com/jobs"}]},
+    )
+    assert r.status_code == 422
+
+
+def test_put_rejects_search_url_missing_keywords_placeholder(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={"jobBoards": [{"source": "jobs.acme.com", "searchUrl": "https://jobs.acme.com/search?q=x"}]},
+    )
+    assert r.status_code == 422
+
+
+def test_put_rejects_search_url_non_http_scheme(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={"jobBoards": [{"source": "jobs.acme.com", "searchUrl": "ftp://jobs.acme.com/search?q={keywords}"}]},
+    )
+    assert r.status_code == 422
+
+
+def test_put_rejects_search_url_unknown_placeholder(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [
+                {
+                    "source": "jobs.acme.com",
+                    "searchUrl": "https://jobs.acme.com/search?q={keywords}&x={foo}",
+                }
+            ]
+        },
+    )
+    assert r.status_code == 422
+
+
+def test_put_rejects_search_url_malformed_braces(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [
+                {
+                    "source": "jobs.acme.com",
+                    "searchUrl": "https://x/s?q={keywords}&f={foo{location}}",
+                }
+            ]
+        },
+    )
+    assert r.status_code == 422
+
+
+def test_put_rejects_search_url_stray_closing_brace(client, data_dir):
+    r = client.put(
+        "/api/agent/config",
+        json={"jobBoards": [{"source": "jobs.acme.com", "searchUrl": "https://x/s?q={keywords}}"}]},
+    )
+    assert r.status_code == 422
+
+
+def test_get_with_invalid_stored_search_url_returns_200_with_empty(client, data_dir):
+    (data_dir / "agent_config.json").write_text(
+        '{"job_boards": [{"source": "jobs.acme.com", "search_url": "ftp://x/?q={keywords}"}]}',
+        encoding="utf-8",
+    )
+    r = client.get("/api/agent/config")
+    assert r.status_code == 200
+    got = {b["source"]: b for b in r.json()["jobBoards"]}
+    assert got["jobs.acme.com"]["searchUrl"] == ""
 
 
 def test_put_merges_partial(client, data_dir):
@@ -785,8 +1029,8 @@ class TestMaxPostingAgeDays:
     def test_defaults_to_null_when_never_configured(self, client, data_dir):
         assert client.get("/api/agent/config").json()["maxPostingAgeDays"] is None
 
-    def test_window_reaches_the_composed_search_urls(self, client, data_dir):
-        """The setting is only useful if it lands on the URLs the agent opens."""
+    def test_window_does_not_shape_the_composed_search_urls(self, client, data_dir):
+        """maxPostingAgeDays is only the hard filter; dork recency is separate."""
         client.put(
             "/api/agent/config",
             json={
@@ -796,7 +1040,62 @@ class TestMaxPostingAgeDays:
         )
         queries = client.get("/api/agent/config").json()["searchQueries"]
         assert queries
-        assert all("tbs=qdr:d3" in q["url"] for q in queries)
+        assert all("tbs=qdr:d3" not in q["url"] for q in queries)
+        assert all(q["url"].endswith("tbs=qdr:d") for q in queries)
+
+
+def test_get_search_queries_carry_all_deduped_profiles(tmp_path, monkeypatch):
+    """Two profiles composing the same dork URL both survive the GET response."""
+    from agentconfig.dorks import compose_queries
+    from agentconfig.store import JobProfile
+
+    profiles = [
+        JobProfile(name="a", keywords=["backend"], enabled=True),
+        JobProfile(name="b", keywords=["backend"], enabled=True),
+    ]
+    queries = compose_queries(profiles, "d", ["ashby"])
+    shared = [q for q in queries if q.get("profiles") == ["a", "b"]]
+    assert shared, queries
+    from api.schemas import SearchQueryModel
+
+    dumped = SearchQueryModel.model_validate(shared[0]).model_dump(by_alias=True)
+    assert dumped["profiles"] == ["a", "b"]
+    assert dumped["profile"] == "a"
+
+
+class TestDorkRecency:
+    def test_round_trips_through_put_and_get(self, client, data_dir):
+        r = client.put("/api/agent/config", json={"dorkRecency": "w"})
+        assert r.status_code == 200
+        assert r.json()["dorkRecency"] == "w"
+        assert client.get("/api/agent/config").json()["dorkRecency"] == "w"
+
+    def test_reaches_the_composed_search_urls(self, client, data_dir):
+        client.put(
+            "/api/agent/config",
+            json={
+                "dorkRecency": "m",
+                "profiles": [{"name": "p", "enabled": True, "keywords": ["backend"]}],
+            },
+        )
+        queries = client.get("/api/agent/config").json()["searchQueries"]
+        assert queries
+        assert all(q["url"].endswith("tbs=qdr:m") for q in queries)
+
+    def test_partial_put_preserves_it(self, client, data_dir):
+        client.put("/api/agent/config", json={"dorkRecency": "y"})
+        client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
+        assert client.get("/api/agent/config").json()["dorkRecency"] == "y"
+
+    def test_invalid_value_is_rejected(self, client, data_dir):
+        assert client.put("/api/agent/config", json={"dorkRecency": "x"}).status_code == 422
+
+    def test_defaults_to_d_for_stored_config_missing_the_key(self, client, data_dir):
+        import json as _json
+        from agentconfig import store
+
+        store.config_path().write_text(_json.dumps({"mode": "full"}), encoding="utf-8")
+        assert client.get("/api/agent/config").json()["dorkRecency"] == "d"
 
     def test_omitting_the_field_leaves_a_stored_window_untouched(self, client, data_dir):
         """PUT merges: an unrelated edit must not clear the window."""

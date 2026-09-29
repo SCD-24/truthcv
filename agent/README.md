@@ -115,7 +115,7 @@ under the operator's name. Watch it.
 
 The container no longer aborts at start without an LLM credential — it logs a warning and continues; each scheduled run aborts (with a recorded reason on the Agents page) until a credential is available.
 
-The agent runs a provider-neutral harness (`agent/harness`, compiled into the image), so the **Model** setting on the Agents page can point at any supported provider — `claude`, `codex`, `openrouter`, or `ollama` — chosen via the connection configured in Settings. The harness's credentials are resolved at run start through `GET /api/agent/llm-credentials`.
+The agent runs a provider-neutral harness (`agent/harness`, compiled into the image). Configure its independent **Application agent** route under **Model routing** in the web UI using a `claude`, `codex`, or `openrouter` connection from **Model routing → Accounts**. Clearing that route uses Claude independently of the default task model: the app resolves a saved Claude sign-in or API key, with an environment credential fallback. Changes take effect on the next run. The harness also supports `ollama` when configured outside this UI. Its credentials are resolved at run start through `GET /api/agent/llm-credentials`.
 
 ### Harness configuration surface
 
@@ -159,11 +159,16 @@ flag that takes precedence; `daily-apply.sh` passes the flags explicitly):
 | `AGENT_LLM_API_KEY` | Credential token (api key or OAuth token). May be empty only for `ollama`. Never echoed — the harness redacts it from all output. |
 | `AGENT_LLM_BASE_URL` | Base URL. Required for `ollama`; optional elsewhere (falls back to the per-provider default above). |
 | `AGENT_LLM_AUTH_TYPE` | How to present the token: `oauth`, `api_key`, or `url`. |
-| `AGENT_CONTEXT_WINDOW` | The model's **input** context capacity in tokens, digits only; values that are not whole numbers, and windows under 8192, are refused rather than silently reinterpreted. Unset/`0` no longer means "no proactive compaction": the harness falls back to a conservative default (32768 tokens) and compacts proactively against it at 75%, logging that the fallback is in effect. State the real figure whenever you know it — any valid stated value always wins over the fallback. The reactive path — compacting when the provider itself says the context is too long, then resending — still runs on top of this **on providers that report an overflow as an error** (Anthropic, OpenAI-wire hosted APIs), and is what rescues a stated or fallback figure that turns out too high. State the input capacity, not the headline total — Anthropic reports it as `max_input_tokens` on `GET /v1/models/{id}`; the difference is what the provider reserves for the reply. There is deliberately no built-in per-model table: one is wrong the day a model ships, and a wrong window fails both ways (too high still overflows, too low silently discards context that was fitting). **Set it explicitly for `ollama`** — a local server that truncates an over-long prompt and answers 200 produces no error to react to, so the reactive path never fires and the oldest messages are dropped server-side, instructions first. The number is also passed to the adapter as `options.num_ctx`; whether the OpenAI-compatible endpoint honours that has not been verified here, so do not rely on it to raise a server-side window. The agent route's own Context window setting (Agents page), when set, takes precedence over this env value. |
-| `AGENT_MAX_TURNS` | Runaway backstop on the agent loop's turns. Defaults to `400`. Not the operational bound on how much a run does — that is `maxApplicationsPerRun` on the Agents page. Driving one application form through the browser costs 15-25 turns. The last turns are reserved for the model to wind up in. |
+The model's **input** context window is no longer an operator-stated env var: the harness discovers it itself, per model, directly from the provider (OpenRouter's `/models` listing, Anthropic's `max_input_tokens` on `GET /v1/models/{id}`, Ollama's `/api/show`, or Codex's `/models` catalog reading `context_window` for the matching model slug — falling back to OpenAI's `/v1/models/{id}` when Codex is configured with an API key, which usually reports no context length) at startup, and uses that figure to trigger proactive compaction at 75%. When a provider cannot report one, or a discovery call fails or times out, the harness falls back to a conservative default (32768 tokens), logging that the fallback is in effect. The reactive path — compacting when the provider itself says the context is too long, then resending — still runs on top of this **on providers that report an overflow as an error** (Anthropic, OpenAI-wire hosted APIs), and is what rescues a discovered or fallback figure that turns out too high. For `ollama`, the discovered (or fallback) window is also passed to the adapter as `options.num_ctx`; whether the OpenAI-compatible endpoint honours that has not been verified here, so do not rely on it to raise a server-side window.
+| `AGENT_MAX_TURNS` | Runaway backstop on the agent loop's turns. Defaults to `400`. Applies **per session** — each apply session daily-apply.sh runs gets its own fresh `AGENT_MAX_TURNS` budget, not a share of one run-wide total. Not the operational bound on how much a run does — that is `maxApplicationsPerRun` on the Agents page. Driving one application form through the browser costs 15-25 turns. The last turns are reserved for the model to wind up in. The harness reports how many turns remain directly on the `finish_run`/`finish_phase` tool result (`turns_remaining`), so the agent is never left guessing at the limit. |
+| `AGENT_SESSION_MODE` | `daily-apply.sh` only. Removed: `pipeline` is the only mode; any other value aborts. Code performs discovery, coverage recording and screening (`pipelineCli`), then runs one short apply session per approved/passing posting, each ending with `finish_application`. Models are routed per stage (Settings agent stages → `llm_routes`, fetched into a temp `--routes-file`); `AGENT_SCREENING_*` env vars still override the screening stage. Dork recency is the `dorkRecency` setting on the Agents page. |
+| `AGENT_FINISH_TOOL` / `--finish-tool` | Names the tool (`finish_run` or `finish_phase`) the harness injects `turns_remaining` into and expects to end the session. `daily-apply.sh` sets it to `finish_application` for each pipeline apply session; the harness still accepts `finish_run`/`finish_phase`. |
+| `AGENT_MAX_RETRIES` | Cap on consecutive retryable-error retries within one turn, before the loop gives up on a persistently failing provider call rather than retrying forever. Defaults to `12`. |
+| `AGENT_MAX_RETRY_DELAY_MS` | Ceiling on a single retry's backoff delay, in ms, so a provider effectively saying "retry in hours" fails fast instead of parking an unattended run. Defaults to `300000` (5 minutes). |
 | `AGENT_MAX_TOOL_RESULT_CHARS` | Caps a single MCP tool result's character length at the moment it is inserted into the conversation. Defaults to `24000`. An over-long result — a full-page browser snapshot, a long file read — is truncated with an explicit marker naming how many characters were cut and instructing the model to re-request a narrower view, so it never receives silently partial data. Must be a positive integer. |
 | `AGENT_PROMPT_CACHE` | Toggles Anthropic prompt-cache `cache_control` breakpoints (the tools block plus the first and last message) on the **Anthropic wire only**. Defaults to `true`. Set to `false` to disable caching entirely if runs are spaced further apart than the cache's 5-minute TTL, where the cache-write cost (1.25x) could exceed the savings. Has no effect on the OpenAI-compatible wire, which relies on automatic prefix caching instead. |
 | `AGENT_MAX_TOOL_CONCURRENCY` | Max non-browser tool calls one turn dispatches concurrently against the shared truthcv MCP server. Defaults to `4`. Browser tool calls always run one at a time regardless of this value, because the browser server drives a single Chromium profile with one holder. Must be a positive integer. |
+| `AGENT_BROWSER_SESSIONS` | Retired for production harvest: ignored, not forwarded by Compose. `harvest_postings` always works boards serially through the primary browser MCP connection and persistent signed-in profile; setting this value cannot re-enable concurrent sessions or tabs. The old session-per-worker and tab modes remain dormant helper code only. |
 | `AGENT_SCREENING_MODEL` | Model identifier for the `screen_posting` built-in tool's own, separate provider adapter — an isolated, typically-cheaper subagent call that screens one discovered posting against a job profile's criteria instead of reasoning through every hard filter in the main loop's own context (see `RUNBOOK.md` §5). **Defaults to `AGENT_LLM_MODEL`** (the main model) when unset, so an operator who configures nothing keeps today's behaviour exactly: one model doing both jobs. |
 | `AGENT_SCREENING_PROVIDER` | Logical provider for the screening adapter: `claude`, `codex`, `openrouter`, or `ollama`. Defaults to `AGENT_LLM_PROVIDER` when unset. |
 | `AGENT_SCREENING_WIRE` | Wire protocol for the screening adapter. Defaults to `AGENT_LLM_WIRE` when unset. |
@@ -181,12 +186,49 @@ connection failure, `5` bad configuration, `6` the loop ended cleanly but
 `finish_run` was never executed, so the run was abandoned without reporting an
 outcome.
 
-**Almost no built-in tools.** The harness ships with one narrow built-in tool,
-`read_runbook_section` — it returns one named section of `RUNBOOK.md` from the
-image and takes no path argument, so it opens no general filesystem read. There
-is no `Read`, `Write`, `WebSearch`, or `WebFetch`. Every other capability the
-agent has comes from the MCP servers declared in [`mcp.json`](mcp.json); if a
-server is not in that config, the agent cannot reach it.
+**Feed-first saved screening.** After the approved Phase 0 queue, the feed
+lists metadata and URLs, not guaranteed posting bodies. Retrieve full posting
+text (serial browser access if needed), then call `screen_and_record_posting`
+for each feed role before direct-board/dork discovery or new applications.
+It screens and persists through the allow-listed `record_screening` MCP tool in
+one call: its compact stored outcome (id, verdict, screening_blocker, created,
+actionable) omits the full posting text; only `actionable:true` permits a new
+application. `created:false` means skip, even when an unread placeholder was
+replaced, and success must not be recorded again. On an error, stop acting on
+that posting, not the entire run; continue other work and coverage. Ask the
+operator to open `GET /api/screenings` on the TruthCV app origin (navigate to
+`/api/screenings` in their browser) and inspect the returned JSON array's `url`
+fields for the posting URL to confirm whether a record exists. The `/screenings`
+UI does not display the URL; there is no agent screening lookup tool. Do not
+retry or rescreen automatically; use `record_screening` manually only after
+the operator confirms no record exists. The read-only `screen_posting` remains
+available for manual screening followed by a separate `record_screening`.
+A raw-snapshot harvest `needs_review` is internal only: recover postings as
+`searched`/`llm`, mark `empty` only on explicit zero-result evidence, otherwise
+record `extraction_failed` with the reason. The `rawSnapshot` is an excerpt;
+if `rawSnapshotTruncated` is true or the note says it was omitted, re-harvest
+that board alone in its own call first. For dorks, pass the Google search URL
+(with the `site:` query) as the board url; links to the `site:` target are
+extracted automatically. Phase 0, filters, caps and
+autonomy are unchanged. `harvest_postings` takes an optional `location`,
+typed into the board's own detected location field (never folded into
+`keywords`); a location neither it nor its known local-language aliases ever
+gets confirmed by the board's own location control comes back `blocked` with
+`blockKind: "location"`. A board with no on-page search box instead carries
+its own `searchUrl` templated search URL (`{keywords}` required, `{location}`
+optional); the built URL replaces `url` outright, is navigated to directly,
+and the snapshot is classified with no search-box typing at all.
+`blockKind: "timeout"` means navigation timed out twice in a row (an initial
+attempt and one retry) — the page did not load — and still maps to
+`status="blocked"`; an absent `blockKind` still means an internal failure.
+
+**Narrow built-in tools.** `read_runbook_section` returns one named section of
+`RUNBOOK.md` from the image and takes no path argument, so it opens no general
+filesystem read. `screen_posting` screens via its configured provider adapter;
+`harvest_postings` uses only allow-listed browser tools on the primary MCP
+connection, serially. There is no `Read`, `Write`, `WebSearch`, or `WebFetch`.
+Other capabilities come from the MCP servers declared in [`mcp.json`](mcp.json);
+if a server is not in that config, the agent cannot reach it.
 
 ## Agents page: the schedule and enable switch
 
@@ -243,6 +285,147 @@ agent has arrives through the MCP tool surface — cover letters, the canonical
 CV, the form answers, cooldowns, and the records it writes back. It has no
 filesystem route to your data and should not acquire one.
 
+## Read-only run diagnostics over MCP
+
+The app's bearer-gated `/mcp/diagnostics` surface offers three additional
+**read-only** tools: `get_agent_status()`,
+`get_run_events(run_id, limit=50, before_sequence=null)`, and
+`get_run_logs(run_id, limit=50, before_offset=null)` (both page limits 1–200;
+`run_id` is a retained run id of 1–80 ASCII letters/digits/underscores/hyphens).
+Use `list_runs` to find a stored run id, then `get_agent_status` for current
+supervisor state, `get_run_events` for metadata-only execution boundaries, and
+`get_run_logs` for classified, sanitized excerpts of the agent's run log.
+Page events backward using `next_before_sequence` as `before_sequence` and
+log excerpts using `next_before_offset` as `before_offset`; null cursors mean
+no older page. No tool starts/cancels runs or returns raw logs. This surface
+requires `DIAGNOSTICS_MCP_TOKEN` as the
+remote client's Bearer token; it is **not** the supervisor's `AGENT_API_TOKEN`.
+The app uses its existing `AGENT_API_TOKEN` to make GET-only requests to the
+agent at `agent:AGENT_CONTROL_PORT` (default 9099), on the private Compose
+network. Use the existing shared agent token in app and agent; no additional
+port exposure or shared volume mount is required. Rebuild both services to
+include the new internal logs route before using `get_run_logs`.
+
+`get_agent_status` reports `observed_at`, `reachability`, `availability`, a
+sanitized `reason` on failure, and allowlisted `/status` fields (`running`,
+`cancelling`, `currentRunId`, `lastRunId`, last start/finish/exit/cancellation,
+`scheduleEnabled`). `get_run_events` validates the id against stored runs and
+returns schema version 1, run id, timestamps, availability/reason, reachability,
+`ownership`, `running`, `currentRunId`, bounded chronological `events`,
+`last_activity_at`, `active_operations`, `active_truncated`, `truncated`, and
+the pagination cursor. Each event holds only sequence, timestamp, operation id,
+phase (`registry_refresh`, `compaction`, `model`, `tool`, `backoff`), boundary status
+(`start`, `success`, `error`), and optional elapsed milliseconds, safe tool
+name, turn/retry/backoff numbers, and active-operation/truncation metadata.
+`get_run_logs` returns `schema_version: 1`, `run_id`, `availability`
+(`available` or `unavailable`), sanitized `reason` (or null), `reachability`
+(`unknown`, `reachable`, or `unreachable`), `excerpts` (newest offsets first),
+`next_before_offset`, `truncated`, and `omitted`. Each excerpt has a byte
+`offset`, `observed_at` (canonical UTC millisecond timestamp of **reading** the
+log, not the event's occurrence), a finite `category`, and a summary
+reconstructed from a fixed local template. Categories are `precondition`,
+`configuration`, `mcp_connection`, `provider_error`, `fatal`, `harness_exit`,
+`harness_error`, `provider_http`, `provider_network`, `loop_event`, `done`, and
+`tool_failure`. Only category-appropriate fields may appear: `exit_code`
+(0–255) for harness exits or done; `provider` (`anthropic`, `openai`,
+`openai_responses`, `openrouter`, `ollama`) for provider HTTP/network errors;
+`http_status` (100–599) for provider HTTP errors; `retryable` (boolean) and
+`retry_after_ms` (0–3,600,000) for provider HTTP/network or harness errors;
+`kind` (`compaction`, `retry`, `reflection`, `emptyTurn`, `turnCapReached`,
+`wrapUp`, `stop`) and `turn` (0–1,000,000) for loop events; `stop_reason`
+(`toolCalls`, `end`, `length`, `error`, `aborted`, `turnCapReached`) and `turns`
+(0–1,000,000) for done. All numeric values are integers, not booleans.
+Optional fields can be absent; do not infer their values. An available page
+can have zero excerpts even when scanning encountered only filtered-out or
+incomplete records. `omitted: true` means some source records were skipped
+(e.g. unrecognized lines, oversized records or a partial append); it does
+not count them. `truncated` is exactly whether `next_before_offset` is
+non-null: a scan can advance its cursor through **empty filtered pages**;
+continue paging while a cursor is returned. Neither empty excerpts nor a null
+cursor establish that the run had no errors.
+
+A missing log yields `availability: unavailable`, `reason: missing`; a log
+that cannot be trusted/read yields `reason: unreadable` (including ambiguous
+multiple matching filenames, symlinks/nonregular files, or a directory with
+more than 1024 entries). The directory cap fails closed even if a matching
+file exists; it does not change retention. Runs retained by the app may lack
+an agent log (e.g. a historical file removed from the agent's own volume).
+An invalid request or unknown stored run returns `invalid_request` or
+`unknown_run` before contacting the agent. Transport and validation failures
+use sanitized reasons including `missing_token`, `token_mismatch`,
+`unreachable`, `timeout`, `old_endpoint`, `upstream_error`, and
+`malformed_response`; no upstream body or exception is returned. Unlike
+`get_run_events`, log excerpts **do not establish live ownership**: use
+`get_agent_status` / `get_run_events` separately for current supervisor state.
+The projection cannot recover an error that was never recorded; a historical
+run may still yield only a generic classification or nothing at all.
+
+No model prompt/response, tool arguments/results, URLs, secrets, raw exception
+text, HTTP body, or raw run log crosses this boundary. Diagnostic telemetry
+alone is capped at 2 MiB per new run in the existing `agent-runs` volume;
+raw run logs do not inherit that retention cap. Both readers cap replies at
+256 KiB, and the app caps received bytes before parsing. Log projection reads
+backward in 64 KiB windows, scanning at most 512 KiB plus 8 KiB per request,
+and discards records over 8 KiB. These bounds limit work, not filesystem
+latency: like the metadata reader, the log reader uses synchronous filesystem
+calls, so a stalled agent volume can delay other supervisor requests.
+Older runs have no backfilled telemetry. Top-level `active_truncated` reports
+whether the latest live active snapshot omitted operations (more than 128),
+even when `before_sequence` selects an empty/older event page; it is false
+for historical or unavailable telemetry. `truncated` separately describes
+event retention/pagination. Truncation and an absent page are not proof of
+inactivity.
+
+Live telemetry also requires the current child's private inherited fd 3 health
+pipe: the harness sends only version, health, and latest *persisted* sequence,
+with a 1-second heartbeat; the supervisor trusts it for at most 5 seconds of
+monotonic time. The pipe is not an endpoint, port, mount, or durable artifact.
+A disk write failure invalidates the live snapshot even if removing a previously
+valid NDJSON file also fails. A missing, closed, malformed, oversized, expired,
+or cancelled channel returns `telemetry_unavailable` with empty events and
+active operations for the current run, while retaining its `running` and
+`currentRunId`. Detection is bounded by the lease, **not instantaneous**; an
+elapsed boundary or unavailable telemetry is not itself a stall diagnosis.
+Historical retained events remain readable without live active snapshots;
+standalone CLI runs without the private channel retain their normal execution
+and diagnostic-file behaviour, but the supervisor never trusts their file as
+live telemetry. A supervisor restart cannot reconstruct a health lease from
+persisted files.
+
+Only `running: true` **and** a matching `currentRunId` establish live
+`ownership: active`. Historical events, a run-store `running` counter, or a
+failed/unreachable supervisor probe do not establish a live process;
+`ownership: unknown` on a failed probe is not an idle verdict. A valid
+supervisor response with missing/malformed telemetry still reports its
+`running`, `currentRunId`, and live ownership, without claiming an active
+snapshot. Reasons such as `missing_token`, `token_mismatch`, `unreachable`,
+`timeout`, `old_endpoint`, `unknown_run`, `malformed_response`, and `absent_telemetry`
+name distinct remediation paths without exposing upstream details. Events
+mark *outer* tool execution boundaries: a long compound built-in (for
+example `screen_and_record_posting`) is timed as one outer tool call, not
+its nested network/model/persistence steps. A long elapsed time or missing
+terminal event is evidence to investigate, **not** an automatic stall
+diagnosis; check ownership and later events before drawing conclusions.
+
+After upgrading, **rebuild and redeploy both app and agent images** with
+matching internal `AGENT_API_TOKEN` values and refresh/reconnect the remote MCP
+client so tool discovery lists all ten read-only tools (including `get_run_logs`).
+The diagnostics client's bearer `DIAGNOSTICS_MCP_TOKEN` remains separate; no
+new port or shared volume mount is needed. The new internal
+`GET /diagnostics/runs/{run_id}/logs` route uses the existing token gate.
+For a smoke check, start a **new** run (a run started before upgrade will not
+have these events). Call `get_agent_status` while it runs and
+confirm `running: true` and `currentRunId` equals the new run id. Poll
+`get_run_events` for that id: while the model or a tool waits, expect a
+`model` or `tool` `start` boundary and an active operation; after completion,
+expect a matching `success` or `error` terminal boundary with `duration_ms`.
+When the process exits, status should stop reporting that run as current and
+subsequent event reads should show `ownership: inactive`, with no live active
+operations. If telemetry is `absent_telemetry`, check that the run really
+started on the redeployed agent; if the supervisor is unreachable, investigate
+the network/token first rather than inferring the run has stopped. A live
+run can apply for real — follow the `RUN_ONCE=1` warning above.
+
 ## What the agent may and may not do
 
 Its allow-list is hardcoded in the harness (`agent/harness/tools.ts`) and is the
@@ -254,22 +437,21 @@ only the tool names this RUNBOOK actually calls are granted, not the whole
 upstream `@playwright/mcp` server. That browser allow-list is itself split
 into a REQUIRED set (the ten tools the RUNBOOK's step-by-step browser
 instructions call directly) and an OPTIONAL set (the four `browser_tab_*`
-tools the `harvest_postings` built-in uses to harvest several boards
-concurrently, each in its own tab). The harness fails loudly at startup,
+tools retained in the allow-list for model-issued calls, not used by
+production `harvest_postings`). The harness fails loudly at startup,
 before any run turn, if a REQUIRED name is missing from what the `browser`
 server actually advertises — an upstream rename must never silently disable a
 tool mid-run. A missing OPTIONAL tab tool does **not** fail startup: those
 names are this workspace's best guess at what the pinned `@playwright/mcp`
 calls its tab tools — the package is installed into the `browser` image at
 build time and is not vendored here, so the names could not be verified
-against it. When the `browser` server does not advertise them,
-`harvest_postings` degrades to harvesting boards serially, one at a time, in
-the single shared tab, instead of concurrently — same per-board result shape
-and outcome classification, just no concurrency; which mode ran is logged
-(never page content). The harness has no MCP-backed built-in tools of its
-own beyond one narrow exception: `read_runbook_section`, which returns a named
-section of `RUNBOOK.md` from the image and takes no path argument, so it opens
-no general filesystem read. It has no tool for approving an inference: the approve/deny gate
+against it. Whether or not the `browser` server advertises them,
+production `harvest_postings` harvests boards serially, one at a time, on the
+primary MCP connection and persistent signed-in profile — same per-board
+result shape and outcome classification; its serial mode is logged (never
+page content). The tab-per-board and session-per-worker helper modes remain
+in code for direct callers/tests, but production dispatch cannot reach them.
+The harness has no tool for approving an inference: the approve/deny gate
 is the product, and the agent never stands on both sides of it. The RUNBOOK's core rules still hold —
 the truthfulness rules, the cooldowns, and the rule that an application counts
 as submitted only when the confirmation page says so — but its search filters

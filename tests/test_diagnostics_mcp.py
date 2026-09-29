@@ -3,9 +3,9 @@
 
 These pin down the two things that matter about a second, bearer-token-only
 MCP surface: that it is unreachable without the right token (404, never a
-hint-carrying 401/403), and that once authenticated it exposes only the five
-read-only diagnostics tools — never any tool from the operational registry
-that can write.
+hint-carrying 401/403), and that once authenticated it exposes only the
+ten read-only diagnostics tools — never any tool from the operational
+registry that can write.
 
 The 404-gate tests use a bare ``TestClient(app)`` (no lifespan): the auth
 check in api.main's /mcp/diagnostics route runs and rejects the request
@@ -23,15 +23,17 @@ anywhere else (this file included) would raise and take that file's
 existing, passing tests down with it. Calling the handlers directly
 exercises exactly the same dispatch logic (registry lookup, schema, tool
 invocation, error wrapping) without needing the streamable-HTTP transport's
-task group at all. Both handlers are `async def` but perform no actual
-awaiting, so `_run_sync` below drives them to completion without an event
-loop — sidestepping this test session's already-active one rather than
-fighting it with a second `asyncio.run()`.
+task group at all. Handler tests run in an event loop because synchronous
+store reads are now offloaded to a thread and supervisor reads are async.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
@@ -42,6 +44,7 @@ from api.diagnostics_mcp import (
     _handle_diag_list_tools,
 )
 from api.main import app
+from gmailsync.model import GmailSuggestion, GmailSyncState
 
 
 class _ToolCallParams:
@@ -57,19 +60,16 @@ class _ToolCallParams:
         self.arguments = arguments or {}
 
 
-def _run_sync(coro):
-    """Drive a coroutine that awaits nothing to completion, synchronously.
+def stub_agent_open(monkeypatch, open_url):
+    import api.agent_diagnostics as diag
 
-    Both `_handle_diag_list_tools` and `_handle_diag_call_tool` are
-    `async def` only because the SDK's dispatch protocol requires it; neither
-    body actually awaits anything. Stepping the coroutine once therefore
-    always finishes it, without needing (or fighting) a live event loop.
-    """
-    try:
-        coro.send(None)
-    except StopIteration as e:
-        return e.value
-    raise RuntimeError("coroutine awaited something; cannot drive it synchronously")
+    monkeypatch.setattr(diag.urllib.request, "build_opener",
+                        lambda *handlers: SimpleNamespace(open=open_url))
+
+
+def _run_sync(coro):
+    """Run a handler on a real loop so threaded store access is exercised."""
+    return asyncio.run(coro)
 
 
 def _rpc(client: TestClient, method: str, params: dict | None = None, headers: dict | None = None):
@@ -146,17 +146,22 @@ def test_existing_operational_mcp_endpoint_has_no_auth_gate(data_dir, monkeypatc
     assert r.status_code != 404
 
 
-def test_registry_holds_exactly_the_five_read_only_tools():
+def test_registry_holds_exactly_the_ten_read_only_tools():
     assert set(_DIAG_TOOL_REGISTRY) == {
         "list_runs",
         "get_run",
         "list_screenings",
         "list_applications",
         "get_status",
+        "get_gmail_sync_status",
+        "list_gmail_suggestions",
+        "get_agent_status",
+        "get_run_events",
+        "get_run_logs",
     }
 
 
-def test_tools_list_handler_advertises_exactly_the_five_diagnostics_tools():
+def test_tools_list_handler_advertises_exactly_the_ten_diagnostics_tools():
     result = _run_sync(_handle_diag_list_tools(None, None))
     names = {tool.name for tool in result.tools}
     assert names == {
@@ -165,6 +170,11 @@ def test_tools_list_handler_advertises_exactly_the_five_diagnostics_tools():
         "list_screenings",
         "list_applications",
         "get_status",
+        "get_gmail_sync_status",
+        "list_gmail_suggestions",
+        "get_agent_status",
+        "get_run_events",
+        "get_run_logs",
     }
     # None of the operational, write-capable tools are reachable here.
     assert "record_application" not in names
@@ -181,6 +191,47 @@ def test_get_status_round_trips_through_the_call_tool_handler(data_dir):
     payload = json.loads(text)
     assert "encryption_available" in payload
     assert "runs" in payload
+    assert "gmail_suggestions" in payload
+    assert "gmail_last_synced_at" in payload
+
+
+def test_get_gmail_sync_status_round_trips_through_the_call_tool_handler(data_dir):
+    import gmailsync.store as gmailsync_store
+
+    gmailsync_store.save_sync_state(
+        GmailSyncState(last_synced_at=1700000000.0, processed_message_ids=["m1", "m2", "m3"])
+    )
+
+    params = _ToolCallParams(name="get_gmail_sync_status", arguments={})
+    result = _run_sync(_handle_diag_call_tool(None, params))
+    text = result.content[0].text
+    assert not result.is_error, text
+    payload = json.loads(text)
+    assert payload["last_synced_at"] == 1700000000.0
+    assert payload["processed_message_count"] == 3
+
+
+def test_list_gmail_suggestions_round_trips_seeded_suggestions_newest_first(data_dir):
+    """Seeds real RFC-2822 Gmail `Date` headers, chosen so a lexicographic
+    string sort would order them wrongly ("Wed" > "Fri"): only parsing the
+    dates puts the 2025 suggestion first."""
+    import gmailsync.store as gmailsync_store
+
+    gmailsync_store.save_suggestions(
+        [
+            GmailSuggestion(id="g-old", date="Wed, 5 Jun 2024 09:00:00 +0000"),
+            GmailSuggestion(id="g-new", date="Fri, 3 Jan 2025 10:00:00 +0000"),
+        ]
+    )
+
+    params = _ToolCallParams(name="list_gmail_suggestions", arguments={})
+    result = _run_sync(_handle_diag_call_tool(None, params))
+    text = result.content[0].text
+    assert not result.is_error, text
+    payload = json.loads(text)
+    assert payload["total"] == 2
+    ids = [s["id"] for s in payload["suggestions"]]
+    assert ids == ["g-new", "g-old"]
 
 
 def test_list_runs_round_trips_a_seeded_run(data_dir):
@@ -269,3 +320,216 @@ def test_list_runs_non_positive_limit_is_clamped_to_the_default_not_unbounded(
     payload = json.loads(text)
     assert payload["total"] == 3
     assert len(payload["runs"]) == 2
+
+
+def test_list_gmail_suggestions_non_positive_limit_is_clamped_to_the_default_not_unbounded(
+    data_dir, monkeypatch
+):
+    """Same guarantee as list_runs's clamp test, for list_gmail_suggestions:
+    a limit<=0 must apply _DEFAULT_LIST_LIMIT, not be treated as "no
+    limit"."""
+    import api.diagnostics_mcp as diagnostics_mcp
+    import gmailsync.store as gmailsync_store
+
+    monkeypatch.setattr(diagnostics_mcp, "_DEFAULT_LIST_LIMIT", 2)
+    gmailsync_store.save_suggestions(
+        [GmailSuggestion(id=f"g-{i}", date=f"2024-01-0{i+1}T00:00:00+00:00") for i in range(3)]
+    )
+
+    params = _ToolCallParams(name="list_gmail_suggestions", arguments={"limit": -5})
+    result = _run_sync(_handle_diag_call_tool(None, params))
+    text = result.content[0].text
+    assert not result.is_error, text
+    payload = json.loads(text)
+    assert payload["total"] == 3
+    assert len(payload["suggestions"]) == 2
+
+
+def test_producer_shaped_metadata_consumed_through_mcp(data_dir, monkeypatch):
+    """Contract fixture follows harness/diagnostics.ts -> agent/diagnostics.mjs.
+
+    One model start and terminal boundary, then an outer tool start, with
+    the producer's camelCase supervisor ownership alongside snake_case
+    event metadata. Only the explicit metadata fields may be returned.
+    """
+    import api.agent_diagnostics as diag
+    import runs.store as runs_store
+
+    run_id = "producer_run"
+    runs_store.start(run_id, trigger="scheduled")
+    at = "2023-11-14T22:13:20.000Z"
+    active = {"operation_id": "op_2", "phase": "tool", "started_at": at,
+              "tool_name": "screen_and_record_posting", "turn": 4}
+    common = {"schema_version": 1, "run_id": run_id, "at": at,
+              "active_truncated": False, "truncated": False}
+    events = [
+        {**common, "sequence": 1, "operation_id": "op_1", "phase": "model",
+         "status": "start", "active_operations": [
+             {"operation_id": "op_1", "phase": "model", "started_at": at}]},
+        {**common, "sequence": 2, "operation_id": "op_1", "phase": "model",
+         "status": "success", "duration_ms": 23, "active_operations": []},
+        {**common, "sequence": 3, "operation_id": "op_2", "phase": "tool",
+         "status": "start", "tool_name": "screen_and_record_posting", "turn": 4,
+         "active_operations": [active]},
+    ]
+    page = {"schema_version": 1, "run_id": run_id, "running": True,
+            "currentRunId": run_id, "observed_at": at, "availability": "available",
+            "reason": None, "events": events, "next_before_sequence": None,
+            "truncated": False, "last_activity_at": at, "active_operations": [active],
+            "active_truncated": False}
+
+    def open_url(req, timeout):
+        assert req.get_method() == "GET"
+        assert req.full_url == f"http://agent:9099/diagnostics/runs/{run_id}/events?limit=50"
+        reply = MagicMock()
+        reply.read.return_value = json.dumps(page).encode()
+        reply.__enter__.return_value = reply
+        return reply
+
+    monkeypatch.setenv("AGENT_API_TOKEN", "agent-only-token")
+    monkeypatch.setenv("AGENT_CONTROL_PORT", "9099")
+    stub_agent_open(monkeypatch, open_url)
+    result = _run_sync(_handle_diag_call_tool(None, _ToolCallParams("get_run_events", {"run_id": run_id})))
+    assert not result.is_error
+    payload = json.loads(result.content[0].text)
+    assert payload["ownership"] == "active" and payload["reachability"] == "reachable"
+    assert [event["status"] for event in payload["events"]] == ["start", "success", "start"]
+    assert payload["events"][1]["duration_ms"] == 23
+    assert payload["active_operations"] == [active]
+    assert payload["active_truncated"] is False
+    assert "agent-only-token" not in result.content[0].text
+
+
+def test_untrusted_live_telemetry_round_trips_through_mcp(data_dir, monkeypatch):
+    import runs.store as runs_store
+
+    run_id = 'untrusted_run'
+    runs_store.start(run_id, trigger='scheduled')
+    at = '2023-11-14T22:13:20.000Z'
+    # Produced by the supervisor when a valid persisted active snapshot cannot
+    # be trusted after write+unlink failure or a lost health lease.
+    page = {'schema_version': 1, 'run_id': run_id, 'running': True,
+            'currentRunId': run_id, 'observed_at': at, 'availability': 'unavailable',
+            'reason': 'telemetry_unavailable', 'events': [], 'next_before_sequence': None,
+            'truncated': False, 'last_activity_at': None, 'active_operations': [],
+            'active_truncated': False}
+
+    def open_url(req, timeout):
+        reply = MagicMock()
+        reply.read.return_value = json.dumps(page).encode()
+        reply.__enter__.return_value = reply
+        return reply
+
+    monkeypatch.setenv('AGENT_API_TOKEN', 'agent-only-token')
+    stub_agent_open(monkeypatch, open_url)
+    result = _run_sync(_handle_diag_call_tool(None, _ToolCallParams('get_run_events', {'run_id': run_id})))
+    assert not result.is_error
+    payload = json.loads(result.content[0].text)
+    assert payload['reason'] == 'telemetry_unavailable' and payload['ownership'] == 'active'
+    assert payload['running'] is True and payload['currentRunId'] == run_id
+    assert payload['events'] == payload['active_operations'] == []
+
+
+def test_run_events_discovery_schema():
+    schema = next(t.input_schema for t in _run_sync(_handle_diag_list_tools(None, None)).tools
+                  if t.name == "get_run_events")
+    assert set(schema["properties"]) == {"run_id", "limit", "before_sequence"}
+    assert schema["required"] == ["run_id"]
+
+
+def test_run_logs_discovery_and_call(data_dir, monkeypatch):
+    import api.agent_run_logs as logs
+    import runs.store as runs_store
+
+    run_id = "log_run"
+    runs_store.start(run_id, trigger="scheduled")
+    schema = next(tool.input_schema for tool in _run_sync(_handle_diag_list_tools(None, None)).tools
+                  if tool.name == "get_run_logs")
+    assert set(schema["properties"]) == {"run_id", "limit", "before_offset"}
+    assert schema["required"] == ["run_id"]
+    assert schema["properties"]["limit"]["type"] == "integer"
+    assert logs.get_run_logs.__defaults__ == (50, None)
+    observed_at = "2023-11-14T22:13:20.000Z"
+    page = {"schema_version": 1, "run_id": run_id, "availability": "available", "reason": None,
+            "excerpts": [{"offset": 12, "observed_at": observed_at, "category": "provider_http",
+                          "summary": "Provider HTTP error", "provider": "openai", "http_status": 429,
+                          "retryable": True, "retry_after_ms": 1000}],
+            "next_before_offset": 12, "truncated": True, "omitted": True}
+
+    def open_url(req, timeout):
+        assert req.full_url == f"http://agent:9099/diagnostics/runs/{run_id}/logs?limit=1&before_offset=20"
+        assert req.get_method() == "GET" and req.get_header("X-agent-token") == "internal-token"
+        reply = MagicMock()
+        reply.read.return_value = json.dumps(page).encode()
+        reply.__enter__.return_value = reply
+        return reply
+
+    monkeypatch.setenv("AGENT_API_TOKEN", "internal-token")
+    monkeypatch.setenv("DIAGNOSTICS_MCP_TOKEN", "different-bearer")
+    stub_agent_open(monkeypatch, open_url)
+    result = _run_sync(_handle_diag_call_tool(None, _ToolCallParams("get_run_logs",
+                                    {"run_id": run_id, "limit": 1, "before_offset": 20})))
+    assert not result.is_error
+    payload = json.loads(result.content[0].text)
+    assert payload["excerpts"] == [page["excerpts"][0]]
+    assert payload["reachability"] == "reachable" and payload["truncated"] is True
+    assert "internal-token" not in result.content[0].text
+    assert "different-bearer" not in result.content[0].text
+    assert logs.get_run_logs is _DIAG_TOOL_REGISTRY["get_run_logs"][0]
+
+
+def test_sync_tools_do_not_block_async_handler(monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    def slow_read():
+        entered.set()
+        release.wait(2)
+        return {"ok": True}
+    monkeypatch.setitem(_DIAG_TOOL_REGISTRY, "get_status", (slow_read, "read-only"))
+
+    async def scenario():
+        task = asyncio.create_task(_handle_diag_call_tool(None, _ToolCallParams("get_status")))
+        try:
+            assert await asyncio.to_thread(entered.wait, 1)
+            # This coroutine must run while the store read is still blocked.
+            assert not task.done()
+        finally:
+            release.set()
+        return await task
+
+    result = asyncio.run(asyncio.wait_for(scenario(), 3))
+    assert json.loads(result.content[0].text) == {"ok": True}
+
+
+def test_agent_network_probe_does_not_block_async_handler(data_dir, monkeypatch):
+    import api.agent_diagnostics as diag
+
+    entered, release = threading.Event(), threading.Event()
+    def slow_probe(req, timeout):
+        entered.set()
+        release.wait(2)
+        reply = MagicMock()
+        reply.read.return_value = b'{"running":false,"currentRunId":null}'
+        reply.__enter__.return_value = reply
+        return reply
+    monkeypatch.setenv("AGENT_API_TOKEN", "private-token")
+    stub_agent_open(monkeypatch, slow_probe)
+
+    async def scenario():
+        task = asyncio.create_task(_handle_diag_call_tool(None, _ToolCallParams("get_agent_status")))
+        try:
+            assert await asyncio.to_thread(entered.wait, 1)
+            assert not task.done()
+        finally:
+            release.set()
+        return await task
+
+    result = asyncio.run(asyncio.wait_for(scenario(), 3))
+    assert json.loads(result.content[0].text)["running"] is False
+
+
+def test_tool_errors_do_not_echo_secret_exception(monkeypatch):
+    def fails():
+        raise RuntimeError("secret: do not expose")
+    monkeypatch.setitem(_DIAG_TOOL_REGISTRY, "get_status", (fails, "read-only"))
+    result = _run_sync(_handle_diag_call_tool(None, _ToolCallParams("get_status")))
+    assert result.is_error and "secret" not in result.content[0].text

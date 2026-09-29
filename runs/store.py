@@ -27,6 +27,10 @@ from .model import RunRecord, new_id, validate_status
 # runs.json cannot grow without bound over the life of the deployment.
 _MAX_RECORDS = 200
 
+# Caps on per-item error detail stored on a finished run.
+MAX_ITEM_ERRORS = 100
+MAX_ITEM_ERROR_CHARS = 2000
+
 
 def runs_path() -> Path:
     return data_dir() / "runs.json"
@@ -180,6 +184,56 @@ def set_note(run_id: str, note: str) -> RunRecord | None:
         return record
 
 
+def append_note(run_id: str, text: str) -> RunRecord | None:
+    """Append ``text`` to the run's free-text note under the same lock as the
+    read, joined with the existing note by a newline (matching the separator
+    finish_phase used to build up when it did the read-modify-write itself).
+    Doing the read and the write outside the lock let two concurrent appends
+    both read the same starting note and one clobber the other; this makes
+    the whole read-modify-write atomic."""
+    with locked(runs_path()):
+        runs = load_all()
+        record = next((r for r in runs if r.id == run_id), None)
+        if record is None:
+            return None
+        record.note = f"{record.note}\n{text}" if record.note else text
+        _write_all(runs)
+        return record
+
+
+def mark_finish_refused(run_id: str) -> RunRecord | None:
+    """Mark that finish_run was refused once for incomplete discovery
+    coverage: sets ``finish_refused`` and increments ``finish_refusals``
+    under the same lock. The legacy one-shot guard only reads
+    ``finish_refused`` (a second call is let through unconditionally); the
+    harness-aware guard reads ``finish_refusals`` against a small cap."""
+    with locked(runs_path()):
+        runs = load_all()
+        record = next((r for r in runs if r.id == run_id), None)
+        if record is None:
+            return None
+        record.finish_refused = True
+        record.finish_refusals += 1
+        _write_all(runs)
+        return record
+
+
+def record_phase_refusal(run_id: str, channel: str) -> RunRecord | None:
+    """Increment the per-channel refusal count for finish_phase, under the
+    same lock every other mutator uses. Never touches ``status`` or
+    ``finish_refused``/``finish_refusals`` — finish_phase is deliberately
+    non-terminal and tracks its own count.
+    """
+    with locked(runs_path()):
+        runs = load_all()
+        record = next((r for r in runs if r.id == run_id), None)
+        if record is None:
+            return None
+        record.phase_refusals[channel] = record.phase_refusals.get(channel, 0) + 1
+        _write_all(runs)
+        return record
+
+
 def add_discovery_coverage(run_id: str, entry: dict) -> RunRecord | None:
     """Append one discovery-coverage entry to the run's record, in call
     order. A genuine second pass over the same (channel, board) — with
@@ -256,6 +310,8 @@ def finish(
     status: str = "completed",
     stopped_reason: str = "",
     note: str = "",
+    items_failed: int = 0,
+    item_errors: list[str] | None = None,
 ) -> RunRecord | None:
     """Close out a run record with its terminal status and coverage answer."""
     with locked(runs_path()):
@@ -268,5 +324,13 @@ def finish(
         record.stopped_reason = stopped_reason
         if note:
             record.note = note
+        # Only overwrite when reported: a later finish call that omits them
+        # (e.g. a status correction) must not erase recorded failures.
+        if items_failed or item_errors:
+            record.items_failed = max(0, int(items_failed))
+            record.item_errors = [
+                str(e)[:MAX_ITEM_ERROR_CHARS]
+                for e in (item_errors or [])[:MAX_ITEM_ERRORS]
+            ]
         _write_all(runs)
         return record

@@ -20,6 +20,9 @@ import path from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import { secondsUntilNextSlot } from "./schedule.mjs";
+import { readRunDiagnostics } from "./diagnostics.mjs";
+import { readRunLogExcerpts } from "./run-log-excerpts.mjs";
+import { createDiagnosticsAvailability } from "./diagnostics-availability.mjs";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -79,9 +82,47 @@ function signalExitCode(signal) {
 
 /** The daily-apply child of the run in progress, or null when idle. */
 let currentChild = null;
+/** In-memory only, bound to the currently executing child. */
+let currentHealth = null;
 
 /** SIGKILL escalation timer for a cancel in progress, so it can be cleared. */
 let killTimer = null;
+
+/**
+ * Guards against a run's outcome being posted to the app twice: once by
+ * settle() when the child actually exits, and once by the SIGTERM/SIGINT
+ * handler recording an honest "shutting down" finish before it does. Reset
+ * per run at the top of doRun(). The API's finish_if_running is a no-op on a
+ * duplicate call regardless — this just avoids the redundant network call and
+ * a possibly-misleading second log line.
+ */
+let runOutcomePosted = false;
+
+/**
+ * The `started` promise (the run-record start POST) for the run currently in
+ * progress, hoisted from doRun()'s local `started` so the SIGTERM/SIGINT
+ * handler — which cannot see doRun's closure — can await it too before
+ * posting its own finish. Assigned at the top of doRun(), alongside
+ * runOutcomePosted.
+ */
+let currentRunStarted = null;
+
+/**
+ * The in-flight finish POST chain from settle(), non-null exactly while a
+ * `/finish` call for the run just ended is still on the wire. Lets the idle
+ * shutdown path (no active run, but a finish still posting) wait for it
+ * instead of exiting out from under it. Nulled by settle() once the chain
+ * completes.
+ */
+let pendingFinish = null;
+
+/**
+ * The shutdown handler's own finish POST promise, non-null exactly while
+ * handleShutdownSignal() is recording a shutdown finish. Lets settle()'s
+ * latched early-return wait for it before calling onSettled (which in
+ * RUN_ONCE mode exits the process) instead of racing it.
+ */
+let shutdownFinish = null;
 
 // How long a cancelled run gets to exit on SIGTERM before SIGKILL. daily-apply.sh
 // and the Node harness process it spawns have MCP servers and a headful browser
@@ -233,7 +274,7 @@ function outcomeFor(rc, cancelled, reason) {
     3: "the run could not get a usable answer from the LLM provider — see the run log: \"request failed with status\" is the provider refusing, \"request could not be sent\" is the network never reaching it",
     4: "could not connect to an MCP server (the app's tools, or the browser)",
     5: "the harness was misconfigured — see the run log",
-    6: "the agent stopped without reporting an outcome, so the run was abandoned part-way and its counters are incomplete — see the run log",
+    6: "the agent stopped without reporting an outcome, so the run was abandoned part-way; screenings and applications are still counted from their own records, but postings seen and discovery coverage only reflect what the agent reported before it stopped — see the run log",
   };
   return {
     status: "failed",
@@ -271,6 +312,9 @@ function doRun(trigger = "manual", onSettled) {
   runState.lastStartedAt = new Date().toISOString();
   runState.currentRunId = runId;
   runState.lastRunId = runId;
+  runOutcomePosted = false;
+  currentHealth?.invalidate();
+  currentHealth = null;
 
   // Create the run record before the child does anything, so a run that dies
   // in its preconditions or on its very first model call is still accounted
@@ -282,6 +326,7 @@ function doRun(trigger = "manual", onSettled) {
   // record, so a child that dies instantly cannot have its finish overtake its
   // start and leave a record stuck at "running".
   const started = postToApp(`/api/agent/runs/${runId}/start`, { trigger });
+  currentRunStarted = started;
 
   // detached: the run is a tree — daily-apply.sh, the Node harness process it
   // spawns, and the stdio MCP servers under it. Its own process group is what
@@ -293,11 +338,13 @@ function doRun(trigger = "manual", onSettled) {
   // cancel therefore drops the MCP session without closing it, and that
   // container's page state survives until it restarts.
   const child = spawn(DAILY_APPLY, [], {
-    stdio: "inherit",
-    env: { ...process.env, TRUTHCV_RUN_ID: runId },
+    stdio: ["inherit", "inherit", "inherit", "pipe"],
+    env: { ...process.env, TRUTHCV_RUN_ID: runId, TRUTHCV_DIAGNOSTICS_FD: "3" },
     detached: true,
   });
   currentChild = child;
+  const health = createDiagnosticsAvailability(child.stdio[3]);
+  currentHealth = health;
 
   /** Common teardown for both exit paths: never leave state mid-cancel. */
   function settle(rc) {
@@ -306,6 +353,8 @@ function doRun(trigger = "manual", onSettled) {
       killTimer = null;
     }
     const cancelled = runState.cancelling;
+    health.invalidate();
+    if (currentHealth === health) currentHealth = null;
     currentChild = null;
     runState.running = false;
     runState.lastCancelled = cancelled;
@@ -317,18 +366,37 @@ function doRun(trigger = "manual", onSettled) {
     // is cleared.
     runState.currentRunId = null;
 
+    if (runOutcomePosted) {
+      // The shutdown handler already recorded an honest outcome for this run
+      // before the child actually exited — do not post a second, possibly
+      // conflicting finish call racing it. If that finish is still in
+      // flight, wait for it (bounded) before handing off to onSettled, which
+      // in RUN_ONCE mode exits the process and would otherwise cut it off.
+      if (shutdownFinish !== null) {
+        const bounded = new Promise((resolve) => setTimeout(resolve, SHUTDOWN_GRACE_MS).unref());
+        Promise.race([shutdownFinish, bounded]).finally(() => onSettled?.(rc));
+      } else {
+        onSettled?.(rc);
+      }
+      return;
+    }
+    runOutcomePosted = true;
+
     // Close the record out. This is the ONLY path that sees every ending: a
     // run SIGKILLed after a cancel, or one whose shell never started, runs no
     // in-container code of its own. finish_if_running leaves a record the
     // model already closed with its own finish_run alone — that account names
     // where the run actually stopped and is the better one.
     const outcome = outcomeFor(rc, cancelled, takeReasonFile(runId));
-    started
+    pendingFinish = started
       .then(() => postToApp(`/api/agent/runs/${runId}/finish`, outcome))
       .then((ok) => {
         if (!ok) log(`run ${runId}: could not record the run outcome with the app`);
       })
-      .finally(() => onSettled?.(rc));
+      .finally(() => {
+        pendingFinish = null;
+        onSettled?.(rc);
+      });
   }
 
   child.on("close", (code, signal) => {
@@ -370,6 +438,7 @@ function cancelRun() {
     // reporting it as cancelled hid its real exit code behind "Last run
     // cancelled" in the UI.
     runState.cancelling = true;
+    currentHealth?.invalidate();
   } catch (err) {
     // ESRCH here means the run exited between the status check and the signal
     // — or, far less likely, that the pid was recycled. Either way nothing of
@@ -397,6 +466,94 @@ function cancelRun() {
 
   return true;
 }
+
+// ---------------------------------------------------------------------------
+// Graceful shutdown
+// ---------------------------------------------------------------------------
+// Docker's default stop grace period is 10s: SIGTERM, then SIGKILL if the
+// process has not exited by then. A container restart (redeploy, host
+// reboot, `docker compose down`) sends SIGTERM to this process regardless of
+// whether a run is active. Before this, nothing handled it: an active run's
+// record was left at "running" forever — indistinguishable from a wedged
+// run — and the child tree could survive past the parent's own death. This
+// path is bounded well under the 10s budget so it always finishes before
+// docker's own escalation to SIGKILL would.
+
+/** Upper bound on the whole shutdown path, comfortably inside docker's 10s default stop grace. */
+const SHUTDOWN_GRACE_MS = 4000;
+
+/** Exit code per signal, matching the shell's 128+n convention (same idea as {@link SIGNAL_EXIT_CODES}). */
+const SHUTDOWN_EXIT_CODES = { SIGTERM: 143, SIGINT: 130 };
+
+/**
+ * Handle SIGTERM/SIGINT. With no run active, exits promptly. With a run
+ * active, signals its process group like cancelRun() does, records an honest
+ * "failed" finish so the run's record is not left stuck at "running", and
+ * exits — the whole path bounded by {@link SHUTDOWN_GRACE_MS}.
+ *
+ * @param {"SIGTERM"|"SIGINT"} signal
+ */
+function handleShutdownSignal(signal) {
+  const exitCode = SHUTDOWN_EXIT_CODES[signal];
+  const runId = runState.currentRunId;
+
+  if (runId === null) {
+    if (pendingFinish !== null) {
+      log(`${signal} received — no active run, but a prior run's finish POST is still in flight; waiting up to ${SHUTDOWN_GRACE_MS}ms for it`);
+      const bounded = new Promise((resolve) => setTimeout(resolve, SHUTDOWN_GRACE_MS).unref());
+      Promise.race([pendingFinish, bounded]).finally(() => {
+        log(`${signal} shutdown complete — exiting`);
+        process.exit(exitCode);
+      });
+      return;
+    }
+    log(`${signal} received — no active run, exiting`);
+    process.exit(exitCode);
+    return;
+  }
+
+  log(`${signal} received — run ${runId} is active; signalling it and recording a shutdown finish`);
+  currentHealth?.invalidate();
+
+  if (currentChild && currentChild.pid) {
+    try {
+      process.kill(-currentChild.pid, "SIGTERM");
+    } catch (err) {
+      log(`shutdown: SIGTERM not delivered to run ${runId} (${err.code || err.message})`);
+    }
+  }
+
+  const finished = (async () => {
+    if (runOutcomePosted) return; // settle() already won the race
+    runOutcomePosted = true;
+    // Wait for the run record to exist before closing it out — finish_if_running
+    // is a no-op against a record that has not been created yet, which would
+    // otherwise leave it stuck at "running" for a run that started just before
+    // this signal arrived. currentRunStarted is doRun's `started` promise,
+    // hoisted to module scope for exactly this handler.
+    await currentRunStarted;
+    // Read as late as reasonably possible (after the child-group SIGTERM
+    // above and the start-record await here) to give the dying child a
+    // chance to write it, without adding an extra sleep of our own.
+    const reason = takeReasonFile(runId);
+    const ok = await postToApp(`/api/agent/runs/${runId}/finish`, {
+      status: "failed",
+      stoppedReason: reason || "supervisor shut down mid-run (container stopping)",
+    });
+    if (!ok) log(`shutdown: could not record run ${runId}'s outcome with the app`);
+  })();
+  shutdownFinish = finished;
+
+  const bounded = new Promise((resolve) => setTimeout(resolve, SHUTDOWN_GRACE_MS).unref());
+
+  Promise.race([finished, bounded]).finally(() => {
+    log(`${signal} shutdown complete (run ${runId}) — exiting`);
+    process.exit(exitCode);
+  });
+}
+
+process.on("SIGTERM", () => handleShutdownSignal("SIGTERM"));
+process.on("SIGINT", () => handleShutdownSignal("SIGINT"));
 
 // ---------------------------------------------------------------------------
 // Schedule fetching
@@ -538,6 +695,53 @@ const server = http.createServer((req, res) => {
     // scheduleEnabled is the scheduler's gate, reported so an operator (and
     // agent/smoke-test.sh) can see which way it is set without reading logs.
     return jsonReply(res, 200, { ...runState, scheduleEnabled });
+  }
+
+  if (req.method === "GET" && req.url?.startsWith("/diagnostics/runs/")) {
+    if (req.url.length > 512) return jsonReply(res, 400, { detail: "Invalid diagnostics request" });
+    const url = new URL(req.url, "http://localhost");
+    const logs = /^\/diagnostics\/runs\/([a-zA-Z0-9_-]{1,80})\/logs$/.exec(url.pathname);
+    if (logs) {
+      const keys = [...url.searchParams.keys()];
+      if (keys.some((key) => !["limit", "before_offset"].includes(key)) ||
+        keys.length !== new Set(keys).size) {
+        return jsonReply(res, 400, { detail: "Invalid diagnostics request" });
+      }
+      const integer = (key, fallback) => {
+        const value = url.searchParams.get(key);
+        return value === null ? fallback : /^(?:0|[1-9][0-9]*)$/.test(value) ? Number(value) : NaN;
+      };
+      try {
+        return jsonReply(res, 200, readRunLogExcerpts(RUN_LOG_DIR, logs[1], {
+          limit: integer("limit", 50), beforeOffset: integer("before_offset", undefined),
+        }));
+      } catch (err) {
+        if (err instanceof RangeError) return jsonReply(res, 400, { detail: "Invalid diagnostics request" });
+        return jsonReply(res, 200, { schema_version: 1, run_id: logs[1], availability: "unavailable",
+          reason: "unreadable", excerpts: [], next_before_offset: null, truncated: false, omitted: false });
+      }
+    }
+    // Never infer diagnostics from raw run logs, even for legacy runs.
+    const match = /^\/diagnostics\/runs\/([a-zA-Z0-9_-]{1,80})\/events$/.exec(url.pathname);
+    if (!match || [...url.searchParams.keys()].some((key) => !["limit", "before_sequence"].includes(key))
+      || [...url.searchParams.keys()].length !== new Set(url.searchParams.keys()).size) {
+      return jsonReply(res, 400, { detail: "Invalid diagnostics request" });
+    }
+    const integer = (key, fallback) => {
+      const value = url.searchParams.get(key);
+      return value === null ? fallback : /^(?:0|[1-9][0-9]*)$/.test(value) ? Number(value) : NaN;
+    };
+    try {
+      const body = readRunDiagnostics(RUN_LOG_DIR, match[1], {
+        limit: integer("limit", 50), beforeSequence: integer("before_sequence", undefined),
+        running: runState.running, currentRunId: runState.currentRunId,
+        health: () => runState.running && currentChild && currentHealth ? currentHealth.snapshot() : null,
+      });
+      return jsonReply(res, 200, body);
+    } catch (err) {
+      if (err instanceof RangeError) return jsonReply(res, 400, { detail: "Invalid diagnostics request" });
+      throw err;
+    }
   }
 
   if (req.method === "POST" && req.url === "/run") {

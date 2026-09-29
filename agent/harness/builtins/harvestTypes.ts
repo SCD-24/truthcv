@@ -14,6 +14,23 @@ export interface HarvestBoardRequest {
   url: string;
   /** Keywords to type into the board's own detected search box, if any. */
   keywords?: string;
+  /** A location to type into the board's own detected location field, if
+   * any — NEVER folded into `keywords`. See harvestLocation.ts for how the
+   * field is detected and how a rejected/unrecognised value is retried
+   * with local-language aliases. */
+  location?: string;
+  /** A templated search-URL for boards with no on-page search box: e.g.
+   * `https://www.adzuna.de/search?q={keywords}&w={location}`. `{keywords}`
+   * is REQUIRED in the template (server-validated); `{location}` is optional.
+   * When set, the built URL (see harvestNavigate.ts's `buildSearchUrl`) is
+   * used as `board.url` and the snapshot is classified directly — no
+   * search-box typing, no `browser_type` call at all. */
+  searchUrl?: string;
+  /** A glob (`*` as the only wildcard) matching this board's OWN posting-link
+   * URL shape, e.g. `https://boards.example.com/job/*` — tried as the
+   * second extraction tier, after known ATS shapes and before the general
+   * same-site heuristic. Anchored to the URL's start; open-ended. */
+  postingUrlPattern?: string;
 }
 
 /** One posting extracted by URL-shape heuristics. */
@@ -22,15 +39,20 @@ export interface HarvestedPosting {
   url: string;
   /** The link's accessible name, as the posting's title. */
   title: string;
-  /** Which known ATS's URL shape matched (`ashby`, `greenhouse`, `lever`, `personio`). */
+  /** Which known ATS's URL shape matched (`ashby`, `greenhouse`, `lever`,
+   * `personio`), or `board-pattern` (matched the board's own
+   * `postingUrlPattern`) or `board-heuristic` (matched the general
+   * same-site job-link rule) or `dork-site` (a Google `site:` dork result
+   * pointing at the dork's target domain). */
   ats: string;
 }
 
-/** How one board's harvest turned out — matches `record_discovery_coverage`'s
- * own status vocabulary exactly, so it is passed straight through, EXCEPT a
- * `blocked` result whose `blockKind` is `'login'`: that maps to a
- * `report_apply_failure` call plus status `login_walled`, never `blocked`. */
-export type HarvestOutcome = 'searched' | 'empty' | 'blocked';
+/** `needs_review` is internal only, NEVER a coverage status. Resolve its
+ * rawSnapshot to searched/llm if postings are recovered, empty only with
+ * explicit zero-result evidence, otherwise extraction_failed with the
+ * extraction detail as reason. A blocked login maps to login_walled after
+ * report_apply_failure. */
+export type HarvestOutcome = 'searched' | 'empty' | 'blocked' | 'needs_review';
 
 /** Which kind of `blocked` a result is, for a `blocked` outcome only —
  * `'login'` a sign-in wall (or a sign-in URL refused before navigating),
@@ -40,8 +62,15 @@ export type HarvestOutcome = 'searched' | 'empty' | 'blocked';
  * board and a bot wall need different operator follow-up, and distinct from
  * a merely slow page (see harvestNavigate.ts's `isUnreachableNavigationError`).
  * A `blocked` result's `blockKind` can also be `undefined` — see
- * {@link HarvestBoardResult.blockKind}. */
-export type BlockKind = 'login' | 'wall' | 'unreachable';
+ * {@link HarvestBoardResult.blockKind}. `'location'` means every candidate
+ * for a given `location` (the value itself and its known local-language
+ * aliases, see harvestLocation.ts) was either rejected outright by the
+ * board's own location control or produced no results even from a
+ * location-only control search — so the board never demonstrably
+ * recognised the location at all. `'timeout'` means navigation itself timed
+ * out TWICE in a row (an initial attempt and one retry) — see
+ * harvestNavigate.ts's `TIMEOUT_NAV_ERROR_PATTERNS`. */
+export type BlockKind = 'login' | 'wall' | 'unreachable' | 'location' | 'timeout';
 
 /** One board's harvest result. */
 export interface HarvestBoardResult {
@@ -67,6 +96,10 @@ export interface HarvestBoardResult {
    * extraction matched nothing (including a consent/bot-check phrase seen
    * alongside real content). Never present on a `blocked` result. */
   rawSnapshot?: string;
+  /** True when `rawSnapshot` is an excerpt (link lines + result text) or was
+   * omitted entirely to fit the result budget; re-harvest this board alone
+   * before recording extraction_failed. */
+  rawSnapshotTruncated?: boolean;
 }
 
 /** The result shape this handler returns, mirroring every other built-in's `{ content, isError }`. */
@@ -87,3 +120,15 @@ export interface BrowserToolResult {
  * call — this module never talks to the pool directly.
  */
 export type BrowserToolCall = (toolName: string, args: Record<string, unknown>) => Promise<BrowserToolResult>;
+
+/**
+ * Check whether a bare browser tool name may be called at all — tools.ts's
+ * `isBrowserToolCallPermitted` in production, reused by harvestSessions.ts's
+ * session-per-worker path (which dispatches on each leased session's own MCP
+ * client directly, never through the `BrowserToolCall` closure above, so it
+ * needs its OWN allow-list check rather than inheriting one).
+ *
+ * @returns The refusal message when the tool is not permitted; `undefined`
+ *   when it is.
+ */
+export type BrowserToolPermissionCheck = (toolName: string) => string | undefined;

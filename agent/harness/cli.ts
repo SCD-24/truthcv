@@ -29,9 +29,11 @@
  *                       constructed.
  *   6  unfinished run — the loop ended cleanly but the agent never called
  *                       `finish_run`, so it abandoned the run without reporting
- *                       an outcome and its counters are incomplete. A clean end
- *                       is otherwise indistinguishable from a run that genuinely
- *                       had nothing to do, and the supervisor would record it as
+ *                       an outcome. Screenings and applications are still
+ *                       counted from their own records, but postings seen and
+ *                       discovery coverage are partial. A clean end is otherwise
+ *                       indistinguishable from a run that genuinely had
+ *                       nothing to do, and the supervisor would record it as
  *                       "completed".
  *   1  fatal          — reserved for a truly unexpected crash in the runtime
  *                       guard (should not happen; runCli catches its own paths).
@@ -54,6 +56,8 @@
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
+import { basename } from 'node:path';
+import { createDiagnostics, createDiagnosticsHealth, SAFE_RUN_ID, type DiagnosticsHealth } from './diagnostics.js';
 
 import { createMcpClientPool, type McpClientPool } from './mcp/client.js';
 import { loadMcpConfig, type McpServerConfig } from './mcp/config.js';
@@ -66,14 +70,19 @@ import {
 import type { ConversationMessage, HarnessEvent, ProviderAdapter } from './providers/types.js';
 import {
   EMPTY_TURN_STOP_DETAIL,
+  UNFINISHED_STOP_DETAIL,
   runLoop,
   DEFAULT_TOOL_CONCURRENCY,
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_MAX_RETRY_DELAY_MS,
   type LoopEvent,
   type LoopOutcome,
   type LoopResult,
 } from './loop.js';
-import { checkAdvertisedBrowserTools } from './tools.js';
-import { DEFAULT_FALLBACK_CONTEXT_WINDOW, type CompactionConfig } from './compaction.js';
+import { checkAdvertisedBrowserTools, sessionDeniedTools } from './tools.js';
+import { type CompactionConfig } from './compaction.js';
+import { discoverContextWindow, type DiscoveredContextWindow } from './contextWindow.js';
+import { parseRoutes, resolveStageRoutes, type ResolvedRoutes, type RoutesDocument, type StageRoute } from './stages.js';
 
 /** The CLI's process exit codes; see the module comment for the full contract. */
 export const ExitCode = {
@@ -140,15 +149,12 @@ export interface CliConfig {
   /** Hard cap on completed loop turns. */
   maxTurns: number;
   /**
-   * The model's context window in tokens, as stated by the operator, or 0 when
-   * unstated. An operator-stated value always wins. 0/unstated no longer turns
-   * proactive compaction off: `runAgent` falls back to a conservative default
-   * (see `DEFAULT_FALLBACK_CONTEXT_WINDOW` in compaction.ts) rather than let an
-   * unbounded transcript grow with nothing but the reactive path to catch it.
-   * A run is still covered reactively either way, when the provider says the
-   * context is too long.
+   * The tool the loop treats as this run's outcome-reporting call — see
+   * loop.ts's `LoopConfig.finishToolName`. `'finish_run'` (default) closes a
+   * single-session run; `'finish_phase'` closes one channel session of a
+   * per-channel-sessions run, sharing a run_id with sibling sessions.
    */
-  contextWindow: number;
+  finishToolName: string;
   /**
    * Maximum characters of a single MCP tool result inserted into the
    * conversation. A larger result is truncated with an explicit marker before
@@ -163,6 +169,17 @@ export interface CliConfig {
    */
   maxToolConcurrency: number;
   /**
+   * Cap on consecutive retryable-error retries within one turn, before the
+   * loop gives up. Defaults to loop.ts's `DEFAULT_MAX_RETRIES` when unset.
+   */
+  maxConsecutiveRetries: number;
+  /**
+   * Ceiling on a single retry backoff delay, in ms, so a "retry in hours"
+   * response fails fast instead of parking an unattended run. Defaults to
+   * loop.ts's `DEFAULT_MAX_RETRY_DELAY_MS` when unset.
+   */
+  maxRetryDelayMs: number;
+  /**
    * Whether Anthropic prompt-cache `cache_control` breakpoints are placed on
    * the wire. An escape hatch: false fully disables caching (Anthropic wire
    * only; no effect on the OpenAI-compatible wire).
@@ -172,6 +189,9 @@ export interface CliConfig {
   outputFile?: string;
   /** Where to write the failure detail on a non-zero exit; omitted to write nothing. */
   reasonFile?: string;
+  /** Dedicated metadata-only run stream, disabled if the safe run ID is absent. */
+  diagnosticsFile?: string;
+  runId?: string;
   /**
    * Model identifier for the `screen_posting` built-in's own provider adapter
    * (see `agent/harness/builtins/screenPosting.ts`). Defaults to {@link
@@ -196,6 +216,10 @@ export interface CliConfig {
   /** Auth routing for the screening adapter. Defaults to {@link
    * CliConfig.authType} when unset. */
   screeningAuthType?: 'oauth' | 'api_key' | 'url';
+  /** Every stage's resolved route (apply/screening/extract), see stages.ts. */
+  stageRoutes?: ResolvedRoutes;
+  /** Static system prompt from `--system-prompt-file`; replaces {@link SYSTEM_PROMPT} when set. */
+  systemPrompt?: string;
 }
 
 /**
@@ -220,10 +244,23 @@ export interface CliDeps {
   readStdin?: () => Promise<string>;
   /** Write the final assistant text to a file. Defaults to `writeFile`. */
   writeOutput?: (path: string, text: string) => Promise<void>;
+  /** Optional private health transport, independently injectable for CLI tests. */
+  healthWriter?: (fd: number) => DiagnosticsHealth;
+  /** Discover a model's context window from its provider. Defaults to {@link
+   * discoverContextWindow}; tests inject a fake so no network is touched. */
+  discoverContextWindow?: (opts: {
+    provider: Provider;
+    wire: Wire;
+    model: string;
+    baseUrl: string;
+    token: string;
+    authType?: CliConfig['authType'];
+  }) => Promise<DiscoveredContextWindow>;
 }
 
 /** The same dependency set with every field resolved to a concrete function. */
 interface ResolvedDeps {
+  healthWriter?: (fd: number) => DiagnosticsHealth;
   createAdapter: (opts: ProviderAdapterOptions) => ProviderAdapter;
   createPool: (servers: McpServerConfig[]) => Promise<McpClientPool>;
   loadConfig: (path: string, env: NodeJS.ProcessEnv) => McpServerConfig[];
@@ -232,6 +269,14 @@ interface ResolvedDeps {
   readFileText: (path: string) => Promise<string>;
   readStdin: () => Promise<string>;
   writeOutput: (path: string, text: string) => Promise<void>;
+  discoverContextWindow: (opts: {
+    provider: Provider;
+    wire: Wire;
+    model: string;
+    baseUrl: string;
+    token: string;
+    authType?: CliConfig['authType'];
+  }) => Promise<DiscoveredContextWindow>;
 }
 
 /** The redacting stdout (JSON) and stderr (text) writers for a run. */
@@ -280,46 +325,6 @@ async function resolvePrompt(
   return (await io.readStdin()).trim();
 }
 
-/**
- * Parse `--context-window`/`AGENT_CONTEXT_WINDOW`; 0 when unset, NaN if invalid.
- *
- * There is deliberately no per-model table behind this. A table of model ids to
- * window sizes is wrong the day a model ships and wrong again when a provider
- * changes a served window, and being wrong here is worse than knowing nothing:
- * an unstated window still gets proactive compaction, just against
- * `runAgent`'s conservative `DEFAULT_FALLBACK_CONTEXT_WINDOW` rather than a
- * guessed per-model figure, and the reactive path covers the rest using the
- * provider's own verdict either way. So the exact number is stated by whoever
- * deployed the model, or not at all — there is no third, guessed option.
- *
- * State it as the model's INPUT capacity, not its headline total: the two
- * differ by whatever the provider reserves for the response (Anthropic reports
- * the input figure as `max_input_tokens` on its models endpoint), and the
- * difference is large enough to matter at the trigger point. A value here,
- * once it passes `MIN_CONTEXT_WINDOW`, always wins over the fallback.
- */
-function resolveContextWindow(flag: string | undefined, envVal: string | undefined): number {
-  const raw = (flag || envVal || '').trim();
-  if (!raw) return 0;
-  // Digits only, deliberately. parseInt stops at the first non-digit and keeps
-  // what it has, which turns every natural way an operator writes a large
-  // number into a small one: "1e6" -> 1, "128k" -> 128, "1_000_000" -> 1,
-  // "0x20000" -> 0. Each of those validates as a positive integer and then
-  // compacts the conversation to its floor on every single turn, silently.
-  if (!/^\d+$/.test(raw)) return Number.NaN;
-  return Number.parseInt(raw, 10);
-}
-
-/**
- * Smallest window worth acting on.
- *
- * Below this the reserve alone exceeds the trigger, so every turn compacts and
- * the agent runs with no memory beyond the pinned instructions and the last
- * few messages — while looking healthy. A figure this small is an operator
- * typo, not an intent, so it is refused rather than honoured.
- */
-const MIN_CONTEXT_WINDOW = 8192;
-
 /** Parse `--max-turns`/`AGENT_MAX_TURNS`, defaulting when unset; NaN if invalid. */
 function resolveMaxTurns(flag: string | undefined, envVal: string | undefined): number {
   const raw = flag || envVal;
@@ -335,10 +340,9 @@ function resolveMaxTurns(flag: string | undefined, envVal: string | undefined): 
 function resolveMaxToolResultChars(flag: string | undefined, envVal: string | undefined): number {
   const raw = (flag || envVal || '').trim();
   if (!raw) return DEFAULT_MAX_TOOL_RESULT_CHARS;
-  // Digits only, deliberately — see resolveContextWindow's comment. This
-  // rejects "1.5", "24000k", "0x10" etc. as NaN instead of parseInt silently
-  // truncating them into a plausible-looking positive integer that would
-  // then sail through validateConfig's Number.isInteger check.
+  // Digits only, deliberately. parseInt stops at the first non-digit and
+  // keeps what it has, so a stray "24000k" or "0x10" validates as a
+  // plausible-looking positive integer instead of the NaN it should be.
   if (!/^\d+$/.test(raw)) return Number.NaN;
   return Number.parseInt(raw, 10);
 }
@@ -358,6 +362,30 @@ function resolveMaxToolConcurrency(flag: string | undefined, envVal: string | un
 }
 
 /**
+ * Parse `--max-retries`/`AGENT_MAX_RETRIES`, defaulting to loop.ts's
+ * `DEFAULT_MAX_RETRIES` when unset; NaN if invalid. CLI flag wins over env var
+ * wins over the default, matching resolveMaxTurns.
+ */
+function resolveMaxRetries(flag: string | undefined, envVal: string | undefined): number {
+  const raw = (flag || envVal || '').trim();
+  if (!raw) return DEFAULT_MAX_RETRIES;
+  if (!/^\d+$/.test(raw)) return Number.NaN;
+  return Number.parseInt(raw, 10);
+}
+
+/**
+ * Parse `--max-retry-delay-ms`/`AGENT_MAX_RETRY_DELAY_MS`, defaulting to
+ * loop.ts's `DEFAULT_MAX_RETRY_DELAY_MS` when unset; NaN if invalid. CLI flag
+ * wins over env var wins over the default, matching resolveMaxTurns.
+ */
+function resolveMaxRetryDelayMs(flag: string | undefined, envVal: string | undefined): number {
+  const raw = (flag || envVal || '').trim();
+  if (!raw) return DEFAULT_MAX_RETRY_DELAY_MS;
+  if (!/^\d+$/.test(raw)) return Number.NaN;
+  return Number.parseInt(raw, 10);
+}
+
+/**
  * Parse `--prompt-cache`/`AGENT_PROMPT_CACHE` as a default-true escape hatch:
  * any value other than the literal string `'false'` leaves caching on. CLI flag
  * wins over env var wins over the default (on), matching resolveMaxTurns.
@@ -366,6 +394,19 @@ function resolvePromptCache(flag: string | undefined, envVal: string | undefined
   const raw = flag ?? envVal;
   if (raw === undefined || raw === '') return true;
   return raw !== 'false';
+}
+
+const FINISH_TOOL_NAMES = ['finish_run', 'finish_phase', 'finish_application'] as const;
+
+/**
+ * Parse `--finish-tool`/`AGENT_FINISH_TOOL`, defaulting to `finish_run` when
+ * unset. CLI flag wins over env var wins over the default, matching
+ * resolveMaxTurns. An unrecognized value is passed through unvalidated here —
+ * validateConfig() rejects it as a config error, consistent with how other
+ * flags are validated after parsing rather than during it.
+ */
+function resolveFinishToolName(flag: string | undefined, envVal: string | undefined): string {
+  return flag || envVal || 'finish_run';
 }
 
 /**
@@ -382,18 +423,46 @@ function resolveScreeningConfig(
   f: Record<string, string>,
   env: NodeJS.ProcessEnv,
   main: { model: string; provider: Provider; wire: Wire; token: string; baseUrl: string; authType?: CliConfig['authType'] },
+  routes: RoutesDocument = {},
 ): Pick<
   CliConfig,
-  'screeningModel' | 'screeningProvider' | 'screeningWire' | 'screeningToken' | 'screeningBaseUrl' | 'screeningAuthType'
+  'screeningModel' | 'screeningProvider' | 'screeningWire' | 'screeningToken' | 'screeningBaseUrl' | 'screeningAuthType' | 'stageRoutes'
 > {
+  const stageRoutes = resolveStageRoutes(routes, main as StageRoute, {
+    screening: {
+      model: f['screening-model'] ?? env.AGENT_SCREENING_MODEL,
+      provider: (f['screening-provider'] ?? env.AGENT_SCREENING_PROVIDER) as Provider | undefined,
+      wire: (f['screening-wire'] ?? env.AGENT_SCREENING_WIRE) as Wire | undefined,
+      token: f['screening-token'] ?? env.AGENT_SCREENING_API_KEY,
+      baseUrl: f['screening-base-url'] ?? env.AGENT_SCREENING_BASE_URL,
+      authType: (f['screening-auth-type'] ?? env.AGENT_SCREENING_AUTH_TYPE) as CliConfig['authType'],
+    },
+  });
+  const s = stageRoutes.screening;
   return {
-    screeningModel: f['screening-model'] ?? env.AGENT_SCREENING_MODEL ?? main.model,
-    screeningProvider: (f['screening-provider'] ?? env.AGENT_SCREENING_PROVIDER ?? main.provider) as Provider,
-    screeningWire: (f['screening-wire'] ?? env.AGENT_SCREENING_WIRE ?? main.wire) as Wire,
-    screeningToken: f['screening-token'] ?? env.AGENT_SCREENING_API_KEY ?? main.token,
-    screeningBaseUrl: f['screening-base-url'] ?? env.AGENT_SCREENING_BASE_URL ?? main.baseUrl,
-    screeningAuthType: (f['screening-auth-type'] ?? env.AGENT_SCREENING_AUTH_TYPE ?? main.authType) as CliConfig['authType'],
+    screeningModel: s.model,
+    screeningProvider: s.provider,
+    screeningWire: s.wire,
+    screeningToken: s.token,
+    screeningBaseUrl: s.baseUrl,
+    screeningAuthType: s.authType,
+    stageRoutes,
   };
+}
+
+/** Read and parse `--routes-file`/`AGENT_ROUTES_FILE`; unreadable or absent yields no routes. */
+async function loadRoutes(
+  f: Record<string, string>,
+  env: NodeJS.ProcessEnv,
+  io: { readFileText: (p: string) => Promise<string> },
+): Promise<RoutesDocument> {
+  const path = f['routes-file'] || env.AGENT_ROUTES_FILE;
+  if (!path) return {};
+  try {
+    return parseRoutes(await io.readFileText(path));
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -412,12 +481,17 @@ export async function resolveConfig(
 ): Promise<CliConfig> {
   const f = parsed.flags;
   const prompt = await resolvePrompt(parsed, io);
-  const model = f.model ?? env.AGENT_LLM_MODEL ?? '';
-  const provider = (f.provider ?? env.AGENT_LLM_PROVIDER ?? '') as Provider;
-  const wire = (f.wire ?? env.AGENT_LLM_WIRE ?? '') as Wire;
-  const token = tokenFrom(f, env);
-  const baseUrl = f['base-url'] ?? env.AGENT_LLM_BASE_URL ?? '';
-  const authType = (f['auth-type'] ?? env.AGENT_LLM_AUTH_TYPE ?? undefined) as CliConfig['authType'];
+  const routes = await loadRoutes(f, env, io);
+  // Field by field: an explicit flag/env value overrides only its own field;
+  // everything else still comes from the routes file's apply route.
+  const applyRoute = routes.apply ?? null;
+  const model = f.model ?? env.AGENT_LLM_MODEL ?? applyRoute?.model ?? '';
+  const provider = (f.provider ?? env.AGENT_LLM_PROVIDER ?? applyRoute?.provider ?? '') as Provider;
+  const wire = (f.wire ?? env.AGENT_LLM_WIRE ?? applyRoute?.wire ?? '') as Wire;
+  const token = f.token ?? env.AGENT_LLM_API_KEY ?? applyRoute?.token ?? '';
+  const baseUrl = f['base-url'] ?? env.AGENT_LLM_BASE_URL ?? applyRoute?.baseUrl ?? '';
+  const authType = (f['auth-type'] ?? env.AGENT_LLM_AUTH_TYPE ?? applyRoute?.authType ?? undefined) as CliConfig['authType'];
+  const systemPrompt = f['system-prompt-file'] ? (await io.readFileText(f['system-prompt-file'])).trim() : undefined;
   return {
     prompt,
     model,
@@ -426,15 +500,20 @@ export async function resolveConfig(
     token,
     baseUrl,
     authType,
-    ...resolveScreeningConfig(f, env, { model, provider, wire, token, baseUrl, authType }),
+    ...resolveScreeningConfig(f, env, { model, provider, wire, token, baseUrl, authType }, { ...routes, apply: null }),
+    systemPrompt: systemPrompt || undefined,
     mcpConfigPath: f['mcp-config'] ?? env.MCP_CONFIG_PATH ?? 'mcp.json',
     maxTurns: resolveMaxTurns(f['max-turns'], env.AGENT_MAX_TURNS),
-    contextWindow: resolveContextWindow(f['context-window'], env.AGENT_CONTEXT_WINDOW),
+    finishToolName: resolveFinishToolName(f['finish-tool'], env.AGENT_FINISH_TOOL),
     maxToolResultChars: resolveMaxToolResultChars(f['max-tool-result-chars'], env.AGENT_MAX_TOOL_RESULT_CHARS),
     maxToolConcurrency: resolveMaxToolConcurrency(f['max-tool-concurrency'], env.AGENT_MAX_TOOL_CONCURRENCY),
+    maxConsecutiveRetries: resolveMaxRetries(f['max-retries'], env.AGENT_MAX_RETRIES),
+    maxRetryDelayMs: resolveMaxRetryDelayMs(f['max-retry-delay-ms'], env.AGENT_MAX_RETRY_DELAY_MS),
     promptCache: resolvePromptCache(f['prompt-cache'], env.AGENT_PROMPT_CACHE),
     outputFile: f['output-file'] || undefined,
     reasonFile: f['reason-file'] || undefined,
+    diagnosticsFile: f['diagnostics-file'] || undefined,
+    runId: f['run-id'] || undefined,
   };
 }
 
@@ -483,16 +562,16 @@ export function validateConfig(config: CliConfig): string[] {
   if (!PROVIDERS.includes(config.provider)) errors.push('a valid --provider (claude|codex|openrouter|ollama) is required');
   if (!WIRES.includes(config.wire)) errors.push('a valid --wire (anthropic-messages|openai-chat-completions|openai-responses) is required');
   if (!Number.isInteger(config.maxTurns) || config.maxTurns <= 0) errors.push('--max-turns must be a positive integer');
+  if (!(FINISH_TOOL_NAMES as readonly string[]).includes(config.finishToolName))
+    errors.push('--finish-tool must be one of finish_run|finish_phase|finish_application');
   if (!Number.isInteger(config.maxToolResultChars) || config.maxToolResultChars <= 0)
     errors.push('--max-tool-result-chars must be a positive integer');
   if (!Number.isInteger(config.maxToolConcurrency) || config.maxToolConcurrency <= 0)
     errors.push('--max-tool-concurrency must be a positive integer');
-  if (!Number.isInteger(config.contextWindow) || config.contextWindow < 0)
-    errors.push(
-      '--context-window must be a whole number of tokens, digits only (0 or unset applies a conservative fallback)',
-    );
-  else if (config.contextWindow > 0 && config.contextWindow < MIN_CONTEXT_WINDOW)
-    errors.push(`--context-window must be at least ${MIN_CONTEXT_WINDOW} tokens, or 0/unset to use the conservative fallback`);
+  if (!Number.isInteger(config.maxConsecutiveRetries) || config.maxConsecutiveRetries <= 0)
+    errors.push('--max-retries must be a positive integer');
+  if (!Number.isInteger(config.maxRetryDelayMs) || config.maxRetryDelayMs <= 0)
+    errors.push('--max-retry-delay-ms must be a positive integer');
   errors.push(...validateAuth(config));
   if (!PROVIDERS.includes(config.screeningProvider))
     errors.push('a valid --screening-provider (claude|codex|openrouter|ollama) is required');
@@ -533,7 +612,10 @@ export function redact(text: string, token: string): string {
  * @returns The text with every credential redacted.
  */
 export function redactAll(text: string, tokens: readonly string[]): string {
-  return tokens.reduce((acc, token) => redact(acc, token), text);
+  // Longest first: a token that contains another must be stripped whole,
+  // not left as `<redacted>` plus the longer token's tail.
+  const longestFirst = [...tokens].sort((x, y) => y.length - x.length);
+  return longestFirst.reduce((acc, token) => redact(acc, token), text);
 }
 
 /**
@@ -622,7 +704,8 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv, deps: CliDe
   }
   // From here on both credentials are known, so every write is redacted
   // against the main AND the screening token — see {@link redactAll}.
-  const tokens = [token, config.screeningToken];
+  const routeTokens = Object.values(config.stageRoutes ?? {}).map((r) => r.token);
+  const tokens = [...new Set([token, config.token, config.screeningToken, ...routeTokens])].filter(Boolean);
   return runOnce(config, env, d, buildEmitter(d, tokens), tokens);
 }
 
@@ -645,7 +728,26 @@ async function runOnce(
 ): Promise<number> {
   const pool = await tryBuildPool(config, env, d, emit);
   if (typeof pool === 'number') return pool;
-  const adapter = d.createAdapter(adapterOptions(config));
+  // Discovered once per adapter, directly from its own provider — the main
+  // and screening adapters can target different providers/models, so each
+  // gets its own discovery call rather than sharing one figure.
+  const mainWindow = await d.discoverContextWindow({
+    provider: config.provider,
+    wire: config.wire,
+    model: config.model,
+    baseUrl: config.baseUrl,
+    token: config.token,
+    authType: config.authType,
+  });
+  const screeningWindow = await d.discoverContextWindow({
+    provider: config.screeningProvider,
+    wire: config.screeningWire,
+    model: config.screeningModel,
+    baseUrl: config.screeningBaseUrl,
+    token: config.screeningToken,
+    authType: config.screeningAuthType,
+  });
+  const adapter = d.createAdapter(adapterOptions(config, mainWindow.window));
   // Built via the SAME plain factory as the main adapter, from a separate
   // options object (a separate, cheaper model by default) — createProviderAdapter
   // holds no shared mutable state, so this instance never disturbs the main
@@ -653,8 +755,8 @@ async function runOnce(
   // screen_posting branch (never a module-level setter), so which adapter a
   // call dispatches to never depends on load order or leaks into a later run
   // in the same process.
-  const screeningAdapter = d.createAdapter(screeningAdapterOptions(config));
-  const outcome = await runAgent(adapter, screeningAdapter, pool, config, d, emit, tokens);
+  const screeningAdapter = d.createAdapter(screeningAdapterOptions(config, screeningWindow.window));
+  const outcome = await runAgent(adapter, screeningAdapter, pool, config, env, d, emit, tokens, mainWindow);
   if (typeof outcome === 'number') return outcome;
   return report(outcome.result, config, d, emit, tokens, outcome.getFailureDetail);
 }
@@ -686,23 +788,18 @@ async function tryBuildPool(
 }
 
 /**
- * Resolve the `compactionConfig` handed to {@link runLoop}, and whether it is
- * running on the fallback rather than an operator-stated figure.
+ * Build the `compactionConfig` handed to {@link runLoop} from the window
+ * discovered for the main adapter.
  *
- * Always returns a real, truthy `contextWindow`: proactive compaction now runs
- * unconditionally, against whatever the operator stated or, failing that,
- * `DEFAULT_FALLBACK_CONTEXT_WINDOW`. See that constant's doc comment for why
- * generous is the safe direction to err in here.
+ * The discovered figure is always a real, positive number — {@link
+ * discoverContextWindow} itself resolves any failure to
+ * `DEFAULT_FALLBACK_CONTEXT_WINDOW` — so proactive compaction always runs.
  *
- * @param config The resolved configuration.
- * @returns The compaction config to pass to the loop, and whether it used the fallback.
+ * @param window The context window discovered for the main adapter.
+ * @returns The compaction config to pass to the loop.
  */
-export function resolveCompactionConfig(config: CliConfig): { compactionConfig: CompactionConfig; usedFallback: boolean } {
-  const usedFallback = !config.contextWindow;
-  return {
-    compactionConfig: { contextWindow: config.contextWindow || DEFAULT_FALLBACK_CONTEXT_WINDOW },
-    usedFallback,
-  };
+export function resolveCompactionConfig(window: number): CompactionConfig {
+  return { contextWindow: window };
 }
 
 /**
@@ -726,37 +823,50 @@ async function runAgent(
   screeningAdapter: ProviderAdapter,
   pool: McpClientPool,
   config: CliConfig,
+  env: NodeJS.ProcessEnv,
   d: ResolvedDeps,
   emit: Emitter,
   tokens: readonly string[],
+  mainWindow: DiscoveredContextWindow,
 ): Promise<{ result: LoopResult; getFailureDetail: () => string | undefined } | number> {
   const stream = createEventStream(emit.json);
-  const { compactionConfig, usedFallback } = resolveCompactionConfig(config);
-  if (usedFallback) {
-    emit.err(
-      `context window unstated; using conservative fallback of ${DEFAULT_FALLBACK_CONTEXT_WINDOW} tokens for proactive compaction`,
-    );
+  let health: DiagnosticsHealth | undefined;
+  const diagnosticsEnabled = config.runId && SAFE_RUN_ID.test(config.runId) && config.diagnosticsFile &&
+    basename(config.diagnosticsFile) === `diagnostics_${config.runId}.ndjson`;
+  if (diagnosticsEnabled && env.TRUTHCV_DIAGNOSTICS_FD === '3') {
+    try { health = (d.healthWriter ?? createDiagnosticsHealth)(3); } catch { /* optional channel */ }
   }
+  const diagnostics = diagnosticsEnabled
+    ? createDiagnostics(config.diagnosticsFile!, config.runId!, { health }) : undefined;
+  const compactionConfig = resolveCompactionConfig(mainWindow.window);
+  emit.err(`context window ${mainWindow.window} (${mainWindow.source})`);
   try {
     const result = await runLoop({
       adapter,
       pool,
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt: config.systemPrompt ?? SYSTEM_PROMPT,
       initialMessages: [{ role: 'user', content: config.prompt }],
       config: {
         maxTurns: config.maxTurns,
         maxToolResultChars: config.maxToolResultChars,
         maxToolConcurrency: config.maxToolConcurrency,
+        maxConsecutiveRetries: config.maxConsecutiveRetries,
+        maxRetryDelayMs: config.maxRetryDelayMs,
+        finishToolName: config.finishToolName,
+        deniedTools: sessionDeniedTools(config.finishToolName),
       },
       compactionConfig,
       screeningAdapter,
       onEvent: stream.onEvent,
+      onDiagnostic: diagnostics?.onDiagnostic,
     });
     return { result, getFailureDetail: stream.getFailureDetail };
   } catch (err) {
     emit.err(`provider error: ${errorMessage(err)}`);
     await writeReason(config, d, tokens, `provider error: ${errorMessage(err)}`);
     return ExitCode.ProviderError;
+  } finally {
+    try { health?.close(); } catch { /* diagnostics never change the exit code */ }
   }
 }
 
@@ -790,7 +900,7 @@ async function report(
   emit.json({ type: 'done', stopReason: result.stopReason, turns: result.turns, exitCode });
   if (config.outputFile) await d.writeOutput(config.outputFile, finalAssistantText(result.messages));
   if (abandoned) {
-    await writeReason(config, d, tokens, abandonedReason(getFailureDetail()));
+    await writeReason(config, d, tokens, abandonedReason(getFailureDetail(), config.finishToolName));
   } else if (exitCode !== ExitCode.Success) {
     await writeReason(config, d, tokens, getFailureDetail() ?? `stopped: ${result.stopReason}`);
   }
@@ -809,9 +919,15 @@ async function report(
  * @param detail The run's captured failure detail, if any.
  * @returns One operator-readable sentence, well under the reason-file bound.
  */
-function abandonedReason(detail: string | undefined): string {
-  const cause = detail === EMPTY_TURN_STOP_DETAIL ? ` (${detail})` : '';
-  return `the agent stopped without calling finish_run${cause} — the run was abandoned before it reported an outcome, so its counters are incomplete`;
+function abandonedReason(detail: string | undefined, finishToolName: string): string {
+  const cause =
+    detail === EMPTY_TURN_STOP_DETAIL || detail === UNFINISHED_STOP_DETAIL ? ` (${detail})` : '';
+  // With the longest cause this is ~234 chars; it must fit within MAX_REASON_CHARS (240)
+  // so truncateReason never has to cut it and append an ellipsis.
+  return (
+    `the agent stopped without calling ${finishToolName}${cause}; screenings and applications ` +
+    'still count from their records, but postings seen and discovery coverage are partial'
+  );
 }
 
 /**
@@ -1065,8 +1181,9 @@ function exitCodeFor(stopReason: LoopOutcome): number {
   return ExitCode.ProviderError;
 }
 
-/** Project a {@link CliConfig} onto the provider adapter's option shape. */
-function adapterOptions(config: CliConfig): ProviderAdapterOptions {
+/** Project a {@link CliConfig} onto the provider adapter's option shape,
+ * carrying the window discovered for this adapter. */
+function adapterOptions(config: CliConfig, contextWindow: number): ProviderAdapterOptions {
   return {
     provider: config.provider,
     wire: config.wire,
@@ -1074,11 +1191,10 @@ function adapterOptions(config: CliConfig): ProviderAdapterOptions {
     token: config.token,
     baseUrl: config.baseUrl,
     authType: config.authType,
-    // The same number the compaction trigger uses. Ollama needs it stated on
-    // the request (`options.num_ctx`) because a local server otherwise serves
-    // its own default; deriving both from one figure is what stops the harness
-    // compacting against one window while the server enforces another.
-    ...(config.contextWindow ? { contextWindow: config.contextWindow } : {}),
+    // The same number the compaction trigger uses. The registry forwards this
+    // as `options.num_ctx` for ollama only, so it never reaches OpenRouter or
+    // Codex as a stray option field.
+    contextWindow,
     // Anthropic-only escape hatch; the registry ignores it on the OpenAI wire.
     promptCache: config.promptCache,
   };
@@ -1090,7 +1206,7 @@ function adapterOptions(config: CliConfig): ProviderAdapterOptions {
  * fields instead. Built via the same {@link createProviderAdapter} plain
  * factory, so this never disturbs the main adapter built alongside it.
  */
-function screeningAdapterOptions(config: CliConfig): ProviderAdapterOptions {
+function screeningAdapterOptions(config: CliConfig, contextWindow: number): ProviderAdapterOptions {
   return {
     provider: config.screeningProvider,
     wire: config.screeningWire,
@@ -1098,7 +1214,7 @@ function screeningAdapterOptions(config: CliConfig): ProviderAdapterOptions {
     token: config.screeningToken,
     baseUrl: config.screeningBaseUrl,
     authType: config.screeningAuthType,
-    ...(config.contextWindow ? { contextWindow: config.contextWindow } : {}),
+    contextWindow,
     promptCache: config.promptCache,
   };
 }
@@ -1111,6 +1227,7 @@ function tokenFrom(flags: Record<string, string>, env: NodeJS.ProcessEnv): strin
 /** Fill in every unset dependency with its real default implementation. */
 function withDefaults(deps: CliDeps): ResolvedDeps {
   return {
+    healthWriter: deps.healthWriter,
     createAdapter: deps.createAdapter ?? createProviderAdapter,
     createPool: deps.createPool ?? ((servers) => createMcpClientPool(servers)),
     loadConfig: deps.loadConfig ?? loadMcpConfig,
@@ -1119,6 +1236,7 @@ function withDefaults(deps: CliDeps): ResolvedDeps {
     readFileText: deps.readFileText ?? ((path) => readFile(path, 'utf8')),
     readStdin: deps.readStdin ?? defaultReadStdin,
     writeOutput: deps.writeOutput ?? ((path, text) => writeFile(path, text, 'utf8')),
+    discoverContextWindow: deps.discoverContextWindow ?? discoverContextWindow,
   };
 }
 

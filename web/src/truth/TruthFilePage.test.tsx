@@ -17,6 +17,17 @@ vi.mock("../api/client", () => ({
     complete: true,
   }),
   getProfile: vi.fn().mockResolvedValue({ hasProfile: true }),
+  // WizardProvider's bootstrap effect calls extractTruth() whenever
+  // hasProfile is true (as it is above) — leaving it unmocked means it
+  // returns undefined and `.then()` throws, producing an unhandled
+  // rejection that can surface as a failure in an unrelated, later test.
+  extractTruth: vi.fn().mockResolvedValue({
+    experiences: [],
+    education: [],
+    skills: [],
+    hobbies: [],
+    profile: { name: "", email: "", phone: "", location: "", links: [], summary: "" },
+  }),
 }));
 
 afterEach(() => {

@@ -8,6 +8,7 @@
  */
 
 import { blockedResult, matchesAny } from './harvestClassify.js';
+import { isLocationFieldLine } from './harvestLocation.js';
 import type { BlockKind, BrowserToolCall, HarvestBoardRequest, HarvestBoardResult } from './harvestTypes.js';
 
 /** URL path segments unambiguously naming a sign-in/authentication flow.
@@ -44,8 +45,53 @@ const UNREACHABLE_NET_ERROR_PATTERNS: readonly RegExp[] = [
   /ECONNREFUSED/i,
 ];
 
+/** Regexes matching a Chromium navigation-timeout-class error — distinct
+ * from {@link UNREACHABLE_NET_ERROR_PATTERNS}: the page WAS reachable (or at
+ * least attempted) but did not finish loading within the timeout, rather
+ * than a confirmed DNS/connection failure. Retried once; a second timeout
+ * maps to `blockKind: 'timeout'`. */
+const TIMEOUT_NAV_ERROR_PATTERNS: readonly RegExp[] = [
+  /Timeout \d+ms exceeded/i,
+  /ERR_TIMED_OUT/i,
+  /ERR_CONNECTION_TIMED_OUT/i,
+  /did not load/i,
+];
+
 /** Match a searchbox/textbox line and capture its `[ref=...]` element ref. */
 const SEARCH_BOX_RE = /-\s*(?:searchbox|textbox)[^\n[]*\[ref=([^\]]+)]/i;
+
+/** Strips every `[ref=...]` token from a snapshot before comparing two
+ * snapshots for an actual content change — refs are reassigned on every
+ * `browser_snapshot` call, so comparing raw text would see a "change" even
+ * when nothing on the page actually moved. */
+const REF_TOKEN_RE = /\[ref=[^\]]+]/g;
+
+/** An input-field snapshot line's trailing `: <value>` — Playwright's aria
+ * snapshot renders a filled searchbox/textbox/combobox as
+ * `- textbox "Search": backend`, so merely TYPING the keywords changes the
+ * snapshot even when the submit itself never did anything. Captures the
+ * line without that value so it can be dropped before comparing. Applied
+ * after {@link REF_TOKEN_RE}. */
+const FIELD_VALUE_RE = /^(\s*-\s*(?:searchbox|textbox|combobox)\b[^\n]*?):\s[^\n]*$/gim;
+
+/** Seconds to wait, via `browser_wait_for`, for a client-side search submit
+ * that has not visibly changed the page yet — some boards debounce or
+ * animate their results in rather than updating synchronously. */
+const SEARCH_SETTLE_SECONDS = 2;
+
+/** The `[ref=...]` of the first line in `snapshot` that looks like a plain
+ * keyword box — a searchbox/textbox line, in document order, SKIPPING any
+ * line {@link isLocationFieldLine} names a location field, so a board that
+ * lists its location field before its keyword box never has the location
+ * field mistaken for the keyword box. */
+function findKeywordFieldRef(snapshot: string): string | undefined {
+  for (const line of snapshot.split('\n')) {
+    if (isLocationFieldLine(line)) continue;
+    const match = SEARCH_BOX_RE.exec(line);
+    if (match) return match[1];
+  }
+  return undefined;
+}
 
 /** Whether `url` looks like a sign-in/login/auth flow rather than an
  * ordinary board page — by its path, or by a query-string parameter whose
@@ -83,36 +129,161 @@ function isUnreachableNavigationError(message: string): boolean {
   return matchesAny(message, UNREACHABLE_NET_ERROR_PATTERNS);
 }
 
+/** Whether a `browser_navigate` failure's own message names a timeout-class
+ * error — see {@link TIMEOUT_NAV_ERROR_PATTERNS}. Checked only once the
+ * message is already confirmed NOT unreachable, so `ERR_DNS_TIMED_OUT`
+ * (a confirmed DNS failure) always stays `'unreachable'`, never `'timeout'`. */
+function isTimeoutNavigationError(message: string): boolean {
+  return matchesAny(message, TIMEOUT_NAV_ERROR_PATTERNS);
+}
+
+/** Replace every `{keywords}`/`{location}` placeholder in a board's
+ * `searchUrl` template with the URI-encoded keywords/location — `{keywords}`
+ * with `encodeURIComponent(keywords ?? '')`, `{location}` likewise for
+ * `location`, every occurrence of each. Used for direct boards with no
+ * on-page search box: the built URL replaces `board.url` outright, is
+ * navigated to directly, and its snapshot classified with no search-box
+ * typing at all. */
+export function buildSearchUrl(template: string, keywords?: string, location?: string): string {
+  return template
+    .split('{keywords}').join(encodeURIComponent(keywords ?? ''))
+    .split('{location}').join(encodeURIComponent(location ?? ''));
+}
+
 /** Navigate to `url` and take one snapshot, or a `blocked`-shaped error
  * otherwise. `blockKind: 'unreachable'` is set ONLY for a confirmed
  * DNS/connection-class navigation failure ({@link isUnreachableNavigationError});
- * any other navigation failure (a generic timeout, a page-level error) is
+ * a timeout-class failure ({@link isTimeoutNavigationError}) is retried once
+ * via {@link navigateOnce}, and `blockKind: 'timeout'` set only if the retry
+ * also times out; any OTHER navigation failure (a page-level error) is
  * reported with NO `blockKind` at all rather than mislabelling a possibly
  * slow-but-reachable board as a dead URL — see `HarvestBoardResult.blockKind`. */
 export async function navigateAndSnapshot(
   call: BrowserToolCall,
   url: string,
 ): Promise<{ snapshot: string } | { error: string; blockKind?: BlockKind }> {
-  const nav = await call('browser_navigate', { url });
-  if (nav.isError) {
-    if (isUnreachableNavigationError(nav.content)) {
-      return { error: `board unreachable: navigation failed: ${nav.content}`, blockKind: 'unreachable' };
-    }
-    return { error: `navigation failed (not a confirmed dead URL — could be a slow or erroring page): ${nav.content}` };
-  }
+  const navError = await navigateOnce(call, url);
+  if (navError) return navError;
   const snap = await call('browser_snapshot', {});
   if (snap.isError) return { error: `snapshot failed: ${snap.content}` };
   return { snapshot: snap.content };
 }
 
-/** Type `keywords` into the first detected search box, then re-snapshot; falls
- * back to the original `snapshot` unchanged when no search box is found or
- * either call errors. */
-export async function searchAndSnapshot(call: BrowserToolCall, snapshot: string, keywords: string): Promise<string> {
-  const ref = SEARCH_BOX_RE.exec(snapshot)?.[1];
-  if (!ref) return snapshot;
-  const typed = await call('browser_type', { element: 'search box', ref, text: keywords, submit: true });
-  if (typed.isError) return snapshot;
+/** Call `browser_navigate`, retrying exactly ONCE on a timeout-class error
+ * ({@link isTimeoutNavigationError}) — a second timeout in a row returns
+ * `blockKind: 'timeout'` rather than retrying indefinitely. Shared by
+ * {@link navigateAndSnapshot} and harvestTabs.ts's `selectAndNavigate`, so
+ * both the single-shared-tab and tab-per-board paths get the same retry.
+ * Resolves to `null` on success, else the navigation error. */
+export async function navigateOnce(call: BrowserToolCall, url: string): Promise<{ error: string; blockKind?: BlockKind } | null> {
+  const nav = await call('browser_navigate', { url });
+  if (!nav.isError) return null;
+  if (isUnreachableNavigationError(nav.content)) {
+    return { error: `board unreachable: navigation failed: ${nav.content}`, blockKind: 'unreachable' };
+  }
+  if (isTimeoutNavigationError(nav.content)) {
+    const retry = await call('browser_navigate', { url });
+    if (!retry.isError) return null;
+    if (isUnreachableNavigationError(retry.content)) {
+      return { error: `board unreachable: navigation failed: ${retry.content}`, blockKind: 'unreachable' };
+    }
+    if (isTimeoutNavigationError(retry.content)) {
+      return { error: `navigation timed out twice: ${retry.content}`, blockKind: 'timeout' };
+    }
+    return { error: `navigation failed (not a confirmed dead URL — could be a slow or erroring page): ${retry.content}` };
+  }
+  return { error: `navigation failed (not a confirmed dead URL — could be a slow or erroring page): ${nav.content}` };
+}
+
+/** Outcome of {@link searchAndSnapshot}: `snapshot` is always the best one
+ * obtained (the pre-search snapshot on any failure or non-submission,
+ * otherwise the post-search one); `submitted` is true only once the page is
+ * confirmed to have actually changed; `reason` explains a `false` `submitted`
+ * and is absent when `submitted` is true. */
+export interface KeywordSearchResult {
+  snapshot: string;
+  submitted: boolean;
+  reason?: string;
+}
+
+/** Strip every `[ref=...]` token, every input field's typed value (see
+ * {@link FIELD_VALUE_RE}) and surrounding whitespace so two snapshots can be
+ * compared for an actual content change rather than reassigned refs or the
+ * keywords just typed into the box. */
+function normaliseForComparison(snapshot: string): string {
+  return snapshot.replace(REF_TOKEN_RE, '').replace(FIELD_VALUE_RE, '$1').trim();
+}
+
+/** Re-snapshot after an inconclusive submit and give the page one more
+ * chance to settle — waits, then takes one more snapshot. Falls back to
+ * `previous` (both as the returned snapshot and for the unchanged check)
+ * when this final snapshot itself errors. */
+async function waitAndResnapshot(call: BrowserToolCall, previous: string): Promise<string> {
+  await call('browser_wait_for', { time: SEARCH_SETTLE_SECONDS });
   const snap = await call('browser_snapshot', {});
-  return snap.isError ? snapshot : snap.content;
+  return snap.isError ? previous : snap.content;
+}
+
+/** Matches a snapshot still showing a loading/searching state. */
+const LOADING_RE = new RegExp(
+  [
+    'finding jobs',
+    'loading\\s*(?:\\.{2,}|…|jobs|results|more)',
+    'text:\\s*"?loading"?\\s*$',
+    'searching\\s*(?:\\.{2,}|…|for\\b|jobs)',
+    'lädt|wird geladen|bitte warten',
+    '-\\s*(?:progressbar|busy)\\b',
+  ].join('|'),
+  'im',
+);
+
+/**
+ * Max wait+resnapshot rounds while results are still loading. Max total wait
+ * is ~15s (5 × 3s); returns as soon as the loading marker clears.
+ */
+const RESULTS_SETTLE_ATTEMPTS = 5;
+
+/** Seconds to wait per round while results are still loading. */
+const RESULTS_SETTLE_SECONDS = 3;
+
+/**
+ * When `snapshot` still shows loading text, wait and re-snapshot up to
+ * {@link RESULTS_SETTLE_ATTEMPTS} times, returning as soon as it clears.
+ * Makes no browser calls for a non-loading snapshot; a snapshot error
+ * returns the last good snapshot.
+ */
+export async function settleIfLoading(call: BrowserToolCall, snapshot: string): Promise<string> {
+  let current = snapshot;
+  for (let i = 0; i < RESULTS_SETTLE_ATTEMPTS && LOADING_RE.test(current); i++) {
+    await call('browser_wait_for', { time: RESULTS_SETTLE_SECONDS });
+    const snap = await call('browser_snapshot', {});
+    if (snap.isError) return current;
+    current = snap.content;
+  }
+  return current;
+}
+
+/** Type `keywords` into the first detected search box, submit, and confirm
+ * the page actually changed — comparing snapshots with `[ref=...]` tokens
+ * stripped, since those are reassigned on every `browser_snapshot` call and
+ * would otherwise look like a change on their own. When the first post-type
+ * snapshot looks unchanged, waits {@link SEARCH_SETTLE_SECONDS} seconds for a
+ * debounced/animated result and re-snapshots once before giving up. Never
+ * throws: any failure or an unconfirmed submit reports `submitted: false`
+ * with a `reason`, and `snapshot` is always the best one available. */
+export async function searchAndSnapshot(call: BrowserToolCall, snapshot: string, keywords: string): Promise<KeywordSearchResult> {
+  const ref = findKeywordFieldRef(snapshot);
+  if (!ref) return { snapshot, submitted: false, reason: 'no keyword search box detected' };
+  const typed = await call('browser_type', { element: 'search box', ref, text: keywords, submit: true });
+  if (typed.isError) return { snapshot, submitted: false, reason: 'keyword browser_type failed' };
+  const snap = await call('browser_snapshot', {});
+  if (snap.isError) return { snapshot, submitted: false, reason: 'post-search snapshot failed' };
+  if (normaliseForComparison(snap.content) !== normaliseForComparison(snapshot)) {
+    return { snapshot: snap.content, submitted: true };
+  }
+  const settled = await waitAndResnapshot(call, snap.content);
+  if (normaliseForComparison(settled) === normaliseForComparison(snapshot)) {
+    return { snapshot: settled, submitted: false, reason: 'submit did not change the page' };
+  }
+  return { snapshot: settled, submitted: true };
 }

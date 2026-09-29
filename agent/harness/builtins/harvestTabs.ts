@@ -1,12 +1,14 @@
 /**
- * Browser-tab lifecycle for `harvest_postings`' CONCURRENT tab-per-board
- * path: a FIFO lock serializing this invocation's own tab-tool calls, tab
+ * Browser-tab lifecycle for `harvest_postings`' tab-per-board FALLBACK path
+ * (taken when the session-per-worker path \u2014 harvestSessions.ts, over
+ * agent/harness/mcp/sessionPool.ts \u2014 has fewer than two available sessions):
+ * a FIFO lock serializing this invocation's own tab-tool calls, tab
  * creation/selection, closing every tab this invocation opened, and probing
  * whether the browser server's tab-listing text can be parsed at all before
- * committing to the concurrent path rather than resting on a guessed text
- * format. Split out of harvestPostings.ts; see that module's own doc for the
- * tool's behaviour as a whole, and harvestBoard.ts for how these pieces
- * compose into one board's harvest.
+ * committing to this path rather than resting on a guessed text format.
+ * Split out of harvestPostings.ts; see that module's own doc for the tool's
+ * behaviour as a whole, and harvestBoard.ts for how these pieces compose
+ * into one board's harvest.
  */
 
 import { navigateAndSnapshot } from './harvestNavigate.js';

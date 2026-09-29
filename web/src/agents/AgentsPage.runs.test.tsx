@@ -26,6 +26,8 @@ function makeRun(overrides: Partial<RunRecord> = {}): RunRecord {
     applicationsSubmitted: 3,
     queuedForApproval: 2,
     overCapWrites: 0,
+    itemsFailed: 0,
+    itemErrors: [],
     stoppedReason: "",
     note: "",
     discoveryCoverage: [],
@@ -74,6 +76,7 @@ describe("RecentRunsSection", () => {
             { channel: "direct", board: "Lever", status: "searched", postingsFound: 0, reason: "" },
             { channel: "direct", board: "Personio", status: "login_walled", postingsFound: 0, reason: "" },
             { channel: "direct", board: "Workday", status: "login_walled", postingsFound: 0, reason: "" },
+            { channel: "direct", board: "Indeed", status: "extraction_failed", postingsFound: 0, reason: "extraction matched nothing" },
           ],
         }),
       ]),
@@ -83,7 +86,9 @@ describe("RecentRunsSection", () => {
 
     await waitFor(() => expect(screen.getByText("run-with-coverage")).toBeTruthy());
     expect(
-      screen.getByText("Feed: 11 postings · Direct boards: 3 searched, 2 login-walled · Dorks: not reached"),
+      screen.getByText(
+        "Feed: 11 postings · Direct boards: 3 searched, 1 extraction-failed, 2 login-walled · Dorks: not reached",
+      ),
     ).toBeTruthy();
   });
 
@@ -96,6 +101,19 @@ describe("RecentRunsSection", () => {
 
     await waitFor(() => expect(screen.getByText("run-no-coverage")).toBeTruthy());
     expect(screen.getByText("Discovery coverage: none recorded")).toBeTruthy();
+  });
+
+  it("shows a stopped-before-recording message for a failed run with no coverage", async () => {
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([makeRun({ id: "run-failed-no-coverage", status: "failed", discoveryCoverage: [] })]),
+    );
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("run-failed-no-coverage")).toBeTruthy());
+    expect(
+      screen.getByText("Discovery coverage: none recorded before the run stopped"),
+    ).toBeTruthy();
   });
 
   it("renders a running run distinctly from a finished one", async () => {
@@ -354,5 +372,39 @@ describe("RecentRunsSection", () => {
 
     // The dialog now shows the stopped run's record, not the stale one.
     await waitFor(() => expect(screen.getByText("failed", { selector: "strong" })).toBeTruthy());
+  });
+
+  it("hides Items failed when there are none", async () => {
+    vi.spyOn(client, "listRuns").mockResolvedValue(makePage([makeRun({ id: "run-ok" })]));
+    render(<RecentRunsSection />);
+    await waitFor(() => expect(screen.getByText("run-ok")).toBeTruthy());
+    expect(screen.queryByText(/Items failed/)).toBeNull();
+    expect(screen.queryByText(/Failed items/)).toBeNull();
+  });
+
+  it("shows Items failed and expands full error texts", async () => {
+    const errs = ["save failed: " + "x".repeat(300), "apply session did not finish", "screen error C"];
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([makeRun({ id: "run-bad", itemsFailed: 3, itemErrors: errs })]),
+    );
+    render(<RecentRunsSection />);
+    await waitFor(() => expect(screen.getByText("run-bad")).toBeTruthy());
+    expect(screen.getByText(/Items failed: 3/)).toBeTruthy();
+    expect(screen.queryByText(errs[1])).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Failed items \(3\)/ }));
+    for (const e of errs) expect(screen.getByText(e)).toBeTruthy();
+  });
+
+  it("keeps the Failed items disclosure outside the role=button card", async () => {
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([makeRun({ id: "run-bad", itemsFailed: 1, itemErrors: ["boom"] })]),
+    );
+    render(<RecentRunsSection />);
+    await waitFor(() => expect(screen.getByText("run-bad")).toBeTruthy());
+    const card = screen.getByRole("button", { name: "Run run-bad" });
+    const toggle = screen.getByRole("button", { name: /Failed items \(1\)/ });
+    expect(card.contains(toggle)).toBe(false);
+    fireEvent.click(toggle);
+    expect(screen.getByRole("list").textContent).toContain("boom");
   });
 });

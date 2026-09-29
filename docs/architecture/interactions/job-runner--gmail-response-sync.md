@@ -1,9 +1,9 @@
-<!-- generated:start edge:gmail-response-sync→llm-provider-layer -->
-# Interaction: Gmail Response Sync → LLM Provider Layer
+<!-- generated:start edge:job-runner→gmail-response-sync -->
+# Interaction: Job Runner → Gmail Response Sync
 
-- **Participants:** `gmail-response-sync` → `llm-provider-layer`
+- **Participants:** `job-runner` → `gmail-response-sync`
 - **Transport:** `in-process`
-<!-- generated:end edge:gmail-response-sync→llm-provider-layer -->
+<!-- generated:end edge:job-runner→gmail-response-sync -->
 
 ## Contract
 

@@ -139,6 +139,17 @@ def test_job_config_passes_the_feed_through_to_the_shell(server):
     assert payload["feedPostings"][0]["url"] == "https://x.example/1"
     assert payload["feedPostings"][0]["tier"] == "api"
     assert payload["feedError"] == "boom"
+    assert payload["feedAlreadyScreened"] == 0
+
+
+def test_job_config_passes_feed_already_screened_through_to_the_shell(server):
+    base, _ = server
+    CONFIG["feedAlreadyScreened"] = 3
+    try:
+        payload = json.loads(_run(base, "job_config").stdout)
+    finally:
+        CONFIG.pop("feedAlreadyScreened")
+    assert payload["feedAlreadyScreened"] == 3
 
 
 def test_a_server_that_omits_the_feed_fields_still_yields_valid_job_config(server):
@@ -157,3 +168,4 @@ def test_a_server_that_omits_the_feed_fields_still_yields_valid_job_config(serve
         CONFIG["feedError"] = "boom"
     assert payload["feedPostings"] == []
     assert payload["feedError"] == ""
+    assert payload["feedAlreadyScreened"] == 0

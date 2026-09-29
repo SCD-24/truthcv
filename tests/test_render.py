@@ -152,6 +152,31 @@ def test_docx_smoke_or_skip(data_dir):
     assert out.exists() and out.stat().st_size > 0
 
 
+def test_docx_staging_file_is_unique_per_call(monkeypatch, data_dir):
+    """Two concurrent-ish render_docx calls must stage their HTML through
+    distinct temp files, not the old shared `cv.render.html` name, so
+    concurrent conversions cannot clobber each other's input."""
+    captured_src_paths = []
+
+    def fake_which(_name):
+        return "/usr/bin/pandoc"
+
+    def fake_run(cmd, **_kwargs):
+        captured_src_paths.append(cmd[1])
+        return None
+
+    monkeypatch.setattr(docx_mod.shutil, "which", fake_which)
+    monkeypatch.setattr(docx_mod.subprocess, "run", fake_run)
+
+    docx_mod.render_docx("<html>one</html>", "out1.docx")
+    docx_mod.render_docx("<html>two</html>", "out2.docx")
+
+    assert len(captured_src_paths) == 2
+    assert captured_src_paths[0] != captured_src_paths[1]
+    for src_path in captured_src_paths:
+        assert "cv.render.html" not in src_path
+
+
 def test_ats_flags_interleaved_keyword():
     """A keyword phrase whose words are spliced apart ('unit and integration
     tests' for 'unit tests') is not a contiguous ATS match: it must be flagged

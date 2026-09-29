@@ -11,7 +11,6 @@ import base64
 import json as _json
 import threading
 import time
-from urllib.parse import urlencode
 
 import httpx
 
@@ -118,13 +117,13 @@ def _exchange_code(auth_code: str, code_verifier: str) -> dict:
     """Exchange an authorization code for tokens via the token URL."""
     resp = httpx.post(
         TOKEN_URL,
-        data=urlencode({
+        data={
             "grant_type": "authorization_code",
             "client_id": CLIENT_ID,
             "code": auth_code,
             "code_verifier": code_verifier,
             "redirect_uri": DEVICE_REDIRECT_URI,
-        }),
+        },
         timeout=30,
     )
     if resp.status_code != 200:
@@ -211,11 +210,11 @@ def get_valid_access_token() -> str:
         try:
             resp = httpx.post(
                 TOKEN_URL,
-                data=urlencode({
+                data={
                     "grant_type": "refresh_token",
                     "refresh_token": record.get("refreshToken", ""),
                     "client_id": CLIENT_ID,
-                }),
+                },
                 timeout=30,
             )
         except httpx.HTTPError as exc:

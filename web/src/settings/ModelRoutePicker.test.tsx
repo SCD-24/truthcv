@@ -121,8 +121,7 @@ describe("ModelRoutePicker", () => {
     expect(testConnectionProvider).not.toHaveBeenCalled();
   });
 
-  it("saving with a context window value calls onSave with contextWindow set", async () => {
-    const onSave = vi.fn().mockResolvedValue(undefined);
+  it("does not render a context window field", () => {
     const connections = [
       makeStatus({ provider: "claude", label: "Claude", subscriptionConnected: true }),
     ];
@@ -130,20 +129,11 @@ describe("ModelRoutePicker", () => {
       <ModelRoutePicker
         connections={connections}
         route={{ connection: "claude", model: "claude-opus-5" }}
-        onSave={onSave}
+        onSave={vi.fn()}
         title="Agent model"
       />,
     );
 
-    fireEvent.change(screen.getByLabelText(/context window/i), {
-      target: { value: "200000" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
-
-    await vi.waitFor(() => {
-      expect(onSave).toHaveBeenCalledWith(
-        expect.objectContaining({ contextWindow: 200000 }),
-      );
-    });
+    expect(screen.queryByLabelText(/context window/i)).toBeNull();
   });
 });

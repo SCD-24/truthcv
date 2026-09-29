@@ -9,6 +9,12 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) - not ex
 
 | Method | Path | Description |
 |---|---|---|
+| **GET** | `/api/jobs` | List every known background job with its current status |
+| **GET** | `/api/jobs/{job_id}` | Fetch one job's status/result by id (404 for unknown id) |
+| **POST** | `/api/jobs/{kind}` | Start a background job (202 Accepted); kinds: gmail-sync (guarded by Gmail tracking gate), feed-refresh |
+| **GET** | `/api/jobs` | List all known background jobs |
+| **GET** | `/api/jobs/{job_id}` | Poll one job's status/result |
+| **POST** | `/api/jobs/{kind}` | Submit a background job of the given kind (202 Accepted) |
 | **GET** | `/api/applications` | List all tracked job applications. |
 | **POST** | `/api/applications` | Create a new application record. |
 | **PUT** | `/api/applications/{id}` | Update an application record (fields and status flags). |
@@ -41,7 +47,13 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) - not ex
 | **GET** | `/api/applications/page` | One page of applications (limit default 25, offset, sort key, direction) with total; sorted server-side. |
 | **DELETE** | `/api/browser/session` | Closes the attended sign-in session; when a session existed and the close was accepted, clears the login_required apply-blocker on every pending/approved screening queued for that host so the next run retries them |
 | **POST** | `/api/runs/{run_id}/stop` | Stop a run: forwards cancel to the supervisor when it owns the run, otherwise closes the record as failed/orphaned. 404 unknown run, 409 already finished. |
+<<<<<<< HEAD
 | **POST** | `/api/gmail/responses/sync` | Manually trigger a Gmail response sync (wired to the Web UI's Sync-now button); delegates to Gmail Response Sync |
+=======
+| **MCP** | `finish_phase` | Non-terminal end of one per-channel agent session (feed\|direct\|dork). Refuses while that channel's coverage is short and the harness reports turns remaining (max 3 refusals). Appends the note to the run and never closes it. |
+| **MCP** | `finish_run (turns_remaining)` | Optional turns_remaining argument supplied by the harness. While turns remain, a short or skipped coverage is refused repeatedly (max 3) instead of only once. |
+| **GET** | `/api/agent/llm-routes` | Per-stage (apply/screening/extract) LLM credentials for the Application Agent; requires the X-Agent-Token header. |
+>>>>>>> origin/main
 | **GET** | `/api/prompt-fragments` | List all prompt fragments (seeded + operator-defined) |
 | **POST** | `/api/prompt-fragments` | Create a prompt fragment; id derived from title if omitted (403 when clashing with a seeded fragment) |
 | **PUT** | `/api/prompt-fragments/{id}` | Update a prompt fragment by id (403 for seeded fragments) |

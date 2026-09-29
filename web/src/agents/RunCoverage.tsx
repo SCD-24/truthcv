@@ -1,5 +1,5 @@
 import Typography from "@mui/material/Typography";
-import type { DiscoveryCoverage } from "../api/types";
+import type { DiscoveryCoverage, RunRecord } from "../api/types";
 
 /** Human-readable label for a discovery-coverage status, e.g. "login_walled"
  * -> "login-walled". Mirrors the values agenttools/tools_runs.py accepts. */
@@ -11,7 +11,14 @@ function statusLabel(status: DiscoveryCoverage["status"]): string {
  * order, so the same run always reads the same way. Statuses absent from the
  * channel's entries are omitted rather than shown as "0 empty". */
 function summariseByStatus(entries: DiscoveryCoverage[]): string {
-  const order: DiscoveryCoverage["status"][] = ["searched", "blocked", "empty", "login_walled", "skipped"];
+  const order: DiscoveryCoverage["status"][] = [
+    "searched",
+    "blocked",
+    "extraction_failed",
+    "empty",
+    "login_walled",
+    "skipped",
+  ];
   const counts = new Map<string, number>();
   for (const entry of entries) {
     counts.set(entry.status, (counts.get(entry.status) ?? 0) + 1);
@@ -42,11 +49,13 @@ function channelClause(label: string, channel: DiscoveryCoverage["channel"], ent
  * every channel — feed, direct boards, dork queries — so a board or query
  * the agent never reached (an empty channel) reads visibly differently from
  * one it worked and found nothing on. */
-export function RunCoverage({ coverage }: { coverage: DiscoveryCoverage[] }) {
+export function RunCoverage({ coverage, status }: { coverage: DiscoveryCoverage[]; status?: RunRecord["status"] }) {
   if (coverage.length === 0) {
     return (
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-        Discovery coverage: none recorded
+        {status === "failed" || status === "cancelled"
+          ? "Discovery coverage: none recorded before the run stopped"
+          : "Discovery coverage: none recorded"}
       </Typography>
     );
   }

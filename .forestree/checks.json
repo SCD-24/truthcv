@@ -2,6 +2,22 @@
   "version": 2,
   "checks": [
     {
+      "id": "agent-responses-tests",
+      "name": "Agent Responses and sibling adapter tests",
+      "kind": "test",
+      "command": "npm --prefix agent test -- __tests__/openaiResponses.test.ts harness/providers/__tests__/adapters.test.ts",
+      "enabled": true,
+      "scope": "repo"
+    },
+    {
+      "id": "agent-typecheck",
+      "name": "Agent TypeScript",
+      "kind": "lint",
+      "command": "npm --prefix agent run typecheck",
+      "enabled": true,
+      "scope": "repo"
+    },
+    {
       "id": "lint",
       "name": "Typecheck (web + agent)",
       "kind": "lint",

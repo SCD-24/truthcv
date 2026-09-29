@@ -1,14 +1,14 @@
 #!/bin/bash
-# Test harness for agent prompt-render profile blocks.
-# Stubs agent-config.js fetch and PROMPT_FILE, drives prompt-composition path,
-# asserts three cases: configured values appear, blank criteria omit lines,
-# fetch failure produces byte-identical prompt to before-change baseline.
-# Also asserts the per-run application cap: config's maxApplicationsPerRun
-# wins over MAX_APPLICATIONS_PER_RUN when present, and the cap line is
-# omitted entirely when neither source supplies one.
-# Also asserts the composed search-queries block: present with both query
-# strings and URLs when job_config carries searchQueries, and absent
-# (byte-identical prompt) when searchQueries is omitted.
+# Test harness for daily-apply.sh's pipeline path.
+# Pipeline is the only mode: code discovers/screens, then one short apply
+# session runs per posting. This file asserts, against the shipped script:
+#  - the pipeline body, apply-failures-file hand-off and rc 3/4/5 loop break;
+#  - conditional --screening-* flags and no RUNBOOK text in the posting prompt;
+#  - no single/per-channel branch remains, and AGENT_SESSION_MODE=single is
+#    actually rejected (behavioural run);
+#  - run_harness(prompt_file, finish_tool) and render_remaining_line wiring;
+#  - REASON_FILE handling (cleared before each apply session, first failure
+#    reason snapshotted and restored).
 
 set -euo pipefail
 
@@ -16,480 +16,73 @@ set -euo pipefail
 TEST_DIR="$(mktemp -d)"
 trap "rm -rf '$TEST_DIR'" EXIT
 
-# Case 1: Configured profiles appear in prompt
-echo "Testing: configured values appear in prompt..."
-PROMPT_FILE="$TEST_DIR/prompt1.txt"
-echo "## Original RUNBOOK filters" > "$PROMPT_FILE"
-echo "Apply to at most 5 role(s) this run." >> "$PROMPT_FILE"
+DAILY_APPLY_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/daily-apply.sh"
 
-# Mock agent-config.js response
-JOB_CONFIG='{"profiles":[{"name":"Senior Python"}],"targetCompanies":["Google"],"cooldownDays":30,"maxApplicationsPerRun":5,"companyBoards":[{"company":"Google","careersUrl":"https://careers.google.com"}]}'
+echo "Testing: daily-apply.sh pipeline branch and harness flags..."
+DA_ALL="$(cat "$DAILY_APPLY_SRC")"
+case "$DA_ALL" in *'PIPELINE_CLI='*) ;; *) echo "FAIL: no pipeline body"; exit 1 ;; esac
+case "$DA_ALL" in *'--apply-failures-file "$APPLY_FAILURES_FILE"'*) ;; *) echo "FAIL: finish is not passed --apply-failures-file"; exit 1 ;; esac
+case "$DA_ALL" in *'[[ "$SESSION_RC" == 3 || "$SESSION_RC" == 4 || "$SESSION_RC" == 5 ]]'*) ;; *) echo "FAIL: rc 3/4/5 no longer break the apply loop"; exit 1 ;; esac
+case "$DA_ALL" in *'note_rc apply "$SESSION_RC"'*) ;; *) echo "FAIL: systemic apply rc is not recorded via note_rc"; exit 1 ;; esac
+case "$DA_ALL" in *'[[ -n "${AGENT_SCREENING_MODEL:-}" ]] && extra+='*) ;; *) echo "FAIL: --screening-* not conditional"; exit 1 ;; esac
+case "$DA_ALL" in *'--screening-model "${AGENT_SCREENING_MODEL:-'*) echo "FAIL: run_harness still defaults --screening-*"; exit 1 ;; esac
+PIPE_BODY="$(grep 'printf .Date:' "$DAILY_APPLY_SRC" || true)"
+case "$PIPE_BODY" in *RUNBOOK*) echo "FAIL: per-posting prompt carries RUNBOOK text"; exit 1 ;; esac
+echo "PASS: pipeline branch, conditional screening flags, no RUNBOOK in posting prompt"
 
-# Simulate the profile rendering logic from daily-apply.sh
-PROMPT_OUTPUT="$PROMPT_FILE"
-if [[ "$JOB_CONFIG" != "" ]]; then
-  PROFILES="$(jq -r '.profiles // [] | length' <<<"$JOB_CONFIG" || echo 0)"
-  if [[ "$PROFILES" -gt 0 ]]; then
-    PROFILE_BLOCK="## Job profiles configured:"$'\n'
-    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Any profile passing all its criteria drives an application."$'\n'
-    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Target companies (watchlist): Google"$'\n'
-    echo "$PROFILE_BLOCK" >> "$PROMPT_OUTPUT"
-  fi
-fi
-
-# Verify profile block appeared
-if ! grep -q "Job profiles configured" "$PROMPT_OUTPUT"; then
-  echo "FAIL: Profile block did not appear in prompt"
+echo "Testing: daily-apply.sh has no single/per-channel branch and rejects AGENT_SESSION_MODE=single..."
+if grep -q -e 'per-channel"' -e '== "single"' -e 'render_session_block' -e 'run_session' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: daily-apply.sh still carries a single/per-channel branch"
   exit 1
 fi
-echo "PASS: Configured values appear in prompt"
-
-# Case 2: Empty profiles fetch returns unchanged prompt
-echo "Testing: empty profiles returns unchanged prompt..."
-PROMPT_FILE2="$TEST_DIR/prompt2.txt"
-BASELINE="$TEST_DIR/baseline.txt"
-echo "## Original RUNBOOK filters" > "$PROMPT_FILE2"
-echo "Apply to at most 5 role(s) this run." >> "$PROMPT_FILE2"
-cp "$PROMPT_FILE2" "$BASELINE"
-
-# Mock empty profiles response
-EMPTY_CONFIG='{"profiles":[],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":null,"companyBoards":[]}'
-
-PROMPT_OUTPUT2="$PROMPT_FILE2"
-if [[ "$EMPTY_CONFIG" != "" ]]; then
-  PROFILES="$(jq -r '.profiles // [] | length' <<<"$EMPTY_CONFIG" || echo 0)"
-  if [[ "$PROFILES" -gt 0 ]]; then
-    echo "Profile block" >> "$PROMPT_OUTPUT2"
-  fi
-fi
-
-# Verify prompt is unchanged
-if ! diff -q "$BASELINE" "$PROMPT_OUTPUT2" >/dev/null 2>&1; then
-  echo "FAIL: Empty profiles changed the prompt"
+MODE_ERR="$TEST_DIR/mode.err"
+MODE_RC=0
+AGENT_SESSION_MODE=single RUN_LOG_DIR="$TEST_DIR/runs" TRUTHCV_RUN_ID=modetest bash "$DAILY_APPLY_SRC" >/dev/null 2>"$MODE_ERR" || MODE_RC=$?
+if [[ "$MODE_RC" -eq 0 ]]; then
+  echo "FAIL: AGENT_SESSION_MODE=single exited 0"
   exit 1
 fi
-echo "PASS: Empty profiles preserves baseline prompt"
-
-# Case 3: Fetch failure leaves prompt unchanged
-echo "Testing: fetch failure produces unchanged prompt..."
-PROMPT_FILE3="$TEST_DIR/prompt3.txt"
-BASELINE3="$TEST_DIR/baseline3.txt"
-echo "## Original RUNBOOK filters" > "$PROMPT_FILE3"
-echo "Apply to at most 5 role(s) this run." >> "$PROMPT_FILE3"
-cp "$PROMPT_FILE3" "$BASELINE3"
-
-# Simulate fetch failure (JOB_CONFIG would be unset or empty)
-# In actual script: if JOB_CONFIG="...fetch..." 2>/dev/null; then
-# If the fetch fails, JOB_CONFIG stays unset, so no profile block appended
-PROMPT_OUTPUT3="$PROMPT_FILE3"
-if [[ "${JOB_CONFIG_FAIL:-}" != "" ]]; then
-  PROFILES="$(jq -r '.profiles // [] | length' <<<"$JOB_CONFIG_FAIL" || echo 0)"
-  if [[ "$PROFILES" -gt 0 ]]; then
-    echo "Profile block" >> "$PROMPT_OUTPUT3"
-  fi
-fi
-
-# Verify prompt is unchanged (no profile block added on fetch failure)
-if ! diff -q "$BASELINE3" "$PROMPT_OUTPUT3" >/dev/null 2>&1; then
-  echo "FAIL: Fetch failure changed the prompt"
+if ! grep -q 'pipeline is the only mode' "$MODE_ERR"; then
+  echo "FAIL: AGENT_SESSION_MODE=single did not report 'pipeline is the only mode' on stderr (got: $(cat "$MODE_ERR"))"
   exit 1
 fi
-echo "PASS: Fetch failure leaves prompt unchanged"
+echo "PASS: pipeline is the only mode; AGENT_SESSION_MODE=single is rejected (rc=$MODE_RC)"
 
-# --- Per-run application cap: config-first, env-fallback -------------------
-# Mirrors daily-apply.sh's actual cap-resolution logic verbatim (see the
-# "Per-run application cap" block there), so a divergence between this
-# simulation and the real script is a bug in one of the two, not just here.
-render_cap() {
-  local job_config="$1" env_cap="$2"
-  local config_cap="" apply_cap="" prompt=""
-  if [[ -n "$job_config" ]]; then
-    config_cap="$(jq -r '.maxApplicationsPerRun' <<<"$job_config")"
-  fi
-  if [[ "$config_cap" =~ ^[1-9][0-9]*$ ]]; then
-    apply_cap="$config_cap"
-  else
-    apply_cap="$env_cap"
-  fi
-  if [[ "$apply_cap" =~ ^[1-9][0-9]*$ ]]; then
-    prompt="Apply to at most $apply_cap role(s) this run."
-  fi
-  echo "$prompt"
-}
-
-# Case 4: config supplies maxApplicationsPerRun (5) - config wins over env,
-# and the cap line is rendered from the config value.
-echo "Testing: cap line rendered from config value (maxApplicationsPerRun: 5)..."
-CAP_CONFIG_SET='{"profiles":[],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":5,"companyBoards":[]}'
-CAP_LINE_4="$(render_cap "$CAP_CONFIG_SET" "9")"
-if [[ "$CAP_LINE_4" != "Apply to at most 5 role(s) this run." ]]; then
-  echo "FAIL: expected cap line from config value 5, got: '$CAP_LINE_4'"
+echo "Testing: run_harness takes a prompt file and finish tool as arguments..."
+if ! grep -q 'local prompt_file="\$1" finish_tool="\$2"' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: run_harness was not refactored to take (prompt_file, finish_tool) arguments"
   exit 1
 fi
-echo "PASS: cap line rendered from config value, config (5) wins over env (9)"
-
-# Case 5: config's maxApplicationsPerRun is null (jq renders it as the string
-# "null") and no env fallback is set either - no cap line at all.
-echo "Testing: cap line omitted when config is null and env unset..."
-CAP_CONFIG_NULL='{"profiles":[],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":null,"companyBoards":[]}'
-CAP_LINE_5="$(render_cap "$CAP_CONFIG_NULL" "")"
-if [[ -n "$CAP_LINE_5" ]]; then
-  echo "FAIL: expected no cap line when both sources are absent, got: '$CAP_LINE_5'"
+if ! grep -q -- '--finish-tool "\$finish_tool"' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: run_harness does not pass --finish-tool to the CLI"
   exit 1
 fi
-echo "PASS: cap line omitted when both config and env are absent"
+echo "PASS: run_harness(prompt_file, finish_tool) refactor present"
 
-# Case 6: config's maxApplicationsPerRun is null - falls back to the env var.
-echo "Testing: cap line falls back to env var when config is null..."
-CAP_LINE_6="$(render_cap "$CAP_CONFIG_NULL" "7")"
-if [[ "$CAP_LINE_6" != "Apply to at most 7 role(s) this run." ]]; then
-  echo "FAIL: expected cap line from env fallback 7, got: '$CAP_LINE_6'"
+echo "Testing: render_remaining_line reads rec.applicationsSubmitted (camelCase) from the runs API..."
+if ! grep -q 'rec.applicationsSubmitted' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: render_remaining_line does not read the camelCase applicationsSubmitted field"
   exit 1
 fi
-echo "PASS: cap line falls back to env var when config does not set it"
+echo "PASS: render_remaining_line reads applicationsSubmitted"
 
-# --- Autonomy mode rule rendered into the prompt ----------------------------
-# Reproduces daily-apply.sh's mode-rule block verbatim (see "Render the mode
-# rule into the prompt" there), so a divergence between this simulation and
-# the real script is a bug in one of the two, not just here.
-render_mode() {
-  local agent_mode="$1"
-  local prompt=""
-  if [[ "$agent_mode" == "semi" ]]; then
-    prompt="$prompt"$'\n\n'"## Autonomy mode: SEMI-AUTO
-
-Do NOT apply to a posting you find this run, however well it scores, and do not
-write a cover letter for it. For a posting that passes every criterion, call
-record_screening passing \"passed\" in verdict, the employing entity's name
-in company, the posting's own job title (as posted, not a placeholder)
-in role, the posting's own URL in url, the full posting text in posting_text,
-the employer's publication date in posted_date when the board states one,
-the enabled profile's name you screened against in profile, what the
-posting itself says about remote work — remote, hybrid, on_site, or
-unstated when it does not say — in remote_arrangement, and any language the
-posting EXPLICITLY requires (e.g. 'German') in language_requirement, or ''
-when it states none. Also pass the posting's own stated salary in
-salary_stated, its own stated employment country in
-employment_country_stated, its own stated role type (e.g. 'contract',
-'full-time') in role_type_stated, and whether the posting states hiring is
-through an EOR / employer-of-record arrangement in eor_stated ('yes' when
-the posting states employment IS via an EOR, 'no' when it states direct
-employment, 'unstated' when you looked and it does not say, or '' when not
-applicable). All four are the posting's OWN stated values, never the
-profile's, and none of them is mandatory; '' is a legitimate, common
-answer, not an omission.
-company, verdict, role and url are each required.
-It enters the operator's approval queue; they draft the letter and decide.
-
-record_screening REJECTS the call and stores nothing unless company, verdict,
-role and url all carry usable values — this applies to every screening you
-record, rejections included, not only to passing ones. A \"passed\" verdict
-is also rejected, storing nothing, without usable posting_text — a real
-posting body, not a login wall or a 404 page; a posting you could not read
-takes a screening_blocker instead. A \"passed\" or \"deferred\" verdict is
-also rejected, storing nothing, without usable profile and remote_arrangement
-values. Evidence that contradicts any of the profile's six hard
-requirements (remote model, working language, salary floor, employment
-country, rejected role types, or EOR) is stored as an automatic rejection —
-not an error to retry, and never fabricate 'remote'/'' to get past it.
-
-Phase 0 is unchanged: postings the operator already approved ARE applied to,
-using the cover_letter text that arrives with each item, verbatim."
-  else
-    prompt="$prompt"$'\n\n'"## Autonomy mode: FULL AUTO
-
-A posting that passes every criterion is applied to this run, as described in
-agent/RUNBOOK.md. On every record_screening call pass the employing entity's
-name in company, the verdict (rejected, passed or deferred) in verdict, the
-posting's own job title (as posted, not a placeholder) in role, the posting's
-own URL in url, the full posting text in posting_text, the employer's
-publication date in posted_date when the board states one, the enabled
-profile's name you screened against in profile, what the posting itself says
-about remote work — remote, hybrid, on_site, or unstated when it does not
-say — in remote_arrangement, and any language the posting EXPLICITLY
-requires (e.g. 'German') in language_requirement, or '' when it states none.
-Also pass the posting's own stated salary in salary_stated, its own stated
-employment country in employment_country_stated, its own stated role type
-(e.g. 'contract', 'full-time') in role_type_stated, and whether the posting
-states hiring is through an EOR / employer-of-record arrangement in
-eor_stated ('yes' when the posting states employment IS via an EOR, 'no'
-when it states direct employment, 'unstated' when you looked and it does
-not say, or '' when not applicable). All four are the posting's OWN stated
-values, never the profile's, and none of them is mandatory; '' is a
-legitimate, common answer, not an omission.
-
-record_screening REJECTS the call and stores nothing unless company, verdict,
-role and url all carry usable values. A \"passed\" or \"deferred\" verdict is
-also rejected, storing nothing, without usable posting_text — a real posting
-body, not a login wall or a 404 page; a posting you could not read takes a
-screening_blocker instead. profile and remote_arrangement are also required
-for a passed/deferred verdict. Evidence that contradicts any of the
-profile's six hard requirements (remote model, working language, salary
-floor, employment country, rejected role types, or EOR) is stored as an
-automatic rejection — not an error to retry, and never fabricate
-'remote'/'' to get past it."
-  fi
-  echo "$prompt"
-}
-
-# Case 6b: the mandatory record_screening arguments are named in BOTH mode
-# branches of the REAL daily-apply.sh — not in this file's copy of it.
-#
-# This is the one assertion here that reads the shipped script. The block above
-# is a verbatim copy, and a copy is exactly how the last defect happened: the
-# tool made `company` and `verdict` required, RUNBOOK.md and prompt.md were
-# updated, this block was not, and the copy here asserted the stale text back.
-# A run following the stale prompt got a TypeError and stored nothing at all.
-echo "Testing: daily-apply.sh names every mandatory record_screening argument..."
-DAILY_APPLY_SRC="$(dirname "${BASH_SOURCE[0]}")/daily-apply.sh"
-SEMI_BLOCK="$(sed -n '/## Autonomy mode: SEMI-AUTO/,/^else$/p' "$DAILY_APPLY_SRC")"
-FULL_BLOCK="$(sed -n '/## Autonomy mode: FULL AUTO/,/^fi$/p' "$DAILY_APPLY_SRC")"
-# Match "in <field>" — the phrasing that actually tells the agent where the
-# value goes. A bare word match is not enough: every field name also appears in
-# the "each required" sentence, so removing an argument still passed.
-for field in company verdict role url profile remote_arrangement; do
-  case "$SEMI_BLOCK" in
-    *"in $field"*) ;;
-    *) echo "FAIL: daily-apply.sh SEMI-AUTO block never passes a value 'in $field'"; exit 1 ;;
-  esac
-  case "$FULL_BLOCK" in
-    *"in $field"*) ;;
-    *) echo "FAIL: daily-apply.sh FULL AUTO block never passes a value 'in $field'"; exit 1 ;;
-  esac
-done
-echo "PASS: daily-apply.sh names every mandatory record_screening argument"
-
-# Case 7: semi renders SEMI-AUTO and the "Do NOT apply" line.
-echo "Testing: semi mode renders SEMI-AUTO block..."
-MODE_SEMI="$(render_mode "semi")"
-if [[ "$MODE_SEMI" != *"SEMI-AUTO"* ]] || [[ "$MODE_SEMI" != *"Do NOT apply"* ]]; then
-  echo "FAIL: semi mode did not render expected SEMI-AUTO block"
+echo "Testing: daily-apply.sh snapshots FIRST_FAILURE_REASON and restores it after the session loop..."
+if ! grep -q 'FIRST_FAILURE_REASON="\$(cat "\$REASON_FILE"' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: daily-apply.sh does not snapshot the reason file on the first non-zero session rc"
   exit 1
 fi
-echo "PASS: semi mode renders SEMI-AUTO block"
-
-# Case 8: full renders FULL AUTO.
-echo "Testing: full mode renders FULL AUTO block..."
-MODE_FULL="$(render_mode "full")"
-if [[ "$MODE_FULL" != *"FULL AUTO"* ]]; then
-  echo "FAIL: full mode did not render expected FULL AUTO block"
+if ! grep -q 'printf .%s\\n. "\$FIRST_FAILURE_REASON" >"\$REASON_FILE"' "$DAILY_APPLY_SRC"; then
+  echo "FAIL: daily-apply.sh does not restore FIRST_FAILURE_REASON to REASON_FILE after the session loop"
   exit 1
 fi
-echo "PASS: full mode renders FULL AUTO block"
+echo "PASS: daily-apply.sh snapshots and restores the first non-zero session's reason"
 
-# Case 9: the two blocks never both appear in either rendering.
-echo "Testing: SEMI-AUTO and FULL AUTO are mutually exclusive..."
-if [[ "$MODE_SEMI" == *"FULL AUTO"* ]] || [[ "$MODE_FULL" == *"SEMI-AUTO"* ]]; then
-  echo "FAIL: SEMI-AUTO and FULL AUTO blocks are not mutually exclusive"
+echo "Testing: REASON_FILE is cleared immediately before each apply session..."
+if ! grep -B1 'run_harness "\$POSTING_PROMPT_FILE"' "$DAILY_APPLY_SRC" | grep -q 'rm -f "\$REASON_FILE"'; then
+  echo "FAIL: apply loop does not rm -f REASON_FILE right before run_harness"
   exit 1
 fi
-echo "PASS: SEMI-AUTO and FULL AUTO never both appear"
-
-# --- Composed search-queries block ------------------------------------------
-# Mirrors daily-apply.sh's QUERIES rendering verbatim (see "Add composed
-# search queries" there), so a divergence between this simulation and the
-# real script is a bug in one of the two, not just here.
-
-# Case 10: searchQueries present renders both query strings and URLs.
-echo "Testing: composed search queries render into prompt..."
-QUERIES_CONFIG='{"profiles":[{"name":"Senior Python"}],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":null,"companyBoards":[],"searchQueries":[{"profile":"Senior Python","source":"jobs.ashbyhq.com","query":"site:jobs.ashbyhq.com \"platform engineer\"","url":"https://www.google.com/search?q=site%3Ajobs.ashbyhq.com+%22platform+engineer%22&tbs=qdr:w"},{"profile":"Senior Python","source":"job-boards.greenhouse.io","query":"site:job-boards.greenhouse.io \"platform engineer\"","url":"https://www.google.com/search?q=site%3Ajob-boards.greenhouse.io+%22platform+engineer%22&tbs=qdr:w"}]}'
-QUERIES="$(jq -r '.searchQueries[]? | "  - [\(.profile)] \(.source): \(.query)\n    \(.url)"' <<<"$QUERIES_CONFIG")"
-if [[ -z "$QUERIES" ]]; then
-  echo "FAIL: expected a rendered queries block, got none"
-  exit 1
-fi
-if [[ "$QUERIES" != *'site:jobs.ashbyhq.com "platform engineer"'* ]] || [[ "$QUERIES" != *'site:job-boards.greenhouse.io "platform engineer"'* ]]; then
-  echo "FAIL: expected both composed query strings in rendered block"
-  exit 1
-fi
-if [[ "$QUERIES" != *"https://www.google.com/search?q=site%3Ajobs.ashbyhq.com"* ]] || [[ "$QUERIES" != *"https://www.google.com/search?q=site%3Ajob-boards.greenhouse.io"* ]]; then
-  echo "FAIL: expected both composed query URLs in rendered block"
-  exit 1
-fi
-echo "PASS: composed search queries render into prompt"
-
-# Case 11: searchQueries omitted leaves the prompt byte-identical to baseline.
-echo "Testing: omitted search queries leaves prompt unchanged..."
-PROMPT_FILE4="$TEST_DIR/prompt4.txt"
-BASELINE4="$TEST_DIR/baseline4.txt"
-echo "## Original RUNBOOK filters" > "$PROMPT_FILE4"
-echo "Apply to at most 5 role(s) this run." >> "$PROMPT_FILE4"
-cp "$PROMPT_FILE4" "$BASELINE4"
-
-NO_QUERIES_CONFIG='{"profiles":[],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":null,"companyBoards":[]}'
-QUERIES_NONE="$(jq -r '.searchQueries[]? | "  - [\(.profile)] \(.source): \(.query)\n    \(.url)"' <<<"$NO_QUERIES_CONFIG")"
-if [[ -n "$QUERIES_NONE" ]]; then
-  echo "$QUERIES_NONE" >> "$PROMPT_FILE4"
-fi
-if ! diff -q "$BASELINE4" "$PROMPT_FILE4" >/dev/null 2>&1; then
-  echo "FAIL: omitted searchQueries changed the prompt"
-  exit 1
-fi
-echo "PASS: omitted search queries leaves prompt unchanged"
-
-# --- Direct-search boards block ---------------------------------------------
-# Mirrors daily-apply.sh's DIRECT_BOARDS rendering verbatim (see "Direct-
-# search boards" there), so a divergence between this simulation and the
-# real script is a bug in one of the two, not just here.
-
-# Case 12: directBoards present renders the board URLs and profile keywords deduplicated.
-echo "Testing: direct-search boards render into prompt with deduplicated criteria..."
-# Test with two boards sharing the same profile to verify deduplication works.
-DIRECT_BOARDS_CONFIG='{"profiles":[{"name":"Senior Python"}],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":null,"companyBoards":[],"directBoards":[{"url":"https://boards.acme.io/careers","signinUrl":"https://boards.acme.io/login","profiles":[{"profile":"Senior Python","keywords":["platform engineer","backend"],"locations":["Berlin"],"rejectedRoleTypes":["contract"]}]},{"url":"https://boards.otherthing.io/jobs","signinUrl":"","profiles":[{"profile":"Senior Python","keywords":["platform engineer","backend"],"locations":["Berlin"],"rejectedRoleTypes":["contract"]}]}]}'
-# Extract and deduplicate criteria (profiles rendered once per unique profile)
-DIRECT_CRITERIA="$(jq -r '[.directBoards[]? | .profiles[]?] | unique_by(.profile)[] | "  [\(.profile)] keywords: \(.keywords // [] | join(", "))" + (if ((.locations // []) | length) > 0 then "; locations: \(.locations | join(", "))" else "" end) + (if ((.rejectedRoleTypes // []) | length) > 0 then "; avoid: \(.rejectedRoleTypes | join(", "))" else "" end)' <<<"$DIRECT_BOARDS_CONFIG")"
-# Extract board URLs (no deduplication of boards)
-DIRECT_BOARDS="$(jq -r '.directBoards[]? | "  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end)' <<<"$DIRECT_BOARDS_CONFIG")"
-# Combine into final output
-FINAL_DIRECT_BOARDS="Direct-search boards (search each on the board's own site using the per-profile criteria listed once below; on a login wall, report_apply_failure with blocker \"login_required\" and the sign-in URL, then continue to the next board):"$'\n'"$DIRECT_CRITERIA"$'\n'"$DIRECT_BOARDS"
-if [[ -z "$DIRECT_BOARDS" ]]; then
-  echo "FAIL: expected a rendered direct-boards block, got none"
-  exit 1
-fi
-if [[ "$FINAL_DIRECT_BOARDS" != *"https://boards.acme.io/careers"* ]] || [[ "$FINAL_DIRECT_BOARDS" != *"https://boards.otherthing.io/jobs"* ]]; then
-  echo "FAIL: expected both board URLs in rendered block"
-  exit 1
-fi
-# Critical: 'platform engineer' should appear exactly once (deduplicated) even though two boards share the profile
-PLATFORM_ENGINEER_COUNT=$(echo "$FINAL_DIRECT_BOARDS" | grep -o "platform engineer" | wc -l)
-if [[ "$PLATFORM_ENGINEER_COUNT" -ne 1 ]]; then
-  echo "FAIL: expected 'platform engineer' exactly once in rendered block (two boards share one profile), got $PLATFORM_ENGINEER_COUNT"
-  exit 1
-fi
-echo "PASS: direct-search boards render into prompt with deduplicated criteria"
-
-# Case 13: directBoards omitted leaves the prompt byte-identical to baseline.
-echo "Testing: omitted direct-search boards leaves prompt unchanged..."
-PROMPT_FILE5="$TEST_DIR/prompt5.txt"
-BASELINE5="$TEST_DIR/baseline5.txt"
-echo "## Original RUNBOOK filters" > "$PROMPT_FILE5"
-echo "Apply to at most 5 role(s) this run." >> "$PROMPT_FILE5"
-cp "$PROMPT_FILE5" "$BASELINE5"
-
-NO_DIRECT_BOARDS_CONFIG='{"profiles":[],"targetCompanies":[],"cooldownDays":null,"maxApplicationsPerRun":null,"companyBoards":[]}'
-DIRECT_CRITERIA_NONE="$(jq -r '[.directBoards[]? | .profiles[]?] | unique_by(.profile)[] | "  [\(.profile)] keywords: \(.keywords // [] | join(", "))" + (if ((.locations // []) | length) > 0 then "; locations: \(.locations | join(", "))" else "" end) + (if ((.rejectedRoleTypes // []) | length) > 0 then "; avoid: \(.rejectedRoleTypes | join(", "))" else "" end)' <<<"$NO_DIRECT_BOARDS_CONFIG")"
-DIRECT_BOARDS_NONE="$(jq -r '.directBoards[]? | "  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end)' <<<"$NO_DIRECT_BOARDS_CONFIG")"
-if [[ -n "$DIRECT_BOARDS_NONE" ]]; then
-  echo "$DIRECT_BOARDS_NONE" >> "$PROMPT_FILE5"
-fi
-if ! diff -q "$BASELINE5" "$PROMPT_FILE5" >/dev/null 2>&1; then
-  echo "FAIL: omitted directBoards changed the prompt"
-  exit 1
-fi
-echo "PASS: omitted direct-search boards leaves prompt unchanged"
-
-# --- Inlined RUNBOOK operating spec -----------------------------------------
-# Mirrors daily-apply.sh's RUNBOOK inlining verbatim (see the "Inline its full
-# text here" block there), so a divergence between this simulation and the real
-# script is a bug in one of the two, not just here. The harness's only
-# file-reading tool is read_runbook_section, which returns one named RUNBOOK
-# section and takes no path argument, so daily-apply.sh no longer inlines the
-# whole file: it inlines the non-negotiable rule sections (1, 4, 7, 8)
-# verbatim plus a table of contents of every heading, and expects the agent
-# to fetch anything else with the tool before it needs it.
-#
-# daily-apply.sh enforces no byte/char/line cap on the composed prompt before
-# invoking the harness, so there is no render-size limit for this test to
-# mirror; RUNBOOK inlining is covered by the case below.
-
-# Case 12: the composed prompt inlines the RUNBOOK's non-negotiable rule
-# sections (1, 4, 7, 8) plus a table of contents of every heading, and does
-# NOT inline the full text of a section that isn't one of those four.
-echo "Testing: composed prompt inlines RUNBOOK rules + TOC, not the full text..."
-RUNBOOK_FIXTURE="$TEST_DIR/RUNBOOK.md"
-cat > "$RUNBOOK_FIXTURE" <<'EOF'
-# Operating spec fixture
-
-## 0. The approved queue — work it first
-Work the approved queue before anything else.
-
-## 1. There is no daily quota
-There is no daily quota.
-
-## 2. Hard filters — every criterion of the matched profile must pass
-This is a long procedural section about gathering filter criteria that must NOT appear in the composed prompt.
-
-## 3. Canonical answers — call get_profile_answers
-This is a long procedural section about canonical answers that must NOT appear in the composed prompt.
-
-## 4. Truthfulness rules — non-negotiable
-Never claim a skill the profile does not have.
-
-## 5. Applying
-This is a long procedural section about applying that must NOT appear in the composed prompt.
-
-## 6. The approve/deny boundary
-This is a long procedural section about the approve/deny boundary that must NOT appear in the composed prompt.
-
-## 7. When something is ambiguous
-Escalate rather than guess.
-
-## 8. Never do — cooldowns
-Never re-apply within the cooldown window.
-
-## 9. Report at the end of every run
-This is a long procedural section about reporting that must NOT appear in the composed prompt.
-EOF
-
-PROMPT_FILE5="$TEST_DIR/prompt5.txt"
-echo "## Original RUNBOOK filters" > "$PROMPT_FILE5"
-echo "Apply to at most 5 role(s) this run." >> "$PROMPT_FILE5"
-
-# Same composition as daily-apply.sh: PROMPT starts from the prompt file,
-# then the RUNBOOK's non-negotiable rule sections (1, 4, 7, 8) are extracted
-# verbatim by section-number range, plus a table of contents of every "## "
-# heading — never the full RUNBOOK text.
-PROMPT="$(cat "$PROMPT_FILE5")"$'\n\n'"Today is $(date +%Y-%m-%d)."
-RUNBOOK_TOC="$(grep -E '^##[^#]' "$RUNBOOK_FIXTURE" | sed -E 's/^##[[:space:]]*/- /')"
-RUNBOOK_RULES="$(awk '
-  /^## 1\. There is no daily quota/,/^## 2\./   { if ($0 !~ /^## 2\./) print }
-  /^## 4\. Truthfulness rules/,/^## 5\./         { if ($0 !~ /^## 5\./) print }
-  /^## 7\. When something is ambiguous/,/^## 8\./ { if ($0 !~ /^## 8\./) print }
-  /^## 8\. Never do/,/^## 9\./                    { if ($0 !~ /^## 9\./) print }
-' "$RUNBOOK_FIXTURE")"
-PROMPT="$PROMPT"$'\n\n'"## Operating spec (agent/RUNBOOK.md) — non-negotiable rules
-
-Also non-negotiable, detailed in the full section — call read_runbook_section
-with EXACTLY this heading text (section numbers included, case-insensitive)
-before you need it:
-- \"0. The approved queue — work it first\": approved-queue postings are
-  applied to before anything new is discovered, every run.
-- \"2. Hard filters — every criterion of the matched profile must pass\":
-  every criterion of the matched profile must pass, no exceptions, no
-  judgment calls.
-- \"3. Canonical answers — call \`get_profile_answers\`\": screening-question
-  answers come only from get_profile_answers, never invented or guessed.
-- \"5. Applying\" (its \"Both documents go up\" subsection): a passing
-  posting gets a CV **and** a cover letter — never one without the other to
-  save cost.
-- record_screening REJECTS the call and stores nothing unless company,
-  verdict, role and url all carry usable values, on every screening you
-  record, rejections included (see \"6. The approve/deny boundary\")."$'\n\n'"$RUNBOOK_RULES"$'\n\n'"## Operating spec — table of contents
-
-Call read_runbook_section(section: <heading text below, exactly as written,
-including its number>) for a section's full procedure before you start the
-phase it covers — its detail is not inlined here. A \"##\" section's fetch
-also returns its \"###\" subsections (e.g. fetching \"5. Applying\" includes
-\"Both documents go up\")."$'\n\n'"$RUNBOOK_TOC"
-
-if [[ "$PROMPT" != *"## Operating spec (agent/RUNBOOK.md) — non-negotiable rules"* ]]; then
-  echo "FAIL: composed prompt is missing the RUNBOOK rules marker"
-  exit 1
-fi
-if [[ "$PROMPT" != *"There is no daily quota."* ]] || [[ "$PROMPT" != *"Never claim a skill the profile does not have."* ]] \
-   || [[ "$PROMPT" != *"Escalate rather than guess."* ]] || [[ "$PROMPT" != *"Never re-apply within the cooldown window."* ]]; then
-  echo "FAIL: composed prompt is missing an inlined RUNBOOK rule section"
-  exit 1
-fi
-if [[ "$PROMPT" == *"must NOT appear in the composed prompt"* ]]; then
-  echo "FAIL: composed prompt inlines a procedural section's full text (it should carry only the TOC for it)"
-  exit 1
-fi
-if [[ "$PROMPT" != *"- 5. Applying"* ]] || [[ "$PROMPT" != *"- 2. Hard filters"* ]]; then
-  echo "FAIL: composed prompt is missing the table of contents for a moved section"
-  exit 1
-fi
-echo "PASS: composed prompt inlines RUNBOOK rules + TOC, not full procedural text"
+echo "PASS: REASON_FILE cleared before each apply session"
 
 echo ""
 echo "All tests passed!"

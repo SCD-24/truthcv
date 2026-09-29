@@ -68,10 +68,12 @@ describe('agent-config.js — stdout is drained before exit', () => {
       cooldownDaysSameCompany: undefined,
       maxApplicationsPerRun: undefined,
       maxPostingAgeDays: undefined,
+      dorkRecency: undefined,
       companyBoards: [],
       searchQueries: [],
       feedPostings: [],
       feedError: '',
+      feedAlreadyScreened: 0,
       directBoards: [],
     };
     const expected = JSON.stringify(expectedPayload);
@@ -93,6 +95,38 @@ describe('agent-config.js — stdout is drained before exit', () => {
     const res = await runConfig('mode', { fake: JSON.stringify({ mode: 'shadow' }) });
     expect(res.status).toBe(0);
     expect(res.stdout).toBe('shadow');
+  });
+
+  it('llm_routes prints the JSON body when the token is set, exits 2 without it, 1 on failure', async () => {
+    const body = JSON.stringify({ stages: { apply: null, screening: null, extract: null } });
+    let seen = '';
+    const server = http.createServer((req, res) => {
+      seen = String(req.headers['x-agent-token'] || '') + ' ' + req.url;
+      if (req.headers['x-agent-token'] !== 'tok') { res.writeHead(404); res.end(); return; }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(body);
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
+    const run = (token?: string) =>
+      new Promise<RunResult>((resolve) => {
+        const env: NodeJS.ProcessEnv = { ...process.env, TRUTHCV_MCP_URL: url };
+        delete env.FAKE_AGENT_CONFIG;
+        delete env.AGENT_API_TOKEN;
+        if (token !== undefined) env.AGENT_API_TOKEN = token;
+        const child = execFile(process.execPath, [SCRIPT, 'llm_routes'], { encoding: 'utf8', env },
+          (_e, stdout) => resolve({ status: child.exitCode, stdout }));
+      });
+    try {
+      const ok = await run('tok');
+      expect(ok.status).toBe(0);
+      expect(ok.stdout).toBe(body);
+      expect(seen).toBe('tok /api/agent/llm-routes');
+      expect((await run()).status).toBe(2);
+      expect((await run('wrong')).status).toBe(1);
+    } finally {
+      server.close();
+    }
   });
 
   it('exits 1 with empty stdout for an unknown field and no TRUTHCV_MCP_URL', async () => {

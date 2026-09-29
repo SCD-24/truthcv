@@ -25,10 +25,11 @@ import type { ToolCall, ToolDefinition, ToolResult } from './providers/types.js'
 import type { ProviderAdapter } from './providers/types.js';
 import { readRunbookSection, readRunbookSectionTool } from './builtins/readRunbook.js';
 import { screenPosting, screenPostingTool } from './builtins/screenPosting.js';
+import { screenAndRecordPosting, screenAndRecordPostingTool } from './builtins/screenAndRecordPosting.js';
 import { harvestPostings, harvestPostingsTool, type BrowserToolCall } from './builtins/harvestPostings.js';
 
 /**
- * The 19 truthcv tools granted individually by `daily-apply.sh`, as their bare
+ * The truthcv tools granted individually by `daily-apply.sh`, as their bare
  * (un-namespaced) tool names.
  *
  * These are enumerated one by one ON PURPOSE: naming each tool keeps the blast
@@ -52,6 +53,9 @@ const TRUTHCV_ALLOWED_TOOL_NAMES = [
   'get_company_findings',
   'start_run',
   'finish_run',
+  'finish_phase',
+  'finish_application',
+  'filter_unscreened_urls',
   'record_run_note',
   'record_postings_seen',
   'record_discovery_coverage',
@@ -60,6 +64,17 @@ const TRUTHCV_ALLOWED_TOOL_NAMES = [
 
 /** The MCP server key of the truthcv tool surface the named grants apply to. */
 const TRUTHCV_SERVER_NAME = 'truthcv';
+
+/** Run-lifecycle tools the launcher owns; an apply session must neither see nor call them. */
+export const APPLY_SESSION_DENIED_TOOLS: readonly string[] = ['start_run', 'finish_run', 'finish_phase'];
+
+/** Finish tool that marks a single-posting apply session. */
+const APPLY_FINISH_TOOL = 'finish_application';
+
+/** Session-scoped tool deny set for the given finish tool (empty unless it is an apply session). */
+export function sessionDeniedTools(finishToolName: string | undefined): readonly string[] {
+  return finishToolName === APPLY_FINISH_TOOL ? APPLY_SESSION_DENIED_TOOLS : [];
+}
 
 /**
  * The browser server, now granted as an enumerated allow-list of tool names
@@ -108,23 +123,13 @@ const BROWSER_REQUIRED_TOOL_NAMES = [
 ] as const;
 
 /**
- * Tab-management tool names, granted so the harvest_postings built-in can
- * harvest several boards concurrently, each in its own browser tab, when the
- * server advertises them — see ./builtins/harvestPostings.ts. Allow-listed
- * but OPTIONAL, UNLIKE {@link BROWSER_REQUIRED_TOOL_NAMES}: these names are
- * this workspace's best guess at what upstream `@playwright/mcp` calls its
- * tab tools, NOT a checked fact — the pinned package is `npm install -g`'d
- * into the `browser` image at build time (browser/Dockerfile) and is not
- * vendored anywhere in this workspace, so there was nothing to verify the
- * names against. A wrong guess must never hard-fail every run, so
- * {@link checkAdvertisedBrowserTools} does not require these; when the
- * `browser` server does not advertise them, harvestPostings.ts degrades to
- * harvesting boards serially, one at a time, in the single shared tab,
- * instead of concurrently. These names being ADVERTISED is only half the
- * gate: even when all four are present, harvestPostings.ts additionally
- * probes the tab-listing TEXT it actually gets back at runtime (its exact
- * rendering is likewise unverified) before committing to the concurrent
- * path — see harvestTabs.ts's `probeTabListing`.
+ * Tab-management tool names remain optionally allow-listed for model-issued
+ * calls, but production harvest_postings never uses them: boards run serially
+ * through the primary browser connection regardless of their advertisement.
+ * Unlike {@link BROWSER_REQUIRED_TOOL_NAMES}, their absence cannot fail
+ * startup. The pinned upstream package is not vendored here, so these names
+ * are not a checked fact; dormant tab-per-board helpers remain available for
+ * their own tests, not for production dispatch.
  */
 const BROWSER_OPTIONAL_TOOL_NAMES = ['browser_tab_list', 'browser_tab_new', 'browser_tab_select', 'browser_tab_close'] as const;
 
@@ -257,6 +262,13 @@ const SCREEN_POSTING_TOOL: RegisteredTool = {
   definition: screenPostingTool,
 };
 
+const SCREEN_AND_RECORD_POSTING_TOOL: RegisteredTool = {
+  namespacedName: screenAndRecordPostingTool.name,
+  serverName: BUILTIN_SERVER_NAME,
+  toolName: screenAndRecordPostingTool.name,
+  definition: screenAndRecordPostingTool,
+};
+
 /**
  * The registry entry for the built-in {@link harvestPostingsTool}. Not
  * MCP-backed, exactly like {@link SCREEN_POSTING_TOOL}, but its dispatch in
@@ -284,7 +296,9 @@ const HARVEST_POSTINGS_TOOL: RegisteredTool = {
  * another concurrent harvest_postings call's own calls — exactly the
  * cross-call race the browser partition exists to prevent. Routing it into
  * the browser partition instead means only one of {browser__* call,
- * harvest_postings call} is ever in flight at a time, harness-wide.
+ * harvest_postings call} is ever in flight at a time within a turn. Each
+ * harvest_postings call itself harvests boards serially on that same primary
+ * connection.
  */
 export const HARVEST_POSTINGS_TOOL_NAME = HARVEST_POSTINGS_TOOL.toolName;
 
@@ -320,9 +334,12 @@ const DEFAULT_RUNBOOK_PATH = join(dirname(fileURLToPath(import.meta.url)), '..',
  * @returns One {@link RegisteredTool} per allowed input tool, sorted by
  *   `namespacedName` ascending.
  */
-export function buildToolRegistry(mcpTools: ReturnType<McpClientPool['listTools']>): RegisteredTool[] {
+export function buildToolRegistry(
+  mcpTools: ReturnType<McpClientPool['listTools']>,
+  deniedTools: readonly string[] = [],
+): RegisteredTool[] {
   const mcp = mcpTools
-    .filter((tool: NamespacedTool) => isToolAllowed(tool.serverName, tool.toolName))
+    .filter((tool: NamespacedTool) => isToolAllowed(tool.serverName, tool.toolName) && !deniedTools.includes(tool.toolName))
     .map((tool: NamespacedTool) => ({
       namespacedName: tool.namespacedName,
       serverName: tool.serverName,
@@ -337,7 +354,7 @@ export function buildToolRegistry(mcpTools: ReturnType<McpClientPool['listTools'
   // MCP-derived tools. Both are appended AFTER the allow-list filter (which
   // would deny their synthetic server) and before the sort, so the advertised
   // block stays byte-stable.
-  return [...mcp, READ_RUNBOOK_SECTION_TOOL, SCREEN_POSTING_TOOL, HARVEST_POSTINGS_TOOL].sort((a, b) =>
+  return [...mcp, READ_RUNBOOK_SECTION_TOOL, SCREEN_POSTING_TOOL, SCREEN_AND_RECORD_POSTING_TOOL, HARVEST_POSTINGS_TOOL].sort((a, b) =>
     a.namespacedName.localeCompare(b.namespacedName),
   );
 }
@@ -388,19 +405,17 @@ export function isToolAllowed(serverName: string, toolName: string): boolean {
 }
 
 /**
- * Whether every {@link BROWSER_OPTIONAL_TOOL_NAMES} tab tool is currently
- * advertised (and so present in `registry`). Decides whether harvest_postings
- * drives several boards concurrently, each in its own tab, or degrades to
- * harvesting them serially in the single shared tab — see
- * ./builtins/harvestPostings.ts.
+ * Whether a bare BROWSER tool name may be called at all, reproducing the
+ * exact {@link isToolAllowed} decision and refusal wording {@link browserToolCall}
+ * uses. Exported for the dormant session-per-worker helper's tests; production
+ * harvest only calls through {@link browserToolCall} on the primary connection.
  *
- * @param registry The current tool registry, from {@link buildToolRegistry}.
- * @returns True when every tab-management tool is available to call.
+ * @param toolName The tool's own (un-namespaced) name.
+ * @returns The refusal message when the tool is not permitted; `undefined`
+ *   when it is.
  */
-function browserTabToolsAvailable(registry: RegisteredTool[]): boolean {
-  return BROWSER_OPTIONAL_TOOL_NAMES.every((name) =>
-    registry.some((t) => t.serverName === BROWSER_SERVER_NAME && t.toolName === name),
-  );
+export function isBrowserToolCallPermitted(toolName: string): string | undefined {
+  return isToolAllowed(BROWSER_SERVER_NAME, toolName) ? undefined : `Tool '${toolName}' is not permitted by the allow-list.`;
 }
 
 /**
@@ -469,9 +484,10 @@ export async function executeToolCall(
   maxContentChars: number = DEFAULT_MAX_TOOL_RESULT_CHARS,
   runbookPath: string = DEFAULT_RUNBOOK_PATH,
   screeningAdapter?: ProviderAdapter,
+  deniedTools: readonly string[] = [],
 ): Promise<ToolResult> {
   const tool = registry.find((t) => t.namespacedName === call.name);
-  if (!tool) {
+  if (!tool || deniedTools.includes(tool.toolName)) {
     return { toolCallId: call.id, content: `Unknown tool: '${call.name}' is not registered.`, isError: true };
   }
   // The built-in RUNBOOK reader is dispatched here, BEFORE the allow-list and
@@ -507,18 +523,26 @@ export async function executeToolCall(
       isError: result.isError,
     };
   }
+  if (tool.namespacedName === SCREEN_AND_RECORD_POSTING_TOOL.namespacedName) {
+    const recorder = registry.find((t) => t.serverName === TRUTHCV_SERVER_NAME && t.toolName === 'record_screening');
+    const record = recorder && isToolAllowed(recorder.serverName, recorder.toolName)
+      ? (args: Record<string, unknown>) => pool.callTool(recorder.namespacedName, args)
+      : undefined;
+    const result = await screenAndRecordPosting(call.arguments, screeningAdapter, record);
+    return {
+      toolCallId: call.id,
+      content: capToolResultContent(result.content, maxContentChars),
+      isError: result.isError,
+    };
+  }
   // Likewise dispatched here, BEFORE the allow-list and without going through
-  // isToolAllowed itself \u2014 but UNLIKE screen_posting, harvest_postings DOES
-  // reach pool.callTool, via the browserToolCall closure below, which
-  // re-checks isToolAllowed and resolves the live namespaced name for every
-  // underlying browser__* call it makes, so the allow-list still governs
-  // every one of them individually.
+  // isToolAllowed itself directly - but UNLIKE screen_posting, harvest_postings
+  // DOES reach pool.callTool via the primary browser connection. Passing false
+  // forces serial boards regardless of advertised tab tools or legacy session
+  // settings. The browserToolCall closure re-checks the allow-list and resolves
+  // the current namespaced name on every underlying browser call.
   if (tool.namespacedName === HARVEST_POSTINGS_TOOL.namespacedName) {
-    const result = await harvestPostings(
-      call.arguments,
-      browserToolCall(pool, registry),
-      browserTabToolsAvailable(registry),
-    );
+    const result = await harvestPostings(call.arguments, browserToolCall(pool, registry), false, undefined, undefined, maxContentChars);
     return {
       toolCallId: call.id,
       content: capToolResultContent(result.content, maxContentChars),

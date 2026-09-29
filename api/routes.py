@@ -7,10 +7,12 @@ the unverifiable tokens.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import logging
 import os
+import threading
 from datetime import date
 import urllib.error
 import urllib.request
@@ -74,6 +76,7 @@ from runs.derive import board_breakdown_by_run, counters_by_run
 from screening.company import company_identity_key
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
+from screening.url import posting_dedupe_key
 
 import coverletter.store as letter_store
 from agenttools.letter_operator import generate_cover_letter_for_operator as _generate_letter_for_operator
@@ -368,9 +371,11 @@ def bulk_set_approval(body: BulkApprovalUpdate) -> BulkApprovalResult:
     try:
         results = []
         for sid in body.ids:
-            results.append(
-                {"id": sid, "ok": screening_store.set_approval(sid, body.approval) is not None}
-            )
+            try:
+                ok = screening_store.set_approval(sid, body.approval) is not None
+            except screening_store.ApprovalConflict:
+                ok = False
+            results.append({"id": sid, "ok": ok})
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     return BulkApprovalResult(results=results)
@@ -482,6 +487,8 @@ def set_screening_approval(screening_id: str, body: ApprovalUpdate) -> Screening
         # regardless of approval value, matching the url-only branch above.
         try:
             screening = screening_store.set_approval(screening_id, body.approval)
+        except screening_store.ApprovalConflict as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
         if screening is None:
@@ -516,10 +523,7 @@ def list_company_finding_contradictions(
     if company is not None:
         groups = company_findings_store.open_contradictions(company)
     else:
-        companies = {f.company for f in company_findings_store.load_all()}
-        groups = []
-        for c in companies:
-            groups.extend(company_findings_store.open_contradictions(c))
+        groups = company_findings_store.all_open_contradictions()
     return [
         ContradictionGroupModel(
             claim=g["claim"],
@@ -731,6 +735,26 @@ def _truth_doc(truth: Truth) -> TruthDoc:
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MiB — a CV/cover-letter upload has no legitimate reason to exceed this
 
+# Guards the persist_source_text/persist_source_hash/persist_profile triple below:
+# uploads run in asyncio.to_thread, so two concurrent /upload requests could
+# otherwise interleave their writes (e.g. source text from one request paired
+# with the hash/profile of another).
+_UPLOAD_PERSIST_LOCK = threading.Lock()
+
+
+def _extract_and_persist_upload(filename: str, data: bytes) -> None:
+    """Extract text from an uploaded file and persist it, off the event loop.
+
+    Raises DocumentExtractError on an unsupported/unparseable file; the
+    caller maps that to a 400 response.
+    """
+    ext = extension_for(filename)
+    text = extract_document_text(filename, data)
+    with _UPLOAD_PERSIST_LOCK:
+        persist_source_text(text)
+        persist_source_hash(text)  # keyed cache: lets /extract skip a repeat LLM pass
+        persist_profile(data, ext)
+
 
 @router.post("/upload", status_code=204)
 async def upload(file: UploadFile = File(...)) -> None:
@@ -741,14 +765,10 @@ async def upload(file: UploadFile = File(...)) -> None:
         raise HTTPException(
             status_code=413, detail="Upload exceeds the maximum allowed size."
         )
-    ext = extension_for(file.filename or "")
     try:
-        text = extract_document_text(file.filename or "", data)
+        await asyncio.to_thread(_extract_and_persist_upload, file.filename or "", data)
     except DocumentExtractError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    persist_source_text(text)
-    persist_source_hash(text)  # keyed cache: lets /extract skip a repeat LLM pass
-    persist_profile(data, ext)
 
 
 @router.post("/extract", response_model=TruthDoc)
@@ -1182,11 +1202,15 @@ def _resolved_job_boards(cfg: agent_config_store.AgentConfig) -> list[dict]:
             "source": board.source,
             "signin_url": board.signin_url,
             "mode": board.mode,
+            "search_url": board.search_url,
+            "enabled": board.enabled,
+            "posting_url_pattern": board.posting_url_pattern,
             "mode_locked": not boards.is_custom_source(board.source),
             "domain": boards.resolve_domain(board.source) or "",
             "effective_signin_url": boards.resolve_signin_url(board.source, board.signin_url),
             "is_default": boards.is_default_source(board.source),
             "is_api": boards.is_api_source(board.source),
+            "key_required": boards.requires_key(board.source),
         })
     return result
 
@@ -1234,57 +1258,89 @@ def _merge_feed_results(*results):
     return FeedResult(postings=postings, error=" ".join(errors))
 
 
-# Combined wall-clock ceiling for BOTH the Remote Rocketship and per-company
-# ATS fetches TOGETHER, not each source's own separate budget. agent/agent-
-# config.js gives the job_config request a fixed 30s socket timeout and
-# treats a timeout as a hard failure: it destroys the request and calls
-# process.exit(1), discarding the whole config — profiles, feed, company
-# boards, and dorks. Each fetcher's own BUDGET_SECONDS (20.0s) was sized on
-# the assumption it was the ONLY fetch running; fanning out to two
-# independent fetchers with independent budgets can now approach 40s.
-# Threading this ONE shared deadline into both callers instead keeps them
-# together under a single ceiling: whatever the first fetcher spends comes
-# out of what the second is given. 25s leaves 5s of headroom under the 30s
+# Combined wall-clock ceiling for the Remote Rocketship, Arbeitnow AND
+# per-company ATS fetches TOGETHER, not each source's own separate budget.
+# agent/agent-config.js gives the job_config request a fixed 30s socket
+# timeout and treats a timeout as a hard failure: it destroys the request and
+# calls process.exit(1), discarding the whole config — profiles, feed,
+# company boards, and dorks. Each fetcher's own BUDGET_SECONDS (20.0s) was
+# sized on the assumption it was the ONLY fetch running; fanning out to three
+# independent fetchers with independent budgets can now approach 60s.
+# Threading this ONE shared deadline into every caller instead keeps them
+# together under a single ceiling: whatever the earlier fetchers spend comes
+# out of what the others are given. 25s leaves 5s of headroom under the 30s
 # socket timeout for the rest of the config route's own work.
 FEED_FETCH_BUDGET_SECONDS = 25.0
 
 
 def _fetch_feed_postings(cfg: agent_config_store.AgentConfig, company_boards: list):
-    """Pull postings for every API-backed source the operator has configured.
+    """Pull postings from Remote Rocketship, Arbeitnow, and every watchlist
+    company's own ATS API, whichever apply.
 
-    Fans out across two independent sources and merges them, de-duplicated by
-    URL (see ``_merge_feed_results``):
+    Fans out across three independent sources and merges them, de-duplicated
+    by URL (see ``_merge_feed_results``):
 
-    - Remote Rocketship, gated on the resolved-source check plus its saved
-      key. The check goes through boards.is_api_source rather than comparing
-      to the catalog key, so a board added as a raw domain reaches the feed
-      like any other.
+    - Remote Rocketship, gated on a resolved board naming it specifically
+      (via ``boards.api_source_key``, not the broader ``is_api_source`` —
+      Arbeitnow is also API-backed and always present as a default, and must
+      not switch Remote Rocketship on) plus its saved key.
+    - Arbeitnow, an always-on default board (agentconfig.boards.DEFAULT_BOARD_SOURCES)
+      with a public API — gated the same way on a resolved board naming it,
+      but never needs a key.
     - Each watchlist company's own ATS API (jobfeeds.ats), gated only on that
       company's ``CompanyBoard.ats`` naming a recognised ATS — no key needed.
 
-    Neither fetcher ever raises, and this function does not either: a source
-    that fails degrades the merged ``error`` rather than emptying the
-    response, while the other source's postings still arrive.
+    No fetcher ever raises, and this function does not either: a source that
+    fails degrades the merged ``error`` rather than emptying the response,
+    while the other sources' postings still arrive.
 
-    The two fetches share ONE wall-clock deadline (FEED_FETCH_BUDGET_SECONDS)
+    All three fetches share ONE wall-clock deadline (FEED_FETCH_BUDGET_SECONDS)
     instead of each getting its own — see that constant's comment for why.
+    They also run on their own threads instead of one after another, so the
+    slowest of the three governs the wall-clock cost of this function rather
+    than their sum; the shared deadline still bounds each individually
+    exactly as when they ran serially.
     """
+    import threading
     import time
 
     from agentconfig import boards
-    from jobfeeds import ats, remoterocketship
+    from jobfeeds import arbeitnow, ats, remoterocketship
 
     deadline = time.monotonic() + FEED_FETCH_BUDGET_SECONDS
+    results: dict = {}
+    resolved_sources = cfg.resolved_board_sources()
 
-    if any(boards.is_api_source(source) for source in cfg.resolved_board_sources()):
-        rr_result = remoterocketship.fetch_postings(
-            cfg.profiles, remoterocketship.api_key(), cfg.max_posting_age_days, deadline=deadline
-        )
-    else:
-        rr_result = remoterocketship.FeedResult()
+    def _run_remote_rocketship() -> None:
+        if any(boards.api_source_key(source) == remoterocketship.SOURCE for source in resolved_sources):
+            results["rr"] = remoterocketship.fetch_postings(
+                cfg.profiles, remoterocketship.api_key(), cfg.max_posting_age_days, deadline=deadline
+            )
+        else:
+            results["rr"] = remoterocketship.FeedResult()
 
-    ats_result = ats.fetch_ats_postings(company_boards, cfg.max_posting_age_days, deadline=deadline)
-    return _merge_feed_results(rr_result, ats_result)
+    def _run_arbeitnow() -> None:
+        if any(boards.api_source_key(source) == arbeitnow.SOURCE for source in resolved_sources):
+            results["arbeitnow"] = arbeitnow.fetch_postings(
+                cfg.profiles, cfg.max_posting_age_days, deadline=deadline
+            )
+        else:
+            results["arbeitnow"] = arbeitnow.FeedResult()
+
+    def _run_ats() -> None:
+        results["ats"] = ats.fetch_ats_postings(company_boards, cfg.max_posting_age_days, deadline=deadline)
+
+    threads = [
+        threading.Thread(target=_run_remote_rocketship),
+        threading.Thread(target=_run_arbeitnow),
+        threading.Thread(target=_run_ats),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    return _merge_feed_results(results["rr"], results["arbeitnow"], results["ats"])
 
 
 @router.get("/job-boards/{source}/key", response_model=JobBoardKeyStatus)
@@ -1293,8 +1349,8 @@ def get_job_board_key(source: str) -> JobBoardKeyStatus:
     from agentconfig import boards
     from jobfeeds import remoterocketship
 
-    if not boards.is_api_source(source):
-        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board.")
+    if not boards.requires_key(source):
+        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board that needs a key.")
     return JobBoardKeyStatus(
         source=remoterocketship.SOURCE,
         key_set=bool(remoterocketship.api_key()),
@@ -1308,8 +1364,8 @@ def put_job_board_key(source: str, body: JobBoardKeyUpdate) -> JobBoardKeyStatus
     from agentconfig import boards
     from jobfeeds import remoterocketship
 
-    if not boards.is_api_source(source):
-        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board.")
+    if not boards.requires_key(source):
+        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board that needs a key.")
     if not secretstore.encryption_available():
         raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
     value = body.api_key.strip()
@@ -1327,8 +1383,8 @@ def test_job_board_key(source: str) -> TestResult:
     from agentconfig import boards
     from jobfeeds import remoterocketship
 
-    if not boards.is_api_source(source):
-        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board.")
+    if not boards.requires_key(source):
+        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board that needs a key.")
     ok, detail = remoterocketship.check_key(remoterocketship.api_key())
     return TestResult(ok=ok, detail=detail)
 
@@ -1510,22 +1566,34 @@ def get_agent_config(include_feed: bool = False) -> AgentConfigModel:
     # Populate search_queries in response. The freshness window is applied to
     # the composed URLs here rather than stored on them, so changing the
     # setting takes effect on the next fetch with no stored state to migrate.
-    # resolved_boards() (not resolved_board_sources()) is passed so a
-    # direct-mode board is excluded from the dorks rather than defaulting to
-    # "dork" the way a bare source string would.
-    resolved_boards = cfg.resolved_boards()
-    data["search_queries"] = compose_queries(cfg.profiles, cfg.max_posting_age_days, resolved_boards)
+    # searched_boards() (not resolved_boards()) is passed so a direct-mode OR
+    # operator-disabled board is excluded from the dorks rather than
+    # defaulting to "dork"/enabled the way a bare source string would.
+    searched = cfg.searched_boards()
+    data["search_queries"] = compose_queries(cfg.profiles, cfg.dork_recency, searched)
 
     # One entry per direct-mode board, for the agent to search on-site.
-    data["direct_boards"] = compose_direct_boards(cfg.profiles, resolved_boards)
+    data["direct_boards"] = compose_direct_boards(cfg.profiles, searched)
 
     # Postings from API-backed boards, on request only. fetch_postings never
     # raises, so a Remote Rocketship outage degrades this response to the
     # config it always carried rather than failing the agent's config fetch.
     if include_feed:
         feed = _fetch_feed_postings(cfg, target_boards)
-        data["feed_postings"] = [p.to_dict() for p in feed.postings]
+        # Drop postings the ledger already screened, so the agent stops
+        # re-screening postings that only come back created:false. An
+        # unread-placeholder screening is not in `keys` (screened_dedupe_keys
+        # excludes it), so that posting stays in the feed for a real screen.
+        # Only postings screened for EVERY enabled profile (or passed/deferred,
+        # or profile-less) count as screened; a rejection under one profile
+        # must not hide the posting from the others.
+        keys = screening_store.screened_dedupe_keys(
+            [p.name for p in cfg.profiles if p.enabled]
+        )
+        kept = [p for p in feed.postings if posting_dedupe_key(p.url) not in keys]
+        data["feed_postings"] = [p.to_dict() for p in kept]
         data["feed_error"] = feed.error
+        data["feed_already_screened"] = len(feed.postings) - len(kept)
 
     return AgentConfigModel.model_validate(data)
 
@@ -1537,12 +1605,13 @@ def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:
     Profiles are WHOLESALE-REPLACED (not merged) because a null or omitted
     profiles field never reaches the merge dict. job_boards is replaced the
     same way, but first NORMALISED: the response-only keys (domain,
-    effective_signin_url, is_default) are stripped — they are derived, and a
-    stored copy is a second writer that can go stale — and any default-source
-    entry with a blank signin_url is DROPPED, so a client echoing back the
-    resolved GET list does not bloat storage with the four defaults. A
-    default-source entry WITH a signin_url is kept, since that is a
-    legitimate override.
+    effective_signin_url, is_default, is_api, key_required) are stripped — they are
+    derived, and a stored copy is a second writer that can go stale — and a default-source
+    entry is DROPPED only when it carries neither a signin_url NOR a disabled
+    flag, so a client echoing back the resolved GET list does not bloat
+    storage with the defaults. A default-source entry WITH a signin_url
+    override or with ``enabled: false`` is kept, since both are legitimate
+    per-board state that would otherwise have nowhere to live.
 
     The optional numeric windows are the exception to exclude_none: for them a
     null is a real value meaning "unset", and dropping it made those fields
@@ -1652,16 +1721,43 @@ def get_agent_llm_credentials(x_agent_token: str = Header(default="")) -> AgentL
     if not secret or not hmac.compare_digest(given, secret.encode("utf-8")):
         raise HTTPException(status_code=404)
 
-    route = modelrouting.load().agent
+    return _credentials_for_route(modelrouting.load().agent)
+
+
+def _credentials_for_route(route: modelrouting.Route | None) -> AgentLlmCredentials:
+    """Credentials for a route (None = the claude card, default model).
+    Raises 404 when the card is unknown or has no usable credentials."""
     card = route.connection if route else "claude"
     model = route.model if route else ""
-
     resolve = _CARD_CREDENTIALS.get(card)
     if resolve is None:
         raise HTTPException(status_code=404)
-    creds = resolve(model)
-    creds.context_window = route.context_window if route else 0
-    return creds
+    return resolve(model)
+
+
+@router.get("/agent/llm-routes")
+def get_agent_llm_routes(x_agent_token: str = Header(default="")) -> dict:
+    """Guarded (404 without AGENT_API_TOKEN): credentials for the apply route
+    and each agent stage. A stage with no route resolves to null. Response-only
+    egress; tokens are never logged."""
+    if not _agent_token_ok(x_agent_token):
+        raise HTTPException(status_code=404)
+    r = modelrouting.load()
+
+    def _creds(route):
+        if route is None:
+            return None
+        # One stage whose card has no usable credentials must not blank the
+        # others: it resolves to null and the harness falls back per stages.ts.
+        try:
+            return _credentials_for_route(route).model_dump(by_alias=True)
+        except HTTPException:
+            return None
+
+    stages = {"apply": _creds(r.agent)}
+    for name in modelrouting.AGENT_STAGE_NAMES:
+        stages[name] = _creds(modelrouting.resolve_agent_stage(r, name))
+    return {"stages": stages}
 
 
 def _agent_token_ok(given: str) -> bool:
@@ -2372,6 +2468,7 @@ def get_routing() -> RoutingModel:
         tasks={k: _route_model(v) for k, v in routing.tasks.items()},
         agent=_route_model(routing.agent) if routing.agent else None,
         default=_route_model(routing.default) if routing.default else None,
+        agent_stages={k: _route_model(v) for k, v in routing.agent_stages.items()},
     )
 
 
@@ -2402,12 +2499,6 @@ def put_routing(body: RoutingUpdate) -> RoutingModel:
                 status_code=400,
                 detail=f"effort '{effort}' is not supported for {connection}/{route_dict.get('model', '')}",
             )
-        context_window = route_dict.get("context_window", 0)
-        if context_window < 0 or 0 < context_window < 8192:
-            raise HTTPException(
-                status_code=400,
-                detail="context_window must be 0 or at least 8192",
-            )
 
     # Merge: update the stored dict with only the fields that were sent.
     # A None value clears the corresponding route rather than being ignored.
@@ -2421,6 +2512,12 @@ def put_routing(body: RoutingUpdate) -> RoutingModel:
         stored_dict["agent"] = update_dict["agent"]
     if "default" in update_dict:
         stored_dict["default"] = update_dict["default"]
+    if "agent_stages" in update_dict:
+        for name, route in (update_dict["agent_stages"] or {}).items():
+            if route is None:
+                stored_dict["agent_stages"].pop(name, None)
+            else:
+                stored_dict["agent_stages"][name] = route
 
     # Parse back to Routing and save
     routing = modelrouting.Routing.from_dict(stored_dict)
@@ -2432,6 +2529,7 @@ def put_routing(body: RoutingUpdate) -> RoutingModel:
         tasks={k: _route_model(v) for k, v in routing.tasks.items()},
         agent=_route_model(routing.agent) if routing.agent else None,
         default=_route_model(routing.default) if routing.default else None,
+        agent_stages={k: _route_model(v) for k, v in routing.agent_stages.items()},
     )
 
 
@@ -2446,6 +2544,10 @@ def _all_routes_in_dict(d: dict) -> list[dict]:
         for route in d["tasks"].values():
             if isinstance(route, dict):
                 routes.append(route)
+    if "agent_stages" in d and isinstance(d["agent_stages"], dict):
+        for route in d["agent_stages"].values():
+            if isinstance(route, dict):
+                routes.append(route)
     return routes
 
 
@@ -2455,5 +2557,4 @@ def _route_model(route: modelrouting.Route) -> RouteModel:
         connection=route.connection,
         model=route.model,
         effort=route.effort,
-        context_window=route.context_window,
     )

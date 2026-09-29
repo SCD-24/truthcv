@@ -14,6 +14,7 @@ import type {
 } from './types.js';
 
 import { networkErrorEvent, providerErrorEvent, readBody, retryAfterMsFrom } from './errors.js';
+import { describeTimeout, PROVIDER_REQUEST_TIMEOUT_MS } from './timeout.js';
 
 /** Options for constructing an Anthropic Messages adapter. */
 export interface AnthropicMessagesOptions {
@@ -34,6 +35,8 @@ export interface AnthropicMessagesOptions {
    * exceed the savings.
    */
   promptCache?: boolean;
+  /** Override for {@link PROVIDER_REQUEST_TIMEOUT_MS}, in milliseconds. */
+  requestTimeoutMs?: number;
 }
 
 /** HTTP statuses worth retrying. */
@@ -84,10 +87,13 @@ function buildHeaders(opts: AnthropicMessagesOptions): Record<string, string> {
  * An empty prompt contributes no block: the API rejects a text block whose
  * text is empty, and appending one would trade this bug for another.
  */
-function buildSystem(systemPrompt: string, opts: AnthropicMessagesOptions): unknown {
-  if (!isOauth(opts)) return systemPrompt;
+function buildSystem(systemPrompt: string, opts: AnthropicMessagesOptions, cacheEnabled = false): unknown {
+  // A non-empty prompt carries the system-side cache breakpoint (budget: tools 1 + system 1 + messages 2 = 4).
+  const promptBlock: Record<string, unknown> = { type: 'text', text: systemPrompt };
+  if (cacheEnabled) promptBlock.cache_control = { type: 'ephemeral' };
+  if (!isOauth(opts)) return systemPrompt && cacheEnabled ? [promptBlock] : systemPrompt;
   const blocks: unknown[] = [{ type: 'text', text: CLAUDE_CODE_PREAMBLE }];
-  if (systemPrompt) blocks.push({ type: 'text', text: systemPrompt });
+  if (systemPrompt) blocks.push(promptBlock);
   return blocks;
 }
 
@@ -151,8 +157,7 @@ function buildBody(request: ModelRequest, opts: AnthropicMessagesOptions): unkno
   const anthropicMessages = request.messages.map(toAnthropicMessage);
   // Anthropic prompt-caching breakpoints. A request may declare at most 4
   // `cache_control` blocks total; here that budget is spent on the tools array
-  // (1) + at most 2 message breakpoints below = 3, well under 4 (the `system`
-  // field is deliberately left uncached to keep its shape byte-identical). The
+  // (1) + a non-empty system prompt (1) + at most 2 message breakpoints below = 4, the maximum. The
   // first message anchors a stable cached prefix; the last message is a rolling
   // breakpoint that extends the cache as the conversation grows.
   //
@@ -168,7 +173,7 @@ function buildBody(request: ModelRequest, opts: AnthropicMessagesOptions): unkno
   const body: Record<string, unknown> = {
     model: opts.model,
     max_tokens: request.maxTokens ?? 4096,
-    system: buildSystem(request.systemPrompt, opts),
+    system: buildSystem(request.systemPrompt, opts, cacheEnabled),
     messages: anthropicMessages,
   };
   // Omitted entirely when there are no tools, rather than sent as `[]`: the
@@ -219,18 +224,22 @@ export class AnthropicMessagesAdapter implements ProviderAdapter {
   /** Send a request and yield normalised events to completion. */
   async *sendMessage(request: ModelRequest): AsyncGenerator<HarnessEvent, void, unknown> {
     const baseUrl = this.opts.baseUrl ?? 'https://api.anthropic.com';
+    const signal = AbortSignal.timeout(this.opts.requestTimeoutMs ?? PROVIDER_REQUEST_TIMEOUT_MS);
     let response: Response;
     try {
       response = await fetch(`${baseUrl}/v1/messages`, {
         method: 'POST',
         headers: buildHeaders(this.opts),
         body: JSON.stringify(buildBody(request, this.opts)),
+        signal,
       });
     } catch (err) {
       // The request never left, or never came back. Reported rather than
       // thrown: a throw here escapes the retry loop entirely, and this is the
-      // failure class most likely to succeed on the next attempt.
-      yield networkErrorEvent('Anthropic', err);
+      // failure class most likely to succeed on the next attempt. A timed-out
+      // signal lands here too, reported as a plain timeout rather than the
+      // DOMException's generic wording.
+      yield networkErrorEvent('Anthropic', describeTimeout(err, signal));
       return;
     }
     if (!response.ok) {
@@ -245,8 +254,10 @@ export class AnthropicMessagesAdapter implements ProviderAdapter {
       // `terminated` rather than `fetch failed`, and it is the same transient
       // socket death as a failed connect — a long response over a flapping
       // link is exactly where it happens. Retryable for the same reason: a
-      // body we never read cannot have been acted on.
-      yield networkErrorEvent('Anthropic', err);
+      // body we never read cannot have been acted on. A signal abort past the
+      // deadline lands here too, since this whole request runs under one
+      // timeout — reported as a plain timeout rather than the raw abort error.
+      yield networkErrorEvent('Anthropic', describeTimeout(err, signal));
       return;
     }
     yield* emitAnthropicEvents(payload);

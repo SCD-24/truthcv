@@ -2,22 +2,32 @@ from __future__ import annotations
 
 import base64
 import html
+import logging
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from email.utils import parseaddr
 
 import httpx
 
 from applications.store import get as get_application, load_all, update as update_application
 from connections.auth.gmail import AuthError, get_valid_access_token
-from providers import ProviderError, get_provider
 from screening import jev
 
-from .matcher import _app_domains, match_message
+from .matcher import _app_domains, _normalize, match_message
 from .model import GmailSuggestion, GmailSyncState
 from .store import load_suggestions, load_sync_state, save_suggestions, save_sync_state
 
-SYNC_THROTTLE_S = 3600
+logger = logging.getLogger(__name__)
+
+SYNC_THROTTLE_S = 300
+
+#: Bounded worker count for concurrent Gmail API fetches — both the per-
+#: application list_messages queries in _collect_message_ids and the
+#: per-message get_metadata prefetch in run_sync share this same pool size,
+#: so a sync run never opens more than this many concurrent Gmail requests
+#: regardless of how many applications or new messages there are.
+GMAIL_FETCH_MAX_WORKERS = 4
 
 
 class GmailSyncError(RuntimeError):
@@ -110,47 +120,35 @@ def _decode_body(part: dict) -> str:
     return "\n".join(out)
 
 
-def _classify_message(subject: str, snippet: str, body: str) -> tuple[str, str]:
-    schema = {
-        "type": "object",
-        "properties": {
-            "classification": {
-                "type": "string",
-                "enum": ["rejection", "interview", "offer", "confirmation", "other"],
-            }
-        },
-        "required": ["classification"],
-        "additionalProperties": False,
-    }
-    prompt = (
-        "Classify this employer reply email for a job application. "
-        "Return rejection, interview, offer, confirmation, or other."
-    )
-    messages = [
-        {
-            "role": "user",
-            "content": f"Subject: {subject}\n\nSnippet: {snippet}\n\nBody:\n{body[:12000]}",
-        }
-    ]
-    try:
-        result = get_provider(task="gmail-sync").extract_json(prompt, messages, schema)
-    except ProviderError:
-        return "", ""
-    classification = str(result.get("classification", "")).strip()
-    suggested = {
-        "rejection": "Rejected",
-        "interview": "Interviewing",
-        "offer": "Offer",
-        "confirmation": "Waiting",
-        "other": "Waiting",
-    }.get(classification, "")
-    return classification, suggested
+def _classify_message(subject: str, body: str) -> tuple[str, str]:
+    """Classify an employer reply with Jev alone — no model-routed LLM call.
+
+    Confirms the rejection statement first, then the interview statement,
+    against the same "subject\\n\\nbody" text a match is scored against,
+    with the body truncated to 12000 characters so a large thread stays
+    well under Jev's timeout instead of failing open to "other".
+    Whichever confirms first wins; if neither confirms, the message is
+    classified "other" and left for manual review. At most one Jev
+    round-trip per statement — no retry, no second confirmation call.
+    Never logs the email text. Returns ``(classification, suggested_status)``
+    where suggested_status is "" for "other".
+    """
+    state = f"{subject}\n\n{body[:12000]}"
+    rejection_statement, rejection_status = _CONFIRM_STATEMENTS["rejection"]
+    if jev.confirm(rejection_statement, state):
+        return "rejection", rejection_status
+    interview_statement, interview_status = _CONFIRM_STATEMENTS["interview"]
+    if jev.confirm(interview_statement, state):
+        return "interview", interview_status
+    return "other", ""
 
 
-#: Statuses still considered "open" — a response hasn't yet been recorded via
-#: an auto-applied Rejected/Interviewing transition, so the application is
-#: still worth scanning for an employer reply.
-OPEN_STATUSES = {"Applied", "Waiting"}
+#: Statuses that mean a response has already been recorded (auto-applied or
+#: otherwise) — the application is no longer worth scanning for an employer
+#: reply. Everything else — including unrecognized/blank status strings — is
+#: still a candidate, since status is an unvalidated str and we'd rather scan
+#: a few extra applications than silently stop watching one.
+CLOSED_STATUSES = {"Interviewing", "Offer", "Rejected"}
 
 
 def _application_query(app, last_synced_at: float) -> str:
@@ -158,14 +156,24 @@ def _application_query(app, last_synced_at: float) -> str:
 
     Reuses matcher._app_domains — the same website/application_url domains
     and company token match_message later scores attribution against — so
-    the query and the eventual attribution stay in sync. Returns "" when the
-    application has no domain or company signal to search on, so the caller
-    can skip it rather than issuing an unscoped query.
+    the query and the eventual attribution stay in sync. Also ORs in a
+    quoted full-text search on the application's company name (with any
+    double quotes stripped out first, so the quoted term can't be broken
+    out of), so an application with a company but no usable domain (or a
+    sender that doesn't match the domain heuristic) is still searched.
+    Returns "" only when the application has neither domain nor company
+    signal to search on, so the caller can skip it rather than issuing an
+    unscoped query.
     """
     domains = _app_domains(app)
-    if not domains:
+    company = str(getattr(app, "company", "") or "").replace('"', "").strip()
+    has_company_signal = bool(_normalize(company))
+    if not domains and not has_company_signal:
         return ""
-    scoped = " OR ".join(f"from:{d}" for d in sorted(domains))
+    terms = [f"from:{d}" for d in sorted(domains)]
+    if has_company_signal:
+        terms.append(f'"{company}"')
+    scoped = " OR ".join(terms)
     parts = [f"({scoped})"]
     if last_synced_at > 0:
         parts.append(f"after:{int(last_synced_at)}")
@@ -173,8 +181,29 @@ def _application_query(app, last_synced_at: float) -> str:
 
 
 def _pending_candidates():
-    """Applications still in an open status (Applied/Waiting) worth scanning."""
-    return [app for app in load_all() if app.status in OPEN_STATUSES]
+    """Applications not yet in a closed status (Interviewing/Offer/Rejected).
+
+    status is an unvalidated str, so this is a closed-set exclusion rather
+    than an allowlist — anything not explicitly closed (Draft, Applied,
+    Waiting, blank, or unrecognized) is still worth scanning. A Draft is
+    also dropped when another non-Draft, non-closed candidate shares its
+    normalized company name — that company is already watched via the
+    other application, and leaving both in would tie the matcher's scoring
+    (matcher.py is not touched) and cause match_message to return None,
+    silently dropping the message and burning its id from processed_message_ids.
+    """
+    candidates = [app for app in load_all() if app.status not in CLOSED_STATUSES]
+    watched_companies = {
+        _normalize(str(getattr(app, "company", "") or ""))
+        for app in candidates
+        if app.status != "Draft"
+    }
+    watched_companies.discard("")
+    return [
+        app
+        for app in candidates
+        if app.status != "Draft" or _normalize(str(getattr(app, "company", "") or "")) not in watched_companies
+    ]
 
 
 def _sender_email(value: str) -> str:
@@ -194,20 +223,46 @@ def pending_suggestions() -> list[GmailSuggestion]:
 
 
 def _collect_message_ids(client: GmailClient, pending_apps: list, sync_state: GmailSyncState, processed_ids: set[str]) -> list[str]:
-    """Distinct new message ids across every open application's scoped query.
+    """Distinct new message ids across every non-closed application's scoped query.
 
-    Issues one Gmail query per open application (skipping any with no domain
-    or company signal), and dedupes ids already in ``processed_ids`` or seen
-    earlier in this same run — a message can legitimately match more than
-    one application's query.
+    Issues one Gmail query per non-closed application (skipping any with no
+    domain or company signal), and dedupes ids already in ``processed_ids``
+    or seen earlier in this same run — a message can legitimately match
+    more than one application's query.
+
+    The queries are built up front, in application order, then run
+    concurrently on a bounded thread pool (GMAIL_FETCH_MAX_WORKERS workers)
+    since each is an independent Gmail API round trip. Futures are resolved
+    inside the with-block, in application order, so a raised exception is
+    the same one a serial run would have raised first — not whichever query
+    happened to fail first in wall-clock time. On the first exception,
+    executor.shutdown(cancel_futures=True) cancels every query still queued
+    behind the workers (an in-flight query still finishes) before the
+    exception is re-raised unchanged. Results are then merged into
+    seen_ids/seen_set SERIALLY, one query's results at a time in that same
+    order, so the dedupe order — and which id "wins" when a message matches
+    more than one query — stays identical to a plain serial run.
     """
-    seen_ids: list[str] = []
-    seen_set: set[str] = set()
+    queries: list[str] = []
     for app in pending_apps:
         query = _application_query(app, sync_state.last_synced_at)
-        if not query:
-            continue
-        for item in client.list_messages(query):
+        if query:
+            queries.append(query)
+    if not queries:
+        return []
+    logger.info("gmail sync: dispatching %d list_messages queries (max_workers=%d)", len(queries), GMAIL_FETCH_MAX_WORKERS)
+    with ThreadPoolExecutor(max_workers=GMAIL_FETCH_MAX_WORKERS) as executor:
+        futures = [executor.submit(client.list_messages, query) for query in queries]
+        try:
+            results = [future.result() for future in futures]
+        except BaseException:
+            # Cancel every still-queued query and re-raise unchanged.
+            executor.shutdown(cancel_futures=True)
+            raise
+    seen_ids: list[str] = []
+    seen_set: set[str] = set()
+    for result in results:
+        for item in result:
             message_id = str(item.get("id", ""))
             if not message_id or message_id in processed_ids or message_id in seen_set:
                 continue
@@ -218,7 +273,7 @@ def _collect_message_ids(client: GmailClient, pending_apps: list, sync_state: Gm
 
 # Classification -> (Jev confirmation statement, status to apply on confirm).
 # Only these two classifications ever auto-apply a status; everything else
-# (offer, confirmation, other) is left for the operator to review manually.
+# (other) is left for the operator to review manually.
 _CONFIRM_STATEMENTS = {
     "rejection": ("This email tells the candidate their job application was rejected.", "Rejected"),
     "interview": ("This email invites the candidate to interview for the job application.", "Interviewing"),
@@ -242,31 +297,25 @@ def _apply_decision(app_id: str, status: str, message_id: str, sender: str, subj
     update_application(app_id, {"status": status, "response_received": True, "notes": notes})
 
 
-def _confirm_decision(classification: str, subject: str, body: str) -> tuple[str, str] | None:
-    """Ask Jev to confirm a rejection/interview classification before acting.
+def _process_message(client: GmailClient, message_id: str, metadata: dict, pending_apps: list, by_id: dict[str, GmailSuggestion]) -> None:
+    """Match and classify one already-fetched message; record a suggestion if matched.
 
-    Returns ``(status, decision)`` where decision is "confirmed" or
-    "declined", or None for classifications with no auto-apply mapping.
-    Never logs the email text.
+    ``metadata`` is the message's get_metadata payload, fetched ahead of
+    time by run_sync's prefetch (see run_sync) rather than fetched here —
+    this function itself does no concurrent work, so classification,
+    get_full, the by_id mutation, and _apply_decision all still run
+    serially on the caller's thread, in application order.
+
+    A rejection/interview classification is a Jev confirmation in itself
+    (see _classify_message), so it auto-applies immediately — the matched
+    application's status is updated with evidence in its notes and the
+    suggestion is recorded as applied — but only when the match itself is
+    not low-confidence (company keyword alone, score 2): a low-confidence
+    match is too weak a link between message and application to act on
+    unattended, so it stays a pending suggestion for the operator to apply
+    by hand even though the classification is recorded. Any other
+    classification is left pending and no application is touched.
     """
-    spec = _CONFIRM_STATEMENTS.get(classification)
-    if spec is None:
-        return None
-    statement, status = spec
-    confirmed = jev.confirm(statement, f"{subject}\n\n{body}")
-    return status, "confirmed" if confirmed else "declined"
-
-
-def _process_message(client: GmailClient, message_id: str, pending_apps: list, by_id: dict[str, GmailSuggestion]) -> None:
-    """Fetch, match, and classify one message; record a suggestion if matched.
-
-    A rejection/interview classification is put to Jev for confirmation; on
-    confirm the matched application's status is auto-updated with evidence
-    in its notes and the suggestion is recorded as applied. On decline (or
-    any other classification) the suggestion is left pending and no
-    application is touched.
-    """
-    metadata = client.get_metadata(message_id)
     sender = _header(metadata, "From")
     subject = _header(metadata, "Subject")
     date = _header(metadata, "Date")
@@ -276,17 +325,15 @@ def _process_message(client: GmailClient, message_id: str, pending_apps: list, b
         return
     full = client.get_full(message_id)
     body = _decode_body(full.get("payload") or {})
-    classification, suggested_status = _classify_message(subject, snippet, body)
+    classification, suggested_status = _classify_message(subject, body)
     if message_id in by_id:
         return
     decision = ""
     suggestion_state = "pending"
-    outcome = _confirm_decision(classification, subject, body)
-    if outcome is not None:
-        status, decision = outcome
-        if decision == "confirmed":
-            _apply_decision(match.application_id, status, message_id, sender, subject, date)
-            suggestion_state = "applied"
+    if suggested_status and match.confidence != "low":
+        _apply_decision(match.application_id, suggested_status, message_id, sender, subject, date)
+        suggestion_state = "applied"
+        decision = "confirmed"
     by_id[message_id] = GmailSuggestion(
         id=message_id,
         application_id=match.application_id,
@@ -321,8 +368,25 @@ def run_sync(*, force: bool = False) -> dict:
     processed_ids = set(sync_state.processed_message_ids)
     pending_apps = _pending_candidates()
     new_processed = _collect_message_ids(client, pending_apps, sync_state, processed_ids)
-    for message_id in new_processed:
-        _process_message(client, message_id, pending_apps, by_id)
+    if new_processed:
+        # Prefetch get_metadata for every new message id concurrently,
+        # bounded by GMAIL_FETCH_MAX_WORKERS. Each future is resolved inside
+        # the with-block in application order and its message is processed
+        # IMMEDIATELY — so, exactly like a serial run, every message before a
+        # failing fetch has already been classified and applied when the
+        # exception surfaces. On the first exception,
+        # executor.shutdown(cancel_futures=True) cancels every fetch still
+        # queued behind the workers (an in-flight fetch still finishes)
+        # before it is re-raised unchanged.
+        logger.info("gmail sync: prefetching metadata for %d messages (max_workers=%d)", len(new_processed), GMAIL_FETCH_MAX_WORKERS)
+        with ThreadPoolExecutor(max_workers=GMAIL_FETCH_MAX_WORKERS) as executor:
+            metadata_futures = [(message_id, executor.submit(client.get_metadata, message_id)) for message_id in new_processed]
+            try:
+                for message_id, future in metadata_futures:
+                    _process_message(client, message_id, future.result(), pending_apps, by_id)
+            except BaseException:
+                executor.shutdown(cancel_futures=True)
+                raise
     sync_state.last_synced_at = now
     sync_state.processed_message_ids = sorted(processed_ids.union(new_processed))
     save_suggestions(list(by_id.values()))

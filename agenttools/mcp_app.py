@@ -23,11 +23,16 @@ from agenttools.tools_ledger import (
     record_screening as _record_screening,
 )
 from agenttools.tools_letter import generate_cover_letter as _generate_cover_letter
+from agenttools.tools_pipeline import (
+    filter_unscreened_urls as _filter_unscreened_urls,
+    finish_application as _finish_application,
+)
 from agenttools.tools_research import (
     get_company_findings as _get_company_findings,
     record_company_finding as _record_company_finding,
 )
 from agenttools.tools_runs import (
+    finish_phase as _finish_phase,
     finish_run as _finish_run,
     record_discovery_coverage as _record_discovery_coverage,
     record_postings_seen as _record_postings_seen,
@@ -62,6 +67,7 @@ _TOOL_REGISTRY = {
         "employment_country_stated (the posting's stated employment country), role_type_stated (the posting's stated role type, e.g. contract vs permanent), and eor_stated (yes, no, or unstated — whether the posting requires an EOR/PEO employer of record) — "
         "profile and remote_arrangement are required and the call is rejected without them; the rest are optional and '' means the posting stated nothing on that point. "
         "Evidence that contradicts ANY of the named profile's six hard requirements — remote model, working language, salary floor, employment country, rejected role types, or EOR — is stored as an automatic rejection (verdict downgraded to rejected), not an error to retry. "
+        "There is one record per posting per profile: a record without a profile, or any passed/deferred record, covers the posting for every profile; created:false means the posting is already covered, so count it as a skip. "
         "Pass your run_id (from start_run) on EVERY call, so this screening is attributed to your run and the run's coverage counters reflect the work you actually did.",
     ),
     "check_cooldown": (
@@ -158,6 +164,14 @@ _TOOL_REGISTRY = {
         "reached', 'browser session died', 'no more postings found'). A run that ends without "
         "calling this is indistinguishable from one that crashed.",
     ),
+    "finish_phase": (
+        _finish_phase,
+        "Reports progress on one discovery channel (feed, direct or dork) mid-run, WITHOUT ending "
+        "the run — use this to check in or leave a note partway through, not just at the end. "
+        "May raise (and record nothing) when this channel's coverage looks short and, per "
+        "turns_remaining, there is still enough run left to act on it — the same discipline as "
+        "finish_run, but scoped to one channel and never terminal.",
+    ),
     "record_run_note": (
         _record_run_note,
         "Leaves a free-text note on the run record for context that is not captured by the "
@@ -167,8 +181,10 @@ _TOOL_REGISTRY = {
     "record_discovery_coverage": (
         _record_discovery_coverage,
         "Records one board or query's discovery coverage for this run: which channel (feed, "
-        "direct or dork), which board, and its status (searched, empty, login_walled, blocked "
-        "or skipped), plus how many postings it found. Call ONE TIME per board or query you "
+        "direct or dork), which board, and its status (searched, empty, login_walled, blocked, "
+        "extraction_failed or skipped), plus how many postings it found. 'extraction_failed' means "
+        "the board was reachable and not walled, but harvest could not extract or read its "
+        "results — never report it as 'empty' or 'blocked'. Call ONE TIME per board or query you "
         "searched. A board you never call this for is read by the operator as 'not reached', "
         "not as searched-and-empty — so an entry left uncalled is itself an honest coverage "
         "gap, and a board you never reached must NOT be reported as empty. 'empty' means the "
@@ -177,6 +193,16 @@ _TOOL_REGISTRY = {
         "— reporting a blocked board as empty hides a broken channel. Pass tier (api, harvest "
         "or llm, or '' when not applicable) to record which extraction tier produced the "
         "postings.",
+    ),
+    "filter_unscreened_urls": (
+        _filter_unscreened_urls,
+        "Given candidate posting URLs (urls), returns {unscreened: [...]}: only those not already "
+        "screened, in input order, deduplicated, with URL fragments ignored. Call before opening postings.",
+    ),
+    "finish_application": (
+        _finish_application,
+        "Notes the outcome of one application (url, outcome, note) on the run record. Non-terminal: "
+        "never ends the run or changes its status. Pass your run_id.",
     ),
     "record_postings_seen": (
         _record_postings_seen,

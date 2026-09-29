@@ -2,10 +2,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createDiagnostics } from '../diagnostics.js';
 
 import type { McpClientPool, NamespacedTool } from '../mcp/client.js';
 import type { HarnessEvent, ProviderAdapter, ToolCall } from '../providers/types.js';
-import { ExitCode, runCli, resolveCompactionConfig, type CliDeps, type CliConfig } from '../cli.js';
+import { ExitCode, runCli, resolveCompactionConfig, resolveConfig, parseArgs, type CliDeps } from '../cli.js';
 import { DEFAULT_FALLBACK_CONTEXT_WINDOW } from '../compaction.js';
 
 /** A tool call referencing the fake pool's one allowed tool. */
@@ -74,6 +75,9 @@ function fakePool(tools?: NamespacedTool[]): McpClientPool {
 }
 
 /** Capture stdout/stderr lines and supply a fake adapter + pool to the CLI. */
+/** Default context window a test's fake `discoverContextWindow` reports, unless overridden. */
+const TEST_DISCOVERED_WINDOW = 128000;
+
 function harness(
   adapter: ProviderAdapter,
   pool: McpClientPool,
@@ -90,6 +94,9 @@ function harness(
     stdout: (line) => stdout.push(line),
     stderr: (line) => stderr.push(line),
     readStdin: async () => '',
+    // Fake by default so no test hits the network; individual tests override
+    // to assert discovery wiring or a fallback scenario.
+    discoverContextWindow: async () => ({ window: TEST_DISCOVERED_WINDOW, source: 'test' }),
     ...overrides,
   };
   return { deps, stdout, stderr, createAdapter, createPool };
@@ -411,99 +418,69 @@ describe('runCli token redaction', () => {
   });
 });
 
-describe('the context window reaches the loop and the adapter', () => {
+describe('the discovered context window reaches the loop and the adapter', () => {
   // The defect this whole change exists to fix was not a broken algorithm: it
   // was a correct one that nothing ever called. These assert the wiring.
-  it('states no window by default, leaving proactive compaction off', async () => {
+  it('passes the discovered window to the adapter, so ollama serves the same one', async () => {
     const adapter = scriptedAdapter([[doneEnd]]);
-    const { deps, createAdapter } = harness(adapter, fakePool());
+    const { deps, createAdapter } = harness(adapter, fakePool(), {
+      discoverContextWindow: async () => ({ window: 200000, source: 'anthropic' }),
+    });
 
     await runCli([...BASE_ARGS, 'go'], {}, deps);
 
-    expect(createAdapter.mock.calls[0][0].contextWindow).toBeUndefined();
+    expect(createAdapter.mock.calls[0][0].contextWindow).toBe(200000);
   });
 
-  it('passes a stated window to the adapter, so ollama serves the same one', async () => {
+  it('resolveCompactionConfig wraps the discovered number unchanged', () => {
+    expect(resolveCompactionConfig(128000).contextWindow).toBe(128000);
+    expect(resolveCompactionConfig(DEFAULT_FALLBACK_CONTEXT_WINDOW).contextWindow).toBe(32768);
+  });
+
+  it('uses the discovered window for compaction and logs it with its source', async () => {
     const adapter = scriptedAdapter([[doneEnd]]);
-    const { deps, createAdapter } = harness(adapter, fakePool());
-
-    await runCli(['--context-window', '128000', ...BASE_ARGS, 'go'], {}, deps);
-
-    expect(createAdapter.mock.calls[0][0].contextWindow).toBe(128000);
-  });
-
-  it('resolveCompactionConfig falls back to DEFAULT_FALLBACK_CONTEXT_WINDOW when unstated', () => {
-    const { compactionConfig, usedFallback } = resolveCompactionConfig({ contextWindow: 0 } as CliConfig);
-
-    expect(compactionConfig.contextWindow).toBe(DEFAULT_FALLBACK_CONTEXT_WINDOW);
-    expect(compactionConfig.contextWindow).toBe(32768);
-    expect(usedFallback).toBe(true);
-  });
-
-  it('resolveCompactionConfig passes a stated window through unchanged', () => {
-    const { compactionConfig, usedFallback } = resolveCompactionConfig({ contextWindow: 128000 } as CliConfig);
-
-    expect(compactionConfig.contextWindow).toBe(128000);
-    expect(usedFallback).toBe(false);
-  });
-
-  it('compacts proactively and logs the fallback when no window is stated', async () => {
-    const adapter = scriptedAdapter([[doneEnd]]);
-    const { deps, stderr } = harness(adapter, fakePool());
+    const { deps, stderr } = harness(adapter, fakePool(), {
+      discoverContextWindow: async () => ({ window: 200000, source: 'anthropic' }),
+    });
 
     await runCli([...BASE_ARGS, 'go'], {}, deps);
 
-    // Not `... 32768 tokens` verbatim: BASE_ARGS's token is the literal 'tok',
-    // and redaction replaces every occurrence of a configured credential —
-    // including as a substring of 'tokens' — with a placeholder.
-    expect(stderr.join('\n')).toContain(`conservative fallback of ${DEFAULT_FALLBACK_CONTEXT_WINDOW}`);
-    expect(stderr.join('\n')).toContain('context window unstated');
+    expect(stderr.join('\n')).toContain('context window 200000 (anthropic)');
   });
 
-  it('does not log a fallback when the operator stated a window', async () => {
+  it('falls back to DEFAULT_FALLBACK_CONTEXT_WINDOW and logs the fallback reason when discovery fails', async () => {
     const adapter = scriptedAdapter([[doneEnd]]);
-    const { deps, stderr } = harness(adapter, fakePool());
+    const { deps, stderr } = harness(adapter, fakePool(), {
+      discoverContextWindow: async () => ({
+        window: DEFAULT_FALLBACK_CONTEXT_WINDOW,
+        source: 'fallback: provider responded with status 401',
+      }),
+    });
 
-    await runCli(['--context-window', '128000', ...BASE_ARGS, 'go'], {}, deps);
+    await runCli([...BASE_ARGS, 'go'], {}, deps);
 
-    expect(stderr.join('\n')).not.toContain('conservative fallback');
+    expect(stderr.join('\n')).toContain(`context window ${DEFAULT_FALLBACK_CONTEXT_WINDOW}`);
+    expect(stderr.join('\n')).toContain('fallback:');
   });
 
-  // parseInt stops at the first non-digit and keeps what it has, so every
-  // natural way of writing a large number becomes a tiny one that validates —
-  // and a tiny window compacts the conversation to its floor every turn,
-  // silently, while the run looks healthy.
-  it.each(['1e6', '128k', '1_000_000', '0x20000', '200000abc', '1.5'])(
-    'refuses %s rather than silently reading a small number out of it',
-    async (raw) => {
-      const adapter = scriptedAdapter([[doneEnd]]);
-      const { deps, stderr } = harness(adapter, fakePool());
+  it('discovers the screening adapter independently of the main adapter', async () => {
+    const adapter = scriptedAdapter([finishRunTurn, [doneEnd]]);
+    const seen: Array<{ model: string }> = [];
+    const { deps, createAdapter } = harness(adapter, fakePool(), {
+      discoverContextWindow: async (opts) => {
+        seen.push({ model: opts.model });
+        return { window: opts.model === 'screen-model' ? 32000 : 200000, source: 'test' };
+      },
+    });
 
-      const code = await runCli(['--context-window', raw, ...BASE_ARGS, 'go'], {}, deps);
+    await runCli([...BASE_ARGS, '--screening-model', 'screen-model', '--screening-token', 'screen-tok', 'go'], {}, deps);
 
-      expect(code).toBe(ExitCode.BadConfig);
-      expect(stderr.join('\n')).toContain('--context-window');
-    },
-  );
-
-  it('refuses a window too small to be anything but a typo', async () => {
-    const adapter = scriptedAdapter([[doneEnd]]);
-    const { deps, stderr } = harness(adapter, fakePool());
-
-    const code = await runCli(['--context-window', '512', ...BASE_ARGS, 'go'], {}, deps);
-
-    expect(code).toBe(ExitCode.BadConfig);
-    expect(stderr.join('\n')).toContain('at least');
-  });
-
-  it('rejects a negative window rather than treating it as unknown', async () => {
-    const adapter = scriptedAdapter([[doneEnd]]);
-    const { deps, stderr } = harness(adapter, fakePool());
-
-    const code = await runCli(['--context-window', '-1', ...BASE_ARGS, 'go'], {}, deps);
-
-    expect(code).toBe(ExitCode.BadConfig);
-    expect(stderr.join('\n')).toContain('--context-window');
+    expect(seen.map((s) => s.model).sort()).toEqual(['m', 'screen-model']);
+    const calls = createAdapter.mock.calls as Array<[{ model: string; contextWindow: number }]>;
+    const main = calls.find((c) => c[0].model === 'm')!;
+    const screening = calls.find((c) => c[0].model === 'screen-model')!;
+    expect(main[0].contextWindow).toBe(200000);
+    expect(screening[0].contextWindow).toBe(32000);
   });
 });
 
@@ -590,6 +567,79 @@ describe('the tool-concurrency cap reaches the loop config', () => {
 
     expect(code).toBe(ExitCode.BadConfig);
     expect(stderr.join('\n')).toContain('--max-tool-concurrency');
+  });
+});
+
+describe('the retry-patience caps reach the resolved config', () => {
+  const noopIo = { readFileText: async () => '', readStdin: async () => '' };
+
+  it('defaults maxConsecutiveRetries and maxRetryDelayMs when neither flag nor env is set', async () => {
+    const config = await resolveConfig(parseArgs([...BASE_ARGS, 'go']), {}, noopIo);
+
+    expect(config.maxConsecutiveRetries).toBe(12);
+    expect(config.maxRetryDelayMs).toBe(300_000);
+  });
+
+  it('accepts AGENT_MAX_RETRIES and AGENT_MAX_RETRY_DELAY_MS from the environment', async () => {
+    const config = await resolveConfig(
+      parseArgs([...BASE_ARGS, 'go']),
+      { AGENT_MAX_RETRIES: '5', AGENT_MAX_RETRY_DELAY_MS: '10000' },
+      noopIo,
+    );
+
+    expect(config.maxConsecutiveRetries).toBe(5);
+    expect(config.maxRetryDelayMs).toBe(10000);
+  });
+
+  it('lets --max-retries and --max-retry-delay-ms override the environment', async () => {
+    const config = await resolveConfig(
+      parseArgs([...BASE_ARGS, '--max-retries', '3', '--max-retry-delay-ms', '2000', 'go']),
+      { AGENT_MAX_RETRIES: '5', AGENT_MAX_RETRY_DELAY_MS: '10000' },
+      noopIo,
+    );
+
+    expect(config.maxConsecutiveRetries).toBe(3);
+    expect(config.maxRetryDelayMs).toBe(2000);
+  });
+
+  it.each(['0', '-1', 'abc', '1.5'])('refuses %s as --max-retries with a BadConfig exit', async (raw) => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, stderr } = harness(adapter, fakePool());
+
+    const code = await runCli([...BASE_ARGS, '--max-retries', raw, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.BadConfig);
+    expect(stderr.join('\n')).toContain('--max-retries');
+  });
+
+  it('refuses a bad AGENT_MAX_RETRIES with a BadConfig exit', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, stderr } = harness(adapter, fakePool());
+
+    const code = await runCli([...BASE_ARGS, 'go'], { AGENT_MAX_RETRIES: '0' }, deps);
+
+    expect(code).toBe(ExitCode.BadConfig);
+    expect(stderr.join('\n')).toContain('--max-retries');
+  });
+
+  it.each(['0', '-1', 'abc', '1.5'])('refuses %s as --max-retry-delay-ms with a BadConfig exit', async (raw) => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, stderr } = harness(adapter, fakePool());
+
+    const code = await runCli([...BASE_ARGS, '--max-retry-delay-ms', raw, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.BadConfig);
+    expect(stderr.join('\n')).toContain('--max-retry-delay-ms');
+  });
+
+  it('refuses a bad AGENT_MAX_RETRY_DELAY_MS with a BadConfig exit', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, stderr } = harness(adapter, fakePool());
+
+    const code = await runCli([...BASE_ARGS, 'go'], { AGENT_MAX_RETRY_DELAY_MS: '0' }, deps);
+
+    expect(code).toBe(ExitCode.BadConfig);
+    expect(stderr.join('\n')).toContain('--max-retry-delay-ms');
   });
 });
 
@@ -832,14 +882,120 @@ describe('runCli unfinished runs', () => {
     expect(forgotCode).toBe(ExitCode.UnfinishedRun);
     expect(reasonText(wentSilent)).toContain('repeatedly returned no content and no tool calls');
     expect(reasonText(wentSilent)).not.toBe(reasonText(forgotFinishRun));
-    // The run that merely forgot the call still reads exactly as it always has.
+    // A run that merely forgot the call is now reminded first (the script
+    // repeats its last text-only end), so it stops on the nudge cap and says so.
     expect(reasonText(forgotFinishRun)).toBe(
-      'the agent stopped without calling finish_run — the run was abandoned before it reported an outcome, so its counters are incomplete',
+      'the agent stopped without calling finish_run (model ended the run without calling finish_run, even after ' +
+        'being reminded); screenings and applications still count from their records, but postings seen and ' +
+        'discovery coverage are partial',
+    );
+  });
+
+  it('keeps the abandoned-run reason under the reason-file cap for every cause', async () => {
+    const wentSilent = vi.fn(async () => {});
+    const { deps: silentDeps } = harness(scriptedAdapter([[doneEmptyTurn]]), fakePool(), { writeOutput: wentSilent });
+    const doneTextOnlyForCap: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'still going' },
+    };
+    const textOnly = vi.fn(async () => {});
+    const { deps: textOnlyDeps } = harness(
+      scriptedAdapter([[doneTextOnlyForCap], [doneTextOnlyForCap], [doneTextOnlyForCap], [doneTextOnlyForCap]]),
+      fakePool(),
+      { writeOutput: textOnly },
+    );
+
+    await runCli([...BASE_ARGS, '--reason-file', REASON_PATH, 'go'], {}, silentDeps);
+    await runCli([...BASE_ARGS, '--reason-file', REASON_PATH, 'go'], {}, textOnlyDeps);
+
+    for (const spy of [wentSilent, textOnly]) {
+      const text = reasonText(spy) ?? '';
+      expect(text).not.toBe('');
+      expect(text).not.toMatch(/…$/);
+      expect(text.length).toBeLessThanOrEqual(240);
+      expect(text).toContain('discovery coverage are partial');
+    }
+  });
+
+  it('names UNFINISHED_STOP_DETAIL as a cause the same way EMPTY_TURN_STOP_DETAIL is', async () => {
+    const nudgedThenGaveUp = vi.fn(async () => {});
+    const doneTextOnly: HarnessEvent = {
+      type: 'done',
+      stopReason: 'end',
+      message: { role: 'assistant', content: 'still going' },
+    };
+    const { deps } = harness(scriptedAdapter([[doneTextOnly], [doneTextOnly], [doneTextOnly], [doneTextOnly]]), fakePool(), {
+      writeOutput: nudgedThenGaveUp,
+    });
+
+    const code = await runCli([...BASE_ARGS, '--reason-file', REASON_PATH, 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.UnfinishedRun);
+    expect(reasonText(nudgedThenGaveUp)).toContain(
+      'model ended the run without calling finish_run, even after being reminded',
     );
   });
 
   // The other direction: the guard must not fail a run that did report its
   // outcome, or every healthy night turns red.
+  it('writes separate run-attributed diagnostics without changing stdout or the exit code', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-diagnostics-'));
+    try {
+      const file = join(dir, 'diagnostics_run1.ndjson');
+      const { deps, stdout } = harness(scriptedAdapter([finishRunTurn, [doneEnd]]), fakePool());
+      const code = await runCli([...BASE_ARGS, '--run-id', 'run1', '--diagnostics-file', file, 'go'], {}, deps);
+      expect(code).toBe(ExitCode.Success);
+      const data = await readFile(file, 'utf8');
+      expect(data).toContain('"run_id":"run1"');
+      expect(data).not.toContain('"content"');
+      expect(stdout.some((line) => line.includes('"type":"done"'))).toBe(true);
+      expect(createDiagnostics(file, '../bad').available()).toBe(false);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it('keeps the optional channel open across a model wait and closes it on exit', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-health-'));
+    const updates: Array<[string, number]> = [];
+    const close = vi.fn();
+    let release = () => {};
+    const waiting: ProviderAdapter = { async *sendMessage() {
+      await new Promise<void>((resolve) => { release = resolve; });
+      yield { type: 'error', retryable: false, message: 'provider failure' } as HarnessEvent;
+    } };
+    try {
+      const { deps, stdout } = harness(waiting, fakePool(), {
+        healthWriter: () => ({ update: (state, sequence) => { updates.push([state, sequence]); }, close }),
+      });
+      const file = join(dir, 'diagnostics_run1.ndjson');
+      const result = runCli([...BASE_ARGS, '--run-id', 'run1', '--diagnostics-file', file, 'go'],
+        { TRUTHCV_DIAGNOSTICS_FD: '3' }, deps);
+      // A model start is persisted before the transport's long wait resolves.
+      for (let i = 0; i < 100 && updates.length === 0; i++) await new Promise((done) => setTimeout(done, 1));
+      expect(updates[0]).toEqual(['healthy', 1]);
+      expect(close).not.toHaveBeenCalled();
+      release();
+      expect(await result).toBe(ExitCode.ProviderError);
+      expect(close).toHaveBeenCalledOnce();
+      expect(stdout.at(-1)).toContain('"type":"done"');
+    } finally { release(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it('does not create a channel for a standalone CLI invocation', async () => {
+    const healthWriter = vi.fn();
+    const { deps } = harness(scriptedAdapter([finishRunTurn, [doneEnd]]), fakePool(), { healthWriter });
+    expect(await runCli([...BASE_ARGS, 'go'], {}, deps)).toBe(ExitCode.Success);
+    expect(healthWriter).not.toHaveBeenCalled();
+  });
+
+  it('ignores a diagnostic write failure while preserving reason and stdout', async () => {
+    const { deps, stdout } = harness(scriptedAdapter([[{ type: 'error', retryable: false, message: 'bad' }]]), fakePool());
+    const code = await runCli([...BASE_ARGS, '--run-id', 'run1',
+      '--diagnostics-file', '/nonexistent/diagnostics_run1.ndjson', 'go'], {}, deps);
+    expect(code).toBe(ExitCode.ProviderError);
+    expect(stdout.some((line) => line.includes('"type":"done"'))).toBe(true);
+  });
+
   it('still exits 0 when the run called finish_run before ending', async () => {
     const adapter = scriptedAdapter([
       [{ type: 'toolCall', toolCall: A_TOOL_CALL }, doneToolCalls('')],
@@ -851,5 +1007,131 @@ describe('runCli unfinished runs', () => {
     const code = await runCli([...BASE_ARGS, 'go'], {}, deps);
 
     expect(code).toBe(ExitCode.Success);
+  });
+});
+
+describe('--finish-tool', () => {
+  /** A pool advertising `finish_phase` alongside the usual allowed tools. */
+  function poolWithFinishPhase(): McpClientPool {
+    return fakePool([
+      { namespacedName: 'truthcv__start_run', serverName: 'truthcv', toolName: 'start_run', description: 'd', inputSchema: { type: 'object' } },
+      { namespacedName: 'truthcv__finish_phase', serverName: 'truthcv', toolName: 'finish_phase', description: 'd', inputSchema: { type: 'object' } },
+      ...BROWSER_TOOLS,
+    ]);
+  }
+
+  const FINISH_PHASE_CALL: ToolCall = { id: 'p1', name: 'truthcv__finish_phase', arguments: {} };
+  const finishPhaseTurn: HarnessEvent[] = [
+    { type: 'toolCall', toolCall: FINISH_PHASE_CALL },
+    { type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [FINISH_PHASE_CALL] } },
+  ];
+
+  it('defaults finishToolName to finish_run', async () => {
+    const config = await resolveConfig(parseArgs([...BASE_ARGS, 'go']), {}, { readFileText: async () => '', readStdin: async () => '' });
+    expect(config.finishToolName).toBe('finish_run');
+  });
+
+  it('accepts AGENT_FINISH_TOOL from the environment, overridden by --finish-tool', async () => {
+    const noopIo = { readFileText: async () => '', readStdin: async () => '' };
+    const fromEnv = await resolveConfig(parseArgs([...BASE_ARGS, 'go']), { AGENT_FINISH_TOOL: 'finish_phase' }, noopIo);
+    expect(fromEnv.finishToolName).toBe('finish_phase');
+    const fromFlag = await resolveConfig(
+      parseArgs([...BASE_ARGS, '--finish-tool', 'finish_phase', 'go']),
+      { AGENT_FINISH_TOOL: 'finish_run' },
+      noopIo,
+    );
+    expect(fromFlag.finishToolName).toBe('finish_phase');
+  });
+
+  it('rejects an unrecognized --finish-tool value as a config error', async () => {
+    const adapter = scriptedAdapter([[doneEnd]]);
+    const { deps, stderr } = harness(adapter, fakePool());
+    const code = await runCli([...BASE_ARGS, '--finish-tool', 'bogus', 'go'], {}, deps);
+    expect(code).toBe(ExitCode.BadConfig);
+    expect(stderr.join('\n')).toContain('--finish-tool');
+  });
+
+  it('exits 0 when --finish-tool finish_phase is executed before a clean end', async () => {
+    const adapter = scriptedAdapter([finishPhaseTurn, [doneEnd]]);
+    const { deps } = harness(adapter, poolWithFinishPhase());
+
+    const code = await runCli([...BASE_ARGS, '--finish-tool', 'finish_phase', 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.Success);
+  });
+
+  it('exits 6 when --finish-tool finish_phase is never called before a clean end', async () => {
+    const adapter = scriptedAdapter([
+      [{ type: 'toolCall', toolCall: A_TOOL_CALL }, doneToolCalls('')],
+      [doneEnd],
+    ]);
+    const { deps } = harness(adapter, poolWithFinishPhase());
+
+    const code = await runCli([...BASE_ARGS, '--finish-tool', 'finish_phase', 'go'], {}, deps);
+
+    expect(code).toBe(ExitCode.UnfinishedRun);
+  });
+});
+
+describe('per-stage routes file', () => {
+  const route = (model: string, token: string) => ({
+    authType: 'api_key', token, model, baseUrl: '', provider: 'claude', wire: 'anthropic-messages',
+  });
+  const io = (doc: unknown) => ({
+    readFileText: async (p: string) => (p === 'routes.json' ? JSON.stringify(doc) : ''),
+    readStdin: async () => '',
+  });
+  const RF = ['--routes-file', 'routes.json'];
+
+  it('uses the routes file apply route when no main flags are given', async () => {
+    const c = await resolveConfig(parseArgs([...RF, 'go']), {}, io({ stages: { apply: route('ap', 'A'), screening: null, extract: null } }));
+    expect([c.model, c.token]).toEqual(['ap', 'A']);
+    expect(c.screeningModel).toBe('ap');
+    expect(c.stageRoutes?.extract.model).toBe('ap');
+  });
+
+  it('an explicit model overrides only the model; other apply-route fields stay', async () => {
+    const doc = { stages: { apply: route('ap', 'A'), screening: null, extract: null } };
+    const env = await resolveConfig(parseArgs([...RF, 'go']), { AGENT_LLM_MODEL: 'env-m' }, io(doc));
+    expect([env.model, env.token, env.provider, env.wire]).toEqual(['env-m', 'A', 'claude', 'anthropic-messages']);
+    const flag = await resolveConfig(parseArgs([...RF, '--model', 'flag-m', 'go']), {}, io(doc));
+    expect([flag.model, flag.token]).toEqual(['flag-m', 'A']);
+    const scr = await resolveConfig(parseArgs([...RF, '--screening-model', 'sm', 'go']), {}, io({ stages: { apply: route('ap', 'A'), screening: route('sc', 'S'), extract: null } }));
+    expect([scr.screeningModel, scr.screeningToken]).toEqual(['sm', 'S']);
+  });
+
+  it('falls back extract -> screening -> apply', async () => {
+    const c = await resolveConfig(parseArgs([...RF, 'go']), {}, io({ stages: { apply: route('ap', 'A'), screening: route('sc', 'S'), extract: null } }));
+    expect(c.stageRoutes?.extract.model).toBe('sc');
+    expect(c.screeningToken).toBe('S');
+  });
+
+  it('explicit main flags beat the apply route; screening flags beat the screening route', async () => {
+    const doc = { stages: { apply: route('ap', 'A'), screening: route('sc', 'S'), extract: null } };
+    const c = await resolveConfig(
+      parseArgs([...BASE_ARGS, ...RF, '--screening-model', 'flag-sc', 'go']), { AGENT_SCREENING_MODEL: 'env-sc' }, io(doc));
+    expect(c.model).toBe('m');
+    expect(c.screeningModel).toBe('flag-sc');
+    expect(c.screeningToken).toBe('S');
+    const e = await resolveConfig(parseArgs([...BASE_ARGS, ...RF, 'go']), { AGENT_SCREENING_MODEL: 'env-sc' }, io(doc));
+    expect(e.screeningModel).toBe('env-sc');
+  });
+
+  it('redacts every resolved stage token', async () => {
+    const screenCall: ToolCall = {
+      id: 'sc1', name: 'screen_posting',
+      arguments: { url: 'https://example.com/jobs/1', role: 'E', company: 'A', postingText: 'x', profile: 'B', criteria: 'c' },
+    };
+    const leak = [{ type: 'error', message: 'boom key=ROUTE-SCREEN-TOK', retryable: false } as HarnessEvent];
+    const adapter = scriptedAdapter([
+      [{ type: 'toolCall', toolCall: screenCall }, { type: 'done', stopReason: 'toolCalls', message: { role: 'assistant', content: '', toolCalls: [screenCall] } }],
+      leak, leak, finishRunTurn, [doneEnd],
+    ]);
+    const doc = { stages: { apply: null, screening: route('sc', 'ROUTE-SCREEN-TOK'), extract: route('ex', 'ROUTE-EXTRACT-TOK') } };
+    const { deps, stdout, stderr } = harness(adapter, fakePool(), { readFileText: io(doc).readFileText });
+    await runCli([...BASE_ARGS, ...RF, 'go'], {}, deps);
+    const all = [...stdout, ...stderr].join('\n');
+    expect(all).not.toContain('ROUTE-SCREEN-TOK');
+    expect(all).not.toContain('ROUTE-EXTRACT-TOK');
   });
 });

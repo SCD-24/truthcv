@@ -22,18 +22,15 @@ import {
   cancelAgentRun,
   getAgentStatus,
   getProfileAnswers,
-  getRouting,
-  listConnections,
   listRuns,
   saveProfileAnswers,
   triggerAgentRun,
   updateAgentConfig,
-  updateRouting,
 } from "../api/client";
 import { ButtonSpinner } from "../components/ButtonSpinner";
-import { ModelRoutePicker } from "../settings/ModelRoutePicker";
 import { SettingsModal } from "../settings/SettingsModal";
 import { RunCoverage } from "./RunCoverage";
+import { RunItemErrors } from "./RunItemErrors";
 import { RunDetailModal } from "./RunDetailModal";
 import {
   DEFAULT_TIMEZONE,
@@ -46,10 +43,8 @@ import {
 import type {
   AgentConfig,
   AgentStatus,
-  ConnectionStatus,
   JobProfile,
   ProfileAnswers,
-  Routing,
   RunPage,
   RunRecord,
   RunStopResult,
@@ -128,10 +123,6 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
   // modal (e.g. the cooldown windows) — opens it scrolled to that section.
   const [settingsSection, setSettingsSection] = useState<"job-search-policy" | null>(null);
 
-  const [connections, setConnections] = useState<ConnectionStatus[]>([]);
-  const [routing, setRouting] = useState<Routing | null>(null);
-  const [modelLoadError, setModelLoadError] = useState<string | null>(null);
-
   useEffect(() => {
     let alive = true;
     Promise.all([getAgentConfig(), getProfileAnswers()])
@@ -144,26 +135,6 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
         setLoadError(e instanceof Error ? e.message : "Couldn't load the agent's configuration."),
       )
       .finally(() => alive && setLoading(false));
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  // Loaded on its own chain, separate from the three loads above: a routing
-  // or connections failure must only take out the Model section, per this
-  // file's own per-section failure-isolation contract — not the whole page.
-  useEffect(() => {
-    let alive = true;
-    Promise.all([getRouting(), listConnections()])
-      .then(([r, conns]) => {
-        if (!alive) return;
-        setRouting(r);
-        setConnections(conns.connections);
-      })
-      .catch((e: unknown) => {
-        if (!alive) return;
-        setModelLoadError(e instanceof Error ? e.message : "Couldn't load the model section.");
-      });
     return () => {
       alive = false;
     };
@@ -202,15 +173,6 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
           />
           <RunNowSection agentEnabled={config.enabled} />
           <RecentRunsSection timeZone={config.runTimezone || DEFAULT_TIMEZONE} />
-          {routing ? (
-            <ModelSection connections={connections} routing={routing} onSaved={setRouting} />
-          ) : (
-            modelLoadError && (
-              <Section title="Model">
-                <Alert severity="error">{modelLoadError}</Alert>
-              </Section>
-            )
-          )}
           <ScheduleSection config={config} onChange={setConfig} />
           <ProfilesSection
             config={config}
@@ -258,67 +220,115 @@ function RunNowSection({ agentEnabled }: { agentEnabled: boolean }) {
   const [cancelling, setCancelling] = useState(false);
   const [unreachable, setUnreachable] = useState<string | null>(null);
 
-  // Ref always holds the *current* active interval ID so the cleanup function
-  // clears whichever interval is live at unmount time, including any that were
+  // Ref always holds the *current* pending poll timer so the cleanup function
+  // clears whichever one is live at unmount time, including any that were
   // started by pace changes inside the poll callback.
-  const pollIdRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Mounted-ness has to outlive the effect closure: `setPoll` is called from
-  // async continuations (the cancel POST, the status poll) that can resolve
-  // after unmount. Without this an interval was installed on a dead component
-  // AFTER cleanup had already run, so nothing could ever clear it — a 2-second
-  // poll for the rest of the session.
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mounted-ness has to outlive the effect closure: continuations (the cancel
+  // POST, the status poll) can resolve after unmount. Without this a timer
+  // was installed on a dead component AFTER cleanup had already run, so
+  // nothing could ever clear it — a poll for the rest of the session.
   const aliveRef = useRef(true);
+  // The pace the poller is currently scheduled at, so a hidden-tab skip or a
+  // visibility-triggered poll reschedules at the right cadence.
+  const intervalRef = useRef(STATUS_POLL_IDLE_MS);
+  // Bumped on every request issued; a reply is applied only if it is still
+  // the newest one outstanding, so a slow response can never land after (and
+  // clobber) a faster one issued after it.
+  const seqRef = useRef(0);
+  // True while a status request (poll or the mount-time fetch) is
+  // outstanding, so a visibilitychange firing mid-request does not start a
+  // second, overlapping one.
+  const inFlightRef = useRef(false);
 
-  /** Replace the current poll with one at a new interval, unless unmounted. */
-  function setPoll(intervalMs: number) {
-    if (pollIdRef.current != null) clearInterval(pollIdRef.current);
-    pollIdRef.current = null;
+  function clearPollTimer() {
+    if (pollTimerRef.current != null) clearTimeout(pollTimerRef.current);
+    pollTimerRef.current = null;
+  }
+
+  /** Fetch status once, then reschedule itself after the request settles (or
+   * is skipped). A backgrounded tab has no one to show the result to, so a
+   * poll due while hidden is skipped rather than fetched — it still
+   * reschedules so polling resumes the moment the tab is shown again. */
+  function pollOnce() {
+    clearPollTimer();
     if (!aliveRef.current) return;
-    pollIdRef.current = setInterval(() => {
-      getAgentStatus()
-        .then((s) => {
-          setAgentStatus(s);
-          setUnreachable(null);
-          // The run is gone, so a cancel of it is no longer in progress —
-          // clear the local flag or the button stays stuck on "Stopping…".
-          if (!s.running) setCancelling(false);
-          // Slow down once the run finishes
-          if (!s.running && intervalMs === STATUS_POLL_ACTIVE_MS) {
-            setPoll(STATUS_POLL_IDLE_MS);
-          }
-        })
-        .catch((e: unknown) => {
-          setUnreachable(e instanceof Error ? e.message : "Agent service unreachable");
-        });
-    }, intervalMs);
+    if (inFlightRef.current) return;
+    if (document.hidden) {
+      pollTimerRef.current = setTimeout(pollOnce, intervalRef.current);
+      return;
+    }
+    const seq = ++seqRef.current;
+    inFlightRef.current = true;
+    getAgentStatus()
+      .then((s) => {
+        if (!aliveRef.current || seq !== seqRef.current) return;
+        setAgentStatus(s);
+        setUnreachable(null);
+        // The run is gone, so a cancel of it is no longer in progress —
+        // clear the local flag or the button stays stuck on "Stopping…".
+        if (!s.running) setCancelling(false);
+        intervalRef.current = s.running ? STATUS_POLL_ACTIVE_MS : STATUS_POLL_IDLE_MS;
+      })
+      .catch((e: unknown) => {
+        if (!aliveRef.current || seq !== seqRef.current) return;
+        setUnreachable(e instanceof Error ? e.message : "Agent service unreachable");
+      })
+      .finally(() => {
+        inFlightRef.current = false;
+        if (!aliveRef.current) return;
+        pollTimerRef.current = setTimeout(pollOnce, intervalRef.current);
+      });
+  }
+
+  /** (Re)schedule the next poll at a new interval, unless unmounted. */
+  function setPoll(intervalMs: number) {
+    intervalRef.current = intervalMs;
+    clearPollTimer();
+    if (!aliveRef.current) return;
+    pollTimerRef.current = setTimeout(pollOnce, intervalMs);
   }
 
   useEffect(() => {
     aliveRef.current = true;
     let alive = true;
 
-    // Kick off an immediate status fetch, then start the poller
+    // Poll once immediately when the tab becomes visible again, rather than
+    // waiting out whatever's left of the current interval. pollOnce itself
+    // both skips while a request is already in flight and clears/replaces
+    // whatever timer was pending, so this is the only place that schedules a
+    // poll in response to visibility — never a second, competing timer.
+    const onVisibilityChange = () => {
+      if (!document.hidden) pollOnce();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    // Kick off an immediate status fetch, through the same sequence guard (and
+    // the same in-flight tracking) as every poll, then start the poller.
+    const seq = ++seqRef.current;
+    inFlightRef.current = true;
     getAgentStatus()
       .then((s) => {
-        if (!alive) return;
+        if (!alive || seq !== seqRef.current) return;
         setAgentStatus(s);
         setUnreachable(null);
         setPoll(s.running ? STATUS_POLL_ACTIVE_MS : STATUS_POLL_IDLE_MS);
       })
       .catch((e: unknown) => {
-        if (!alive) return;
+        if (!alive || seq !== seqRef.current) return;
         setUnreachable(e instanceof Error ? e.message : "Agent service unreachable");
         // Keep polling so we recover when the container comes back up
         setPoll(STATUS_POLL_IDLE_MS);
+      })
+      .finally(() => {
+        inFlightRef.current = false;
       });
 
     return () => {
       alive = false;
       aliveRef.current = false;
-      if (pollIdRef.current != null) clearInterval(pollIdRef.current);
-      // Null it too: a later `setPoll` from an in-flight promise would
-      // otherwise clear an already-cleared id and install a fresh interval.
-      pollIdRef.current = null;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearPollTimer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -474,10 +484,20 @@ function RecentRunsSection({ timeZone }: { timeZone?: string } = {}) {
   useEffect(() => {
     aliveRef.current = true;
     refresh();
-    const id = setInterval(refresh, STATUS_POLL_IDLE_MS);
+    // A backgrounded tab has no one to show a refreshed list to; skip the
+    // fetch while hidden, and catch up with one immediate refresh when the
+    // tab is shown again rather than waiting out the rest of the interval.
+    const id = setInterval(() => {
+      if (!document.hidden) refresh();
+    }, STATUS_POLL_IDLE_MS);
+    const onVisibilityChange = () => {
+      if (!document.hidden) refresh();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       aliveRef.current = false;
       clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [refresh]);
 
@@ -601,23 +621,27 @@ function RunSummaryRow({
   
   return (
     <Paper
+      variant="outlined"
+      sx={{
+        borderColor: isRunning ? "info.main" : undefined,
+        transition: "all 0.2s ease-in-out",
+        "&:hover": {
+          backgroundColor: "rgba(0, 0, 0, 0.02)",
+        },
+      }}
+    >
+    <Box
       role="button"
       tabIndex={0}
       onClick={onSelect}
       onKeyDown={handleKeyDown}
-      variant="outlined"
       sx={{
         p: 1.5,
-        borderColor: isRunning ? "info.main" : undefined,
         cursor: "pointer",
         "&:focus-visible": {
           outline: "2px solid",
           outlineColor: "primary.main",
-          outlineOffset: "2px",
-        },
-        transition: "all 0.2s ease-in-out",
-        "&:hover": {
-          backgroundColor: "rgba(0, 0, 0, 0.02)",
+          outlineOffset: "-2px",
         },
       }}
       aria-label={`Run ${run.id}`}
@@ -661,8 +685,13 @@ function RunSummaryRow({
             Over cap: {run.overCapWrites}
           </Typography>
         )}
+        {(run.itemsFailed ?? 0) > 0 && (
+          <Typography variant="caption" color="warning.main">
+            Items failed: {run.itemsFailed}
+          </Typography>
+        )}
       </Stack>
-      <RunCoverage coverage={run.discoveryCoverage} />
+      <RunCoverage coverage={run.discoveryCoverage} status={run.status} />
       {run.stoppedReason && (
         <Typography
           variant="caption"
@@ -672,6 +701,8 @@ function RunSummaryRow({
           Stopped: {run.stoppedReason}
         </Typography>
       )}
+    </Box>
+    <RunItemErrors errors={run.itemErrors ?? []} />
     </Paper>
   );
 }
@@ -782,43 +813,6 @@ function ModeSection({
       </Typography>
       {error && <Alert severity="error">{error}</Alert>}
     </Section>
-  );
-}
-
-/** The model the unattended agent runs on — a ModelRoutePicker that now
- * supports THREE wires (see agent/harness/providers/registry.ts):
- * - anthropic-messages (claude)
- * - openai-chat-completions (openrouter, codex api-key)
- * - openai-responses (codex subscription)
- * 
- * Previously this was limited to anthropic-messages only (claude + openrouter).
- * With the codex subscription wire (openai-responses) the ChatGPT (OpenAI)
- * card is now also a valid agent target when connected via subscription.
- * saving/clearing the `agent` route.
- * Cleared falls back to the container's ANTHROPIC_API_KEY. */
-function ModelSection({
-  connections,
-  routing,
-  onSaved,
-}: {
-  connections: ConnectionStatus[];
-  routing: Routing;
-  onSaved: (r: Routing) => void;
-}) {
-  return (
-    <ModelRoutePicker
-      connections={connections}
-      route={routing.agent}
-      onSave={async (route) => {
-        const fresh = await updateRouting({ agent: route });
-        onSaved(fresh);
-      }}
-      title="Model"
-      description="Model and account the unattended agent runs on. Cleared = the container's ANTHROPIC_API_KEY."
-      filterCards={["claude", "openrouter", "codex"]}
-      allowClear
-      showTest={false}
-    />
   );
 }
 
@@ -979,6 +973,7 @@ interface ProfileDraft {
   name: string;
   enabled: boolean;
   keywordsText: string;
+  titleKeywordsText: string;
   locationsText: string;
   remoteModel: string;
   employmentCountry: string;
@@ -1032,6 +1027,7 @@ function profileToDraft(p: JobProfile): ProfileDraft {
     name: p.name,
     enabled: p.enabled,
     keywordsText: listToText(p.keywords),
+    titleKeywordsText: listToText(p.titleKeywords ?? []),
     locationsText: listToText(p.locations),
     remoteModel: p.remoteModel ?? "",
     employmentCountry: p.employmentCountry ?? "",
@@ -1054,6 +1050,7 @@ function emptyDraft(): ProfileDraft {
     name: "New profile",
     enabled: true,
     keywordsText: "",
+    titleKeywordsText: "",
     locationsText: "",
     remoteModel: "remote",
     employmentCountry: "Germany",
@@ -1077,6 +1074,7 @@ function draftToProfile(d: ProfileDraft): JobProfile {
     name: d.name.trim(),
     enabled: d.enabled,
     keywords: textToList(d.keywordsText),
+    titleKeywords: textToList(d.titleKeywordsText),
     locations: textToList(d.locationsText),
     remoteModel: d.remoteModel.trim() || null,
     employmentCountry: d.employmentCountry.trim() || null,
@@ -1261,6 +1259,14 @@ function ProfilesSection({
                   value={draft.keywordsText}
                   onChange={(e) => updateDraft(index, { keywordsText: e.target.value })}
                   helperText="Comma-separated. Blank means no keyword filter."
+                />
+                <TextField
+                  label="Job titles (search)"
+                  size="small"
+                  fullWidth
+                  value={draft.titleKeywordsText}
+                  onChange={(e) => updateDraft(index, { titleKeywordsText: e.target.value })}
+                  helperText="Comma-separated job titles used for Google searches. Blank means titles are picked out of Keywords automatically."
                 />
                 <TextField
                   label="Locations"

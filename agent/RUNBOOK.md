@@ -209,7 +209,8 @@ Record which profile drove each application in the screening report.
 
 The profile's `keywords` and `locations` are not screening criteria — they
 drive discovery instead, alongside the global job boards list on the Agents
-page (which always includes the default boards); see §5's Discovery
+page (which includes the default boards unless the operator has switched
+one off on the Job Boards page); see §5's Discovery
 subsection.
 
 **Verify entity and remote policy on the employer's own posting.** Never
@@ -299,20 +300,35 @@ deliberately does not duplicate its values.
 
 ### Discovery
 
+**Pipeline mode (the only mode; any other `AGENT_SESSION_MODE` aborts).** Code, not you, runs discovery, coverage recording and screening; an apply session only applies the one posting handed to it and ends with `finish_application`.
+
 Discovery works three channels, and they are worked in a fixed order:
 **feed**, then **direct boards**, then **dork queries**. Take one full pass
 over every board or query in a channel before starting a second pass on any
 channel — do not dork a query twice while a direct board in the same run has
 never been touched. Skipping a board or query is never acceptable: work it
 and call `record_discovery_coverage`, described below, even when it turns up
-nothing.
+nothing. The feed channel is a single pass; a feed posting whose
+`screen_and_record_posting` call returns `created:false` means it was already
+screened in an earlier run — a normal outcome, never a reason to stop or to
+skip direct boards or dork queries. Recording `skipped` coverage for a board
+you simply never got to, while turns remain, is not acceptable either.
+`finish_run` enforces this directly: the first `status: "completed"` call is
+refused while direct-board or dork-query coverage is short of the configured
+count or has `skipped` entries, with a message to go back and finish it; call
+it again only if you genuinely cannot continue (turn limit, browser down),
+with an honest `stopped_reason` — the second call always closes the run.
 
 The **feed** channel is postings pulled from API-backed job boards — boards
 that expose a real search API rather than requiring a browser session at all.
-Your run prompt may carry a feed block listing these postings directly,
-already fetched; there is no browser step for this channel; work the list it
-gives you the same way you would work a dorked or direct-board result, into
-the normal Applying flow below.
+Your run prompt may carry a feed block listing URLs and metadata already
+fetched. Metadata is NOT full posting text: open the URL and retrieve its
+actual text (serial browser retrieval is allowed), then screen and persist
+that posting with `screen_and_record_posting` before any direct-board/dork
+discovery or application to a newly found role. Finish the feed pass and save
+each result as you go; do not defer recording until later discovery. Phase 0
+approved applications still run first, and the same freshness, profile,
+cooldown, autonomy and application cap rules govern feed postings.
 
 Your run prompt may also carry a list of composed search queries, built
 deterministically from each enabled profile's `keywords` and `locations`,
@@ -331,24 +347,36 @@ board's own site instead of via a `site:` dork, because the board has no
 useful dork surface. Your run prompt carries a Direct-search boards block for
 these, with the board's URL and its sign-in URL (if any), plus a separate
 per-profile criteria line naming that profile's `keywords` and `locations`.
-`harvest_postings` (below) takes only a single `keywords` string — it has no
-separate location argument — so **fold a profile's `locations` into the
-`keywords` text you pass it** (e.g. `"backend engineer Berlin"`) rather than
-dropping them. Work this channel before the dork queries.
+`harvest_postings` (below) takes a separate `location` argument alongside
+`keywords` — pass a profile's `locations` there, one at a time, rather than
+folding them into `keywords` text. It types `location` into the board's own
+detected location field, never into the keyword box, and retries the
+board's own local-language spelling before giving up on it — that retry
+applies to on-page location controls only; for a board with a `searchUrl`
+template, `location` is substituted into the URL as given, so retry a local
+spelling (e.g. München) by calling again with that spelling as `location`.
+Work this channel before the dork queries.
 
 Harvest each direct board with the `harvest_postings` built-in tool instead of
 driving the browser step by step yourself. Pass it one or more `boards`, each
 with the board's `board` name, its search `url`, and optional `keywords` to
 type into the board's own search box — ONE call replaces the whole
-navigate/snapshot/type/snapshot sequence this section used to prescribe. It
+navigate/snapshot/type/snapshot sequence this section used to prescribe. A
+board with no on-page search box instead carries its own `searchUrl`
+templated search URL (`{keywords}` required, `{location}` optional, e.g.
+`https://www.adzuna.de/search?q={keywords}&w={location}`) — pass its
+`keywords`/`location` along as usual; the built URL replaces `url` outright,
+is navigated to directly, and the snapshot classified with no search-box
+typing at all. It
 drives the allow-listed browser tools internally and extracts posting URLs by
 matching each known ATS's stable URL shape (Ashby, Greenhouse, Lever,
 Personio) against the accessibility tree `browser_snapshot` returns — never a
 hand-written CSS selector, since boards restyle. It reports, per board, an
 `outcome`: `"searched"` (postings found — this value matches
 `record_discovery_coverage`'s own status vocabulary on purpose, so pass it
-straight through as `status`) plus `tier: "harvest"`; `"empty"` (the search
-ran and genuinely matched nothing); or `"blocked"` (the board was reachable
+straight through as `status`) plus `tier: "harvest"`; `"empty"` (explicit
+zero-result evidence); `"needs_review"` (internal only: content exists but
+extraction found no known URLs); or `"blocked"` (the board was reachable
 but unreadable), which USUALLY also carries a `blockKind`:
 
 - `blockKind: "login"` — a sign-in wall, OR a board whose `url` was itself an
@@ -367,13 +395,21 @@ but unreadable), which USUALLY also carries a `blockKind`:
   network errors is reported `blocked` with NO `blockKind` at all instead —
   see the next bullet — so a slow-but-reachable board is never misreported
   to you as a dead link.
+- `blockKind: "location"` — a `location` argument was given, but neither it
+  nor any of its known local-language aliases was ever confirmed by the
+  board's own location-only control search; the board's location field
+  never demonstrably recognised it. Record this the same as
+  `status="blocked"`.
+- `blockKind: "timeout"` — navigation itself timed out TWICE in a row (an
+  initial attempt and one automatic retry): the page did not load at all.
+  Record this the same as `status="blocked"`.
 - No `blockKind` at all — an internal tool failure (a lost browser
   connection, a `browser_snapshot` call that itself errored, or a navigation
   failure too generic to confirm as a dead URL), rather than any signal read
   from the page. Read `note` for what happened; still record this the same
   as `status="blocked"`.
 
-`blockKind: "wall"` or `"unreachable"` both map to
+`blockKind: "wall"`, `"unreachable"` or `"timeout"` all map to
 `record_discovery_coverage`'s `status="blocked"` as-is; name which one it
 was (or that none was given) in your run report so a dead board URL is never
 confused with a bot wall.
@@ -382,21 +418,31 @@ When a board's page plainly had content but the URL-shape extraction matched
 nothing — including a consent/cookie-banner or bot-check phrase seen
 alongside real content, which never on its own discards that content — the
 result also carries the raw snapshot text — read that yourself as the
-LAST-RESORT fallback (an LLM-extraction tier 3 step) only in that one
-ambiguous case; do not fall back to a manual `browser_navigate`/
-`browser_snapshot` pass otherwise, and never for a board `harvest_postings`
+LAST-RESORT fallback (an LLM-extraction tier 3 step) only for that
+`needs_review` result. Resolve it before coverage: recovered postings map to
+`searched`/`llm`; explicit zero-result evidence maps to `empty`; unresolved
+extraction maps to `extraction_failed` with a reason naming extraction failure.
+The raw snapshot is an excerpt (link lines + result text): if
+`rawSnapshotTruncated` is true or the note says it was omitted, re-harvest that
+board alone in its own call before recording `extraction_failed`. For dorks,
+pass the Google search URL (with the `site:` query) as the board `url`; links
+to the `site:` target are extracted automatically.
+`needs_review` is NEVER a `record_discovery_coverage` status. Do not fall
+back to a manual `browser_navigate`/`browser_snapshot` pass otherwise, and
+never for a board `harvest_postings`
 already reported `blocked` — a blocked result never carries a raw snapshot.
-Several boards may be harvested in the same call: when the browser server's
-tab listing can actually be parsed, `harvest_postings` opens each board in
-its own browser tab, sharing the one Chromium profile, and works them
-concurrently, bounded conservatively; when it cannot, every board is instead
-harvested serially, one at a time, in the single shared tab — same per-board
-result shape either way, and the result names when it degraded to serial so
-you can see why. Either way its own execution is serialized against every
-other browser-driving tool call so it never interleaves with one you issue
-yourself. It never drives a sign-in flow through a tab, and an attended
-session the operator opens still takes the browser back from the whole set,
-exactly as it does from a single run (see browser/session-server.js).
+Several boards may be harvested in the same call, but production
+`harvest_postings` works them serially, in order, through the existing primary
+browser MCP connection and persistent signed-in profile. It makes no extra
+session or tab-management calls, even if tab tools are advertised or the old
+`AGENT_BROWSER_SESSIONS` setting is present. The session-per-worker and
+tab-per-board modes remain dormant helper code, not available through this
+tool's production dispatch. Each board keeps the same per-board result shape,
+outcome classification and raw-snapshot fallback described above. The whole
+harvest call is serialized against other browser-driving tool calls, so it
+does not interleave with browser actions you issue yourself. It never drives
+a sign-in flow, and an attended session the operator opens still takes the
+browser back from the run (see browser/session-server.js).
 
 If the board puts up a login wall before you can search or apply — including
 a direct board `harvest_postings` reported `blocked` with `blockKind:
@@ -409,8 +455,8 @@ next run — and move on to the next board or query.
 
 After every board or query in every channel — feed, direct boards, and dork
 queries alike — call `record_discovery_coverage` with the channel, the board
-(or query), a status (`searched`, `empty`, `login_walled`, `blocked`, or
-`skipped`), and `postings_found`. This is what makes the §9 coverage report
+(or query), a status (`searched`, `empty`, `login_walled`, `blocked`,
+`extraction_failed`, or `skipped`), and `postings_found`. This is what makes the §9 coverage report
 possible: a board worked but never recorded is indistinguishable, at report
 time, from one never reached at all. Call it even for a board that turned up
 nothing — `empty` is a real, useful status, and skipping the call is never
@@ -430,9 +476,28 @@ were found or a tier does not apply.
 
 ### Screening a discovered posting
 
-Once you have a posting's URL, role, company, and full text, screen it with
-the `screen_posting` built-in tool instead of reasoning through every hard
-filter yourself in this conversation. Pass it the posting's `url`, `role`,
+Once you have a posting's URL, role, company, and full text, use the
+`screen_and_record_posting` built-in tool with required `run_id` and optional
+`source` and stated `posted_date` to screen and SAVE in a single tool call.
+It evaluates against the matched profile and awaits the existing
+`record_screening` ledger. Its compact returned outcome (id, verdict,
+screening_blocker, created, actionable) is authoritative, including server
+downgrades: only `actionable:true` (newly stored `passed` with no blocker) may
+drive an application; `created:false` is a skip even if an unread placeholder
+was replaced, not a retry or a reason to change the URL. The posting text stays
+in the ledger, not in this tool result. Never call `record_screening` again
+after a successful compound call. On any error, do not assume a new pass:
+stop acting on that posting, not the entire run; continue other work and
+coverage. Ask the operator to open `GET /api/screenings` on the TruthCV app
+origin (navigate to `/api/screenings` in their browser), inspect the returned
+JSON array's `url` fields for the posting URL, and confirm whether a record
+exists. The `/screenings` UI does not display the URL; no agent screening lookup
+tool exists. Do not retry or rescreen automatically; use `record_screening`
+manually only after the operator confirms no record exists.
+
+The read-only `screen_posting` tool remains available when you need separate
+screening; then call `record_screening` yourself before any application.
+Pass it the posting's `url`, `role`,
 `company`, `postingText`, the matched enabled profile's `profile` name, and
 its `criteria` (the hard filters from §2, rendered as text). It runs the
 screening in an isolated subagent conversation, backed by its own (often
@@ -446,8 +511,8 @@ profile's (`eor_stated` is `""`/`"yes"`/`"no"`/`"unstated"`, reflecting
 whether the posting states hiring is through an EOR / employer-of-record
 arrangement, where `"unstated"` means you looked and the posting did not
 say).
-Continue into the Applying steps below only for a posting `screen_posting`
-reports as `passed`.
+Continue into the Applying steps below only for a newly stored `passed`
+verdict without a blocker, not a model's unpersisted proposal.
 
 **`screen_posting` does not replace `record_screening`.** It has no access to
 the screening ledger and writes nothing. You must still call `record_screening`

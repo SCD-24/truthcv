@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-28 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+30 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -148,7 +148,7 @@ Provider connection layer (connections/): a static catalog of connection cards p
 <!-- generated:start comp:agent-config -->
 ## Agent Config (`agent-config`, BACKEND)
 
-Owns the unattended agent's configuration (agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed. Also composes the deterministic dork-style search queries handed to each run.
+Owns the unattended agent's configuration (agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed, but any board (default or the operator's own) can be switched off, and a disabled board is not searched. Also composes the deterministic dork-style search queries handed to each run.
 <!-- generated:end comp:agent-config -->
 
 <!-- generated:start comp:screening-engine -->
@@ -187,6 +187,8 @@ Screens discovered postings against the active job profile's criteria and record
 
 <!-- generated:start comp:job-feeds -->
 ## Job Feeds (`job-feeds`, BACKEND)
+
+API-backed job feeds pulled directly by TruthCV: Remote Rocketship (keyed, opt-in), Arbeitnow (keyless, a default board that is always searched), and per-company ATS APIs. Results are merged and de-duplicated by URL under one shared fetch deadline.
 <!-- generated:end comp:job-feeds -->
 
 <!-- generated:start comp:jev-api -->
@@ -200,3 +202,19 @@ External third-party Jev (TypeSafe) service at https://api.typesafe.ai/v1/system
 <!-- generated:start comp:gmail-response-sync -->
 ## Gmail Response Sync (`gmail-response-sync`, BACKEND)
 <!-- generated:end comp:gmail-response-sync -->
+
+<!-- generated:start comp:job-runner -->
+## Job Runner (`job-runner`, BACKEND)
+
+Bounded background job executor (jobs/): a shared thread pool (MAX_WORKERS=4) plus an in-memory, thread-safe registry of Job records. Callers submit a zero-argument callable via submit(kind, fn); it runs on a worker thread and its outcome (result or exception) is recorded on the returned Job. get()/list_jobs() poll registry state. Registry is in-memory only - jobs are not persisted across restarts.
+
+**Tech:** Python, concurrent.futures ThreadPoolExecutor
+<!-- generated:end comp:job-runner -->
+
+<!-- generated:start comp:arbeitnow-api -->
+## Arbeitnow Job Board API (`arbeitnow-api`, CUSTOM)
+
+External public Arbeitnow job-board API (https://www.arbeitnow.com/api/job-board-api). Job Feeds (jobfeeds/arbeitnow.py) fetches paginated postings from it on every feed refresh, because arbeitnow is a default, non-removable board (agentconfig/boards.py).
+
+**Tech:** Arbeitnow public REST API, HTTPS
+<!-- generated:end comp:arbeitnow-api -->

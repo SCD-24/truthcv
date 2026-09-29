@@ -83,6 +83,7 @@ Use these exact names and ids when discussing the architecture.
 | API | `api` | backend |
 | Application Agent | `application-agent` | backend |
 | Application Tracker | `application-tracker` | backend |
+| Arbeitnow Job Board API | `arbeitnow-api` | custom |
 | Browser Service | `browser-service` | backend |
 | Company Research | `company-research` | backend |
 | Connections | `connections` | backend |
@@ -92,6 +93,7 @@ Use these exact names and ids when discussing the architecture.
 | Guardrail Validator | `guardrail-validator` | backend |
 | Jev (TypeSafe System One) API | `jev-api` | custom |
 | Job Feeds | `job-feeds` | backend |
+| Job Runner | `job-runner` | backend |
 | Keyword Vocabulary | `keyword-vocabulary` | backend |
 | LLM Provider Layer | `llm-provider-layer` | backend |
 | LLM Provider Service | `llm-provider-service` | custom |
@@ -112,5 +114,5 @@ Use these exact names and ids when discussing the architecture.
 <!-- generated:start cap:system-boundary -->
 ## System Boundary
 
-The declared system consists of 28 component(s) and 98 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
+The declared system consists of 30 component(s) and 102 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
 <!-- generated:end cap:system-boundary -->

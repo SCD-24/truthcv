@@ -7,6 +7,7 @@ import {
   renderDroppedTranscript,
   KEEP_RECENT,
   PIN_LEADING,
+  STALE_TOOL_RESULT_CHARS,
   type CompactionConfig,
 } from '../compaction.js';
 import type { ConversationMessage } from '../providers/types.js';
@@ -221,6 +222,123 @@ describe('renderDroppedTranscript', () => {
     const text = renderDroppedTranscript(dropped);
 
     expect(text).toContain('applied to Acme via URL https://x/jobs/1');
+  });
+});
+
+describe('stale tool result elision', () => {
+  const config: CompactionConfig = { contextWindow: 1000 };
+
+  function messagesWithToolResults(count: number): ConversationMessage[] {
+    const big = 'x'.repeat(STALE_TOOL_RESULT_CHARS + 500);
+    const messages: ConversationMessage[] = [{ role: 'user', content: 'RUNBOOK' }];
+    for (let i = 0; i < count; i += 1) {
+      messages.push({ role: 'assistant', content: '', toolCalls: [{ id: `c${i}`, name: 'browser', arguments: {} }] });
+      messages.push({
+        role: 'user',
+        content: '',
+        toolResults: [{ toolCallId: `c${i}`, content: big, isError: i % 3 === 0 }],
+      });
+    }
+    return messages;
+  }
+
+  it('elides oversized tool results in kept messages other than the latest', () => {
+    const messages = messagesWithToolResults(PIN_LEADING + KEEP_RECENT);
+    const { messages: out, record } = compact(messages, config);
+
+    const keptToolResultMessages = out.filter((m) => (m.toolResults?.length ?? 0) > 0);
+    const latest = keptToolResultMessages[keptToolResultMessages.length - 1];
+    expect(latest.toolResults?.[0].content.length).toBe(STALE_TOOL_RESULT_CHARS + 500);
+
+    for (const message of keptToolResultMessages.slice(0, -1)) {
+      const content = message.toolResults?.[0].content ?? '';
+      expect(content.length).toBeLessThan(STALE_TOOL_RESULT_CHARS + 500);
+      expect(content.startsWith('x'.repeat(STALE_TOOL_RESULT_CHARS))).toBe(true);
+      expect(content).toContain('elided by compaction');
+    }
+    expect(record?.elidedToolResultCount).toBeGreaterThan(0);
+  });
+
+  it('preserves ids, isError and call/result pairing on elided results', () => {
+    const messages = messagesWithToolResults(PIN_LEADING + KEEP_RECENT);
+    const { messages: out } = compact(messages, config);
+
+    for (const message of out) {
+      for (const result of message.toolResults ?? []) {
+        expect(result.toolCallId).toMatch(/^c\d+$/);
+      }
+    }
+    const errored = out.find((m) => m.toolResults?.some((r) => r.isError));
+    expect(errored).toBeDefined();
+  });
+
+  it('never mutates the input array or its messages', () => {
+    const messages = messagesWithToolResults(PIN_LEADING + KEEP_RECENT);
+    const snapshot = JSON.parse(JSON.stringify(messages));
+
+    compact(messages, config);
+
+    expect(messages).toEqual(snapshot);
+  });
+
+  it('returns the input unchanged and a null record when there is nothing to drop or elide', () => {
+    // Below the keep-minimum, so planCompaction is null; the single
+    // tool-results message present is the latest one, which is exempt from
+    // elision — so compact() truly has nothing to do.
+    const messages = messagesWithToolResults(1);
+    const { messages: out, record } = compact(messages, config);
+
+    expect(record).toBeNull();
+    expect(out).toBe(messages);
+  });
+
+  it('elides even without dropping when a stale oversized result exists before the latest', () => {
+    const big = 'x'.repeat(STALE_TOOL_RESULT_CHARS + 500);
+    const messages: ConversationMessage[] = [
+      { role: 'user', content: 'RUNBOOK' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'browser', arguments: {} }] },
+      { role: 'user', content: '', toolResults: [{ toolCallId: 'c1', content: big }] },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c2', name: 'browser', arguments: {} }] },
+      { role: 'user', content: '', toolResults: [{ toolCallId: 'c2', content: big }] },
+    ];
+
+    const { messages: out, record } = compact(messages, config);
+
+    expect(planCompaction(messages)).toBeNull();
+    expect(record).not.toBeNull();
+    expect(record?.droppedMessageCount).toBe(0);
+    expect(record?.elidedToolResultCount).toBe(1);
+    expect(out[2].toolResults?.[0].content.length).toBeLessThan(big.length);
+    expect(out[4].toolResults?.[0].content).toBe(big);
+  });
+
+  it('is idempotent: compacting its own elided output again finds nothing left and returns null', () => {
+    const big = 'x'.repeat(STALE_TOOL_RESULT_CHARS + 500);
+    const messages: ConversationMessage[] = [
+      { role: 'user', content: 'RUNBOOK' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'browser', arguments: {} }] },
+      { role: 'user', content: '', toolResults: [{ toolCallId: 'c1', content: big }] },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c2', name: 'browser', arguments: {} }] },
+      { role: 'user', content: '', toolResults: [{ toolCallId: 'c2', content: big }] },
+    ];
+
+    const { messages: once, record: firstRecord } = compact(messages, config);
+    expect(firstRecord?.elidedToolResultCount).toBe(1);
+
+    const { messages: twice, record: secondRecord } = compact(once, config);
+
+    expect(secondRecord).toBeNull();
+    expect(twice).toBe(once);
+  });
+
+  it('appends the elision note to a model-provided summary when something was elided', () => {
+    const messages = messagesWithToolResults(PIN_LEADING + KEEP_RECENT);
+    const { record } = compact(messages, config, 'MODEL SUMMARY: whatever happened.');
+
+    expect(record?.elidedToolResultCount).toBeGreaterThan(0);
+    expect(record?.summary.startsWith('MODEL SUMMARY: whatever happened.')).toBe(true);
+    expect(record?.summary).toContain('Elided');
+    expect(record?.summary).toContain('stale tool result');
   });
 });
 

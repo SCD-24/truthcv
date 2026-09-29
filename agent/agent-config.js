@@ -1,6 +1,6 @@
 // Fetch one field of the agent config from the app service. The agent image
 // has no curl (see daily-apply.sh's note); node is the only HTTP client.
-// Usage: node agent-config.js mode|enabled|run_at|run_days|run_timezone|job_config|llm_credentials
+// Usage: node agent-config.js mode|enabled|run_at|run_days|run_timezone|job_config|llm_credentials|llm_routes
 // Errors print nothing and exit 1 — callers fall back to env defaults.
 import nodeHttp from "node:http";
 import nodeHttps from "node:https";
@@ -20,7 +20,7 @@ const DAY_NUM = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
 // waiting on stdout to drain, and the HTTP path below must not run (a
 // top-level `return` is not allowed in an ES module, hence the flag).
 let servedByFake = false;
-if (process.env.FAKE_AGENT_CONFIG && field !== "llm_credentials") {
+if (process.env.FAKE_AGENT_CONFIG && field !== "llm_credentials" && field !== "llm_routes") {
   const cfg = JSON.parse(process.env.FAKE_AGENT_CONFIG);
   if (field === "job_config") {
     servedByFake = true;
@@ -33,10 +33,13 @@ if (process.env.FAKE_AGENT_CONFIG && field !== "llm_credentials") {
         cooldownDaysSameCompany: cfg.cooldownDaysSameCompany,
         maxApplicationsPerRun: cfg.maxApplicationsPerRun,
         maxPostingAgeDays: cfg.maxPostingAgeDays,
+        dorkRecency: cfg.dorkRecency,
         companyBoards: cfg.companyBoards || [],
         searchQueries: cfg.searchQueries || [],
         feedPostings: cfg.feedPostings || [],
         feedError: cfg.feedError || "",
+        // Count of feed postings dropped because already screened in an earlier run.
+        feedAlreadyScreened: cfg.feedAlreadyScreened || 0,
         // One entry per direct-mode board, searched on-site rather than via
         // a dork. Defaults to [] so an older fixture/API build omitting the
         // key still produces a valid, empty-but-present payload.
@@ -52,7 +55,28 @@ if (process.env.FAKE_AGENT_CONFIG && field !== "llm_credentials") {
 }
 if (!servedByFake) {
 const base = process.env.TRUTHCV_MCP_URL;
-if (!base || !["enabled", "mode", "run_at", "run_days", "run_timezone", "llm_credentials", "job_config"].includes(field)) process.exit(1);
+if (!base || !["enabled", "mode", "run_at", "run_days", "run_timezone", "llm_credentials", "llm_routes", "job_config"].includes(field)) process.exit(1);
+
+if (field === "llm_routes") {
+  // Token-gated like llm_credentials; prints the JSON body verbatim (it
+  // carries credentials, so nothing is logged or echoed elsewhere).
+  const token = process.env.AGENT_API_TOKEN;
+  if (!token) process.exit(2);
+  let ru;
+  try { ru = new URL(base.replace(/\/mcp\/?$/, "") + "/api/agent/llm-routes"); }
+  catch { process.exit(1); }
+  const rhttp = ru.protocol === "https:" ? nodeHttps : nodeHttp;
+  const rreq = rhttp.get(ru, { timeout: 5000, headers: { "X-Agent-Token": token } }, (res) => {
+    if (res.statusCode !== 200) { res.resume(); process.exit(1); }
+    let body = "";
+    res.on("data", (c) => (body += c));
+    res.on("end", () => {
+      try { JSON.parse(body); emit(body); } catch { process.exit(1); }
+    });
+  });
+  rreq.on("error", () => process.exit(1));
+  rreq.on("timeout", () => { rreq.destroy(); process.exit(1); });
+} else
 
 if (field === "llm_credentials") {
   // Distinct exit code (2) when the shared secret itself is missing, so
@@ -78,10 +102,10 @@ if (field === "llm_credentials") {
         // newest additions, appended after baseUrl for the same reason: a
         // reader that only wants the earlier lines keeps working, and an
         // older API server that omits provider/wire degrades to empty lines
-        // (via `|| ""`) rather than crashing. Line 7 (contextWindow) is the
-        // route's configured context window, empty when unset so callers
-        // fall back to their own default, and output stays exactly 7 lines.
-        emit(`${creds.authType}\n${creds.token}\n${creds.model || ""}\n${creds.baseUrl || ""}\n${creds.provider || ""}\n${creds.wire || ""}\n${creds.contextWindow || ""}\n`);
+        // (via `|| ""`) rather than crashing. There is no context-window
+        // line: the harness discovers the model's context window itself
+        // from the provider at startup, so output stays exactly 6 lines.
+        emit(`${creds.authType}\n${creds.token}\n${creds.model || ""}\n${creds.baseUrl || ""}\n${creds.provider || ""}\n${creds.wire || ""}\n`);
       } catch { process.exit(1); }
     });
   });
@@ -136,6 +160,7 @@ const req = http.get(u, { timeout }, (res) => {
           cooldownDaysSameCompany: cfg.cooldownDaysSameCompany,
           maxApplicationsPerRun: cfg.maxApplicationsPerRun,
           maxPostingAgeDays: cfg.maxPostingAgeDays,
+          dorkRecency: cfg.dorkRecency,
           companyBoards: cfg.companyBoards || [],
           searchQueries: cfg.searchQueries || [],
           // Postings pulled from API-backed boards (Remote Rocketship). Only
@@ -144,6 +169,9 @@ const req = http.get(u, { timeout }, (res) => {
           // outbound call, so the parameter is opt-in per caller.
           feedPostings: cfg.feedPostings || [],
           feedError: cfg.feedError || "",
+          // Count of feed postings the server dropped because they were
+          // already screened in an earlier run; 0 from an older API build.
+          feedAlreadyScreened: cfg.feedAlreadyScreened || 0,
           // One entry per direct-mode board, searched on-site rather than
           // via a dork. Defaults to [] so an older API build that omits the
           // key still produces a valid, empty-but-present payload.

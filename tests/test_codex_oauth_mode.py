@@ -29,7 +29,7 @@ def test_complete_via_responses_builds_correct_url_headers_and_body(monkeypatch)
     from providers import codex_responses as cr
 
     route = respx.post(cr.DEFAULT_BASE_URL + "/responses").mock(
-        return_value=Response(200, text='data: {"type":"response.completed","response":{"completed_reason":"stop"}}\ndata: [DONE]\n')
+        return_value=Response(200, text='data: {"type":"response.completed","response":{"status":"completed","output":[]}}\ndata: [DONE]\n')
     )
     token = "tok-at"
     account = "acct-1"
@@ -43,7 +43,6 @@ def test_complete_via_responses_builds_correct_url_headers_and_body(monkeypatch)
     assert req.headers["openai-beta"] == "responses=experimental"
     assert req.headers["accept"] == "text/event-stream"
     body = req.read().decode()
-    parsed = {"store": False, "stream": True}  # quick check
     import json as _json
 
     j = _json.loads(body)
@@ -58,13 +57,42 @@ def test_complete_via_responses_accumulates_deltas_and_stops_at_completed():
     from providers import codex_responses as cr
 
     events = [
-        'data: {"type":"response.output_text.delta","response":{"output_text":{"delta":"Hello"}}}\n',
-        'data: {"type":"response.output_text.delta","response":{"output_text":{"delta":" world"}}}\n',
-        'data: {"type":"response.completed","response":{"completed_reason":"stop"}}\n',
+        'data: {"type":"response.output_text.delta","delta":"Hello"}\n',
+        'data: {"type":"response.output_text.delta","delta":" world"}\n',
+        'data: {"type":"response.completed","response":{"status":"completed","output":[]}}\n',
     ]
     text = "\n".join(events)
     route = respx.post(cr.DEFAULT_BASE_URL + "/responses").mock(
         return_value=Response(200, text=text)
+    )
+    out = cr.complete_via_responses("tok", "acct", "gpt-5.4", "sys", [])
+    assert out == "Hello world"
+
+
+@respx.mock
+def test_complete_via_responses_falls_back_to_output_when_no_deltas():
+    """When no delta events arrive, text is assembled from response.output[] message parts."""
+    from providers import codex_responses as cr
+
+    response_obj = {
+        "status": "completed",
+        "output": [
+            {
+                "type": "message",
+                "content": [
+                    {"type": "output_text", "text": "Hello"},
+                    {"type": "output_text", "text": " world"},
+                ],
+            }
+        ],
+    }
+    import json as _json
+
+    events = [
+        'data: ' + _json.dumps({"type": "response.completed", "response": response_obj}) + '\n',
+    ]
+    route = respx.post(cr.DEFAULT_BASE_URL + "/responses").mock(
+        return_value=Response(200, text="\n".join(events))
     )
     out = cr.complete_via_responses("tok", "acct", "gpt-5.4", "sys", [])
     assert out == "Hello world"
@@ -78,7 +106,7 @@ def test_complete_via_responses_error_event_raises_provider_error():
 
     events = [
         'data: {"type":"error","error":{"code":"some_code","message":"something bad"}}\n',
-        'data: {"type":"response.completed","response":{"completed_reason":"stop"}}\n',
+        'data: {"type":"response.completed","response":{"status":"completed","output":[]}}\n',
     ]
     route = respx.post(cr.DEFAULT_BASE_URL + "/responses").mock(
         return_value=Response(200, text="\n".join(events))
@@ -89,6 +117,60 @@ def test_complete_via_responses_error_event_raises_provider_error():
     except ProviderError as e:
         assert "some_code" in str(e)
         assert "something bad" in str(e)
+
+
+@respx.mock
+def test_complete_via_responses_flat_error_event_raises_provider_error():
+    """A top-level flat error event (no nested `error` object) raises ProviderError."""
+    from providers import codex_responses as cr
+    from providers.base import ProviderError
+
+    events = [
+        'data: {"type":"error","code":"x","message":"y"}\n',
+    ]
+    route = respx.post(cr.DEFAULT_BASE_URL + "/responses").mock(
+        return_value=Response(200, text="\n".join(events))
+    )
+    try:
+        cr.complete_via_responses("tok", "acct", "gpt-5.4", "sys", [])
+        assert False, "Expected ProviderError"
+    except ProviderError as e:
+        assert "x" in str(e)
+        assert "y" in str(e)
+
+
+@respx.mock
+def test_complete_via_responses_string_error_event_keeps_message():
+    """An error event whose `error` is a plain string keeps that string in the ProviderError."""
+    from providers import codex_responses as cr
+    from providers.base import ProviderError
+
+    events = ['data: {"type":"error","error":"backend unavailable"}\n']
+    respx.post(cr.DEFAULT_BASE_URL + "/responses").mock(
+        return_value=Response(200, text="\n".join(events))
+    )
+    with pytest.raises(ProviderError, match="backend unavailable"):
+        cr.complete_via_responses("tok", "acct", "gpt-5.4", "sys", [])
+
+
+@respx.mock
+def test_complete_via_responses_sse_usage_limit_error_raises_usage_message():
+    """An SSE error event with a usage-limit code raises the usage-limit ProviderError."""
+    from providers import codex_responses as cr
+    from providers.base import ProviderError
+
+    events = [
+        'data: {"type":"error","code":"usage_limit_reached","message":"limit","resets_at":42}\n',
+    ]
+    route = respx.post(cr.DEFAULT_BASE_URL + "/responses").mock(
+        return_value=Response(200, text="\n".join(events))
+    )
+    try:
+        cr.complete_via_responses("tok", "acct", "gpt-5.4", "sys", [])
+        assert False, "Expected ProviderError"
+    except ProviderError as e:
+        assert "usage limit" in str(e).lower()
+        assert "42" in str(e)
 
 
 @respx.mock
@@ -108,6 +190,25 @@ def test_complete_via_responses_response_failed_raises():
         assert False, "Expected ProviderError"
     except ProviderError as e:
         assert "internal_error" in str(e)
+
+
+@respx.mock
+def test_complete_via_responses_incomplete_raises_with_reason():
+    """An SSE response.incomplete event raises ProviderError naming the reason."""
+    from providers import codex_responses as cr
+    from providers.base import ProviderError
+
+    events = [
+        'data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}\n',
+    ]
+    route = respx.post(cr.DEFAULT_BASE_URL + "/responses").mock(
+        return_value=Response(200, text="\n".join(events))
+    )
+    try:
+        cr.complete_via_responses("tok", "acct", "gpt-5.4", "sys", [])
+        assert False, "Expected ProviderError"
+    except ProviderError as e:
+        assert "max_output_tokens" in str(e)
 
 
 @respx.mock
@@ -154,7 +255,7 @@ def test_complete_via_responses_incomplete_stream_raises():
     from providers.base import ProviderError
 
     events = [
-        'data: {"type":"response.output_text.delta","response":{"output_text":{"delta":"partial"}}}\n',
+        'data: {"type":"response.output_text.delta","delta":"partial"}\n',
     ]
     route = respx.post(cr.DEFAULT_BASE_URL + "/responses").mock(
         return_value=Response(200, text="\n".join(events))

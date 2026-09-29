@@ -113,7 +113,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:end comp:connections -->
 
 <!-- generated:start comp:agent-config -->
-- **Agent Config** (`agent-config`) - backend component. Owns the unattended agent's configuration (agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed. Also composes the deterministic dork-style search queries handed to each run.
+- **Agent Config** (`agent-config`) - backend component. Owns the unattended agent's configuration (agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed, but any board (default or the operator's own) can be switched off, and a disabled board is not searched. Also composes the deterministic dork-style search queries handed to each run.
 <!-- generated:end comp:agent-config -->
 
 <!-- generated:start comp:screening-engine -->
@@ -149,7 +149,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:end comp:services-layer -->
 
 <!-- generated:start comp:job-feeds -->
-- **Job Feeds** (`job-feeds`) - backend component.
+- **Job Feeds** (`job-feeds`) - backend component. API-backed job feeds pulled directly by TruthCV: Remote Rocketship (keyed, opt-in), Arbeitnow (keyless, a default board that is always searched), and per-company ATS APIs. Results are merged and de-duplicated by URL under one shared fetch deadline.
 <!-- generated:end comp:job-feeds -->
 
 <!-- generated:start comp:jev-api -->
@@ -159,3 +159,11 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:start comp:gmail-response-sync -->
 - **Gmail Response Sync** (`gmail-response-sync`) - backend component.
 <!-- generated:end comp:gmail-response-sync -->
+
+<!-- generated:start comp:job-runner -->
+- **Job Runner** (`job-runner`) - backend component. Bounded background job executor (jobs/): a shared thread pool (MAX_WORKERS=4) plus an in-memory, thread-safe registry of Job records. Callers submit a zero-argument callable via submit(kind, fn); it runs on a worker thread and its outcome (result or exception) is recorded on the returned Job. get()/list_jobs() poll registry state. Registry is in-memory only - jobs are not persisted across restarts.
+<!-- generated:end comp:job-runner -->
+
+<!-- generated:start comp:arbeitnow-api -->
+- **Arbeitnow Job Board API** (`arbeitnow-api`) - custom component. External public Arbeitnow job-board API (https://www.arbeitnow.com/api/job-board-api). Job Feeds (jobfeeds/arbeitnow.py) fetches paginated postings from it on every feed refresh, because arbeitnow is a default, non-removable board (agentconfig/boards.py).
+<!-- generated:end comp:arbeitnow-api -->

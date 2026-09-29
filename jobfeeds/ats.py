@@ -77,6 +77,7 @@ import json
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
@@ -112,6 +113,12 @@ MAX_REQUESTS = 60
 # handful of very large boards from crowding out every other feed's postings
 # in the prompt.
 MAX_POSTINGS = 300
+
+# Bound on concurrently in-flight board fetches. The one shared httpx.Client
+# (thread-safe) lets several hosts' requests overlap instead of queuing one
+# after another; kept modest so a large watchlist does not open dozens of
+# sockets to different ATS hosts at once.
+MAX_WORKERS = 4
 
 # The ATS-hosted board hosts each careers_url must resolve to before this
 # module will derive a board id from it. Anything else (an employer's own
@@ -493,6 +500,40 @@ def _fetch_one(
     return _parse_response_text(handler, text, board, board_id)
 
 
+# Returned by ``_fetch_worker`` in place of a real error when the shared
+# deadline is already gone by the time a worker actually starts — the same
+# note the submission loop appends for boards it never got to submitting at
+# all. Sharing the exact string lets the merge loop dedupe it down to one
+# appearance in ``errors`` regardless of which of the two places produced it.
+_DEADLINE_EXCEEDED_NOTE = "ATS fetch was too slow; some companies were skipped."
+
+
+def _fetch_worker(
+    client, board: CompanyBoard, ats_key: str, handler: _AtsHandler, url: str, deadline: float
+) -> tuple[CompanyBoard, list[FeedPosting], str | None]:
+    """Run ``_fetch_one`` for one board on a worker thread, pairing its result
+    with the board it came from so the caller can merge many concurrent
+    workers' results back in submission order. Isolates one worker's own bug
+    the same way the caller used to isolate a call it made directly.
+
+    Re-derives ``remaining`` from the absolute ``deadline`` here, at
+    execution time, rather than trusting the snapshot the caller had when it
+    decided to submit this board: submission returns near-instantly, but a
+    queued board can sit behind MAX_WORKERS other in-flight requests for
+    seconds before a thread actually picks it up, and by then the deadline
+    may already be gone. When it is, this returns without ever calling
+    ``_fetch_one`` — see ``_DEADLINE_EXCEEDED_NOTE``.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return board, [], _DEADLINE_EXCEEDED_NOTE
+    try:
+        fetched, error = _fetch_one(client, board, ats_key, url, remaining, deadline)
+    except Exception as exc:  # noqa: BLE001 — isolate one company's bug from the rest
+        fetched, error = [], f"{handler.label} fetch failed for {board.company}: {type(exc).__name__}."
+    return board, fetched, error
+
+
 def _collect(
     fetched: list[FeedPosting],
     max_posting_age_days: int | None,
@@ -563,6 +604,33 @@ def fetch_ats_postings(
     also individually held to this same absolute ceiling while streaming its
     body (see ``_read_within_deadline``), so one slow-trickling host cannot
     outlive it.
+
+    Deciding WHICH boards get fetched at all — dispatch/skip counting, the
+    MAX_REQUESTS cap, and the shared deadline check — stays serial, so it can
+    stop submitting further work the instant either limit is hit without
+    needing results back from anything already in flight. The requests
+    actually decided on are then fanned out across a small worker thread pool
+    (MAX_WORKERS) sharing this one ``httpx.Client`` (thread-safe), so a slow
+    host's wait overlaps with the others' instead of queuing behind it. A
+    board that clears the submission-time deadline check can still find the
+    deadline gone by the time a worker actually gets to it — submitting
+    returns near-instantly, but a queued board can sit behind MAX_WORKERS
+    others in flight for seconds — so ``_fetch_worker`` re-checks the same
+    absolute deadline right before it would call ``_fetch_one`` (see
+    ``_DEADLINE_EXCEEDED_NOTE``). Results are then merged back serially, IN
+    SUBMISSION ORDER, through ``_collect`` and ``errors`` — so the
+    MAX_POSTINGS cap, URL dedupe, and error ordering all stay exactly as
+    deterministic as the fully serial version, regardless of which host
+    happens to answer first. (The len(postings) >= MAX_POSTINGS submission
+    short-circuit the serial version had is gone — with fetches in flight
+    concurrently there is no "postings so far" to check before submitting —
+    but MAX_POSTINGS is still enforced at merge time, so the returned
+    postings are identical to the serial version's either way. The
+    aggregated ``error`` note is not always identical, though: a board whose
+    worker finds the deadline already gone by execution time contributes the
+    same "too slow" note the serial version only ever produced for boards it
+    never reached at all, so that note can now appear in runs the serial
+    version would have finished cleanly.)
     """
     deadline = deadline if deadline is not None else time.monotonic() + BUDGET_SECONDS
     moment = now or datetime.now(timezone.utc)
@@ -572,36 +640,47 @@ def fetch_ats_postings(
     requests_made = 0
     skipped_unhosted_boards = 0
     skipped_tokenless_boards = 0
+    deadline_note_added = False
 
     try:
         import httpx
 
         with httpx.Client(timeout=TIMEOUT_SECONDS) as client:
-            for board in boards:
-                dispatch = _dispatch(board)
-                if dispatch is None:
-                    note_kind = _unhosted_note_kind(board)
-                    if note_kind == "unhosted":
-                        skipped_unhosted_boards += 1
-                    elif note_kind == "tokenless":
-                        skipped_tokenless_boards += 1
-                    continue
-                ats_key, handler, url = dispatch
-                if requests_made >= MAX_REQUESTS or len(postings) >= MAX_POSTINGS:
-                    break
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    errors.append("ATS fetch was too slow; some companies were skipped.")
-                    break
-                requests_made += 1
-                try:
-                    fetched, error = _fetch_one(client, board, ats_key, url, remaining, deadline)
-                except Exception as exc:  # noqa: BLE001 — isolate one company's bug from the rest
-                    fetched, error = [], f"{handler.label} fetch failed for {board.company}: {type(exc).__name__}."
-                if error is not None:
-                    errors.append(error)
-                    continue
-                _collect(fetched, max_posting_age_days, moment, seen_urls, postings)
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                submissions: list[Future] = []
+                for board in boards:
+                    dispatch = _dispatch(board)
+                    if dispatch is None:
+                        note_kind = _unhosted_note_kind(board)
+                        if note_kind == "unhosted":
+                            skipped_unhosted_boards += 1
+                        elif note_kind == "tokenless":
+                            skipped_tokenless_boards += 1
+                        continue
+                    ats_key, handler, url = dispatch
+                    if requests_made >= MAX_REQUESTS:
+                        break
+                    if deadline - time.monotonic() <= 0:
+                        if not deadline_note_added:
+                            errors.append(_DEADLINE_EXCEEDED_NOTE)
+                            deadline_note_added = True
+                        break
+                    requests_made += 1
+                    submissions.append(
+                        executor.submit(_fetch_worker, client, board, ats_key, handler, url, deadline)
+                    )
+
+                for future in submissions:
+                    _board, fetched, error = future.result()
+                    if error == _DEADLINE_EXCEEDED_NOTE:
+                        if not deadline_note_added:
+                            errors.append(error)
+                            deadline_note_added = True
+                        continue
+                    if error is not None:
+                        errors.append(error)
+                        continue
+                    _collect(fetched, max_posting_age_days, moment, seen_urls, postings)
     except Exception as exc:  # noqa: BLE001 — a feed must never break config
         errors.append(f"ATS fetch failed: {type(exc).__name__}.")
 

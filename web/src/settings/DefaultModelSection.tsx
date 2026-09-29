@@ -8,21 +8,26 @@ export function DefaultModelSection({
   connections,
   routing,
   onSaved,
+  autosave = false,
 }: {
   connections: ConnectionStatus[];
   routing: Routing;
   onSaved: (r: Routing) => void;
+  /** Settings modal opts in; onboarding retains manual Save. */
+  autosave?: boolean;
 }) {
   return (
     <ModelRoutePicker
       connections={connections}
       route={routing.default}
+      autosaveKey={autosave ? "routing:default" : undefined}
+      allowDefaultCommit={autosave}
       onSave={async (route) => {
         const fresh = await updateRouting({ default: route });
         onSaved(fresh);
       }}
       title="Default model"
-      description="The model used when a task has no more specific routing."
+      description="Used when a task has no override; application agent routing is independent."
       savedLabel="Default model saved."
       showTest
     />

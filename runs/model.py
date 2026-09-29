@@ -61,12 +61,19 @@ class RunRecord:
     # words (e.g. "apply cap reached", "browser session died"). Empty for a
     # run that completed normally.
     stopped_reason: str = ""
+    # Per-item failures that did not fail the run: one screening save/screen
+    # error, one apply session that did not finish. Absent from older records,
+    # which from_dict's known-field filter loads as 0.
+    items_failed: int = 0
+    # Full per-item error text for those failures (capped by runs/store.py).
+    # Absent from older records, which load as [].
+    item_errors: list[str] = field(default_factory=list)
     # Free-text note the agent can leave via record_run_note.
     note: str = ""
     # Per-source discovery coverage: what the agent actually searched this run,
     # not just what it found. Each entry is a dict shaped like:
     #   {"channel": "feed"|"direct"|"dork", "board": str,
-    #    "status": "searched"|"empty"|"login_walled"|"blocked"|"skipped",
+    #    "status": "searched"|"empty"|"login_walled"|"blocked"|"extraction_failed"|"skipped",
     #    "postings_found": int, "reason": str, "tier": "api"|"harvest"|"llm"|""}
     # so a run that skipped or was blocked from a source leaves that fact
     # behind instead of just an absence of postings from it. "empty" means the
@@ -77,6 +84,27 @@ class RunRecord:
     # applicable; a record stored before "tier" existed loads with it absent
     # from the dict, which callers must treat the same as "".
     discovery_coverage: list[dict] = field(default_factory=list)
+    # Set when finish_run was refused once because discovery coverage looked
+    # incomplete (see agenttools/tools_runs.py's shortfall check), so a
+    # second finish_run call is allowed through unconditionally rather than
+    # refusing forever. Defaults False and is absent from records written
+    # before this field existed, which from_dict's known-field filter loads
+    # the same as False.
+    finish_refused: bool = False
+    # How many times finish_run has been refused for this run. Paired with
+    # finish_refused (which only says "at least once") so a harness-aware
+    # caller passing turns_remaining can compare against a small cap
+    # (_MAX_FINISH_REFUSALS in agenttools/tools_runs.py) instead of the
+    # all-or-nothing one-shot guard. Absent from records written before this
+    # field existed, which from_dict's known-field filter loads as 0.
+    finish_refusals: int = 0
+    # Per-channel refusal counts for finish_phase (agenttools/tools_runs.py),
+    # keyed by "feed"/"direct"/"dork". finish_phase never touches run status,
+    # so it tracks its own refusal count separately from finish_refusals
+    # rather than sharing it. Defaults {} and absent from records written
+    # before this field existed, which from_dict's known-field filter loads
+    # the same as {}.
+    phase_refusals: dict = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, raw: dict) -> "RunRecord":

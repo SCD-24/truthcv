@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { harvestPostings, harvestPostingsTool, type BrowserToolCall, type BrowserToolResult } from '../harvestPostings.js';
+import { McpClientPool, type ClientConnector } from '../../mcp/client.js';
+import { BrowserSessionPool } from '../../mcp/sessionPool.js';
 
 /** A greenhouse-shaped posting link line, as `browser_snapshot` might render it. */
 const GREENHOUSE_LINK =
@@ -121,9 +123,9 @@ describe('harvestPostingsTool definition', () => {
     expect(harvestPostingsTool.inputSchema.required).toEqual(['boards']);
   });
 
-  it('no longer accepts a location argument', () => {
+  it('accepts a location argument', () => {
     const properties = harvestPostingsTool.inputSchema.properties as { boards?: { items?: { properties?: object } } };
-    expect(properties.boards?.items?.properties).not.toHaveProperty('location');
+    expect(properties.boards?.items?.properties).toHaveProperty('location');
   });
 });
 
@@ -200,8 +202,8 @@ describe('harvestPostings: blocked vs empty, reported distinctly', () => {
     const result = await harvestPostings({ boards: [board('Odd Board', 'https://board.example/search')] }, call);
 
     const { results } = JSON.parse(result.content);
-    // Ambiguous, not blocked: the tier-3 last resort, with the raw snapshot attached.
-    expect(results[0].outcome).toBe('empty');
+    // Ambiguous, not blocked or empty: the tier-3 last resort, with the raw snapshot attached.
+    expect(results[0].outcome).toBe('needs_review');
     expect(results[0].blockKind).toBeUndefined();
     expect(results[0].rawSnapshot).toContain('reCAPTCHA');
   });
@@ -223,21 +225,101 @@ describe('harvestPostings: blocked vs empty, reported distinctly', () => {
     expect(results[0].note).toContain('unreachable');
   });
 
-  it('reports blocked with NO blockKind for a generic/timeout navigation failure, never mislabelling a slow board unreachable', async () => {
-    const call = stubBrowserCall({
-      browser_tab_new: { content: '[0]', isError: false },
-      browser_tab_list: { content: '[0] about:blank', isError: false },
-      browser_tab_select: { content: 'ok', isError: false },
-      browser_navigate: { content: 'page.goto: Timeout 30000ms exceeded.', isError: true },
-      browser_tab_close: { content: 'ok', isError: false },
-    });
+  it('retries once on a timeout, then classifies normally when the retry succeeds', async () => {
+    let navigateCalls = 0;
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    const call = stubBrowserCall(
+      {
+        browser_tab_new: { content: '[0]', isError: false },
+        browser_tab_list: { content: '[0] about:blank', isError: false },
+        browser_tab_select: { content: 'ok', isError: false },
+        browser_navigate: () => {
+          navigateCalls += 1;
+          return navigateCalls === 1
+            ? { content: 'page.goto: Timeout 30000ms exceeded.', isError: true }
+            : { content: 'ok', isError: false };
+        },
+        browser_snapshot: { content: GREENHOUSE_LINK, isError: false },
+        browser_tab_close: { content: 'ok', isError: false },
+      },
+      calls,
+    );
+
+    const result = await harvestPostings({ boards: [board('Slow Board', 'https://slow-board.example/search')] }, call);
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    expect(calls.filter((c) => c.toolName === 'browser_navigate')).toHaveLength(2);
+  });
+
+  it('reports blocked with blockKind "timeout" when navigation times out twice in a row', async () => {
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    const call = stubBrowserCall(
+      {
+        browser_tab_new: { content: '[0]', isError: false },
+        browser_tab_list: { content: '[0] about:blank', isError: false },
+        browser_tab_select: { content: 'ok', isError: false },
+        browser_navigate: { content: 'page.goto: Timeout 30000ms exceeded.', isError: true },
+        browser_tab_close: { content: 'ok', isError: false },
+      },
+      calls,
+    );
 
     const result = await harvestPostings({ boards: [board('Slow Board', 'https://slow-board.example/search')] }, call);
 
     const { results } = JSON.parse(result.content);
     expect(results[0].outcome).toBe('blocked');
-    expect(results[0].blockKind).toBeUndefined();
-    expect(results[0].note).not.toContain('unreachable');
+    expect(results[0].blockKind).toBe('timeout');
+    expect(results[0].note).toContain('navigation timed out twice');
+    expect(calls.filter((c) => c.toolName === 'browser_navigate')).toHaveLength(2);
+  });
+
+  it('reports blockKind "unreachable" (not "timeout") when the retry itself is a confirmed DNS/connection failure', async () => {
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    let navigateCalls = 0;
+    const call = stubBrowserCall(
+      {
+        browser_tab_new: { content: '[0]', isError: false },
+        browser_tab_list: { content: '[0] about:blank', isError: false },
+        browser_tab_select: { content: 'ok', isError: false },
+        browser_navigate: () => {
+          navigateCalls += 1;
+          return navigateCalls === 1
+            ? { content: 'page.goto: Timeout 30000ms exceeded.', isError: true }
+            : { content: 'net::ERR_DNS_TIMED_OUT: page did not load', isError: true };
+        },
+        browser_tab_close: { content: 'ok', isError: false },
+      },
+      calls,
+    );
+
+    const result = await harvestPostings({ boards: [board('Slow Board', 'https://slow-board.example/search')] }, call);
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('blocked');
+    expect(results[0].blockKind).toBe('unreachable');
+    expect(calls.filter((c) => c.toolName === 'browser_navigate')).toHaveLength(2);
+  });
+
+  it('reports blocked with blockKind "unreachable" and only ONE navigate call for a confirmed DNS failure, never retrying', async () => {
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    const call = stubBrowserCall(
+      {
+        browser_tab_new: { content: '[0]', isError: false },
+        browser_tab_list: { content: '[0] about:blank', isError: false },
+        browser_tab_select: { content: 'ok', isError: false },
+        browser_navigate: { content: 'net::ERR_NAME_NOT_RESOLVED', isError: true },
+        browser_tab_close: { content: 'ok', isError: false },
+      },
+      calls,
+    );
+
+    const result = await harvestPostings({ boards: [board('Dead Board', 'https://dead-board.example/search')] }, call);
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('blocked');
+    expect(results[0].blockKind).toBe('unreachable');
+    expect(calls.filter((c) => c.toolName === 'browser_navigate')).toHaveLength(1);
   });
 
   it('reports empty when the board explicitly states no matches', async () => {
@@ -260,28 +342,51 @@ describe('harvestPostings: blocked vs empty, reported distinctly', () => {
     const result = await harvestPostings({ boards: [board('Busy Board', 'https://board.example/search')] }, call);
 
     const { results } = JSON.parse(result.content);
-    expect(results[0].outcome).toBe('empty');
+    expect(results[0].outcome).toBe('needs_review');
     expect(results[0].rawSnapshot).toContain('30 results');
   });
 
-  it('reports empty with the raw snapshot attached (tier-3 last resort) when content exists but nothing matched', async () => {
+  it('reports needs_review with the raw snapshot attached (tier-3 last resort) when content exists but nothing matched', async () => {
     const call = stubBrowserCall(singleTabHandlers('A page full of content but no known ATS links.'));
 
     const result = await harvestPostings({ boards: [board('Odd Board', 'https://board.example/search')] }, call);
 
     const { results } = JSON.parse(result.content);
-    expect(results[0].outcome).toBe('empty');
+    expect(results[0].outcome).toBe('needs_review');
     expect(results[0].rawSnapshot).toContain('no known ATS links');
   });
 });
 
+describe('harvestPostings: postingUrlPattern', () => {
+  it('extracts via the board posting-link pattern when its native links match', async () => {
+    const snapshot = [
+      '- link "Board Native Posting" [ref=e1]: https://employer.example/job/9001',
+      '- link "Unrelated nav link" [ref=e2]: https://employer.example/about',
+    ].join('\n');
+    const call = stubBrowserCall(singleTabHandlers(snapshot));
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Employer', url: 'https://employer.example/careers', postingUrlPattern: 'https://employer.example/job/*' }] },
+      call,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    expect(results[0].tier).toBe('harvest');
+    expect(results[0].postings).toEqual([{ url: 'https://employer.example/job/9001', title: 'Board Native Posting', ats: 'board-pattern' }]);
+  });
+});
+
 describe('harvestPostings: a consent/bot-check phrase over real content is never data loss', () => {
-  it('attaches the raw snapshot and reports empty (never blocked) for a consent banner sitting over 20 non-ATS job links', async () => {
+  it('attaches the raw snapshot and reports needs_review (never blocked) for a consent banner sitting over 20 non-ATS job links', async () => {
     // An employer's own careers site — the common case for a direct board —
     // whose links are never ATS-shaped, with a cookie-consent banner on top.
+    // Deliberately NOT job-listing-shaped by the same-site heuristic either
+    // (no jobs/careers/... path segment) — this test is specifically about
+    // the tier-3 last-resort case where NO tier extracts anything.
     const links = Array.from(
       { length: 20 },
-      (_, i) => `- link "Role ${i}" [ref=e${i}]: https://employer.example/careers/role-${i}`,
+      (_, i) => `- link "Role ${i}" [ref=e${i}]: https://employer.example/updates/role-${i}`,
     ).join('\n');
     const snapshot = `We value your privacy - Accept all cookies\n${links}`;
     const call = stubBrowserCall(singleTabHandlers(snapshot));
@@ -289,7 +394,7 @@ describe('harvestPostings: a consent/bot-check phrase over real content is never
     const result = await harvestPostings({ boards: [board('Employer Careers', 'https://employer.example/careers')] }, call);
 
     const { results } = JSON.parse(result.content);
-    expect(results[0].outcome).toBe('empty');
+    expect(results[0].outcome).toBe('needs_review');
     expect(results[0].blockKind).toBeUndefined();
     expect(results[0].postings).toEqual([]);
     expect(results[0].rawSnapshot).toBeDefined();
@@ -443,6 +548,126 @@ describe('harvestPostings: search box typing', () => {
     expect(results[0].postings.some((p: { ats: string }) => p.ats === 'greenhouse')).toBe(true);
     // No leak: the created tab (index 1 — index 0 is the pre-seeded default) was closed.
     expect(calls.some((c) => c.toolName === 'browser_tab_close' && c.args.index === 1)).toBe(true);
+  });
+
+  it('a submit that never visibly changes the page (even after waiting) classifies needs_review, noting the search was never confirmed submitted', async () => {
+    // Every browser_snapshot call returns text identical except for its
+    // [ref=...] token — exercising both the "keeps waiting once" behaviour
+    // and that a ref-only difference is correctly treated as unchanged.
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    let snapshotCalls = 0;
+    const call = stubBrowserCall(
+      {
+        ...singleTabHandlers(''),
+        browser_type: { content: 'ok', isError: false },
+        browser_snapshot: () => {
+          snapshotCalls += 1;
+          return { content: `- searchbox "Search jobs" [ref=e${snapshotCalls}]\n${UNKNOWN_LINK}`, isError: false };
+        },
+      },
+      calls,
+    );
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'backend' }] },
+      call,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('needs_review');
+    expect(results[0].note).toContain('search not submitted: submit did not change the page');
+    expect(calls.filter((c) => c.toolName === 'browser_wait_for')).toHaveLength(1);
+    // navigate snapshot + post-submit snapshot + post-wait snapshot.
+    expect(snapshotCalls).toBe(3);
+  });
+
+  it('a snapshot differing only by the keywords typed into the search box still counts as not submitted', async () => {
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    let snapshotCalls = 0;
+    const call = stubBrowserCall(
+      {
+        ...singleTabHandlers(''),
+        browser_type: { content: 'ok', isError: false },
+        browser_snapshot: () => {
+          snapshotCalls += 1;
+          const value = snapshotCalls === 1 ? '' : ': backend';
+          return { content: `- searchbox "Search jobs" [ref=e${snapshotCalls}]${value}\n${UNKNOWN_LINK}`, isError: false };
+        },
+      },
+      calls,
+    );
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'backend' }] },
+      call,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('needs_review');
+    expect(results[0].note).toContain('search not submitted: submit did not change the page');
+    expect(calls.filter((c) => c.toolName === 'browser_wait_for')).toHaveLength(1);
+  });
+
+  it('a submit that only changes the page after waiting classifies from the settled snapshot, unannotated', async () => {
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    let waited = false;
+    let refCounter = 0;
+    const call = stubBrowserCall(
+      {
+        ...singleTabHandlers(''),
+        browser_type: { content: 'ok', isError: false },
+        browser_wait_for: () => {
+          waited = true;
+          return { content: 'ok', isError: false };
+        },
+        browser_snapshot: () => {
+          if (waited) return { content: GREENHOUSE_LINK, isError: false };
+          refCounter += 1;
+          return { content: `- searchbox "Search jobs" [ref=e${refCounter}]\n${UNKNOWN_LINK}`, isError: false };
+        },
+      },
+      calls,
+    );
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'backend' }] },
+      call,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(waited).toBe(true);
+    expect(results[0].outcome).toBe('searched');
+    expect(results[0].note ?? '').not.toContain('search not submitted');
+    expect(calls.filter((c) => c.toolName === 'browser_wait_for')).toHaveLength(1);
+  });
+
+  it('no detected search box classifies needs_review, noting why the search was never submitted', async () => {
+    const call = stubBrowserCall(singleTabHandlers(UNKNOWN_LINK));
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'backend' }] },
+      call,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('needs_review');
+    expect(results[0].note).toContain('search not submitted: no keyword search box detected');
+  });
+
+  it('a failed keyword browser_type classifies needs_review, noting the failure', async () => {
+    const call = stubBrowserCall({
+      ...singleTabHandlers(`- searchbox "Search jobs" [ref=e5]\n${UNKNOWN_LINK}`),
+      browser_type: { content: 'type failed', isError: true },
+    });
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'backend' }] },
+      call,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('needs_review');
+    expect(results[0].note).toContain('search not submitted: keyword browser_type failed');
   });
 });
 
@@ -778,7 +1003,7 @@ describe('harvestPostings: argument validation and error handling', () => {
     expect(results[0].board).toBe('Valid');
   });
 
-  it('drops a location argument rather than acting on it', async () => {
+  it('accepts a location argument, harvesting normally when the page has no location field', async () => {
     const call = stubBrowserCall(singleTabHandlers(GREENHOUSE_LINK));
 
     const result = await harvestPostings(
@@ -804,5 +1029,546 @@ describe('harvestPostings: argument validation and error handling', () => {
     const { results } = JSON.parse(result.content);
     expect(results[0].outcome).toBe('blocked');
     expect(results[0].note).toContain('mcp connection lost');
+  });
+});
+
+describe('harvestPostings: location field control-search flow', () => {
+  /** Field lines: a keyword box and a location box, in the given order —
+   * used to test that ordering never matters (case 7). */
+  function fieldLines(order: 'kw-first' | 'loc-first' = 'kw-first'): string {
+    const kw = '- textbox "Keywords" [ref=kw]';
+    const loc = '- textbox "Location" [ref=loc]';
+    return `${order === 'kw-first' ? kw : loc}\n${order === 'kw-first' ? loc : kw}\n`;
+  }
+
+  /** A stateful fake single-tab browser driving the location-control flow:
+   * `resultFor(kw, loc)` decides what each snapshot shows for the CURRENT
+   * typed keywords/location, reset to '' on every `browser_navigate`. */
+  function makeLocationBrowser(
+    resultFor: (kw: string, loc: string) => 'postings' | 'zero' | 'rejected',
+    order: 'kw-first' | 'loc-first' = 'kw-first',
+  ): { call: BrowserToolCall; calls: { toolName: string; args: Record<string, unknown> }[] } {
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    let kw = '';
+    let loc = '';
+    function snapshotText(): string {
+      const outcome = resultFor(kw, loc);
+      if (outcome === 'postings') return fieldLines(order) + GREENHOUSE_LINK;
+      if (outcome === 'rejected') return fieldLines(order) + 'Invalid location entered.';
+      return fieldLines(order) + 'No jobs found.';
+    }
+    const call = stubBrowserCall(
+      {
+        browser_navigate: () => {
+          kw = '';
+          loc = '';
+          return { content: 'ok', isError: false };
+        },
+        browser_snapshot: () => ({ content: snapshotText(), isError: false }),
+        browser_type: (args) => {
+          const ref = args.ref as string;
+          if (ref === 'kw') kw = args.text as string;
+          if (ref === 'loc') loc = args.text as string;
+          return { content: 'ok', isError: false };
+        },
+      },
+      calls,
+    );
+    return { call, calls };
+  }
+
+  it('(1) types the location on the location ref and keywords on the keyword ref, returning searched', async () => {
+    const { call, calls } = makeLocationBrowser((kw, loc) => (kw === 'eng' && loc === 'Berlin' ? 'postings' : 'zero'));
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    const typeCalls = calls.filter((c) => c.toolName === 'browser_type');
+    expect(typeCalls).toContainEqual({ toolName: 'browser_type', args: expect.objectContaining({ ref: 'loc', text: 'Berlin', submit: false }) });
+    expect(typeCalls).toContainEqual({ toolName: 'browser_type', args: expect.objectContaining({ ref: 'kw', text: 'eng', submit: true }) });
+  });
+
+  it('(2) with no location field, zero results classify empty with no control navigate issued', async () => {
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    const call = stubBrowserCall(
+      {
+        browser_navigate: { content: 'ok', isError: false },
+        browser_snapshot: { content: '- textbox "Keywords" [ref=kw]\nNo jobs found.', isError: false },
+        browser_type: { content: 'ok', isError: false },
+      },
+      calls,
+    );
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('empty');
+    expect(calls.filter((c) => c.toolName === 'browser_navigate')).toHaveLength(1);
+  });
+
+  it('(3) a zero combined search whose control search confirms the location classifies empty, naming it', async () => {
+    const { call } = makeLocationBrowser((kw, loc) => (kw === '' && loc === 'Berlin' ? 'postings' : 'zero'));
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('empty');
+    expect(results[0].note).toBe('search ran; zero matches; location "Berlin" confirmed recognised by a location-only control search');
+  });
+
+  it('(4) retries the German alias when the English control comes back zero, and the alias search finds postings', async () => {
+    const { call } = makeLocationBrowser((kw, loc) => (kw === 'eng' && loc === 'Deutschland' ? 'postings' : 'zero'));
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Germany' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+  });
+
+  it('(5) blocks with blockKind location when every candidate is empty/rejected', async () => {
+    const { call } = makeLocationBrowser(() => 'zero');
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Germany' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('blocked');
+    expect(results[0].blockKind).toBe('location');
+    expect(results[0].note).toContain('tried Germany, Deutschland');
+  });
+
+  it('(6) a rejection phrase short-circuits straight to the next candidate', async () => {
+    const { call } = makeLocationBrowser((kw, loc) => {
+      if (kw === '' && loc === 'Germany') return 'rejected';
+      if (kw === 'eng' && loc === 'Deutschland') return 'postings';
+      return 'zero';
+    });
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Germany' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+  });
+
+  it('(7) a keyword box listed after the location field is still chosen for the keywords', async () => {
+    const { call, calls } = makeLocationBrowser((kw, loc) => (kw === 'eng' && loc === 'Berlin' ? 'postings' : 'zero'), 'loc-first');
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    const typeCalls = calls.filter((c) => c.toolName === 'browser_type');
+    expect(typeCalls).toContainEqual({ toolName: 'browser_type', args: expect.objectContaining({ ref: 'kw', text: 'eng' }) });
+  });
+
+  it('(8) a rejection phrase on the COMBINED page skips the control entirely and tries the next candidate', async () => {
+    const { call, calls } = makeLocationBrowser((kw, loc) => {
+      if (kw === 'eng' && loc === 'Germany') return 'rejected';
+      if (kw === 'eng' && loc === 'Deutschland') return 'postings';
+      return 'zero';
+    });
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Germany' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    // Only the initial navigate plus the re-navigate for the Deutschland
+    // candidate — no control navigate was ever issued for Germany.
+    expect(calls.filter((c) => c.toolName === 'browser_navigate')).toHaveLength(2);
+  });
+
+  it('(9) a control page showing a login wall blocks with blockKind login, never confirming the location', async () => {
+    let navigateCount = 0;
+    const call = stubBrowserCall({
+      browser_navigate: () => {
+        navigateCount++;
+        return { content: 'ok', isError: false };
+      },
+      browser_type: () => ({ content: 'ok', isError: false }),
+      browser_snapshot: () =>
+        navigateCount >= 2
+          ? { content: fieldLines() + 'Please sign in to continue.', isError: false }
+          : { content: fieldLines() + 'No jobs found.', isError: false },
+    });
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('blocked');
+    expect(results[0].blockKind).toBe('login');
+  });
+
+  it('(10) a browser_type error during the control search never confirms empty nor reports blockKind location', async () => {
+    let locTypeCount = 0;
+    const call = stubBrowserCall({
+      browser_navigate: () => ({ content: 'ok', isError: false }),
+      browser_type: (args) => {
+        if (args.ref === 'loc') {
+          locTypeCount++;
+          if (locTypeCount >= 2) return { content: 'type failed', isError: true };
+        }
+        return { content: 'ok', isError: false };
+      },
+      browser_snapshot: () => ({ content: fieldLines() + 'No jobs found.', isError: false }),
+    });
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('empty');
+    expect(results[0].blockKind).not.toBe('location');
+    expect(results[0].note).not.toContain('confirmed recognised');
+  });
+
+  it('(11) a navigation error during the control search falls back to the combined snapshot instead of blocking as location', async () => {
+    let navigateCount = 0;
+    const call = stubBrowserCall({
+      browser_navigate: () => {
+        navigateCount++;
+        if (navigateCount >= 2) return { content: 'nav failed', isError: true };
+        return { content: 'ok', isError: false };
+      },
+      browser_type: () => ({ content: 'ok', isError: false }),
+      browser_snapshot: () => ({ content: fieldLines() + 'No jobs found.', isError: false }),
+    });
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('empty');
+    expect(results[0].blockKind).not.toBe('location');
+  });
+
+  it('(12) real ATS posting links alongside a "did you mean" phrase on the combined page still classify searched', async () => {
+    const call = stubBrowserCall({
+      browser_navigate: () => ({ content: 'ok', isError: false }),
+      browser_type: () => ({ content: 'ok', isError: false }),
+      browser_snapshot: () => ({ content: `${fieldLines()}${GREENHOUSE_LINK}\nDid you mean Engineer?`, isError: false }),
+    });
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'eng', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    expect(results[0].postings).toHaveLength(1);
+  });
+});
+
+describe('harvestPostings: dispatch precedence (sessions > tabs > serial)', () => {
+  /** A `BrowserSessionPool` of `sessionCount` fake sessions, every board on
+   * every session resolving to the same GREENHOUSE_LINK snapshot — these
+   * tests only care WHICH path ran, not per-board content. */
+  function fakeSessionPool(sessionCount: number): BrowserSessionPool {
+    const connector: ClientConnector = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async (params) => {
+        if (params.name === 'browser_snapshot') {
+          return { content: [{ type: 'text', text: GREENHOUSE_LINK }], isError: false };
+        }
+        return { content: [{ type: 'text', text: 'ok' }], isError: false };
+      },
+      close: async () => {},
+    });
+    const mcpPool = new McpClientPool([{ name: 'browser', url: 'http://browser' }], connector);
+    return new BrowserSessionPool(mcpPool, { AGENT_BROWSER_SESSIONS: String(sessionCount) });
+  }
+
+  it('prefers the session-per-worker path when at least two sessions are available, never touching the tab/serial call', async () => {
+    const boards = [board('One', 'https://one.example'), board('Two', 'https://two.example')];
+    const call = vi.fn();
+    const sessionPool = fakeSessionPool(2);
+
+    const result = await harvestPostings({ boards }, call as unknown as BrowserToolCall, true, sessionPool);
+
+    expect(result.isError).toBe(false);
+    const { results } = JSON.parse(result.content);
+    expect(results).toHaveLength(2);
+    expect(results.every((r: { outcome: string }) => r.outcome === 'searched')).toBe(true);
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the existing tab-per-board path when fewer than two sessions are available', async () => {
+    const boards = [board('One', 'https://one.example')];
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    const call = stubBrowserCall(singleTabHandlers(GREENHOUSE_LINK), calls);
+    const sessionPool = fakeSessionPool(1);
+
+    const result = await harvestPostings({ boards }, call, true, sessionPool);
+
+    expect(result.isError).toBe(false);
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    // The tab path ran via `call`, not the session pool.
+    expect(calls.some((c) => c.toolName === 'browser_tab_new')).toBe(true);
+  });
+
+  it('fills boards a dead session pool never claimed via a serial fallback on the shared call, after the sessions each attempted have their own failure result', async () => {
+    // Every session's first navigate throws, so both workers die on the
+    // very first board each claims and neither can lease a replacement —
+    // with 2 sessions and 3 boards, the third board is never claimed by
+    // the sessions path at all.
+    const boardsReq = [board('One', 'https://one.example'), board('Two', 'https://two.example'), board('Three', 'https://three.example')];
+    const deadConnector: ClientConnector = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async (params) => {
+        if (params.name === 'browser_navigate') throw new Error('transport exploded');
+        return { content: [{ type: 'text', text: 'ok' }], isError: false };
+      },
+      close: async () => {},
+    });
+    const mcpPool = new McpClientPool([{ name: 'browser', url: 'http://browser' }], deadConnector);
+    const sessionPool = new BrowserSessionPool(mcpPool, { AGENT_BROWSER_SESSIONS: '2' });
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    const call = stubBrowserCall(
+      { browser_navigate: { content: 'ok', isError: false }, browser_snapshot: { content: GREENHOUSE_LINK, isError: false } },
+      calls,
+    );
+
+    const result = await harvestPostings({ boards: boardsReq }, call, true, sessionPool);
+
+    expect(result.isError).toBe(false);
+    const { results } = JSON.parse(result.content);
+    expect(results).toHaveLength(3);
+    const blocked = results.filter((r: { outcome: string }) => r.outcome === 'blocked');
+    const searched = results.filter((r: { outcome: string }) => r.outcome === 'searched');
+    // The two boards the dead sessions actually attempted carry their own
+    // failure result; the never-attempted remainder came back genuinely
+    // harvested via the serial fallback on the shared `call`.
+    expect(blocked).toHaveLength(2);
+    expect(searched).toHaveLength(1);
+    expect(calls.some((c) => c.toolName === 'browser_navigate')).toBe(true);
+  });
+
+  it('falls back to serial when zero sessions are available and tab tools are unavailable', async () => {
+    const boards = [board('One', 'https://one.example')];
+    const call = stubBrowserCall({
+      browser_navigate: { content: 'ok', isError: false },
+      browser_snapshot: { content: GREENHOUSE_LINK, isError: false },
+    });
+    const sessionPool = fakeSessionPool(0);
+
+    const result = await harvestPostings({ boards }, call, false, sessionPool);
+
+    expect(result.isError).toBe(false);
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+  });
+});
+
+describe('harvestPostings: templated searchUrl boards', () => {
+  const TEMPLATE = 'https://www.adzuna.de/search?q={keywords}&w={location}';
+
+  it('navigates the built, encoded URL and never calls browser_type — single-shared-tab path', async () => {
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    const call = stubBrowserCall(
+      { browser_navigate: { content: 'ok', isError: false }, browser_snapshot: { content: GREENHOUSE_LINK, isError: false } },
+      calls,
+    );
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Adzuna', url: 'https://www.adzuna.de/search', searchUrl: TEMPLATE, keywords: 'backend dev', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    expect(results[0].url).toBe('https://www.adzuna.de/search?q=backend%20dev&w=Berlin');
+    const navigateCall = calls.find((c) => c.toolName === 'browser_navigate');
+    expect(navigateCall?.args.url).toBe('https://www.adzuna.de/search?q=backend%20dev&w=Berlin');
+    expect(calls.some((c) => c.toolName === 'browser_type')).toBe(false);
+  });
+
+  it('navigates the built, encoded URL and never calls browser_type — tab-per-board path', async () => {
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    const call = stubBrowserCall(singleTabHandlers(GREENHOUSE_LINK), calls);
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Adzuna', url: 'https://www.adzuna.de/search', searchUrl: TEMPLATE, keywords: 'backend dev', location: 'Berlin' }] },
+      call,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    expect(results[0].url).toBe('https://www.adzuna.de/search?q=backend%20dev&w=Berlin');
+    const navigateCall = calls.find((c) => c.toolName === 'browser_navigate');
+    expect(navigateCall?.args.url).toBe('https://www.adzuna.de/search?q=backend%20dev&w=Berlin');
+    expect(calls.some((c) => c.toolName === 'browser_type')).toBe(false);
+  });
+
+  it('refuses a templated board whose BUILT url looks like a sign-in page, before navigating', async () => {
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    const call = stubBrowserCall(singleTabHandlers(GREENHOUSE_LINK), calls);
+
+    const result = await harvestPostings(
+      {
+        boards: [
+          {
+            board: 'Sneaky Board',
+            url: 'https://board.example/search',
+            searchUrl: 'https://board.example/users/sign-in?next={keywords}',
+            keywords: 'backend',
+          },
+        ],
+      },
+      call,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('blocked');
+    expect(results[0].blockKind).toBe('login');
+    expect(calls.some((c) => c.toolName === 'browser_navigate')).toBe(false);
+  });
+
+  it('appends a location-not-applied note when the template has no {location} placeholder', async () => {
+    const call = stubBrowserCall({
+      browser_navigate: { content: 'ok', isError: false },
+      browser_snapshot: { content: GREENHOUSE_LINK, isError: false },
+    });
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Adzuna', url: 'https://www.adzuna.de/search', searchUrl: 'https://www.adzuna.de/search?q={keywords}', keywords: 'backend', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    expect(results[0].note).toContain('location not applied: search URL template has no {location}');
+  });
+
+  it('appends the location-not-applied note on an early navigation-failure return too, for a templated board', async () => {
+    const call = stubBrowserCall({
+      browser_navigate: { content: 'net::ERR_NAME_NOT_RESOLVED', isError: true },
+    });
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Adzuna', url: 'https://www.adzuna.de/search', searchUrl: 'https://www.adzuna.de/search?q={keywords}', keywords: 'backend', location: 'Berlin' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('blocked');
+    expect(results[0].note).toContain('location not applied: search URL template has no {location}');
+  });
+
+  it('appends the location-not-applied note on the sign-in-url-refusal early return too, for a templated board', async () => {
+    const call = stubBrowserCall({});
+
+    const result = await harvestPostings(
+      {
+        boards: [
+          {
+            board: 'Sneaky Board',
+            url: 'https://board.example/search',
+            searchUrl: 'https://board.example/users/sign-in?next={keywords}',
+            keywords: 'backend',
+            location: 'Berlin',
+          },
+        ],
+      },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('blocked');
+    expect(results[0].blockKind).toBe('login');
+    expect(results[0].note).toContain('location not applied: search URL template has no {location}');
+  });
+
+  it('reports the built templated URL (not the original url) when the browser call throws mid-harvest', async () => {
+    // Throw only on the board's own navigation: the tool's pre-harvest probes
+    // must succeed so the failure is contained per-board, not tool-wide.
+    const call: BrowserToolCall = async (toolName) => {
+      if (toolName === 'browser_navigate') throw new Error('MCP transport error');
+      return { content: 'ok', isError: false };
+    };
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Adzuna', url: 'https://www.adzuna.de/search', searchUrl: 'https://www.adzuna.de/search?q={keywords}', keywords: 'backend' }] },
+      call,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('blocked');
+    expect(results[0].url).toBe('https://www.adzuna.de/search?q=backend');
+  });
+
+  it('leaves a board with no searchUrl unchanged (searchAndClassify path, browser_type still used when keywords are given)', async () => {
+    const firstSnapshot = '- searchbox "Search jobs" [ref=e5]';
+    let snapshotCalls = 0;
+    const calls: { toolName: string; args: Record<string, unknown> }[] = [];
+    const call = stubBrowserCall(
+      {
+        browser_navigate: { content: 'ok', isError: false },
+        browser_snapshot: () => {
+          snapshotCalls += 1;
+          return { content: snapshotCalls === 1 ? firstSnapshot : GREENHOUSE_LINK, isError: false };
+        },
+        browser_type: { content: 'ok', isError: false },
+      },
+      calls,
+    );
+
+    const result = await harvestPostings(
+      { boards: [{ board: 'Acme', url: 'https://acme.example/jobs', keywords: 'backend' }] },
+      call,
+      false,
+    );
+
+    const { results } = JSON.parse(result.content);
+    expect(results[0].outcome).toBe('searched');
+    expect(results[0].url).toBe('https://acme.example/jobs');
+    expect(calls.some((c) => c.toolName === 'browser_type')).toBe(true);
   });
 });

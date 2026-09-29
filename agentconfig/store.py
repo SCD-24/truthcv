@@ -7,9 +7,21 @@ import zoneinfo
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from agentconfig.boards import DEFAULT_BOARD_SOURCES, catalog_mode
+import logging
+
+from agentconfig.boards import (
+    DEFAULT_BOARD_SOURCES,
+    catalog_mode,
+    is_custom_source,
+    posting_url_pattern_error,
+    search_url_error,
+)
 from screening.company import company_identity_key
 from storage import data_dir
+
+
+# Google dork recency letters (tbs=qdr:<x>); "none" omits the recency param.
+DORK_RECENCIES: tuple[str, ...] = ("h", "d", "w", "m", "y", "none")
 
 
 def config_path() -> Path:
@@ -48,6 +60,12 @@ class JobBoard:
     source: str = ""
     signin_url: str = ""
     mode: str = ""
+    search_url: str = ""
+    # Whether this board is actually searched. Missing/non-bool loads as True
+    # (mirrors JobProfile.enabled), so a board is only ever excluded by an
+    # explicit operator action, never by a hand-edited or older config file.
+    enabled: bool = True
+    posting_url_pattern: str = ""
 
     @classmethod
     def from_dict(cls, raw: dict) -> "JobBoard":
@@ -59,11 +77,34 @@ class JobBoard:
             kwargs["signin_url"] = raw["signin_url"]
         if "mode" in raw and isinstance(raw["mode"], str):
             kwargs["mode"] = raw["mode"]
+        if "search_url" in raw and isinstance(raw["search_url"], str):
+            if search_url_error(raw["search_url"]):
+                logging.getLogger(__name__).warning(
+                    "agent_config.json: stored job board search_url is invalid; dropping it"
+                )
+            else:
+                kwargs["search_url"] = raw["search_url"]
+        if "enabled" in raw and isinstance(raw["enabled"], bool):
+            kwargs["enabled"] = raw["enabled"]
+        if "posting_url_pattern" in raw and isinstance(raw["posting_url_pattern"], str):
+            if posting_url_pattern_error(raw["posting_url_pattern"]):
+                logging.getLogger(__name__).warning(
+                    "agent_config.json: stored job board posting_url_pattern is invalid; dropping it"
+                )
+            else:
+                kwargs["posting_url_pattern"] = raw["posting_url_pattern"]
         return cls(**kwargs)
 
     def to_dict(self) -> dict:
         """Serialize to a dict with snake_case keys."""
-        return {"source": self.source, "signin_url": self.signin_url, "mode": self.mode}
+        return {
+            "source": self.source,
+            "signin_url": self.signin_url,
+            "mode": self.mode,
+            "search_url": self.search_url,
+            "enabled": self.enabled,
+            "posting_url_pattern": self.posting_url_pattern,
+        }
 
 
 @dataclass
@@ -74,6 +115,9 @@ class JobProfile:
     enabled: bool = True
     # Search group
     keywords: list[str] = field(default_factory=list)
+    # Job titles used for Google dork discovery; when empty, dork composition
+    # falls back to titles detected from keywords (see agentconfig/dorks.py).
+    title_keywords: list[str] = field(default_factory=list)
     locations: list[str] = field(default_factory=list)
     # Requirement fields (all optional/nullable per spec)
     remote_model: str | None = None
@@ -103,8 +147,8 @@ class JobProfile:
         if "enabled" in raw and isinstance(raw["enabled"], bool):
             kwargs["enabled"] = raw["enabled"]
 
-        # keywords, locations: list[str]
-        for field_name in ("keywords", "locations"):
+        # keywords, title_keywords, locations: list[str]
+        for field_name in ("keywords", "title_keywords", "locations"):
             if field_name in raw:
                 if _is_string_list(raw[field_name]):
                     kwargs[field_name] = raw[field_name]
@@ -149,6 +193,7 @@ class JobProfile:
             "name": self.name,
             "enabled": self.enabled,
             "keywords": self.keywords,
+            "title_keywords": self.title_keywords,
             "locations": self.locations,
             "remote_model": self.remote_model,
             "employment_country": self.employment_country,
@@ -189,15 +234,20 @@ class AgentConfig:
     cooldown_days_same_role: int | None = None
     cooldown_days_same_company: int | None = None
     max_applications_per_run: int | None = None
-    # Discovery freshness window: only consider postings published within this
-    # many days. None means "unset", which keeps the past-week window the dork
-    # URLs have always carried; 0 disables the window entirely (any age),
-    # mirroring how 0 disables a cooldown window.
+    # Freshness hard filter: only consider postings published within this many
+    # days. It drives ONLY the API-feed filter and the run prompt's hard-filter
+    # line; the dork URL's recency is the separate dork_recency setting. None
+    # means "unset"; 0 disables the window entirely (any age), mirroring how 0
+    # disables a cooldown window.
     max_posting_age_days: int | None = None
+    # Google dork recency (tbs=qdr:<x>): one of DORK_RECENCIES. Default past day.
+    dork_recency: str = "d"
     # The operator's OWN boards, beyond the four defaults. The defaults
     # (agentconfig.boards.DEFAULT_BOARD_SOURCES) are unioned in at resolve
-    # time via resolved_board_sources(), never stored here, so they are
-    # always searched and cannot be lost to a bad PUT or a hand-edited file.
+    # time via resolved_board_sources(), so they cannot be lost to a bad PUT
+    # or a hand-edited file, but a default is now STORED here when it carries
+    # a sign-in override OR has been disabled — both are per-board state that
+    # would otherwise have nowhere to live.
     job_boards: list[JobBoard] = field(default_factory=list)
 
     @property
@@ -212,19 +262,14 @@ class AgentConfig:
         return self.mode != "off"
 
     def resolved_board_sources(self) -> list[str]:
-        """Job board sources actually searched: the four defaults, then the operator's own.
+        """ENABLED job board sources actually searched: the four defaults, then the operator's own.
 
         The one place the union is expressed, so discovery (agentconfig/dorks.py)
-        and the API cannot drift apart on what "the boards" means.
+        and the API cannot drift apart on what "the boards" means. A default or
+        custom board the operator has disabled is excluded — see resolved_boards()
+        for the full listing (enabled or not).
         """
-        result = list(DEFAULT_BOARD_SOURCES)
-        seen = {s.casefold() for s in DEFAULT_BOARD_SOURCES}
-        for board in self.job_boards:
-            key = board.source.strip().casefold()
-            if key and key not in seen:
-                seen.add(key)
-                result.append(board.source)
-        return result
+        return [b.source for b in self.resolved_boards() if b.enabled]
 
     def resolved_boards(self) -> list[JobBoard]:
         """Job boards actually searched, defaults-first, each carrying its effective mode.
@@ -244,17 +289,49 @@ class AgentConfig:
             seen.add(key)
             override = overrides.get(key)
             signin_url = override.signin_url if override else ""
+            search_url = override.search_url if override and is_custom_source(source) else ""
+            enabled = override.enabled if override else True
+            posting_url_pattern = override.posting_url_pattern if override else ""
             result.append(
-                JobBoard(source=source, signin_url=signin_url, mode=catalog_mode(source) or "dork")
+                JobBoard(
+                    source=source,
+                    signin_url=signin_url,
+                    mode=catalog_mode(source) or "dork",
+                    search_url=search_url,
+                    enabled=enabled,
+                    posting_url_pattern=posting_url_pattern,
+                )
             )
+            # Catalog boards keep search_url "" — the template applies only to
+            # a custom board's own on-site search page.
         for board in self.job_boards:
             key = board.source.strip().casefold()
             if not key or key in seen:
                 continue
             seen.add(key)
             mode = catalog_mode(board.source) or (board.mode or "dork")
-            result.append(JobBoard(source=board.source, signin_url=board.signin_url, mode=mode))
+            search_url = board.search_url if is_custom_source(board.source) else ""
+            result.append(
+                JobBoard(
+                    source=board.source,
+                    signin_url=board.signin_url,
+                    mode=mode,
+                    search_url=search_url,
+                    enabled=board.enabled,
+                    posting_url_pattern=board.posting_url_pattern,
+                )
+            )
         return result
+
+    def searched_boards(self) -> list[JobBoard]:
+        """Resolved boards actually searched — resolved_boards() filtered to enabled ones.
+
+        A disabled board (default or custom) stays listed by resolved_boards()
+        so the operator can re-enable it, but must not contribute a dork,
+        direct-board entry, API feed pull, or coverage count — this is the
+        one place callers should use instead of resolved_boards() for that.
+        """
+        return [b for b in self.resolved_boards() if b.enabled]
 
     @classmethod
     def from_dict(cls, raw: dict) -> AgentConfig:
@@ -332,9 +409,10 @@ class AgentConfig:
             # Migrated from each profile's old preferred_sources when the
             # job_boards key is absent, so an existing config's discovery
             # behaviour survives the upgrade. The defaults are NOT seeded
-            # here — they are added at resolve time by resolved_board_sources()
-            # — so an empty result here is correct and simply means "just
-            # the defaults".
+            # here — they are added at resolve time by resolved_boards() —
+            # so an empty result here is correct and simply means "just the
+            # defaults, all enabled". (A default is only ever stored once it
+            # carries a sign-in override or has been disabled.)
             migrated: list[JobBoard] = []
             raw_profiles = raw.get("profiles")
             if isinstance(raw_profiles, list):
@@ -385,6 +463,10 @@ class AgentConfig:
             )
             kwargs["max_posting_age_days"] = value if usable else None
 
+        # dork_recency: one of DORK_RECENCIES; anything else keeps the default.
+        if "dork_recency" in raw and raw["dork_recency"] in DORK_RECENCIES:
+            kwargs["dork_recency"] = raw["dork_recency"]
+
         return cls(**kwargs)
 
     def to_dict(self) -> dict:
@@ -406,6 +488,7 @@ class AgentConfig:
             "cooldown_days_same_company": self.cooldown_days_same_company,
             "max_applications_per_run": self.max_applications_per_run,
             "max_posting_age_days": self.max_posting_age_days,
+            "dork_recency": self.dork_recency,
         }
 
     def _storage_dict(self) -> dict:

@@ -90,10 +90,13 @@ Projected from `schema` widgets on the architecture canvas.
 
 | Field | Type | Flags | Notes |
 |---|---|---|---|
-| `job_boards` | list[JobBoard] |  | The operator's OWN boards. The four default boards are unioned in at resolve time and are not stored here unless carrying a signin_url override. |
 | `job_boards[].source` | string |  | A catalog key (linkedin, ashby, greenhouse, lever, personio, workday) or a raw domain. |
 | `job_boards[].signin_url` | string | optional | Operator-supplied sign-in URL; blank for a known board, which resolves from the catalog. |
 | `job_boards[].mode` | string | optional | dork \| direct. User-settable only for custom boards (source not in the boards.py catalog). Catalog boards derive a fixed mode and ignore any stored value. Defaults to dork on load for backward compatibility, and to direct for a newly added custom board. |
+| `profiles[].title_keywords` | list[str] | optional | Job titles used to compose Google dork queries. When empty, titles are detected from keywords by title noun (Engineer, Developer, Analyst…), falling back to the raw keywords. Each dork is capped at 32 words and split into several queries per board when needed. |
+| `job_boards` | list[JobBoard] |  | The operator's OWN boards. The four default boards are unioned in at resolve time and are stored here only when carrying a signin_url override or when disabled. |
+| `job_boards[].enabled` | bool | optional | Defaults to true. False keeps the board listed but excludes it from dorks, direct boards and API feeds. Applies to default boards too. |
+| `dork_recency` | "h"\|"d"\|"w"\|"m"\|"y"\|"none" |  | Google tbs qdr for composed dork URLs; default d; camelCase dorkRecency |
 <!-- generated:end comp:agent-config -->
 
 <!-- generated:start comp:api -->
@@ -104,6 +107,7 @@ Projected from `schema` widgets on the architecture canvas.
 | Field | Type | Flags | Notes |
 |---|---|---|---|
 | `jobBoards` | JobBoardModel[] |  | On GET/PUT /api/agent/config. Each entry: source, signinUrl, plus response-only domain, effectiveSigninUrl and isDefault resolved server-side. GET returns the resolved list, defaults first. |
+| `feedAlreadyScreened` | int |  | GET /agent/config?include_feed=true: count of feed postings omitted because the ledger already screened them |
 <!-- generated:end comp:api -->
 
 <!-- generated:start comp:run-store -->
@@ -116,4 +120,23 @@ Projected from `schema` widgets on the architecture canvas.
 | `boardBreakdown` | BoardBreakdown[] | derived on read | Per job board (from screening URL host): postingsSeen, forReview, rejected |
 | `discovery_coverage[].tier` | string |  | Which extraction tier produced the postings: api, harvest, llm, or empty when not applicable. |
 | `discovery_coverage[].status` | string |  | searched \| empty \| blocked \| login_walled \| skipped. 'blocked' means the page was unreadable (CAPTCHA/consent/bot wall), distinct from 'empty'. |
+| `finish_refused` | bool |  | Set when finish_run was refused once for incomplete direct/dork discovery coverage; the second call always records. |
 <!-- generated:end comp:run-store -->
+
+<!-- generated:start comp:job-runner -->
+## Job Runner (`job-runner`)
+
+### Job record
+
+| Field | Type | Flags | Notes |
+|---|---|---|---|
+| `id` | UUID string | Primary Key | - |
+| `kind` | string | - | caller-supplied job kind, e.g. gmail sync, feed refresh |
+| `status` | string | - | pending \| running \| done \| failed |
+| `progress` | float | - | caller-defined 0..1 fraction, default 0.0 |
+| `result` | Any | - | set only when status=done |
+| `error` | string \| null | - | set only when status=failed |
+| `created_at` | float (epoch) | - | - |
+| `started_at` | float (epoch) \| null | - | - |
+| `finished_at` | float (epoch) \| null | - | - |
+<!-- generated:end comp:job-runner -->

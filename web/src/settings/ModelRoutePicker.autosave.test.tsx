@@ -1,0 +1,102 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
+import { listConnectionModels } from "../api/client";
+import type { ConnectionStatus, ModelInfo } from "../api/types";
+import { ModelRoutePicker } from "./ModelRoutePicker";
+import { SettingsAutosaveProvider } from "./SettingsAutosave";
+
+vi.mock("../api/client", () => ({ listConnectionModels: vi.fn(), testConnectionProvider: vi.fn() }));
+const connected = (provider: string): ConnectionStatus => ({
+  provider, label: provider, modes: ["apikey"], subscriptionConnected: false,
+  apiKeyConnected: true, authMode: "apikey", expiresAt: null, connectedAt: null,
+});
+const models: ModelInfo[] = [{ id: "m", label: "Model M", effortLevels: ["high"] }];
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+describe("opt-in picker autosave", () => {
+  it("restores a custom invalid UI draft when a route unmounts, without writing on remount", async () => {
+    vi.mocked(listConnectionModels).mockResolvedValue(models);
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    function Host() {
+      const [shown, setShown] = useState(true);
+      return <SettingsAutosaveProvider>
+        <button onClick={() => setShown((value) => !value)}>Toggle route</button>
+        {shown && <ModelRoutePicker title="Task" autosaveKey="task" connections={[connected("a")]}
+          route={null} onSave={onSave} />}
+      </SettingsAutosaveProvider>;
+    }
+    render(<Host />);
+    await screen.findByRole("button", { name: "Reload" });
+    fireEvent.mouseDown(screen.getByLabelText(/^model$/i));
+    fireEvent.click(screen.getByRole("option", { name: /custom/i }));
+    fireEvent.click(screen.getByText("Toggle route"));
+    fireEvent.click(screen.getByText("Toggle route"));
+    expect((screen.getByRole("textbox", { name: "Custom model id" }) as HTMLInputElement).value).toBe("");
+    expect(screen.queryByLabelText(/context window/i)).toBeNull();
+    expect(screen.getByRole("status").textContent).toMatch(/valid/i);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+  it("reconciles a restored unlisted model into Custom without saving or losing invalid text", async () => {
+    vi.mocked(listConnectionModels).mockResolvedValue(models);
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    function Host() {
+      const [shown, setShown] = useState(true);
+      return <SettingsAutosaveProvider>
+        <button onClick={() => setShown((value) => !value)}>Toggle route</button>
+        {shown && <ModelRoutePicker title="Task" autosaveKey="task" connections={[connected("a")]}
+          route={{ connection: "a", model: "retained" }} onSave={onSave} />}
+      </SettingsAutosaveProvider>;
+    }
+    render(<Host />);
+    await screen.findByRole("button", { name: "Reload" });
+    fireEvent.click(screen.getByText("Toggle route"));
+    fireEvent.click(screen.getByText("Toggle route"));
+    expect((await screen.findByRole("textbox", { name: "Custom model id" }) as HTMLInputElement).value).toBe("retained");
+    expect(screen.queryByLabelText(/context window/i)).toBeNull();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("never saves hydration or reload, but saves committed provider default, model and effort", async () => {
+    vi.mocked(listConnectionModels).mockResolvedValue(models);
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<ModelRoutePicker title="Default" autosaveKey="default" connections={[connected("a"), connected("b")]}
+      route={{ connection: "a", model: "m" }} onSave={onSave} />);
+    await vi.waitFor(() => expect(listConnectionModels).toHaveBeenCalledWith("a"));
+    await vi.waitFor(() => expect((screen.getByRole("button", { name: "Reload" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    expect(onSave).not.toHaveBeenCalled();
+    fireEvent.mouseDown(screen.getByLabelText(/^model$/i));
+    fireEvent.click(await screen.findByRole("option", { name: "Provider default" }));
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith({ connection: "a", model: "" }));
+    fireEvent.mouseDown(screen.getByLabelText(/^model$/i));
+    fireEvent.click(await screen.findByRole("option", { name: "Model M" }));
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith({ connection: "a", model: "m" }));
+    fireEvent.mouseDown(screen.getByLabelText(/effort level/i));
+    fireEvent.click(screen.getByRole("option", { name: "High" }));
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith({ connection: "a", model: "m", effort: "high" }));
+    fireEvent.mouseDown(screen.getByLabelText(/connection/i));
+    fireEvent.click(screen.getByRole("option", { name: "b" }));
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith({ connection: "b", model: "" }));
+  });
+
+  it("rejects incomplete custom, saves on blur and clears null", async () => {
+    vi.mocked(listConnectionModels).mockResolvedValue(models);
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<ModelRoutePicker title="Task" autosaveKey="task" allowClear connections={[connected("a")]}
+      route={null} onSave={onSave} />);
+    await vi.waitFor(() => expect(listConnectionModels).toHaveBeenCalled());
+    fireEvent.mouseDown(screen.getByLabelText(/^model$/i));
+    fireEvent.click(screen.getByRole("option", { name: /custom/i }));
+    expect(screen.getByRole("status").textContent).toMatch(/complete a valid/i);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText(/context window/i)).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: "Custom model id" }), { target: { value: "custom-id" } });
+    fireEvent.blur(screen.getByRole("textbox", { name: "Custom model id" }));
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith({ connection: "a", model: "custom-id" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    await vi.waitFor(() => expect(onSave).toHaveBeenLastCalledWith(null));
+    expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
+  });
+});

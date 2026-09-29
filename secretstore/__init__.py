@@ -76,18 +76,31 @@ def read_secrets() -> dict:
         ) from exc
 
 
-def write_secrets(data: dict) -> None:
-    """Encrypt and atomically persist the given secrets."""
+def _write_secrets_unlocked(data: dict) -> None:
+    """Encrypt and atomically persist the given secrets.
+
+    Caller must already hold the ``locked(secrets_path())`` lock. Split out
+    from ``write_secrets`` so load-modify-save callers (set_connection,
+    clear_mode) can hold one lock across the whole cycle without nesting
+    ``flock`` acquisitions, which are not reentrant and would deadlock.
+    """
+    from storage.atomic import atomic_write_text
+
     f = _fernet()
     if f is None:
         raise SecretsUnavailable("ENCRYPTION_KEY is missing or invalid.")
     clean = {k: v for k, v in data.items() if v is not None}
     p = secrets_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
     token = f.encrypt(json.dumps(clean).encode("utf-8"))
-    tmp = p.with_suffix(".enc.tmp")
-    tmp.write_bytes(token)
-    tmp.replace(p)
+    atomic_write_text(p, token.decode("ascii"), mode=0o600)
+
+
+def write_secrets(data: dict) -> None:
+    """Encrypt and atomically persist the given secrets, under the file lock."""
+    from storage.atomic import locked
+
+    with locked(secrets_path()):
+        _write_secrets_unlocked(data)
 
 
 SCHEMA_VERSION = 2
@@ -120,15 +133,10 @@ def migrate_v1(raw: dict) -> dict:
     }
 
 
-def load_store() -> dict:
-    """Return the v2 store, migrating a v1 file in place (with a .bak) once.
-
-    If secrets.enc exists but cannot be decrypted (wrong/rotated key), back up
-    the raw bytes and re-raise so no subsequent write can overwrite and destroy
-    the still-encrypted credentials.
-    """
+def _read_store_raw() -> dict:
+    """Read secrets.enc as-is, without migrating or locking. Pure read."""
     try:
-        raw = read_secrets()
+        return read_secrets()
     except SecretsDecryptError:
         p = secrets_path()
         if p.exists():
@@ -136,8 +144,15 @@ def load_store() -> dict:
             if not bak.exists():
                 bak.write_bytes(p.read_bytes())
         raise
-    if raw.get("version") == SCHEMA_VERSION:
-        return raw
+
+
+def _migrate_store_unlocked(raw: dict) -> dict:
+    """Lift ``raw`` (a non-v2 store) to v2 and persist it, with a .bak.
+
+    Caller must already hold the ``locked(secrets_path())`` lock when calling
+    this directly (set_connection does, to avoid a nested/non-reentrant
+    acquisition); ``_migrate_store_locked`` takes the lock itself.
+    """
     store = migrate_v1(raw)
     if raw and encryption_available():
         p = secrets_path()
@@ -145,8 +160,41 @@ def load_store() -> dict:
             bak = p.with_name("secrets.enc.v1.bak")
             if not bak.exists():
                 bak.write_bytes(p.read_bytes())
-        write_secrets(store)
+        _write_secrets_unlocked(store)
     return store
+
+
+def _migrate_store_locked(raw: dict) -> dict:
+    from storage.atomic import locked
+
+    with locked(secrets_path()):
+        return _migrate_store_unlocked(raw)
+
+
+def load_store() -> dict:
+    """Return the v2 store, migrating a v1 file in place (with a .bak) once.
+
+    If secrets.enc exists but cannot be decrypted (wrong/rotated key), back up
+    the raw bytes and re-raise so no subsequent write can overwrite and destroy
+    the still-encrypted credentials.
+
+    Reads take no lock: ``os.replace`` in ``atomic_write_text`` keeps every
+    read seeing either the pre- or post-write file, never a partial one, so a
+    reader does not need to contend with writers (and must not — taking the
+    lock here would make every read fail on a read-only data dir where no
+    ``.lock`` sidecar can be created, even though nothing needed writing).
+    A v1 file still needs migrating in place; that write path takes the lock
+    itself, only when there is actually something to write.
+    """
+    raw = _read_store_raw()
+    if raw.get("version") == SCHEMA_VERSION:
+        return raw
+    # A fresh/empty store (no file, or no encryption key yet) has nothing to
+    # persist, so migrate_v1({}) is returned without ever touching the lock
+    # sidecar — required so a pure read keeps working on a read-only data dir.
+    if raw and encryption_available():
+        return _migrate_store_locked(raw)
+    return migrate_v1(raw)
 
 
 def save_store(store: dict) -> None:
@@ -184,15 +232,25 @@ def get_connection(card: str) -> dict:
 
 
 def set_connection(card: str, updates: dict) -> None:
-    """Merge updates into a card's stored connection. None deletes a field."""
-    store = load_store()
-    conn = store.setdefault("connections", {}).setdefault(card, {})
-    for k, v in updates.items():
-        if v is None:
-            conn.pop(k, None)
-        else:
-            conn[k] = v
-    save_store(store)
+    """Merge updates into a card's stored connection. None deletes a field.
+
+    Holds one file lock across the whole load-modify-save cycle so two
+    concurrent callers (e.g. different cards) cannot race and drop one
+    another's changes; ``flock`` is not reentrant, so this calls the
+    unlocked load/write bodies directly rather than load_store()/save_store().
+    """
+    from storage.atomic import locked
+
+    with locked(secrets_path()):
+        raw = _read_store_raw()
+        store = raw if raw.get("version") == SCHEMA_VERSION else _migrate_store_unlocked(raw)
+        conn = store.setdefault("connections", {}).setdefault(card, {})
+        for k, v in updates.items():
+            if v is None:
+                conn.pop(k, None)
+            else:
+                conn[k] = v
+        _write_secrets_unlocked(store)
 
 
 def clear_mode(card: str, mode: str) -> None:

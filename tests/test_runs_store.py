@@ -345,6 +345,40 @@ def test_add_discovery_coverage_is_a_no_op_for_an_unknown_run(data_dir):
     assert store.add_discovery_coverage("never-started", {"channel": "feed"}) is None
 
 
+def test_record_discovery_coverage_accepts_extraction_failed_status(data_dir):
+    """"extraction_failed" (board reachable and not walled, but harvest could
+    not extract or read its results) is distinct from both "empty" and
+    "blocked", and round-trips through the store on read."""
+    tools_runs.start_run(run_id="run-extraction-failed", trigger="scheduled")
+
+    result = tools_runs.record_discovery_coverage(
+        run_id="run-extraction-failed",
+        channel="direct",
+        board="greenhouse",
+        status="extraction_failed",
+        postings_found=0,
+        reason="extraction matched nothing without zero-result evidence",
+    )
+
+    assert result["recorded"] is True
+    entry = store.get("run-extraction-failed").discovery_coverage[0]
+    assert entry["status"] == "extraction_failed"
+
+
+def test_record_discovery_coverage_rejects_an_unknown_status(data_dir):
+    tools_runs.start_run(run_id="run-bad-status", trigger="scheduled")
+
+    result = tools_runs.record_discovery_coverage(
+        run_id="run-bad-status",
+        channel="direct",
+        board="greenhouse",
+        status="not_a_real_status",
+    )
+
+    assert result == {"recorded": False}
+    assert store.get("run-bad-status").discovery_coverage == []
+
+
 def test_record_discovery_coverage_accepts_blocked_status_and_tier(data_dir):
     """"blocked" (reachable but unreadable — CAPTCHA, consent wall, bot check)
     is distinct from "empty" (ran and genuinely matched nothing), and the tier
@@ -546,3 +580,122 @@ def test_list_page_with_no_limit_returns_everything(data_dir):
 
     assert len(page) == 7
     assert total == 7
+
+
+def test_append_note_joins_existing_note_with_newline(data_dir):
+    store.start("run-note-1", trigger="scheduled", apply_cap=0)
+
+    store.append_note("run-note-1", "first")
+    second = store.append_note("run-note-1", "second")
+
+    assert second.note == "first\nsecond"
+    assert store.get("run-note-1").note == "first\nsecond"
+
+
+def test_concurrent_append_notes_do_not_lose_either_update(data_dir):
+    store.start("run-note-race", trigger="scheduled", apply_cap=0)
+
+    threads = [
+        threading.Thread(target=store.append_note, args=("run-note-race", "a")),
+        threading.Thread(target=store.append_note, args=("run-note-race", "b")),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    note = store.get("run-note-race").note
+    assert "a" in note.split("\n")
+    assert "b" in note.split("\n")
+
+
+def test_finish_refused_defaults_false(data_dir):
+    record = store.start("run-fr-1", trigger="scheduled", apply_cap=0)
+    assert record.finish_refused is False
+
+
+def test_mark_finish_refused_persists(data_dir):
+    store.start("run-fr-2", trigger="scheduled", apply_cap=0)
+
+    marked = store.mark_finish_refused("run-fr-2")
+    assert marked.finish_refused is True
+
+    fetched = store.get("run-fr-2")
+    assert fetched.finish_refused is True
+
+
+def test_old_record_without_finish_refused_key_loads_as_false(data_dir):
+    from runs.model import RunRecord
+
+    record = RunRecord.from_dict({"id": "run-fr-3", "status": "running"})
+    assert record.finish_refused is False
+
+
+def test_mark_finish_refused_unknown_run_id_returns_none(data_dir):
+    assert store.mark_finish_refused("no-such-run") is None
+
+
+def test_finish_refusals_defaults_zero(data_dir):
+    record = store.start("run-frn-1", trigger="scheduled", apply_cap=0)
+    assert record.finish_refusals == 0
+
+
+def test_old_record_without_finish_refusals_key_loads_as_zero(data_dir):
+    from runs.model import RunRecord
+
+    record = RunRecord.from_dict({"id": "run-frn-2", "status": "running"})
+    assert record.finish_refusals == 0
+
+
+def test_finish_persists_items_failed_and_errors_with_caps(data_dir):
+    store.start("run-if-1", trigger="scheduled", apply_cap=0)
+    errors = ["x" * (store.MAX_ITEM_ERROR_CHARS + 50)] * (store.MAX_ITEM_ERRORS + 5)
+    store.finish("run-if-1", items_failed=-3, item_errors=errors)
+    assert store.get("run-if-1").items_failed == 0
+    got = store.get("run-if-1").item_errors
+    assert len(got) == store.MAX_ITEM_ERRORS
+    assert all(len(e) == store.MAX_ITEM_ERROR_CHARS for e in got)
+
+    store.start("run-if-2", trigger="scheduled", apply_cap=0)
+    store.finish("run-if-2", items_failed=2, item_errors=["a", "b"])
+    rec = store.get("run-if-2")
+    assert rec.items_failed == 2
+    assert rec.item_errors == ["a", "b"]
+
+
+def test_second_finish_without_item_fields_keeps_recorded_failures(data_dir):
+    store.start("run-if-5", trigger="scheduled", apply_cap=0)
+    store.finish("run-if-5", items_failed=1, item_errors=["screen failed"])
+    store.finish("run-if-5", status="failed", stopped_reason="browser died")
+    rec = store.get("run-if-5")
+    assert rec.status == "failed"
+    assert rec.items_failed == 1
+    assert rec.item_errors == ["screen failed"]
+
+
+def test_old_record_without_item_fields_loads_as_defaults(data_dir):
+    from runs.model import RunRecord
+
+    record = RunRecord.from_dict({"id": "run-if-3", "status": "running"})
+    assert record.items_failed == 0
+    assert record.item_errors == []
+
+
+def test_finish_run_with_items_failed_completes(data_dir):
+    tools_runs.start_run("run-if-4")
+    result = tools_runs.finish_run(
+        run_id="run-if-4", status="completed", items_failed=1, item_errors=["boom"]
+    )
+    assert result["recorded"] is True
+    assert result["items_failed"] == 1
+    assert result["item_errors"] == ["boom"]
+
+
+def test_mark_finish_refused_increments_finish_refusals(data_dir):
+    store.start("run-frn-3", trigger="scheduled", apply_cap=0)
+
+    store.mark_finish_refused("run-frn-3")
+    second = store.mark_finish_refused("run-frn-3")
+
+    assert second.finish_refusals == 2
+    assert second.finish_refused is True

@@ -158,6 +158,92 @@ class TestStoreRefusesASecondRecord:
         assert len(store.load_all()) == 1
 
 
+class TestScreenedDedupeKeys:
+    """Feed filtering support: which postings the agent has already screened."""
+
+    def test_a_normal_screenings_key_is_included(self):
+        url = "https://x.example.com/j/abc"
+        store.create_or_get(_fields(url))
+        assert posting_dedupe_key(url) in store.screened_dedupe_keys()
+
+    def test_an_unread_placeholder_is_excluded(self):
+        """It may be superseded by a real screening, so the agent must still
+        see it in the feed rather than have it look already screened."""
+        store.create_or_get(
+            {
+                "company": "Acme",
+                "role": "Backend Engineer",
+                "url": "https://x.example.com/j/abc",
+                "verdict": "",
+                "screening_blocker": "not_found",
+            }
+        )
+        assert store.screened_dedupe_keys() == set()
+
+    def test_a_blank_url_contributes_no_key(self):
+        store.create_or_get(_fields(""))
+        assert store.screened_dedupe_keys() == set()
+
+    def test_url_variants_sharing_a_dedupe_key_match(self):
+        url = "https://job-boards.greenhouse.io/grafanalabs/jobs/6117334004"
+        store.create_or_get(_fields(url))
+        variant_key = posting_dedupe_key(url + "/apply?utm_source=alert")
+        assert variant_key in store.screened_dedupe_keys()
+
+
+class TestPerProfileRecords:
+    URL = "https://x.example.com/j/abc"
+
+    def _rec(self, profile, verdict="rejected"):
+        return store.create_or_get(_fields(self.URL, profile=profile, verdict=verdict))
+
+    def test_rejected_for_a_then_recorded_for_b(self):
+        assert self._rec("A")[1] is True
+        assert self._rec("B")[1] is True
+        assert len(store.load_all()) == 2
+
+    def test_same_profile_twice_is_a_duplicate(self):
+        self._rec("A")
+        assert self._rec("A")[1] is False
+
+    def test_url_wide_record_blocks_profiles(self):
+        first, _ = self._rec("")
+        assert self._rec("A") == (first, False)
+        assert self._rec("B")[1] is False
+
+    def test_second_queueing_record_returns_the_first(self):
+        first, _ = self._rec("A", "passed")
+        again, created = self._rec("B", "passed")
+        assert created is False
+        assert again.id == first.id
+
+    def test_deferred_then_passed_is_blocked(self):
+        self._rec("A", "deferred")
+        assert self._rec("B", "passed")[1] is False
+
+    def test_placeholder_superseded_by_profiled_screening(self):
+        first, _ = store.create_or_get(
+            {"company": "Acme", "role": "R", "url": self.URL, "verdict": "",
+             "screening_blocker": "not_found"}
+        )
+        again, created = self._rec("A")
+        assert created is False
+        assert again.id == first.id
+        assert len(store.load_all()) == 1
+
+    def test_screened_keys_with_enabled_profiles(self):
+        key = posting_dedupe_key(self.URL)
+        self._rec("A")
+        assert key not in store.screened_dedupe_keys(["A", "B"])
+        assert key in store.screened_dedupe_keys()
+        self._rec("B")
+        assert key in store.screened_dedupe_keys(["A", "B"])
+
+    def test_a_pass_under_one_profile_covers_all(self):
+        self._rec("A", "passed")
+        assert posting_dedupe_key(self.URL) in store.screened_dedupe_keys(["A", "B"])
+
+
 class TestAgentToolReportsTheDuplicate:
     def test_record_screening_reports_created_false_and_persists_nothing(self):
         url = "https://job-boards.greenhouse.io/grafanalabs/jobs/6117334004"
@@ -274,3 +360,64 @@ class TestUnreadPlaceholdersAreSuperseded:
         assert created is False
         assert again.approval == "rejected"
         assert again.verdict == ""
+
+
+class TestProfileCaseAndApprovalConflict:
+    """Profile names compare case-insensitively; one approval per posting."""
+
+    URL = "https://x.example.com/j/case1"
+
+    def test_profile_case_is_ignored_when_blocking(self):
+        store.create_or_get(_fields(self.URL, profile="backend"))
+        _, created = store.create_or_get(_fields(self.URL, profile="Backend"))
+        assert created is False
+
+    def test_screened_keys_fold_case_and_whitespace(self):
+        store.create_or_get(_fields(self.URL, profile="backend "))
+        assert posting_dedupe_key(self.URL) in store.screened_dedupe_keys(["Backend"])
+
+    def test_second_approval_conflicts_until_first_is_rejected(self):
+        a, _ = store.create_or_get(_fields(self.URL, profile="A"))
+        b, _ = store.create_or_get(_fields(self.URL, profile="B"))
+        assert store.set_approval(a.id, "approved").approval == "approved"
+        with pytest.raises(store.ApprovalConflict) as exc:
+            store.set_approval(b.id, "approved")
+        assert a.id in str(exc.value)
+        store.set_approval(a.id, "rejected")
+        assert store.set_approval(b.id, "approved").approval == "approved"
+
+
+class TestActiveRecordInvariant:
+    """A posting has at most one pending/approved/applied record."""
+
+    URL = "https://x.example.com/j/active1"
+
+    def _pair(self):
+        a, _ = store.create_or_get(_fields(self.URL, profile="A"))
+        b, _ = store.create_or_get(_fields(self.URL, profile="B"))
+        return a, b
+
+    def test_new_deferred_is_blocked_by_an_approved_record(self):
+        a, _ = store.create_or_get(_fields(self.URL, profile="A"))
+        store.set_approval(a.id, "approved")
+        got, created = store.create_or_get(
+            _fields(self.URL, profile="B", verdict="deferred")
+        )
+        assert (got.id, created) == (a.id, False)
+
+    def test_approving_conflicts_with_an_applied_record(self):
+        a, b = self._pair()
+        store.set_approval(a.id, "applied")
+        with pytest.raises(store.ApprovalConflict):
+            store.set_approval(b.id, "approved")
+
+    def test_claim_for_apply_refused_when_another_record_applied(self):
+        a, b = self._pair()
+        store.set_approval(a.id, "applied")
+        assert store.claim_for_apply(b.id) is None
+        assert store._apply_refusal(store.get(b.id), store.load_all()) == "already_applied"
+
+    def test_screened_keys_count_an_approved_rejected_record(self):
+        a, _ = store.create_or_get(_fields(self.URL, profile="A"))
+        store.set_approval(a.id, "approved")
+        assert posting_dedupe_key(self.URL) in store.screened_dedupe_keys(["A", "B"])

@@ -40,6 +40,18 @@ STAMP="$(date +%Y-%m-%d_%H%M)"
 # accountable.
 TRUTHCV_RUN_ID="${TRUTHCV_RUN_ID:-$(date +%s)-$$}"
 
+# Pipeline is the only mode: code discovers/screens; one short apply session
+# per posting. The old single/per-channel session modes were removed, so any
+# other AGENT_SESSION_MODE is rejected (set it to 'pipeline' or leave it unset).
+if [[ -n "${AGENT_SESSION_MODE:-}" && "${AGENT_SESSION_MODE:-}" != "pipeline" ]]; then
+  mkdir -p "$RUN_LOG_DIR"
+  REASON_FILE="$RUN_LOG_DIR/${TRUTHCV_RUN_ID}.reason"
+  msg="AGENT_SESSION_MODE single/per-channel were removed; pipeline is the only mode"
+  printf '%s\n' "$msg" >"$REASON_FILE" 2>/dev/null || true
+  echo "ABORT: $msg" >&2
+  exit 1
+fi
+
 mkdir -p "$RUN_LOG_DIR"
 RUN_LOG="$RUN_LOG_DIR/run_${STAMP}_${TRUTHCV_RUN_ID}.log"
 
@@ -220,152 +232,6 @@ log "agent mode: $AGENT_MODE"
 
 # --- Run ---------------------------------------------------------------------
 
-# agent/prompt.md carries the operating instructions (it references
-# agent/RUNBOOK.md and names the eleven tools); this script adds the date and,
-# below, inlines the RUNBOOK text the prompt refers to.
-PROMPT="$(cat "$PROMPT_FILE")"$'\n\n'"Today is $(date +%Y-%m-%d)."
-
-# agent/prompt.md tells the agent to "read agent/RUNBOOK.md in full before
-# doing anything else". The harness's only file-reading tool is
-# read_runbook_section (agent/harness/builtins/readRunbook.ts) — it returns
-# one named section of RUNBOOK.md on request and takes no path argument, so
-# it cannot read anything else. The full 39.8KB RUNBOOK no longer travels in
-# this permanently-pinned first message (every token here is paid on every
-# turn of the run, cached or not, for the life of the conversation): only its
-# non-negotiable rules/invariants are inlined below, verbatim from the file,
-# plus a table of contents of every section heading. Every other section —
-# the per-phase how-to — is fetched on demand with read_runbook_section, and
-# the agent is told to do so before starting the phase it covers.
-# $RUNBOOK is checked readable in the preconditions above.
-#
-# The ranges below are section numbers, not headings, so a RUNBOOK edit that
-# only changes prose (not renumbers a section) needs no change here; a
-# renumbering does, and test-prompt-render.sh's Case 12 plus this script
-# failing to find a "## N." marker (awk silently prints nothing for a range
-# whose start never matches) are the signals that it drifted.
-RUNBOOK_TOC="$(grep -E '^##[^#]' "$RUNBOOK" | sed -E 's/^##[[:space:]]*/- /')"
-RUNBOOK_RULES="$(awk '
-  /^## 1\. There is no daily quota/,/^## 2\./   { if ($0 !~ /^## 2\./) print }
-  /^## 4\. Truthfulness rules/,/^## 5\./         { if ($0 !~ /^## 5\./) print }
-  /^## 7\. When something is ambiguous/,/^## 8\./ { if ($0 !~ /^## 8\./) print }
-  /^## 8\. Never do/,/^## 9\./                    { if ($0 !~ /^## 9\./) print }
-' "$RUNBOOK")"
-
-PROMPT="$PROMPT"$'\n\n'"## Operating spec (agent/RUNBOOK.md) — non-negotiable rules
-
-Also non-negotiable, detailed in the full section — call read_runbook_section
-with EXACTLY this heading text (section numbers included, case-insensitive)
-before you need it:
-- \"0. The approved queue — work it first\": approved-queue postings are
-  applied to before anything new is discovered, every run.
-- \"2. Hard filters — every criterion of the matched profile must pass\":
-  every criterion of the matched profile must pass, no exceptions, no
-  judgment calls.
-- \"3. Canonical answers — call \`get_profile_answers\`\": screening-question
-  answers come only from get_profile_answers, never invented or guessed.
-- \"5. Applying\" (its \"Both documents go up\" subsection): a passing
-  posting gets a CV **and** a cover letter — never one without the other to
-  save cost.
-- record_screening REJECTS the call and stores nothing unless company,
-  verdict, role and url all carry usable values, on every screening you
-  record, rejections included (see \"6. The approve/deny boundary\")."$'\n\n'"$RUNBOOK_RULES"$'\n\n'"## Operating spec — table of contents
-
-Call read_runbook_section(section: <heading text below, exactly as written,
-including its number>) for a section's full procedure before you start the
-phase it covers — its detail is not inlined here. A \"##\" section's fetch
-also returns its \"###\" subsections (e.g. fetching \"5. Applying\" includes
-\"Both documents go up\")."$'\n\n'"$RUNBOOK_TOC"
-
-PROMPT="$PROMPT"$'\n\n'"## Run identity
-
-Your run id for this run is: $TRUTHCV_RUN_ID
-
-Call start_run ONCE, at the very beginning, passing this run id. Keep passing
-this same run_id on every subsequent tool call that accepts one (e.g.
-get_approved_applications, record_application). Before you exit — including
-if you are stopping early — call finish_run with this run_id and an honest
-stopped_reason describing where you stopped. A run that ends without calling
-finish_run is indistinguishable from one that crashed."
-
-# The mode changes what the agent does with a posting that passes every
-# criterion, so it is rendered into the prompt rather than left implicit. The
-# queueing itself is enforced server-side in screening.store.create - this text
-# tells the agent what to expect, it is not what makes it true.
-if [[ "$AGENT_MODE" == "semi" ]]; then
-  PROMPT="$PROMPT"$'\n\n'"## Autonomy mode: SEMI-AUTO
-
-Do NOT apply to a posting you find this run, however well it scores, and do not
-write a cover letter for it. For a posting that passes every criterion, call
-record_screening passing \"passed\" in verdict, the employing entity's name
-in company, the posting's own job title (as posted, not a placeholder)
-in role, the posting's own URL in url, the full posting text in posting_text,
-the employer's publication date in posted_date when the board states one,
-the enabled profile's name you screened against in profile, what the
-posting itself says about remote work — remote, hybrid, on_site, or
-unstated when it does not say — in remote_arrangement, and any language the
-posting EXPLICITLY requires (e.g. 'German') in language_requirement, or ''
-when it states none. Also pass the posting's own stated salary in
-salary_stated, its own stated employment country in
-employment_country_stated, its own stated role type (e.g. 'contract',
-'full-time') in role_type_stated, and whether the posting states hiring is
-through an EOR / employer-of-record arrangement in eor_stated ('yes' when
-the posting states employment IS via an EOR, 'no' when it states direct
-employment, 'unstated' when you looked and it does not say, or '' when not
-applicable). All four are the posting's OWN stated values, never the
-profile's, and none of them is mandatory; '' is a legitimate, common
-answer, not an omission.
-company, verdict, role and url are each required.
-It enters the operator's approval queue; they draft the letter and decide.
-
-record_screening REJECTS the call and stores nothing unless company, verdict,
-role and url all carry usable values — this applies to every screening you
-record, rejections included, not only to passing ones. A \"passed\" verdict
-is also rejected, storing nothing, without usable posting_text — a real
-posting body, not a login wall or a 404 page; a posting you could not read
-takes a screening_blocker instead. A \"passed\" or \"deferred\" verdict is
-also rejected, storing nothing, without usable profile and remote_arrangement
-values. Evidence that contradicts any of the profile's six hard
-requirements (remote model, working language, salary floor, employment
-country, rejected role types, or EOR) is stored as an automatic rejection —
-not an error to retry, and never fabricate 'remote'/'' to get past it.
-
-Phase 0 is unchanged: postings the operator already approved ARE applied to,
-using the cover_letter text that arrives with each item, verbatim."
-else
-  PROMPT="$PROMPT"$'\n\n'"## Autonomy mode: FULL AUTO
-
-A posting that passes every criterion is applied to this run, as described in
-agent/RUNBOOK.md. On every record_screening call pass the employing entity's
-name in company, the verdict (rejected, passed or deferred) in verdict, the
-posting's own job title (as posted, not a placeholder) in role, the posting's
-own URL in url, the full posting text in posting_text, the employer's
-publication date in posted_date when the board states one, the enabled
-profile's name you screened against in profile, what the posting itself says
-about remote work — remote, hybrid, on_site, or unstated when it does not
-say — in remote_arrangement, and any language the posting EXPLICITLY
-requires (e.g. 'German') in language_requirement, or '' when it states none.
-Also pass the posting's own stated salary in salary_stated, its own stated
-employment country in employment_country_stated, its own stated role type
-(e.g. 'contract', 'full-time') in role_type_stated, and whether the posting
-states hiring is through an EOR / employer-of-record arrangement in
-eor_stated ('yes' when the posting states employment IS via an EOR, 'no'
-when it states direct employment, 'unstated' when you looked and it does
-not say, or '' when not applicable). All four are the posting's OWN stated
-values, never the profile's, and none of them is mandatory; '' is a
-legitimate, common answer, not an omission.
-
-record_screening REJECTS the call and stores nothing unless company, verdict,
-role and url all carry usable values. A \"passed\" or \"deferred\" verdict is
-also rejected, storing nothing, without usable posting_text — a real posting
-body, not a login wall or a 404 page; a posting you could not read takes a
-screening_blocker instead. profile and remote_arrangement are also required
-for a passed/deferred verdict. Evidence that contradicts any of the
-profile's six hard requirements (remote model, working language, salary
-floor, employment country, rejected role types, or EOR) is stored as an
-automatic rejection — not an error to retry, and never fabricate
-'remote'/'' to get past it."
-fi
-
 # jq program rendering one criteria block per ENABLED configured profile:
 # name, employment country, remote model, salary band (in the profile's own
 # currency), Glassdoor minimum, EOR/entity-verification flags, working
@@ -429,144 +295,6 @@ if JOB_CONFIG="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" job_confi
   if [[ "$ENABLED_PROFILES" -eq 0 ]]; then
     abort "No enabled job profiles configured — set your search criteria on the Agents page before the agent can run (config fetch succeeded; it contained zero enabled profiles)"
   fi
-  # No stderr suppression on the jq calls in this block: jq is a checked
-  # precondition above, so a jq failure here means malformed config, and it
-  # must be visible in the run log rather than quietly miscounting profiles.
-  PROFILES="$(jq -r '.profiles // [] | length' <<<"$JOB_CONFIG")"
-  if [[ "$PROFILES" -gt 0 ]]; then
-    # Append a block for each enabled profile
-    PROFILE_BLOCK="## Job profiles configured:"$'\n'
-    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Any profile passing all its criteria drives an application (single-profile-passes rule)."$'\n'
-    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Record which profile drove each application in the screening report."$'\n'
-    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Target companies (watchlist): $(jq -r '.targetCompanies | join(", ")' <<<"$JOB_CONFIG")"$'\n'
-    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Resolved company boards and apply-channel URLs:"$'\n'
-    
-    # Add company boards (resolved)
-    BOARDS="$(jq -r '.companyBoards[]? | "\(.company): \(.careersUrl)"' <<<"$JOB_CONFIG" | sed 's/^/  - /')"
-    if [[ -n "$BOARDS" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$BOARDS"$'\n'
-    fi
-
-    # Discovery channels are rendered in the order the RUNBOOK requires them
-    # worked: feed, then direct boards, then dork queries.
-
-    # Postings pulled from API-backed job boards by the app. Unlike the
-    # composed queries below these are already-matched postings, not entry
-    # points to search from — each line is a URL the agent can open and
-    # screen directly. The feed is a discovery channel like any other: a
-    # posting still passes the full profile criteria before it drives an
-    # application.
-    #
-    # Two distinct groups share this response and must NOT share one claim:
-    # Remote Rocketship postings (jobfeeds.remoterocketship) are matched
-    # against a specific enabled profile and carry that profile's name in
-    # `.profile`, so the "pre-filtered" claim below is broadly true for them —
-    # but not absolutely: filters_for_profile sets
-    # showJobsWithoutSalaryWithMinSalaryFilter, so a posting stating no salary
-    # still comes back even with a salary floor set, and per the board's own
-    # docs a location outside its known set narrows nothing. The header is
-    # worded to not overclaim either. Postings pulled straight from a
-    # watchlist company's own ATS (jobfeeds.ats) carry NO profile — that
-    # fetcher applies only a freshness window, no keyword/location/salary
-    # filtering — so even the hedged claim would be false for them. The two
-    # groups are told apart below by whether `.profile` is set, since only
-    # Remote Rocketship ever sets it; an empty `.profile` renders as "Company
-    # board" rather than an empty "[]".
-    #
-    # Field names are the API's camelCase wire shape (api/schemas.py emits by
-    # alias), not jobfeeds' snake_case dataclass fields — agent-config.js
-    # passes the response through untouched. The source/tier bracket is built
-    # from whichever of the two is present, joined with "/" only when both
-    # are, so tier still renders on a posting with no source (e.g. an older
-    # app image serving no source).
-    FEED_PROFILE_MATCHED="$(jq -r '.feedPostings[]? | select((.profile // "") != "") | "  - [\(.profile)] \(.title)\(if (.company // "") != "" then " — " + .company else "" end)\(if (.salaryRange // "") != "" then " (" + .salaryRange + ")" else "" end)\(if ((.source // "") != "" or (.tier // "") != "") then " [" + ([(.source // ""), (.tier // "")] | map(select(. != "")) | join("/")) + "]" else "" end)\n    \(.url)"' <<<"$JOB_CONFIG")"
-    if [[ -n "$FEED_PROFILE_MATCHED" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Postings pulled from your API-backed job boards (pre-filtered by the board's own keyword and location matching, where the board supports it; a posting naming no salary can still appear even with a salary floor set — open and screen these directly, they are still subject to every profile criterion below):"$'\n'
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$FEED_PROFILE_MATCHED"$'\n'
-    fi
-
-    FEED_COMPANY_BOARDS="$(jq -r '.feedPostings[]? | select((.profile // "") == "") | "  - [Company board] \(.title)\(if (.company // "") != "" then " — " + .company else "" end)\(if (.salaryRange // "") != "" then " (" + .salaryRange + ")" else "" end)\(if ((.source // "") != "" or (.tier // "") != "") then " [" + ([(.source // ""), (.tier // "")] | map(select(. != "")) | join("/")) + "]" else "" end)\n    \(.url)"' <<<"$JOB_CONFIG")"
-    if [[ -n "$FEED_COMPANY_BOARDS" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Postings pulled directly from watchlist companies' own applicant-tracking systems — NOT filtered by profile keywords, locations or salary floor (only a freshness window); screen each fully against your profile criteria before applying:"$'\n'
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$FEED_COMPANY_BOARDS"$'\n'
-    fi
-
-    # A feed failure is rendered rather than swallowed: an empty feed and a
-    # rejected API key look identical in the prompt otherwise, and the agent
-    # would silently apply to fewer jobs with nothing in the run log saying why.
-    FEED_ERROR="$(jq -r '.feedError // ""' <<<"$JOB_CONFIG")"
-    if [[ -n "$FEED_ERROR" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Job board feed warning: ${FEED_ERROR} Continue the run using the other discovery channels; do not treat this as a reason to stop."$'\n'
-    fi
-
-    # Direct-search boards: searched on the board's own site rather than via
-    # a Google dork (e.g. it has no useful `site:` search surface). Per-profile
-    # search criteria (keywords/locations/avoid) are printed ONCE, in a
-    # preamble, rather than once per board — several direct boards commonly
-    # share the same enabled profiles, and repeating the criteria per board
-    # only bloats the prompt without adding information. The board lines below
-    # then carry only the URL and sign-in URL. On hitting a login wall, report
-    # the board with report_apply_failure(blocker="login_required", signin_url)
-    # and move on to the next board — see RUNBOOK.md.
-    DIRECT_CRITERIA="$(jq -r '[.directBoards[]? | .profiles[]?] | unique_by(.profile)[] | "  [\(.profile)] keywords: \(.keywords // [] | join(", "))" + (if ((.locations // []) | length) > 0 then "; locations: \(.locations | join(", "))" else "" end) + (if ((.rejectedRoleTypes // []) | length) > 0 then "; avoid: \(.rejectedRoleTypes | join(", "))" else "" end)' <<<"$JOB_CONFIG")"
-    DIRECT_BOARDS="$(jq -r '.directBoards[]? | "  - \(.url)" + (if (.signinUrl // "") != "" then " (sign in: \(.signinUrl))" else "" end)' <<<"$JOB_CONFIG")"
-    if [[ -n "$DIRECT_BOARDS" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Direct-search boards (search each on the board's own site using the per-profile criteria listed once below; on a login wall, report_apply_failure with blocker \"login_required\" and the sign-in URL, then continue to the next board):"$'\n'
-      if [[ -n "$DIRECT_CRITERIA" ]]; then
-        PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$DIRECT_CRITERIA"$'\n'
-      fi
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$DIRECT_BOARDS"$'\n'
-    fi
-
-    # Add composed search queries (deterministic entry points, not a boundary
-    # on discovery): built from each enabled profile's keywords and locations,
-    # and the configured job boards. The agent may open them with WebSearch or
-    # the browser as it prefers; free-form WebSearch remains available
-    # alongside them.
-    QUERIES="$(jq -r '.searchQueries[]? | "  - [\(.profile)] \(.source): \(.query)\n    \(.url)"' <<<"$JOB_CONFIG")"
-    if [[ -n "$QUERIES" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Composed search queries (deterministic entry points from keywords/locations and the configured job boards; use WebSearch or the browser, free-form search still applies too):"$'\n'
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$QUERIES"$'\n'
-    fi
-
-    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Cooldown days (stale company filter): $(jq -r '.cooldownDays // "not configured"' <<<"$JOB_CONFIG")"$'\n'
-
-    # Discovery freshness window. Rendered as a hard filter rather than only
-    # baked into the composed search URLs: WebSearch results and an employer's
-    # own board both ignore Google's tbs parameter, so without this the agent
-    # would still surface and screen months-old postings from those channels.
-    # Only a whole number of days 1..365 is a filter. Anything else — absent,
-    # null, 0, a bool, a negative, a hand-edited string — means no age
-    # filtering, and must say so rather than falling through to the filter
-    # branch. The else-branch used to be the catch-all, so a config holding
-    # `true` rendered "true days. HARD FILTER" and `-1` rendered "-1 days.
-    # HARD FILTER", while the search side treated both as disabled. Guarded
-    # the same way maxApplicationsPerRun is below.
-    MAX_AGE="$(jq -r 'if (.maxPostingAgeDays|type) == "number" then (.maxPostingAgeDays|tostring) else "unset" end' <<<"$JOB_CONFIG" 2>/dev/null || echo unset)"
-    if [[ "$MAX_AGE" =~ ^[1-9][0-9]*$ ]] && (( MAX_AGE <= 365 )); then
-      AGE_LINE="Posting freshness window: ${MAX_AGE} days. HARD FILTER — reject any posting whose stated publication date is older than this, with failing_criterion 'posting_age'. When a board states no date, do NOT infer one and do NOT reject on age."
-    else
-      # Unset is NOT a rejection rule. Discovery still carries a past-week
-      # preference in the composed search URLs, but a posting arriving by any
-      # other route is judged on the profile criteria alone — exactly what
-      # happened before this setting existed.
-      AGE_LINE="Posting freshness window: not configured — a posting's age is never a rejection reason on this run. Prefer recent postings when choosing what to open, but never reject one for being old."
-    fi
-    PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"$AGE_LINE"$'\n'
-
-    # Render each profile's full criteria: name, employment country, remote
-    # model, salary band, Glassdoor minimum, EOR/entity-verification rules,
-    # working language, and accepted/rejected role types. The agent matches
-    # each posting against these instead of the RUNBOOK.md §2 defaults, and
-    # must quote the matched profile's name back with get_job_profiles /
-    # recommend_salary.
-    PROFILE_CRITERIA="$(jq -r "$PROFILE_CRITERIA_JQ" <<<"$JOB_CONFIG")"
-    if [[ -n "$PROFILE_CRITERIA" ]]; then
-      PROFILE_BLOCK="$PROFILE_BLOCK"$'\n'"Profile criteria (call get_job_profiles to re-fetch verbatim; call"$'\n'"recommend_salary with the matched profile's name for any salary-expectation field):"$'\n\n'"$PROFILE_CRITERIA"$'\n'
-    fi
-
-    PROMPT="$PROMPT"$'\n\n'"$PROFILE_BLOCK"
-  fi
 fi
 
 # Per-run application cap: the Agents page's maxApplicationsPerRun (fetched
@@ -591,11 +319,7 @@ else
 fi
 # Empty/unset (from either source) means no cap (agent/RUNBOOK.md §1, "there
 # is no daily quota"; docker-compose.yml defaults the env var to empty for
-# that reason). Only append a limit line when the resolved value is actually
-# a positive integer, so the common no-cap case adds nothing to the prompt.
-if [[ "$APPLY_CAP" =~ ^[1-9][0-9]*$ ]]; then
-  PROMPT="$PROMPT"$'\n\n'"Apply to at most $APPLY_CAP role(s) this run."
-fi
+# that reason). Only a positive integer is enforced (pipeline apply loop).
 
 # Fetch routed LLM credentials from the app (Stage 2) and export them as the
 # provider-neutral variables the harness consumes (AGENT_LLM_*). Fallback (when
@@ -605,17 +329,16 @@ fi
 AGENT_MODEL=""
 if [[ -n "${AGENT_API_TOKEN:-}" ]]; then
   if CREDS="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" llm_credentials 2>/dev/null)"; then
-    # Seven lines, in order: authType, token, model, baseUrl, provider, wire,
-    # contextWindow. An older agent-config.js emitting fewer lines yields
-    # empty values for the missing ones here (sed on a missing line prints
-    # nothing), which the final gate rejects for the required fields.
+    # Six lines, in order: authType, token, model, baseUrl, provider, wire.
+    # An older agent-config.js emitting fewer lines yields empty values for
+    # the missing ones here (sed on a missing line prints nothing), which the
+    # final gate rejects for the required fields.
     AUTH_TYPE="$(sed -n 1p <<<"$CREDS")"
     AUTH_TOKEN="$(sed -n 2p <<<"$CREDS")"
     AGENT_MODEL="$(sed -n 3p <<<"$CREDS")"
     AGENT_BASE_URL="$(sed -n 4p <<<"$CREDS")"
     AGENT_PROVIDER="$(sed -n 5p <<<"$CREDS")"
     AGENT_WIRE="$(sed -n 6p <<<"$CREDS")"
-    AGENT_ROUTE_CONTEXT_WINDOW="$(sed -n 7p <<<"$CREDS")"
 
     export AGENT_LLM_PROVIDER="$AGENT_PROVIDER"
     export AGENT_LLM_MODEL="$AGENT_MODEL"
@@ -645,6 +368,19 @@ else
   export AGENT_LLM_WIRE="${AGENT_LLM_WIRE:-}"
   export AGENT_LLM_AUTH_TYPE="${AGENT_LLM_AUTH_TYPE:-}"
   AGENT_MODEL="$AGENT_LLM_MODEL"
+fi
+
+# Per-stage routes (llm_routes) go to a 0600 temp file, removed on exit; the
+# token never reaches argv or the log.
+ROUTES_FILE=""
+PIPE_DIR=""
+cleanup_tmp() { [[ -n "$ROUTES_FILE" ]] && rm -f "$ROUTES_FILE"; [[ -n "$PIPE_DIR" ]] && rm -rf "$PIPE_DIR"; return 0; }
+trap cleanup_tmp EXIT
+if [[ -n "${AGENT_API_TOKEN:-}" ]]; then
+  ROUTES_FILE="$(umask 077; mktemp)"
+  if ! node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" llm_routes >"$ROUTES_FILE" 2>/dev/null; then
+    rm -f "$ROUTES_FILE"; ROUTES_FILE=""
+  fi
 fi
 
 # Final gate: the harness needs a known provider AND a usable credential for it.
@@ -700,11 +436,14 @@ esac
 # — see above) is handed over via a temp file.
 log "invoking agent harness... (provider: $AGENT_LLM_PROVIDER, browser driver: $AGENT_BROWSER_DRIVER)"
 
-HARNESS_PROMPT_FILE="$(mktemp)"
-printf '%s' "$PROMPT" >"$HARNESS_PROMPT_FILE"
 # The harness writes its final assistant message here; named alongside RUN_LOG
 # so a run's artifacts share one stamp+id prefix.
 RUN_OUTPUT="$RUN_LOG_DIR/run_${STAMP}_${TRUTHCV_RUN_ID}.output"
+# Dedicated metadata-only stream; never interpolate an unsafe id into its path.
+DIAGNOSTIC_FILE=""
+if [[ "$TRUTHCV_RUN_ID" =~ ^[a-zA-Z0-9_-]{1,80}$ ]]; then
+  DIAGNOSTIC_FILE="$RUN_LOG_DIR/diagnostics_${TRUTHCV_RUN_ID}.ndjson"
+fi
 
 # Exit codes are the harness's machine contract: 0 success, 2 turn cap, 3
 # provider error, 4 MCP connection failure, 5 bad configuration, 6 the agent
@@ -719,8 +458,23 @@ RUN_OUTPUT="$RUN_LOG_DIR/run_${STAMP}_${TRUTHCV_RUN_ID}.output"
 # gets today's exact behaviour: one model doing both jobs. Set the
 # AGENT_SCREENING_* env vars to point screening at a separate, cheaper model
 # instead.
+# run_harness takes the prompt file and finish-tool name as arguments so the
+# pipeline can invoke it once per apply session, each with its own prompt
+# and --finish-tool (finish_application).
+run_harness() {
+local prompt_file="$1" finish_tool="$2" system_prompt_file="${3:-}"
+local extra=()
+[[ -n "$ROUTES_FILE" ]] && extra+=(--routes-file "$ROUTES_FILE")
+[[ -n "$system_prompt_file" ]] && extra+=(--system-prompt-file "$system_prompt_file")
+[[ -n "${AGENT_SCREENING_MODEL:-}" ]] && extra+=(--screening-model "$AGENT_SCREENING_MODEL")
+[[ -n "${AGENT_SCREENING_PROVIDER:-}" ]] && extra+=(--screening-provider "$AGENT_SCREENING_PROVIDER")
+[[ -n "${AGENT_SCREENING_WIRE:-}" ]] && extra+=(--screening-wire "$AGENT_SCREENING_WIRE")
+[[ -n "${AGENT_SCREENING_API_KEY:-}" ]] && extra+=(--screening-token "$AGENT_SCREENING_API_KEY")
+[[ -n "${AGENT_SCREENING_BASE_URL:-}" ]] && extra+=(--screening-base-url "$AGENT_SCREENING_BASE_URL")
+[[ -n "${AGENT_SCREENING_AUTH_TYPE:-}" ]] && extra+=(--screening-auth-type "$AGENT_SCREENING_AUTH_TYPE")
 node "$HARNESS_CLI" \
-  --prompt-file "$HARNESS_PROMPT_FILE" \
+  "${extra[@]}" \
+  --prompt-file "$prompt_file" \
   --model "$AGENT_MODEL" \
   --provider "$AGENT_LLM_PROVIDER" \
   --wire "$AGENT_LLM_WIRE" \
@@ -729,21 +483,167 @@ node "$HARNESS_CLI" \
   --base-url "$AGENT_LLM_BASE_URL" \
   --mcp-config "$MCP_CONFIG" \
   --max-turns "${AGENT_MAX_TURNS:-400}" \
-  --context-window "${AGENT_ROUTE_CONTEXT_WINDOW:-${AGENT_CONTEXT_WINDOW:-0}}" \
+  --max-retries "${AGENT_MAX_RETRIES:-12}" \
+  --max-retry-delay-ms "${AGENT_MAX_RETRY_DELAY_MS:-300000}" \
   --max-tool-result-chars "${AGENT_MAX_TOOL_RESULT_CHARS:-24000}" \
   --prompt-cache "${AGENT_PROMPT_CACHE:-true}" \
-  --screening-model "${AGENT_SCREENING_MODEL:-$AGENT_MODEL}" \
-  --screening-provider "${AGENT_SCREENING_PROVIDER:-$AGENT_LLM_PROVIDER}" \
-  --screening-wire "${AGENT_SCREENING_WIRE:-$AGENT_LLM_WIRE}" \
-  --screening-token "${AGENT_SCREENING_API_KEY:-$AGENT_LLM_API_KEY}" \
-  --screening-base-url "${AGENT_SCREENING_BASE_URL:-$AGENT_LLM_BASE_URL}" \
-  --screening-auth-type "${AGENT_SCREENING_AUTH_TYPE:-$AGENT_LLM_AUTH_TYPE}" \
+  --finish-tool "$finish_tool" \
   --output-file "$RUN_OUTPUT" \
   --reason-file "$REASON_FILE" \
+  --diagnostics-file "$DIAGNOSTIC_FILE" \
+  --run-id "$TRUTHCV_RUN_ID" \
   </dev/null >>"$RUN_LOG" 2>&1
+}
 
-RC=$?
-rm -f "$HARNESS_PROMPT_FILE"
+# Renders 'Applications remaining this run: N' from the run record's live
+# applications_submitted (GET /api/runs/{run_id}, same base URL as
+# TRUTHCV_MCP_URL with /mcp stripped, no auth required — the same route the
+# web UI reads). Falls back to the static cap line on any fetch failure
+# (run not yet recorded, network error, malformed body) so an
+# apply session never blocks on this becoming available.
+render_remaining_line() {
+  local cap="$1"
+  [[ "$cap" =~ ^[1-9][0-9]*$ ]] || { printf ''; return; }
+  local base="${TRUTHCV_MCP_URL%/mcp}"
+  base="${base%/mcp/}"
+  local submitted
+  submitted="$(node -e '
+const http = require("http"); const https = require("https");
+let u;
+try { u = new URL(process.argv[1] + "/api/runs/" + process.argv[2]); } catch { process.exit(1); }
+const mod = u.protocol === "https:" ? https : http;
+const req = mod.get(u, { timeout: 5000 }, (res) => {
+  if (res.statusCode !== 200) { res.resume(); process.exit(1); }
+  let body = "";
+  res.on("data", (c) => (body += c));
+  res.on("end", () => {
+    try {
+      const rec = JSON.parse(body);
+      const submittedRaw = rec.applicationsSubmitted !== undefined ? rec.applicationsSubmitted : rec.applications_submitted;
+      const n = Number(submittedRaw);
+      if (!Number.isFinite(n)) process.exit(1);
+      process.stdout.write(String(n));
+    } catch { process.exit(1); }
+  });
+});
+req.on("timeout", () => { req.destroy(); process.exit(1); });
+req.on("error", () => process.exit(1));
+' "$base" "$TRUTHCV_RUN_ID" 2>/dev/null)" || submitted=""
+  if [[ "$submitted" =~ ^[0-9]+$ ]]; then
+    local remaining=$(( cap - submitted ))
+    (( remaining < 0 )) && remaining=0
+    printf 'Applications remaining this run: %s' "$remaining"
+  else
+    printf 'Apply to at most %s role(s) this run.' "$cap"
+  fi
+}
+
+FD3_OPEN=0
+if [[ "${TRUTHCV_DIAGNOSTICS_FD:-}" == 3 && -e /dev/fd/3 ]]; then
+  FD3_OPEN=1
+else
+  unset TRUTHCV_DIAGNOSTICS_FD
+fi
+
+FINAL_RC=0
+FINAL_RC_SET=0
+
+# Pipeline: code discovers and screens; apply sessions only apply. A failed
+# apply session for one posting (rc 1/2/6) is a per-item failure: it is logged
+# to APPLY_FAILURES_FILE and counted by `finish`, never failing the run. rc
+# 3/4/5 (provider/MCP/config) are systemic and stop the apply loop.
+PIPELINE_CLI="${PIPELINE_CLI:-/app/agent/dist/harness/pipeline/pipelineCli.js}"
+PIPE_DIR="$(umask 077; mktemp -d)"
+PIPE_ISSUES=""
+PIPE_FLAGS=(--mcp-config "$MCP_CONFIG" --run-id "$TRUTHCV_RUN_ID")
+[[ -n "$ROUTES_FILE" ]] && PIPE_FLAGS+=(--routes-file "$ROUTES_FILE")
+# start/finish need no model: no credentials at all. Only discover-screen
+# (pipe_cli_model) gets them, through the environment - never argv.
+pipe_cli() {
+  node "$PIPELINE_CLI" "$@" "${PIPE_FLAGS[@]}" </dev/null >>"$RUN_LOG" 2>&1
+}
+pipe_cli_model() {
+  AGENT_LLM_MODEL="$AGENT_MODEL" AGENT_LLM_PROVIDER="$AGENT_LLM_PROVIDER" AGENT_LLM_WIRE="$AGENT_LLM_WIRE" \
+    AGENT_LLM_AUTH_TYPE="$AGENT_LLM_AUTH_TYPE" AGENT_LLM_API_KEY="$AGENT_LLM_API_KEY" AGENT_LLM_BASE_URL="$AGENT_LLM_BASE_URL" \
+    pipe_cli "$@"
+}
+START_ARGS=(start --out "$PIPE_DIR/approved.json")
+[[ "$APPLY_CAP" =~ ^[1-9][0-9]*$ ]] && START_ARGS+=(--limit "$APPLY_CAP")
+note_rc() { # name rc: record the first failure and any non-zero rc
+  (( $2 == 0 )) && return 0
+  PIPE_ISSUES="${PIPE_ISSUES:+$PIPE_ISSUES | }$1 rc=$2"
+  if (( FINAL_RC_SET == 0 )); then FINAL_RC=$2; FINAL_RC_SET=1; fi
+  if [[ -z "$FIRST_FAILURE_REASON" ]]; then FIRST_FAILURE_REASON="$(cat "$REASON_FILE" 2>/dev/null || true)"; fi
+}
+FIRST_FAILURE_REASON=""
+APPROVED_FILE="$PIPE_DIR/approved.json"; PASSES_FILE="$PIPE_DIR/passes.json"
+CRITERIA_FILE="$PIPE_DIR/criteria.json"; JOB_FILE="$PIPE_DIR/job.json"
+SYSTEM_FILE="$PIPE_DIR/apply-system.txt"
+APPLY_FAILURES_FILE="$PIPE_DIR/apply-failures.txt"
+pipe_cli "${START_ARGS[@]}"; note_rc start $?
+if (( FINAL_RC == 0 )); then
+  printf '%s' "$JOB_CONFIG" >"$JOB_FILE"
+  NAMES_JSON="$(jq -c '[.profiles[] | select(.enabled == true) | .name]' <<<"$JOB_CONFIG")"
+  TEXTS_JSON="$(jq -c "[$PROFILE_CRITERIA_JQ]" <<<"$JOB_CONFIG")"
+  jq -n --argjson n "$NAMES_JSON" --argjson t "$TEXTS_JSON" '[range(0; $n|length) | {key: $n[.], value: $t[.]}] | from_entries' >"$CRITERIA_FILE"
+  pipe_cli_model discover-screen --job-config "$JOB_FILE" --criteria "$CRITERIA_FILE" --out "$PASSES_FILE"; note_rc discover-screen $?
+  node "$PIPELINE_CLI" stage-prompt apply >"$SYSTEM_FILE" 2>>"$RUN_LOG"; note_rc stage-prompt $?
+fi
+if (( FINAL_RC == 0 || FINAL_RC == 3 )) && [[ -s "$SYSTEM_FILE" ]]; then
+  APPLY_ITEMS=()
+  if [[ -s "$APPROVED_FILE" ]]; then
+    while IFS= read -r ITEM; do [[ -n "$ITEM" ]] && APPLY_ITEMS+=("approved:$ITEM"); done < <(jq -c '(if type == "array" then .[] else ((.applications // .approved // [])[]) end) | select((.blocked_reason // "") == "")' "$APPROVED_FILE" 2>/dev/null)
+  fi
+  # Semi-auto leaves new passes for operator approval; only full auto applies to them.
+  if [[ "$AGENT_MODE" == "full" && -s "$PASSES_FILE" ]]; then
+    while IFS= read -r ITEM; do [[ -n "$ITEM" ]] && APPLY_ITEMS+=("pass:$ITEM"); done < <(jq -c '.passes[]?' "$PASSES_FILE" 2>/dev/null)
+  fi
+  LAUNCHED=0 # local budget: a failed run-count read must never exceed the cap
+  for ENTRY in "${APPLY_ITEMS[@]:-}"; do
+    [[ -z "$ENTRY" ]] && continue
+    if [[ "$APPLY_CAP" =~ ^[1-9][0-9]*$ ]] && (( LAUNCHED >= APPLY_CAP )); then break; fi
+    KIND="${ENTRY%%:*}"; POSTING="${ENTRY#*:}"
+    REMAINING_LINE="$(render_remaining_line "$APPLY_CAP")"
+    if [[ "$KIND" == pass && "$APPLY_CAP" =~ ^[1-9][0-9]*$ && "$REMAINING_LINE" == *"remaining this run: 0" ]]; then break; fi
+    POSTING_PROMPT_FILE="$(mktemp "$PIPE_DIR/posting.XXXXXX")"
+    printf 'Date: %s\nRun id: %s\nKind: %s\nPosting: %s\n%s\n' "$(date +%Y-%m-%d)" "$TRUTHCV_RUN_ID" "$KIND" "$POSTING" "$REMAINING_LINE" >"$POSTING_PROMPT_FILE"
+    LAUNCHED=$((LAUNCHED + 1))
+    log "session start: apply posting ($KIND)"
+    rm -f "$REASON_FILE" 2>/dev/null || true # a session that writes no reason must not reuse the last one
+    run_harness "$POSTING_PROMPT_FILE" finish_application "$SYSTEM_FILE"
+    SESSION_RC=$?
+    log "session end: apply rc=$SESSION_RC"
+    if [[ "$SESSION_RC" == 3 || "$SESSION_RC" == 4 || "$SESSION_RC" == 5 ]]; then
+      note_rc apply "$SESSION_RC"
+      break
+    elif (( SESSION_RC != 0 )); then
+      # Per-item failure (1 other, 2 turn cap, 6 no finish call): counted, not fatal.
+      ITEM_URL="$(jq -r '.url // empty' <<<"$POSTING" 2>/dev/null || true)"
+      ITEM_REASON="$(tr '\r\n' '  ' <"$REASON_FILE" 2>/dev/null || true)"
+      APPLY_FAILURE="apply $KIND ${ITEM_URL:-$POSTING} rc=$SESSION_RC: $ITEM_REASON"
+      APPLY_FAILURE="$(tr '\r\n' '  ' <<<"$APPLY_FAILURE")"
+      printf '%s\n' "$APPLY_FAILURE" >>"$APPLY_FAILURES_FILE"
+      log "apply failure (per-item): $APPLY_FAILURE"
+    fi
+  done
+fi
+FINISH_ARGS=(finish --issues "$PIPE_ISSUES")
+[[ -s "$PASSES_FILE" ]] && FINISH_ARGS+=(--state-file "$PASSES_FILE")
+[[ -s "$APPLY_FAILURES_FILE" ]] && FINISH_ARGS+=(--apply-failures-file "$APPLY_FAILURES_FILE")
+pipe_cli "${FINISH_ARGS[@]}"; FINISH_RC=$?
+(( FINAL_RC == 0 && FINISH_RC != 0 )) && FINAL_RC=$FINISH_RC
+if [[ -n "$FIRST_FAILURE_REASON" ]]; then
+  printf '%s\n' "$FIRST_FAILURE_REASON" >"$REASON_FILE" 2>/dev/null || true
+elif (( FINAL_RC == 0 )); then
+  # A per-item apply failure's reason is in the counted failures, not the run's stopped_reason.
+  rm -f "$REASON_FILE" 2>/dev/null || true
+fi
+
+if (( FD3_OPEN )); then
+  exec 3>&-
+fi
+
+RC=$FINAL_RC
 log "agent harness exited rc=$RC"
 
 log "=== run complete: $RUN_LOG ==="

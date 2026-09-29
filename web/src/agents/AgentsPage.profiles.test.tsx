@@ -51,6 +51,7 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     cooldownDaysSameCompany: null,
     maxApplicationsPerRun: null,
     maxPostingAgeDays: null,
+    dorkRecency: "d",
     companyBoards: [],
     ...overrides,
   };
@@ -61,6 +62,7 @@ function makeProfile(overrides: Partial<JobProfile> = {}): JobProfile {
     name: "",
     enabled: true,
     keywords: [],
+    titleKeywords: [],
     locations: [],
     remoteModel: null,
     employmentCountry: null,
@@ -242,6 +244,7 @@ describe("AgentsPage profiles section", () => {
         name: "New profile",
         enabled: true,
         keywords: [],
+        titleKeywords: [],
         locations: [],
         remoteModel: "remote",
         employmentCountry: "Germany",
@@ -352,6 +355,23 @@ describe("AgentsPage profiles section", () => {
 
     expect(await screen.findByText("Salary floor must be <= ask minimum")).toBeTruthy();
     expect(updateAgentConfig).not.toHaveBeenCalled();
+  });
+
+  it("editing Job titles is saved as titleKeywords in the PUT payload", async () => {
+    await renderLoaded(makeConfig());
+
+    fireEvent.click(screen.getByRole("button", { name: "Add profile" }));
+    const titleKeywords = screen.getByLabelText("Job titles (search)");
+    fireEvent.change(titleKeywords, { target: { value: "Software Engineer, SWE" } });
+
+    vi.mocked(updateAgentConfig).mockResolvedValueOnce(
+      makeConfig({ profiles: [makeProfile({ titleKeywords: ["Software Engineer", "SWE"] })] }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save profiles" }));
+
+    await vi.waitFor(() => expect(updateAgentConfig).toHaveBeenCalled());
+    const body = vi.mocked(updateAgentConfig).mock.calls[0][0];
+    expect(body.profiles?.[0]?.titleKeywords).toEqual(["Software Engineer", "SWE"]);
   });
 
   it("no longer offers a per-profile Preferred sources field", async () => {

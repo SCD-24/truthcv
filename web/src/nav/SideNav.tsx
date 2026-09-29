@@ -102,6 +102,12 @@ export function SideNav({
       dataTour: "nav-agents",
     },
     {
+      path: ROUTES.modelRouting,
+      label: "Model routing",
+      icon: <SettingsOutlinedIcon fontSize="small" />,
+      dataTour: "nav-model-routing",
+    },
+    {
       path: ROUTES.screenings,
       label: "Screenings",
       icon: <FactCheckOutlinedIcon fontSize="small" />,

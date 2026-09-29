@@ -19,6 +19,8 @@ function makeRun(overrides: Partial<RunRecord> & { boardBreakdown?: BoardBreakdo
     applicationsSubmitted: 0,
     queuedForApproval: 0,
     overCapWrites: 0,
+    itemsFailed: 0,
+    itemErrors: [],
     stoppedReason: "",
     note: "",
     discoveryCoverage: [],

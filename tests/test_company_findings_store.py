@@ -153,3 +153,28 @@ def test_record_invalid_company_stores_nothing(data_dir):
     with pytest.raises(ValueError):
         store.record("n/a", "employer_rating", "4.5", "https://a.example/x", "press", "", "agent")
     assert store.load_all() == []
+
+
+def test_all_open_contradictions_matches_per_company_concatenation(data_dir):
+    """all_open_contradictions() equals concatenation of per-company groups.
+
+    Companies are ordered by earliest observed_at across their findings,
+    matching the order they'd naturally appear when the whole dataset is
+    read once, so this test records them out of alphabetical order.
+    """
+    store.record(
+        "Beta Inc", "employer_rating", "3.0", "https://b.example/y", "review_site", "", "agent"
+    )
+    store.record(
+        "Beta Inc", "employer_rating", "4.5", "https://a.example/x", "company_statement", "", "agent"
+    )
+    store.record(
+        "Acme Co", "employer_rating", "1.0", "https://c.example/z", "review_site", "", "agent"
+    )
+    store.record(
+        "Acme Co", "employer_rating", "2.0", "https://d.example/w", "company_statement", "", "agent"
+    )
+
+    combined = store.all_open_contradictions()
+    expected = store.open_contradictions("Beta Inc") + store.open_contradictions("Acme Co")
+    assert combined == expected

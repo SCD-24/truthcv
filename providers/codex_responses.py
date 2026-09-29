@@ -95,42 +95,77 @@ def _stream_events(response: Any) -> Any:
         buffer = ""
 
 
+def _extract_output_text(response: dict[str, Any]) -> str:
+    """Fallback: concatenate output_text parts from response.output[] messages."""
+    text = ""
+    for item in response.get("output") or []:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for part in item.get("content") or []:
+            if isinstance(part, dict) and part.get("type") == "output_text":
+                text += part.get("text") or ""
+    return text
+
+
+def _raise_error_event(event: dict[str, Any]) -> None:
+    """Raise ProviderError for a top-level `error` SSE event (nested or flat shape)."""
+    err = event.get("error")
+    if isinstance(err, dict):
+        code = err.get("code")
+        message = err.get("message")
+        resets = err.get("resets_at")
+    else:
+        code = event.get("code")
+        message = event.get("message") or (str(err) if err else None)
+        resets = event.get("resets_at")
+    if code in USAGE_LIMIT_CODES:
+        suffix = f" (resets at {resets})" if isinstance(resets, (int, float)) else ""
+        raise ProviderError(f"ChatGPT usage limit reached{suffix}")
+    raise ProviderError(f"{code or 'error'}: {message}")
+
+
+def _raise_failed_event(event: dict[str, Any]) -> None:
+    """Raise ProviderError for a `response.failed` SSE event."""
+    err = (event.get("response") or {}).get("error") or {}
+    code = err.get("code") if isinstance(err, dict) else None
+    message = err.get("message") if isinstance(err, dict) else str(err)
+    raise ProviderError(f"{code or 'failed'}: {message}")
+
+
+def _raise_incomplete_event(event: dict[str, Any]) -> None:
+    """Raise ProviderError for a `response.incomplete` SSE event."""
+    response = event.get("response") or {}
+    details = response.get("incomplete_details") or {}
+    reason = details.get("reason") if isinstance(details, dict) else None
+    raise ProviderError(f"Codex Responses incomplete ({reason})")
+
+
 def _accumulate(events: Any) -> str:
     """Walk the SSE event stream and assemble the assistant text."""
     text = ""
-    completed = False
+    completed_response: dict[str, Any] | None = None
+
     for event in events:
         evt_type = event.get("type")
 
         if evt_type == "error":
-            err = event.get("error") or {}
-            code = err.get("code") if isinstance(err, dict) else None
-            message = err.get("message") if isinstance(err, dict) else str(err)
-            if code in USAGE_LIMIT_CODES:
-                resets = err.get("resets_at") if isinstance(err, dict) else None
-                suffix = f" (resets at {resets})" if isinstance(resets, (int, float)) else ""
-                raise ProviderError(f"ChatGPT usage limit reached{suffix}")
-            raise ProviderError(f"{code or 'error'}: {message}")
-
-        if evt_type == "response.failed":
-            err = (event.get("response") or {}).get("error") or {}
-            code = err.get("code") if isinstance(err, dict) else None
-            message = err.get("message") if isinstance(err, dict) else str(err)
-            raise ProviderError(f"{code or 'failed'}: {message}")
-
-        # Text delta
-        if evt_type == "response.output_text.delta":
-            delta = (event.get("response") or {}).get("output_text", {}).get("delta")
+            _raise_error_event(event)
+        elif evt_type == "response.failed":
+            _raise_failed_event(event)
+        elif evt_type == "response.incomplete":
+            _raise_incomplete_event(event)
+        elif evt_type == "response.output_text.delta":
+            delta = event.get("delta")
             if delta:
                 text += delta
-
-        # Stream completion marker
-        if evt_type == "response.completed":
-            completed = True
+        elif evt_type == "response.completed":
+            completed_response = event.get("response") or {}
             break
 
-    if not completed:
+    if completed_response is None:
         raise ProviderError("Stream ended without a completion event")
+    if not text:
+        text = _extract_output_text(completed_response)
     return text
 
 

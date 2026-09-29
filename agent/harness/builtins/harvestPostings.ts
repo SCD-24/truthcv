@@ -32,29 +32,39 @@
  * once the page loads is reported `blocked` with `blockKind: 'login'`, never
  * `empty` and never carrying a raw snapshot.
  *
- * Several boards are harvested CONCURRENTLY, each in its own browser tab
- * sharing the one Chromium profile, but ONLY once this invocation has
- * confirmed, at runtime, that it can actually parse the browser server's tab
- * listing (harvestTabs.ts's `probeTabListing`) — the upstream
- * `@playwright/mcp` server's exact tab-list text format is not vendored in
- * this workspace and was never a verified fact, only a guess, so resting
- * live behaviour on it being right was the wrong default. When the probe
- * fails (an errored call, or text this build cannot parse at all), every
- * board is instead harvested SERIALLY, one at a time, in the single shared
- * tab — same per-board classification and result shape, just no concurrency
- * and no tab tool calls — and the result names why it degraded rather than
- * reporting every board blocked. The same serial fallback is also taken
- * outright when `tabToolsAvailable` is false (the tab-management tools are
- * not advertised at all). A single board's failure — thrown, not just
- * returned as an error result — is confined to that board; it never
- * discards every other board's already-harvested results.
+ * Production dispatch in tools.ts passes `false` with no session pool, so
+ * boards run serially through the primary MCP connection and saved profile,
+ * with no tab management. The optional helper modes below remain dormant in
+ * production, retaining their signatures and tests. Direct helper callers
+ * can select the FIRST usable strategy of three, tried in this order:
+ *  1. One independent MCP session per board (harvestSessions.ts), when the
+ *     browser session pool (agent/harness/mcp/sessionPool.ts) has at least
+ *     two sessions available. No tab tools at all in this path — each
+ *     session already has its own "current tab".
+ *  2. Failing that, one browser tab per board, all sharing the one Chromium
+ *     profile and MCP connection, but ONLY once this invocation has
+ *     confirmed, at runtime, that it can actually parse the browser server's
+ *     tab listing (harvestTabs.ts's `probeTabListing`) — the upstream
+ *     `@playwright/mcp` server's exact tab-list text format is not vendored
+ *     in this workspace and was never a verified fact, only a guess, so
+ *     resting live behaviour on it being right was the wrong default.
+ *  3. Failing that too — the probe fails, or `tabToolsAvailable` is false
+ *     because the tab-management tools are not advertised at all — every
+ *     board is harvested SERIALLY, one at a time, in the single shared tab.
+ *
+ * All three report the same per-board classification and result shape; the
+ * degraded (2→3) path names why it degraded rather than reporting every
+ * board blocked. A single board's failure — thrown, not just returned as an
+ * error result — is confined to that board in every path; it never discards
+ * every other board's already-harvested results.
  *
  * Split across sibling modules in this directory: harvestTypes.ts (shared
  * types), harvestClassify.ts (extraction/classification), harvestNavigate.ts
  * (sign-in refusal, navigation-failure classification, search-box typing),
  * harvestTabs.ts (tab lifecycle: the async lock, tab-list parsing/probing,
- * create/select/close), and harvestBoard.ts (per-board orchestration, serial
- * and concurrent). This module is the public entry point: the tool
+ * create/select/close), harvestBoard.ts (per-board orchestration, serial and
+ * tab-per-board), and harvestSessions.ts (per-board orchestration over
+ * leased sessions). This module is the public entry point: the tool
  * definition and {@link harvestPostings} itself.
  *
  * This is dispatched exactly like `screen_posting` and `read_runbook_section`
@@ -65,9 +75,12 @@
  */
 
 import type { ToolDefinition } from '../providers/types.js';
-import { errorMessage, harvestBounded, harvestSerial } from './harvestBoard.js';
+import { errorMessage, harvestBounded, harvestOneBoardSafely, harvestSerial } from './harvestBoard.js';
+import { fitRawSnapshots } from './harvestExcerpt.js';
+import { harvestWithSessions } from './harvestSessions.js';
 import { probeTabListing } from './harvestTabs.js';
-import type { BrowserToolCall, HarvestBoardRequest, HarvestPostingsResult } from './harvestTypes.js';
+import type { BrowserToolCall, BrowserToolPermissionCheck, HarvestBoardRequest, HarvestBoardResult, HarvestPostingsResult } from './harvestTypes.js';
+import { MIN_SESSIONS_FOR_PARALLEL_HARVEST, type BrowserSessionPool } from '../mcp/sessionPool.js';
 
 export type {
   BlockKind,
@@ -90,31 +103,58 @@ export const harvestPostingsTool: ToolDefinition = {
     'never a CSS selector. Returns, per board, an outcome: "searched" (postings found — this ' +
     'value matches record_discovery_coverage\'s own status vocabulary, so pass it straight ' +
     'through as status) plus tier "harvest"; "empty" (the search ran and genuinely matched ' +
-    'nothing); or "blocked" (the page was reachable but unreadable), which usually also carries ' +
+    'nothing, with explicit zero-result evidence); "needs_review" (internal only: extraction ' +
+    'matched nothing without zero-result evidence; inspect rawSnapshot to recover postings and ' +
+    'record coverage searched/tier llm, or empty only if explicit zero results are found; if ' +
+    'unresolved record status "extraction_failed" with the note as reason — never persist ' +
+    'needs_review); ' +
+    'or "blocked" (the page was reachable but unreadable), which usually also carries ' +
     'a blockKind — "login" means call report_apply_failure with blocker="login_required" then ' +
     'record status "login_walled", never "blocked"; "wall" (a CAPTCHA/consent interstitial with ' +
     'no substantive content of its own) or "unreachable" (a confirmed DNS/connection failure, ' +
-    'never just a slow page) both map to status "blocked" as-is; an ABSENT blockKind means an ' +
-    'internal tool failure rather than a page signal — still record status "blocked", using note ' +
-    'for detail. A board whose url looks like a sign-in page (by path or query string) is refused ' +
-    'and never navigated — harvest never drives a sign-in flow through a tab. ' +
+    'never just a slow page) both map to status "blocked" as-is; "location" means every candidate ' +
+    'for the given location (the value itself and its known local-language aliases) was never ' +
+    'confirmed by the board\'s own location control — still record status "blocked". An ABSENT ' +
+    'blockKind means an internal tool failure rather than a page signal — still record status ' +
+    '"blocked", using note for detail. A board whose url looks like a sign-in page (by path or ' +
+    'query string) is refused and never navigated — harvest never drives a sign-in flow through a tab. ' +
+    'Pass optional location to type into the board\'s own detected location field — never fold it ' +
+    'into keywords. For a board with no on-page search box, pass searchUrl (its templated search URL, ' +
+    'e.g. "https://example.com/search?q={keywords}&loc={location}"): {keywords} is required in the ' +
+    'template and {location} optional; when set, the built URL replaces url outright, is navigated to ' +
+    'directly, and the snapshot classified with no browser_type call at all. "timeout" blockKind means ' +
+    'navigation timed out twice in a row (an initial attempt and one retry) — still maps to status ' +
+    '"blocked". ' +
     "A board's result carries a raw snapshot ONLY when its page had content but extraction " +
     'matched nothing (including a consent/bot-check phrase seen alongside real content) — read ' +
-    'that yourself as the last resort. Boards harvest concurrently, each in its own browser tab, ' +
-    'when the browser server’s tab listing can be parsed; otherwise every board is harvested ' +
-    'serially instead, one at a time, with the same result shape.',
+    'that yourself as the last resort. Production harvests boards serially, one at a time, ' +
+    'through the primary browser MCP connection and saved signed-in profile; it never opens ' +
+    'extra sessions or manages tabs, regardless of advertised tab tools. Resolves both accessibility-tree ' +
+    'link formats browser_snapshot itself uses — a same-line URL and Playwright\'s own indented child ' +
+    '"- /url: <href>" line, often relative, resolved against the snapshot\'s own Page URL line or the ' +
+    'board url. Extraction tries, in order: known ATS URL shapes; a board\'s own postingUrlPattern glob, ' +
+    'when given; then a general same-site job-link rule (a jobs/careers/stellen-style path segment ' +
+    'followed by a posting-shaped later segment), which counts only with at least two distinct ' +
+    'qualifying links. Raw snapshots are excerpts (link lines plus result text), not the full page: ' +
+    'when a result has rawSnapshotTruncated:true or a note saying the raw snapshot was omitted, ' +
+    're-harvest that board alone in its own call before recording extraction_failed. A Google ' +
+    'dork board (search URL with a site: query) has its links to the site: target extracted ' +
+    'automatically and comes back as searched/harvest.',
   inputSchema: {
     type: 'object',
     properties: {
       boards: {
         type: 'array',
-        description: 'One or more boards to harvest, each opened and searched in its own tab.',
+        description: 'One or more boards to harvest in order, serially on the primary browser connection.',
         items: {
           type: 'object',
           properties: {
             board: { type: 'string', description: "The board's name, for reporting." },
             url: { type: 'string', description: "The board's search or listing URL to open." },
             keywords: { type: 'string', description: 'Keywords to type into the detected search box, if any.' },
+            location: { type: 'string', description: "A location to type into the board's own detected location field, if any — never folded into keywords." },
+            searchUrl: { type: 'string', description: 'A templated search URL for a board with no on-page search box, e.g. "https://example.com/search?q={keywords}&loc={location}" — {keywords} required, {location} optional. When set, the built URL replaces url and is navigated to directly, with no search-box typing.' },
+            postingUrlPattern: { type: 'string', description: "A glob ('*' as the only wildcard) matching this board's own posting-link URL shape, e.g. 'https://boards.example.com/job/*' — tried after known ATS shapes and before the general same-site heuristic." },
           },
           required: ['board', 'url'],
           additionalProperties: false,
@@ -133,10 +173,10 @@ export const harvestPostingsTool: ToolDefinition = {
  *
  * @param mode Which harvesting mode ran.
  * @param boardCount How many boards were harvested.
- * @param reason Present only when the concurrent path was abandoned for the
- *   serial fallback after a failed tab-listing probe.
+ * @param reason Present only when the concurrent-tabs path was abandoned for
+ *   the serial fallback after a failed tab-listing probe.
  */
-function logHarvestMode(mode: 'concurrent-tabs' | 'serial', boardCount: number, reason?: string): void {
+function logHarvestMode(mode: 'sessions' | 'concurrent-tabs' | 'serial', boardCount: number, reason?: string): void {
   const line = { event: 'harvest_postings.mode', mode, boards: boardCount, ...(reason ? { reason } : {}) };
   process.stderr.write(`${JSON.stringify(line)}\n`);
 }
@@ -148,25 +188,61 @@ const TAB_LIST_UNPARSEABLE_REASON =
   "the browser server's tab-listing text did not match any recognised format; harvested every board serially in the single shared tab instead of concurrently";
 
 /**
- * Decide the harvesting mode and run it: concurrent tab-per-board when
- * `tabToolsAvailable` AND a live probe confirms the tab listing can be
- * parsed; serial otherwise — either because the tools are not advertised at
- * all, or because the probe failed. See this module's own doc for why the
- * probe exists.
+ * Fill every board index the session-per-worker path left unclaimed —
+ * `undefined` in `sessionResults`, because a worker either could not lease
+ * even its first session or lost its session mid-harvest with no
+ * replacement available (see harvestSessions.ts's own doc) — by harvesting
+ * that board SERIALLY on the shared `call`, in request order. A dead session
+ * this way costs at most its own board's failure; every other board is
+ * still genuinely harvested, by a surviving worker or this fallback.
  */
-async function runHarvest(call: BrowserToolCall, boards: HarvestBoardRequest[], tabToolsAvailable: boolean): Promise<HarvestPostingsResult> {
+async function fillUnclaimedBoards(
+  call: BrowserToolCall,
+  boards: HarvestBoardRequest[],
+  sessionResults: (HarvestBoardResult | undefined)[],
+): Promise<HarvestBoardResult[]> {
+  const results: HarvestBoardResult[] = new Array(boards.length);
+  for (let i = 0; i < boards.length; i++) {
+    results[i] = sessionResults[i] ?? (await harvestOneBoardSafely(call, boards[i]));
+  }
+  return results;
+}
+
+/**
+ * Decide the harvesting mode and run it, in the precedence this module's own
+ * doc names: session-per-worker when the pool yields at least two sessions;
+ * else concurrent tab-per-board when `tabToolsAvailable` AND a live probe
+ * confirms the tab listing can be parsed; else serial.
+ */
+async function runHarvest(
+  call: BrowserToolCall,
+  boards: HarvestBoardRequest[],
+  tabToolsAvailable: boolean,
+  sessionPool?: BrowserSessionPool,
+  isSessionToolPermitted?: BrowserToolPermissionCheck,
+  resultBudgetChars?: number,
+): Promise<HarvestPostingsResult> {
+  const fit = (r: HarvestBoardResult[], extra?: Record<string, unknown>): HarvestBoardResult[] =>
+    (resultBudgetChars ? fitRawSnapshots(r, resultBudgetChars, extra) : r);
+  const sessionCount = sessionPool ? await sessionPool.availableSessionCount() : 0;
+  if (sessionPool && sessionCount >= MIN_SESSIONS_FOR_PARALLEL_HARVEST) {
+    logHarvestMode('sessions', boards.length);
+    const sessionResults = await harvestWithSessions(sessionPool, boards, sessionCount, isSessionToolPermitted);
+    const results = fit(await fillUnclaimedBoards(call, boards, sessionResults));
+    return { content: JSON.stringify({ results }), isError: false };
+  }
   if (!tabToolsAvailable) {
     logHarvestMode('serial', boards.length);
-    return { content: JSON.stringify({ results: await harvestSerial(call, boards) }), isError: false };
+    return { content: JSON.stringify({ results: fit(await harvestSerial(call, boards)) }), isError: false };
   }
   const tabsParseable = await probeTabListing(call);
   if (!tabsParseable) {
     logHarvestMode('serial', boards.length, 'tab-list-unparseable');
-    const results = await harvestSerial(call, boards);
+    const results = fit(await harvestSerial(call, boards), { degradedReason: TAB_LIST_UNPARSEABLE_REASON });
     return { content: JSON.stringify({ results, degradedReason: TAB_LIST_UNPARSEABLE_REASON }), isError: false };
   }
   logHarvestMode('concurrent-tabs', boards.length);
-  return { content: JSON.stringify({ results: await harvestBounded(call, boards) }), isError: false };
+  return { content: JSON.stringify({ results: fit(await harvestBounded(call, boards)) }), isError: false };
 }
 
 /** Whether `value` is a well-formed {@link HarvestBoardRequest} object. */
@@ -182,6 +258,9 @@ function coerceBoard(v: Record<string, unknown>): HarvestBoardRequest {
     board: v.board as string,
     url: v.url as string,
     keywords: typeof v.keywords === 'string' ? v.keywords : undefined,
+    location: typeof v.location === 'string' ? v.location : undefined,
+    searchUrl: typeof v.searchUrl === 'string' ? v.searchUrl : undefined,
+    postingUrlPattern: typeof v.postingUrlPattern === 'string' ? v.postingUrlPattern : undefined,
   };
 }
 
@@ -193,32 +272,41 @@ function coerceBoards(raw: unknown): HarvestBoardRequest[] {
 }
 
 /**
- * Harvest one or more boards. Each in its own browser tab, bounded
- * concurrently, when `tabToolsAvailable` is true AND this invocation's own
- * tab-listing probe succeeds; serially in the single shared tab otherwise
- * (see the module doc). Never throws: a missing/invalid `boards` argument,
+ * Harvest one or more boards. Production passes `false` without a session
+ * pool, forcing serial work in the primary tab; direct helper callers may
+ * still exercise the optional tab/session paths (see the module doc).
+ * Never throws: a missing/invalid `boards` argument,
  * or any failure raised while harvesting, is returned as an `isError`
  * result.
  *
  * @param rawArgs The raw tool-call arguments.
  * @param call Drives the allow-listed browser tools, supplied by tools.ts.
- * @param tabToolsAvailable Whether the browser server advertises its
- *   tab-management tools, as decided by tools.ts's `browserTabToolsAvailable`.
- *   Defaults to true so every existing caller/test keeps today's concurrent
- *   behaviour unless it says otherwise.
+ * @param tabToolsAvailable Whether to try the dormant tab-management path;
+ *   production explicitly passes false. The default retains helper behavior.
+ * @param sessionPool Optional pool for dormant session-per-worker helpers;
+ *   production never supplies one.
+ * @param isSessionToolPermitted The allow-list check used only by the dormant
+ *   session-per-worker path. `undefined` falls back to
+ *   permitting everything (see harvestSessions.ts's `harvestWithSessions`),
+ *   so an existing caller/test keeps working unchanged.
+ * @param resultBudgetChars When set, raw snapshots are excerpted so the
+ *   serialised result stays within this many characters.
  * @returns The per-board results as JSON, or an error message, with `isError` set.
  */
 export async function harvestPostings(
   rawArgs: Record<string, unknown>,
   call: BrowserToolCall,
   tabToolsAvailable = true,
+  sessionPool?: BrowserSessionPool,
+  isSessionToolPermitted?: BrowserToolPermissionCheck,
+  resultBudgetChars?: number,
 ): Promise<HarvestPostingsResult> {
   const boards = coerceBoards(rawArgs.boards);
   if (boards.length === 0) {
     return { content: 'harvest_postings requires a non-empty boards array, each with board and url.', isError: true };
   }
   try {
-    return await runHarvest(call, boards, tabToolsAvailable);
+    return await runHarvest(call, boards, tabToolsAvailable, sessionPool, isSessionToolPermitted, resultBudgetChars);
   } catch (err) {
     return { content: `harvest_postings failed: ${errorMessage(err)}`, isError: true };
   }

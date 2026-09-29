@@ -91,6 +91,15 @@ def test_omitting_offset_keeps_the_old_default_behaviour(client):
     assert body["offset"] == 0
 
 
+def test_get_run_returns_items_failed_and_full_item_errors(client):
+    store.start("run-items", trigger="scheduled", apply_cap=0)
+    text = "e" * 1500
+    store.finish("run-items", items_failed=2, item_errors=[text, "second"])
+    body = client.get("/api/runs/run-items").json()
+    assert body["itemsFailed"] == 2
+    assert body["itemErrors"] == [text, "second"]
+
+
 def test_get_run_404_on_unknown_id(client):
     r = client.get("/api/runs/does-not-exist")
     assert r.status_code == 404

@@ -35,7 +35,7 @@ def test_wrong_or_missing_header_404(client):
 def test_api_key_path(client):
     secretstore.set_connection("claude", {"apiKey": "sk-ant-agent", "authMode": "apikey"})
     modelrouting.save(
-        Routing(agent=Route("claude", "claude-opus-4-8", context_window=200000))
+        Routing(agent=Route("claude", "claude-opus-4-8"))
     )
     body = client.get("/api/agent/llm-credentials", headers=_hdr()).json()
     assert body == {
@@ -46,7 +46,6 @@ def test_api_key_path(client):
         "baseUrl": "",
         "provider": "claude",
         "wire": "anthropic-messages",
-        "contextWindow": 200000,
     }
 
 
@@ -98,7 +97,6 @@ def test_codex_route_returns_openai_wire(client):
         "baseUrl": "",
         "provider": "codex",
         "wire": "openai-chat-completions",
-        "contextWindow": 0,
     }
 
 
@@ -118,7 +116,6 @@ def test_openrouter_route_returns_openai_wire(client):
         "baseUrl": "https://openrouter.ai/api/v1",
         "provider": "openrouter",
         "wire": "openai-chat-completions",
-        "contextWindow": 0,
     }
 
 
@@ -133,7 +130,6 @@ def test_ollama_route_returns_tokenless_credentials(client):
         "baseUrl": "http://x:11434",
         "provider": "ollama",
         "wire": "openai-chat-completions",
-        "contextWindow": 0,
     }
 
 
@@ -153,7 +149,6 @@ def test_ollama_route_without_stored_base_url_falls_back_to_env_default(client, 
         "baseUrl": "http://ollama:11434",
         "provider": "ollama",
         "wire": "openai-chat-completions",
-        "contextWindow": 0,
     }
 
 
@@ -172,7 +167,7 @@ def test_response_shape_matches_agent_parser(client):
     modelrouting.save(Routing(agent=Route("claude", "claude-opus-4-8")))
     body = client.get("/api/agent/llm-credentials", headers=_hdr()).json()
     assert set(body.keys()) == {
-        "authType", "token", "model", "baseUrl", "provider", "wire", "contextWindow",
+        "authType", "token", "model", "baseUrl", "provider", "wire",
     }
     assert {"authType", "token", "model", "baseUrl"} <= set(body.keys())
 

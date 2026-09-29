@@ -422,6 +422,48 @@ def test_blocked_item_consumes_no_cap_budget(data_dir):
     assert "" in reasons.values()
 
 
+def test_cap_accounts_for_applications_already_submitted_this_run(data_dir):
+    """A second get_approved_applications call within the same run must not
+    reset the cap: an item this run already submitted no longer sits in the
+    approved queue, so the cap has to be seeded from the ledger, not just
+    from what the current call's own loop reclaims."""
+    _with_letter(company="Already", url="https://already.example/jobs/1")
+    apps.create(
+        {
+            "company": "Already",
+            "application_url": "https://already.example/jobs/1",
+            "submitted": True,
+            "run_id": "run-a",
+        }
+    )
+    _with_letter(company="NotYet1", url="https://notyet1.example/jobs/1")
+    _with_letter(company="NotYet2", url="https://notyet2.example/jobs/1")
+
+    items = get_approved_applications(run_id="run-a", limit=2)
+    unblocked = [i for i in items if not i["blocked_reason"]]
+    assert len(unblocked) <= 1
+
+
+def test_cap_seeding_is_scoped_to_its_own_run_id(data_dir):
+    """A different run_id's cap must not be affected by another run's
+    already-submitted applications."""
+    _with_letter(company="Already", url="https://already.example/jobs/1")
+    apps.create(
+        {
+            "company": "Already",
+            "application_url": "https://already.example/jobs/1",
+            "submitted": True,
+            "run_id": "run-a",
+        }
+    )
+    _with_letter(company="NotYet1", url="https://notyet1.example/jobs/1")
+    _with_letter(company="NotYet2", url="https://notyet2.example/jobs/1")
+
+    items = get_approved_applications(run_id="run-b", limit=2)
+    unblocked = [i for i in items if not i["blocked_reason"]]
+    assert len(unblocked) == 2
+
+
 def test_expired_lease_is_reclaimable_live_lease_is_not(data_dir):
     s = _with_letter(company="Lease Co", url="https://lease.example/jobs/1")
 
