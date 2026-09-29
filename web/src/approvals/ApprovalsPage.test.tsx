@@ -267,7 +267,10 @@ describe("ApprovalsPage", () => {
     await waitFor(() =>
       expect(setScreeningUrl).toHaveBeenCalledWith("a1", "https://x.example/updated"),
     );
-    expect(await screen.findByText("https://x.example/updated")).toBeTruthy();
+    const a = await screen.findByRole("link", { name: "link" });
+    expect(a.getAttribute("href")).toBe("https://x.example/updated");
+    expect(a.getAttribute("title")).toBe("https://x.example/updated");
+    expect(screen.queryByText("https://x.example/updated")).toBeNull();
   });
 
   it("cancelling an edit discards the draft and restores the original link", async () => {
@@ -280,7 +283,10 @@ describe("ApprovalsPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
     expect(screen.queryByLabelText(/posting url/i)).toBeNull();
-    expect(await screen.findByText("https://contoso.example/jobs/1")).toBeTruthy();
+    const a = await screen.findByRole("link", { name: "link" });
+    expect(a.getAttribute("href")).toBe("https://contoso.example/jobs/1");
+    expect(a.getAttribute("title")).toBe("https://contoso.example/jobs/1");
+    expect(screen.queryByText("https://contoso.example/jobs/1")).toBeNull();
     expect(setScreeningUrl).not.toHaveBeenCalled();
   });
 
@@ -292,7 +298,10 @@ describe("ApprovalsPage", () => {
       rejected: [makeRecord({ id: "r1", company: "Soylent", approval: "rejected" })],
     });
     clickTab(/rejected/i);
-    expect(await screen.findByText("https://contoso.example/jobs/1")).toBeTruthy();
+    expect(
+      (await screen.findByRole("link", { name: "link" })).getAttribute("href"),
+    ).toBe("https://contoso.example/jobs/1");
+    expect(screen.queryByText("https://contoso.example/jobs/1")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /edit url/i }));
     fireEvent.change(screen.getByLabelText(/posting url/i), {
       target: { value: "https://x.example/rejected" },
@@ -301,7 +310,10 @@ describe("ApprovalsPage", () => {
     await waitFor(() =>
       expect(setScreeningUrl).toHaveBeenCalledWith("r1", "https://x.example/rejected"),
     );
-    expect(await screen.findByText("https://x.example/rejected")).toBeTruthy();
+    const a = await screen.findByRole("link", { name: "link" });
+    expect(a.getAttribute("href")).toBe("https://x.example/rejected");
+    expect(a.getAttribute("title")).toBe("https://x.example/rejected");
+    expect(screen.queryByText("https://x.example/rejected")).toBeNull();
   });
 
   it("saving a url calls through and renders the link in place of the field", async () => {
@@ -316,7 +328,10 @@ describe("ApprovalsPage", () => {
     await waitFor(() =>
       expect(setScreeningUrl).toHaveBeenCalledWith("s1", "https://x.example/job"),
     );
-    expect(await screen.findByText("https://x.example/job")).toBeTruthy();
+    const a = await screen.findByRole("link", { name: "link" });
+    expect(a.getAttribute("href")).toBe("https://x.example/job");
+    expect(a.getAttribute("title")).toBe("https://x.example/job");
+    expect(screen.queryByText("https://x.example/job")).toBeNull();
     expect(screen.queryByLabelText(/posting url/i)).toBeNull();
   });
 
@@ -644,9 +659,10 @@ describe("ApprovalsPage applied tab", () => {
       ],
     });
     clickTab(/applied/i);
-    const link = (await screen.findByText("https://fernwood.example/jobs/1")) as HTMLElement;
-    expect(link.closest("a")).toBeTruthy();
-    expect(link.closest("a")?.getAttribute("href")).toBe("https://fernwood.example/jobs/1");
+    const link = await screen.findByRole("link", { name: "link" });
+    expect(link.getAttribute("href")).toBe("https://fernwood.example/jobs/1");
+    expect(link.getAttribute("title")).toBe("https://fernwood.example/jobs/1");
+    expect(screen.queryByText("https://fernwood.example/jobs/1")).toBeNull();
   });
 
   it("does not render a javascript: applied URL as a clickable link", async () => {
