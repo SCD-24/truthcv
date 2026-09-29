@@ -30,6 +30,7 @@ import {
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { SettingsModal } from "../settings/SettingsModal";
 import { RunCoverage } from "./RunCoverage";
+import { RunItemErrors } from "./RunItemErrors";
 import { RunDetailModal } from "./RunDetailModal";
 import {
   DEFAULT_TIMEZONE,
@@ -620,23 +621,27 @@ function RunSummaryRow({
   
   return (
     <Paper
+      variant="outlined"
+      sx={{
+        borderColor: isRunning ? "info.main" : undefined,
+        transition: "all 0.2s ease-in-out",
+        "&:hover": {
+          backgroundColor: "rgba(0, 0, 0, 0.02)",
+        },
+      }}
+    >
+    <Box
       role="button"
       tabIndex={0}
       onClick={onSelect}
       onKeyDown={handleKeyDown}
-      variant="outlined"
       sx={{
         p: 1.5,
-        borderColor: isRunning ? "info.main" : undefined,
         cursor: "pointer",
         "&:focus-visible": {
           outline: "2px solid",
           outlineColor: "primary.main",
-          outlineOffset: "2px",
-        },
-        transition: "all 0.2s ease-in-out",
-        "&:hover": {
-          backgroundColor: "rgba(0, 0, 0, 0.02)",
+          outlineOffset: "-2px",
         },
       }}
       aria-label={`Run ${run.id}`}
@@ -680,6 +685,11 @@ function RunSummaryRow({
             Over cap: {run.overCapWrites}
           </Typography>
         )}
+        {(run.itemsFailed ?? 0) > 0 && (
+          <Typography variant="caption" color="warning.main">
+            Items failed: {run.itemsFailed}
+          </Typography>
+        )}
       </Stack>
       <RunCoverage coverage={run.discoveryCoverage} status={run.status} />
       {run.stoppedReason && (
@@ -691,6 +701,8 @@ function RunSummaryRow({
           Stopped: {run.stoppedReason}
         </Typography>
       )}
+    </Box>
+    <RunItemErrors errors={run.itemErrors ?? []} />
     </Paper>
   );
 }
