@@ -1304,6 +1304,7 @@ class RoutingModel(_Camel):
     tasks: dict[str, RouteModel] = Field(default_factory=dict)
     agent: RouteModel | None = None
     default: RouteModel | None = None
+    agent_stages: dict[str, RouteModel] = Field(default_factory=dict)
 
 
 class AgentLlmCredentials(_Camel):
@@ -1573,3 +1574,16 @@ class RoutingUpdate(_Camel):
     tasks: dict[str, RouteModel | None] | None = None
     agent: RouteModel | None = None
     default: RouteModel | None = None
+    # Per-agent-stage routes; a null entry clears that stage. Unknown stage
+    # names are rejected (422) rather than silently dropped.
+    agent_stages: dict[str, RouteModel | None] | None = None
+
+    @field_validator("agent_stages")
+    @classmethod
+    def _known_stages(cls, v):
+        from modelrouting.store import AGENT_STAGE_NAMES
+
+        for name in v or {}:
+            if name not in AGENT_STAGE_NAMES:
+                raise ValueError(f"unknown agent stage: {name}")
+        return v

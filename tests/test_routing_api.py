@@ -11,7 +11,7 @@ def client(data_dir):
 
 def test_get_empty_routing(client):
     body = client.get("/api/routing").json()
-    assert body == {"tasks": {}, "agent": None, "default": None}
+    assert body == {"tasks": {}, "agent": None, "default": None, "agentStages": {}}
 
 
 def test_put_partial_update_merges(client):

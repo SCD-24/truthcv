@@ -1712,15 +1712,38 @@ def get_agent_llm_credentials(x_agent_token: str = Header(default="")) -> AgentL
     if not secret or not hmac.compare_digest(given, secret.encode("utf-8")):
         raise HTTPException(status_code=404)
 
-    route = modelrouting.load().agent
+    return _credentials_for_route(modelrouting.load().agent)
+
+
+def _credentials_for_route(route: modelrouting.Route | None) -> AgentLlmCredentials:
+    """Credentials for a route (None = the claude card, default model).
+    Raises 404 when the card is unknown or has no usable credentials."""
     card = route.connection if route else "claude"
     model = route.model if route else ""
-
     resolve = _CARD_CREDENTIALS.get(card)
     if resolve is None:
         raise HTTPException(status_code=404)
-    creds = resolve(model)
-    return creds
+    return resolve(model)
+
+
+@router.get("/agent/llm-routes")
+def get_agent_llm_routes(x_agent_token: str = Header(default="")) -> dict:
+    """Guarded (404 without AGENT_API_TOKEN): credentials for the apply route
+    and each agent stage. A stage with no route resolves to null. Response-only
+    egress; tokens are never logged."""
+    if not _agent_token_ok(x_agent_token):
+        raise HTTPException(status_code=404)
+    r = modelrouting.load()
+
+    def _creds(route):
+        if route is None:
+            return None
+        return _credentials_for_route(route).model_dump(by_alias=True)
+
+    stages = {"apply": _creds(r.agent)}
+    for name in modelrouting.AGENT_STAGE_NAMES:
+        stages[name] = _creds(modelrouting.resolve_agent_stage(r, name))
+    return {"stages": stages}
 
 
 def _agent_token_ok(given: str) -> bool:
@@ -2431,6 +2454,7 @@ def get_routing() -> RoutingModel:
         tasks={k: _route_model(v) for k, v in routing.tasks.items()},
         agent=_route_model(routing.agent) if routing.agent else None,
         default=_route_model(routing.default) if routing.default else None,
+        agent_stages={k: _route_model(v) for k, v in routing.agent_stages.items()},
     )
 
 
@@ -2474,6 +2498,12 @@ def put_routing(body: RoutingUpdate) -> RoutingModel:
         stored_dict["agent"] = update_dict["agent"]
     if "default" in update_dict:
         stored_dict["default"] = update_dict["default"]
+    if "agent_stages" in update_dict:
+        for name, route in (update_dict["agent_stages"] or {}).items():
+            if route is None:
+                stored_dict["agent_stages"].pop(name, None)
+            else:
+                stored_dict["agent_stages"][name] = route
 
     # Parse back to Routing and save
     routing = modelrouting.Routing.from_dict(stored_dict)
@@ -2485,6 +2515,7 @@ def put_routing(body: RoutingUpdate) -> RoutingModel:
         tasks={k: _route_model(v) for k, v in routing.tasks.items()},
         agent=_route_model(routing.agent) if routing.agent else None,
         default=_route_model(routing.default) if routing.default else None,
+        agent_stages={k: _route_model(v) for k, v in routing.agent_stages.items()},
     )
 
 
@@ -2497,6 +2528,10 @@ def _all_routes_in_dict(d: dict) -> list[dict]:
         routes.append(d["default"])
     if "tasks" in d and isinstance(d["tasks"], dict):
         for route in d["tasks"].values():
+            if isinstance(route, dict):
+                routes.append(route)
+    if "agent_stages" in d and isinstance(d["agent_stages"], dict):
+        for route in d["agent_stages"].values():
             if isinstance(route, dict):
                 routes.append(route)
     return routes

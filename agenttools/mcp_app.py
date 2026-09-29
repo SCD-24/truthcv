@@ -23,6 +23,10 @@ from agenttools.tools_ledger import (
     record_screening as _record_screening,
 )
 from agenttools.tools_letter import generate_cover_letter as _generate_cover_letter
+from agenttools.tools_pipeline import (
+    filter_unscreened_urls as _filter_unscreened_urls,
+    finish_application as _finish_application,
+)
 from agenttools.tools_research import (
     get_company_findings as _get_company_findings,
     record_company_finding as _record_company_finding,
@@ -188,6 +192,16 @@ _TOOL_REGISTRY = {
         "— reporting a blocked board as empty hides a broken channel. Pass tier (api, harvest "
         "or llm, or '' when not applicable) to record which extraction tier produced the "
         "postings.",
+    ),
+    "filter_unscreened_urls": (
+        _filter_unscreened_urls,
+        "Given candidate posting URLs (urls), returns {unscreened: [...]}: only those not already "
+        "screened, in input order, deduplicated, with URL fragments ignored. Call before opening postings.",
+    ),
+    "finish_application": (
+        _finish_application,
+        "Notes the outcome of one application (url, outcome, note) on the run record. Non-terminal: "
+        "never ends the run or changes its status. Pass your run_id.",
     ),
     "record_postings_seen": (
         _record_postings_seen,
