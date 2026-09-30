@@ -197,6 +197,34 @@ def test_findings_table_unknown_as_of_renders_literal_unknown():
     assert "| unknown |" in text
 
 
+def test_superseded_finding_is_not_flagged_as_contradiction():
+    app = _app("777lll777lll", company="Acme Co")
+    old = _finding("Acme Co", "employer_rating", "4.5")
+    new = _finding("Acme Co", "employer_rating", "3.0")
+    new.supersedes = old.id
+    text = render_log([app], {"Acme Co": [old, new]})
+    assert "open contradiction" not in text
+    assert "superseded" in text
+
+
+def test_other_claim_renders_label():
+    app = _app("888mmm888mmm", company="Acme Co")
+    f = _finding("Acme Co", "other", "Series B")
+    f.claim_label = "Funding stage"
+    text = render_log([app], {"Acme Co": [f]})
+    assert "| Funding stage | Series B" in text
+
+
+def test_other_rows_with_different_labels_not_flagged():
+    app = _app("999nnn999nnn", company="Acme Co")
+    a = _finding("Acme Co", "other", "Series B")
+    a.claim_label = "Funding stage"
+    b = _finding("Acme Co", "other", "Berlin")
+    b.claim_label = "Headquarters"
+    text = render_log([app], {"Acme Co": [a, b]})
+    assert "open contradiction" not in text
+
+
 def test_contradicting_findings_render_as_adjacent_rows_with_open_status():
     app = _app("666kkk666kkk", company="Acme Co")
     findings = [

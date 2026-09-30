@@ -499,7 +499,9 @@ def set_screening_approval(screening_id: str, body: ApprovalUpdate) -> Screening
 
 def _company_finding_model(f) -> CompanyFindingModel:
     """Map a stored CompanyFinding to its wire model."""
-    return CompanyFindingModel(**f.to_dict())
+    return CompanyFindingModel(
+        **f.to_dict(), company_key=company_identity_key(f.company)
+    )
 
 
 @router.get("/company-findings", response_model=list[CompanyFindingModel])
@@ -554,6 +556,8 @@ def create_company_finding(body: CompanyFindingCreate) -> CompanyFindingModel:
             as_of=body.as_of,
             recorded_by="operator",
             note=body.note,
+            claim_label=body.claim_label,
+            supersedes=body.supersedes,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

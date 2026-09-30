@@ -362,7 +362,21 @@ export interface CompanyFinding {
   resolution: string;
   resolvedAt: string;
   resolutionNote: string;
+  /** Server company_identity_key(company): spellings of one company share it. */
+  companyKey: string;
+  /** Free-text row label; only meaningful when claim is 'other'. */
+  claimLabel: string;
+  /** Id of the finding this one corrects; empty when it corrects none. */
+  supersedes: string;
 }
+
+export type ClaimType = "employment_entity" | "employer_rating" | "other";
+
+export const CLAIM_TYPES: { value: ClaimType; label: string }[] = [
+  { value: "employment_entity", label: "Employing entity" },
+  { value: "employer_rating", label: "Employer rating" },
+  { value: "other", label: "Other" },
+];
 
 /** One claim with two or more disagreeing, cited findings. */
 export interface ContradictionGroup {

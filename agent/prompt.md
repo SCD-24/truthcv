@@ -239,8 +239,12 @@ their application history is this tool surface. You have the following tools:
   salary-expectation answer — see the rule below.
 - `record_company_board` — records a target company's careers URL and ATS once verified on the employer's own site. Call it whenever you verify a board, including for postings you reject.
 - `record_company_finding` — records one sourced, dated company research
-  finding (employing entity / EOR, an employer-review figure, or any other
-  company-level claim). Every argument is required except `as_of` and `note`;
+  finding. `claim` must be exactly one of `employment_entity` (the employing
+  entity / EOR / ability to hire in Germany), `employer_rating` (the
+  Glassdoor/Kununu rating and review count), or `other` — `other` requires a
+  `claim_label` naming the fact. Call `get_company_findings` first and use the
+  company name exactly as already recorded when one exists. Every argument is
+  required except `as_of`, `note` and `claim_label`;
   `source_url` must be the page you actually read the claim from; `as_of` is
   the date the source is dated and must be left empty when unknown — never
   inferred, never today's date. This is the only way to record a claim about

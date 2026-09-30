@@ -157,8 +157,14 @@ Judge each posting by the matched profile's own fields:
 A claim about a *company* (its employing entity, an employer-review figure,
 anything that isn't specific to one posting) is recorded with
 `record_company_finding`, never left implicit in a screening verdict. Every
-argument is required except `as_of` and `note`:
+argument is required except `as_of`, `note` and `claim_label`:
 
+- `claim` must be exactly one of `employment_entity` (the employing entity /
+  EOR / ability to hire in Germany), `employer_rating` (the Glassdoor/Kununu
+  rating and review count), or `other`. `other` requires a `claim_label`
+  naming the fact.
+- Call `get_company_findings` first, and when the company already has
+  findings use the company name **exactly as already recorded**.
 - `source_url` must be the page the claim was **actually read from** — not a
   search-results snippet, not a memory of having seen it once.
 - `source_class` is one of the ranked classes, strongest first:

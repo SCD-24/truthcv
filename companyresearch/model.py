@@ -6,6 +6,11 @@ where it came from and how strong that source is. Findings are append-only:
 a later pass never overwrites an earlier one, because overwriting destroys
 the signal that two passes disagreed. See ``companyresearch.store`` for how
 that discipline is enforced and how a disagreement is surfaced.
+
+The operator's "edit" works by superseding: a new finding whose ``supersedes``
+names an earlier finding of the same company and claim replaces it in the
+active view. The earlier record is never changed or removed; it is simply
+excluded from contradiction detection once superseded.
 """
 
 from __future__ import annotations
@@ -33,6 +38,9 @@ SOURCE_CLASSES = (
 # nothing to disagree with, in either direction.
 UNCITED = "unattributed"
 
+# Fixed claim types. "other" requires a free-text ``claim_label``.
+CLAIM_TYPES = ("employment_entity", "employer_rating", "other")
+
 RECORDED_BY_VALUES = ("agent", "operator", "import")
 RESOLUTION_VALUES = ("", "accepted", "rejected")
 
@@ -46,6 +54,22 @@ def source_rank(source_class: str) -> int:
     if source_class in SOURCE_CLASSES:
         return SOURCE_CLASSES.index(source_class)
     return len(SOURCE_CLASSES)
+
+
+def claim_key_of(claim: str, claim_label: str = "") -> str:
+    """Comparison key for a claim: 'other' claims are keyed by their label."""
+    if claim == "other":
+        return "other:" + (claim_label or "").strip().casefold()
+    return claim
+
+
+def claim_key(f) -> str:
+    """Comparison key for a finding's claim.
+
+    Equals ``f.claim`` except for 'other', where distinct free-text labels are
+    distinct claims and must never be compared against each other.
+    """
+    return claim_key_of(f.claim, getattr(f, "claim_label", ""))
 
 
 def is_cited(finding: "CompanyFinding") -> bool:
@@ -76,6 +100,10 @@ class CompanyFinding:
     observed_at: str = ""
     recorded_by: str = ""
     note: str = ""
+    # Free-text label; required when claim == "other".
+    claim_label: str = ""
+    # Id of an earlier finding this one replaces (the operator's "edit").
+    supersedes: str = ""
     contradicts: list[str] = field(default_factory=list)
     resolution: str = ""
     resolved_at: str = ""
@@ -101,6 +129,8 @@ class CompanyFinding:
             "observed_at": self.observed_at,
             "recorded_by": self.recorded_by,
             "note": self.note,
+            "claim_label": self.claim_label,
+            "supersedes": self.supersedes,
             "contradicts": list(self.contradicts),
             "resolution": self.resolution,
             "resolved_at": self.resolved_at,
@@ -120,6 +150,7 @@ def validate_finding(
     source_url: str,
     source_class: str,
     recorded_by: str,
+    claim_label: str = "",
 ) -> None:
     """Raise ValueError if this finding is not usable; otherwise return None.
 
@@ -131,6 +162,12 @@ def validate_finding(
     validate_company_name(company)
     if not claim.strip():
         raise ValueError("A claim is required — an empty claim names nothing.")
+    if claim not in CLAIM_TYPES:
+        raise ValueError(
+            f"Unknown claim {claim!r}. Use one of: {', '.join(CLAIM_TYPES)}."
+        )
+    if claim == "other" and not claim_label.strip():
+        raise ValueError("A claim_label is required when claim is 'other'.")
     if not value.strip():
         raise ValueError("A value is required — an empty value asserts nothing.")
     if source_class not in SOURCE_CLASSES:

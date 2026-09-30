@@ -5,6 +5,10 @@ that rule, because overwriting destroys the signal that two passes disagreed.
 ``record`` only ever appends; the sole mutation this module permits on an
 existing record is ``resolve``, which stamps an operator's accept/reject
 decision without touching the finding's factual fields.
+
+The operator's "edit" is a new finding whose ``supersedes`` names the earlier
+one (same company, same claim, not already superseded). The earlier record is
+kept as history but excluded from contradiction detection.
 """
 
 from __future__ import annotations
@@ -20,6 +24,8 @@ from storage import data_dir
 from .model import (
     RESOLUTION_VALUES,
     CompanyFinding,
+    claim_key,
+    claim_key_of,
     is_cited,
     new_id,
     source_rank,
@@ -94,16 +100,46 @@ def for_company(company: str) -> list[CompanyFinding]:
     return sorted(matches, key=lambda f: (f.observed_at, f.id))
 
 
+def superseded_ids(findings: list[CompanyFinding]) -> set[str]:
+    """Ids of findings that some other finding in ``findings`` supersedes."""
+    return {f.supersedes for f in findings if f.supersedes}
+
+
+def _check_supersedes(
+    items: list[CompanyFinding], company: str, claim: str, target_id: str, claim_label: str = ""
+) -> None:
+    """Raise ValueError unless ``target_id`` is a valid supersede target."""
+    target = next((f for f in items if f.id == target_id), None)
+    if target is None:
+        raise ValueError(f"Cannot supersede unknown finding {target_id!r}.")
+    if _key(target.company) != _key(company):
+        raise ValueError("Cannot supersede a finding recorded for a different company.")
+    if claim_key(target) != claim_key_of(claim, claim_label):
+        raise ValueError("Cannot supersede a finding with a different claim.")
+    if target_id in superseded_ids(items):
+        raise ValueError(f"Finding {target_id!r} is already superseded.")
+
+
 def _values_differ(a: str, b: str) -> bool:
     """True when two claim values differ after normalizing for comparison."""
     return a.strip().casefold() != b.strip().casefold()
 
 
-def _contradiction_ids(existing: list[CompanyFinding], claim: str, value: str) -> list[str]:
+def _contradiction_ids(
+    existing: list[CompanyFinding],
+    claim: str,
+    value: str,
+    claim_label: str = "",
+    exclude: str = "",
+) -> list[str]:
     """Ids of existing cited, non-rejected findings that disagree with `value`."""
     ids = []
+    superseded = superseded_ids(existing)
+    if exclude:
+        superseded.add(exclude)
+    new_key = claim_key_of(claim, claim_label)
     for f in existing:
-        if f.claim != claim:
+        if claim_key(f) != new_key or f.id in superseded:
             continue
         if not is_cited(f):
             continue
@@ -123,6 +159,8 @@ def record(
     as_of: str = "",
     recorded_by: str = "agent",
     note: str = "",
+    claim_label: str = "",
+    supersedes: str = "",
 ) -> CompanyFinding:
     """Append a new finding. Never mutates or removes an existing one.
 
@@ -131,7 +169,9 @@ def record(
     never contradicted — only cited findings participate in contradiction
     detection, so migrated legacy data does not retroactively block anything.
     """
-    validate_finding(company, claim, value, source_url, source_class, recorded_by)
+    validate_finding(
+        company, claim, value, source_url, source_class, recorded_by, claim_label
+    )
     finding = CompanyFinding(
         id=new_id(),
         company=company,
@@ -143,13 +183,19 @@ def record(
         observed_at=_now(),
         recorded_by=recorded_by,
         note=note,
+        claim_label=claim_label,
+        supersedes=supersedes,
     )
     with locked(findings_path()):
         items = load_all()
+        if supersedes:
+            _check_supersedes(items, company, claim, supersedes, claim_label)
         if is_cited(finding):
             key = _key(company)
             same_company = [f for f in items if _key(f.company) == key]
-            finding.contradicts = _contradiction_ids(same_company, claim, value)
+            finding.contradicts = _contradiction_ids(
+                same_company, claim, value, claim_label, supersedes
+            )
         items.append(finding)
         _write_all(items)
     return finding
@@ -186,12 +232,16 @@ def _open_contradictions_from(findings: list[CompanyFinding]) -> list[dict]:
     ordered strongest source first then most recently observed. A rejected
     finding is excluded, so resolving one side clears the group.
     """
-    cited = [f for f in findings if is_cited(f) and f.resolution != "rejected"]
+    superseded = superseded_ids(findings)
+    cited = [
+        f for f in findings
+        if is_cited(f) and f.resolution != "rejected" and f.id not in superseded
+    ]
     by_claim: dict[str, list[CompanyFinding]] = {}
     for f in cited:
-        by_claim.setdefault(f.claim, []).append(f)
+        by_claim.setdefault(claim_key(f), []).append(f)
     groups = []
-    for claim, group_findings in by_claim.items():
+    for group_findings in by_claim.values():
         values = {f.value.strip().casefold() for f in group_findings}
         if len(values) < 2:
             continue
@@ -199,7 +249,7 @@ def _open_contradictions_from(findings: list[CompanyFinding]) -> list[dict]:
         # first — the second sort's ties keep the first sort's ordering.
         ordered = sorted(group_findings, key=lambda f: f.observed_at, reverse=True)
         ordered.sort(key=lambda f: source_rank(f.source_class))
-        groups.append({"claim": claim, "findings": ordered})
+        groups.append({"claim": group_findings[0].claim, "findings": ordered})
     return groups
 
 
