@@ -17,6 +17,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from agenttools.server import router as mcp_router
 from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
+from companyresearch.claim_migration import migrate_claims_if_needed
 from services.errors import Conflict, NotFound, Refused, ServiceError, Unavailable
 from storage import data_dir
 
@@ -120,6 +121,32 @@ _mcp_server.add_request_handler(
     "tools/call", types.CallToolRequestParams, _handle_call_tool
 )
 
+
+def _migrate_company_claims() -> None:
+    """Run the startup company-claims migration; never let it block startup.
+
+    Logs only counts, mappings, backup path and the company keys of new
+    contradictions - never finding values.
+    """
+    try:
+        report = migrate_claims_if_needed()
+    except Exception:
+        logger.exception("startup company-claims migration failed")
+        return
+    if report is None:
+        return
+    logger.info(
+        "startup company-claims migration: to_map=%s total_findings=%s "
+        "mapped_counts=%s mappings=%s backup=%s new_contradictions=%s",
+        report["to_map"],
+        report["total_findings"],
+        report["mapped_counts"],
+        report["mappings"],
+        report["backup"],
+        [c["company_key"] for c in report["new_contradictions"]],
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Run the MCP streamable-HTTP session manager for the app's lifetime.
@@ -133,6 +160,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception("startup reconciliation of orphaned runs failed: %s", e)
         # Startup must not fail because of runs.json
+
+    _migrate_company_claims()
 
     async with _mcp_server.session_manager.run():
         async with diagnostics_session_manager.run():
