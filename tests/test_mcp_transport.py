@@ -20,16 +20,23 @@ from api.main import app, _mcp_server
 
 
 @pytest.fixture(scope="module")
-def client():
+def client(tmp_path_factory):
     """A TestClient with the app's lifespan actually running.
 
     TestClient only enters the lifespan when used as a context manager, and the
     MCP streamable-HTTP session manager is started there — a bare
     ``TestClient(app)`` makes every POST /mcp fail with "Task group is not
     initialized".
+
+    Module-scoped, so it is created before the function-scoped autouse
+    ``data_dir`` fixture: DATA_DIR is pointed at a module temp dir here so the
+    lifespan's startup steps (run reconciliation, company-claims migration)
+    never touch the real ./data.
     """
-    with TestClient(app) as test_client:
-        yield test_client
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("DATA_DIR", str(tmp_path_factory.mktemp("mcp_transport_data")))
+        with TestClient(app) as test_client:
+            yield test_client
 
 
 def test_mcp_initialize_returns_json_rpc_result(client: TestClient) -> None:
