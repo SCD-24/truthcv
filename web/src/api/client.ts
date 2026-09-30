@@ -47,6 +47,7 @@ import type {
   JobBoardKeyStatus,
   BrowserSession,
   CompanyFinding,
+  ClaimType,
   ContradictionGroup,
   RunPage,
   RunRecord,
@@ -497,7 +498,9 @@ export function listContradictions(company?: string): Promise<ContradictionGroup
 /** Record an operator-sourced company finding. Never overwrites an existing one. */
 export function createCompanyFinding(body: {
   company: string;
-  claim: string;
+  claim: ClaimType;
+  claimLabel?: string;
+  supersedes?: string;
   value: string;
   sourceUrl: string;
   sourceClass: string;
