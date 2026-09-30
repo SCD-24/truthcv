@@ -834,6 +834,9 @@ class CompanyFindingModel(_Camel):
     observed_at: str = ""
     recorded_by: str = ""
     note: str = ""
+    claim_label: str = ""
+    supersedes: str = ""
+    company_key: str = ""
     contradicts: list[str] = Field(default_factory=list)
     resolution: str = ""
     resolved_at: str = ""
@@ -850,6 +853,17 @@ class CompanyFindingCreate(_Camel):
     source_class: str = ""
     as_of: str = ""
     note: str = ""
+    claim_label: str = ""
+    supersedes: str = ""
+
+    @field_validator("claim")
+    @classmethod
+    def _validate_claim(cls, v: str) -> str:
+        from companyresearch.model import CLAIM_TYPES
+
+        if v not in CLAIM_TYPES:
+            raise ValueError(f"claim must be one of: {', '.join(CLAIM_TYPES)}")
+        return v
 
     @field_validator("source_class")
     @classmethod

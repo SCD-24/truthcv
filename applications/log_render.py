@@ -32,6 +32,9 @@ import os
 import tempfile
 from pathlib import Path
 
+from companyresearch.model import claim_key
+from companyresearch.store import superseded_ids
+
 from .model import Application
 
 HEADER = """# Application log
@@ -127,12 +130,15 @@ def _has_open_contradiction(findings: list) -> bool:
     """True when two or more cited, non-rejected findings share a claim but
     disagree on its value."""
     by_claim: dict[str, set[str]] = {}
+    superseded = superseded_ids(findings)
     for f in findings:
+        if f.id in superseded:
+            continue
         if getattr(f, "source_class", "unattributed") == "unattributed":
             continue
         if getattr(f, "resolution", "") == "rejected":
             continue
-        by_claim.setdefault(f.claim, set()).add(f.value.strip().casefold())
+        by_claim.setdefault(claim_key(f), set()).add(f.value.strip().casefold())
     return any(len(values) > 1 for values in by_claim.values())
 
 
@@ -144,6 +150,14 @@ def _screening_lines(app: Application) -> list[str]:
         if value:
             lines.append(f"- **{_humanize_key(key)}:** {_cell(value)}")
     return lines
+
+
+def _claim_cell(f) -> str:
+    """Claim column text: the free-text label for an 'other' claim, else the type."""
+    label = getattr(f, "claim_label", "")
+    if f.claim == "other" and label and label.strip():
+        return label
+    return f.claim
 
 
 def _findings_table(findings: list) -> list[str]:
@@ -175,6 +189,7 @@ def _findings_table(findings: list) -> list[str]:
         return rank_order.index(source_class) if source_class in rank_order else len(rank_order)
 
     ordered = sorted(findings, key=lambda f: (f.claim, _rank(f.source_class)))
+    superseded = superseded_ids(findings)
     rows = [
         "\n**Company research:**\n",
         "| Claim | Value | Source | As of | Status |",
@@ -184,18 +199,21 @@ def _findings_table(findings: list) -> list[str]:
         source = f"{f.source_class} — {f.source_url}" if f.source_url else f.source_class
         as_of = f.as_of or "unknown"
         status = {"accepted": "accepted", "rejected": "rejected"}.get(f.resolution, "")
+        if not status and f.id in superseded:
+            status = "superseded"
         if not status and f.source_class != "unattributed":
             claim_values = {
                 g.value.strip().casefold()
                 for g in ordered
-                if g.claim == f.claim
+                if claim_key(g) == claim_key(f)
                 and g.source_class != "unattributed"
                 and g.resolution != "rejected"
+                and g.id not in superseded
             }
             if len(claim_values) > 1 and f.resolution != "rejected":
                 status = "open contradiction"
         rows.append(
-            f"| {_cell(f.claim)} | {_cell(f.value)} | {_cell(source)} | "
+            f"| {_cell(_claim_cell(f))} | {_cell(f.value)} | {_cell(source)} | "
             f"{_cell(as_of)} | {_cell(status)} |"
         )
     return rows

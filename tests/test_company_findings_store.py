@@ -155,6 +155,82 @@ def test_record_invalid_company_stores_nothing(data_dir):
     assert store.load_all() == []
 
 
+def _rec(company="Acme Co", value="4.5", claim="employer_rating", **kw):
+    return store.record(
+        company, claim, value, "https://a.example/x", "press", "", "agent", **kw
+    )
+
+
+def test_record_other_requires_label(data_dir):
+    with pytest.raises(ValueError, match="claim_label"):
+        _rec(claim="other")
+    assert _rec(claim="other", claim_label="Funding").claim_label == "Funding"
+
+
+def test_record_rejects_claim_outside_enum(data_dir):
+    with pytest.raises(ValueError, match="Unknown claim"):
+        _rec(claim="glassdoor")
+    assert store.load_all() == []
+
+
+def test_supersede_validation_errors(data_dir):
+    first = _rec()
+    with pytest.raises(ValueError, match="unknown"):
+        _rec(supersedes="nope")
+    with pytest.raises(ValueError, match="different company"):
+        _rec(company="Other Co", supersedes=first.id)
+    with pytest.raises(ValueError, match="different claim"):
+        _rec(claim="employment_entity", supersedes=first.id)
+    _rec(value="5.0", supersedes=first.id)
+    with pytest.raises(ValueError, match="already superseded"):
+        _rec(value="1.0", supersedes=first.id)
+    assert len(store.load_all()) == 2
+
+
+def test_superseding_finding_does_not_contradict_target(data_dir):
+    first = _rec()
+    second = _rec(value="3.0", supersedes=first.id)
+    assert second.contradicts == []
+    assert store.open_contradictions("Acme Co") == []
+    assert store.superseded_ids(store.load_all()) == {first.id}
+
+
+def test_chained_supersede_does_not_resurrect_contradiction(data_dir):
+    a = _rec()
+    b = _rec(value="3.0", supersedes=a.id)
+    c = _rec(value="2.0", supersedes=b.id)
+    assert c.contradicts == []
+    assert store.open_contradictions("Acme Co") == []
+
+
+def test_other_claims_with_different_labels_do_not_contradict(data_dir):
+    _rec(claim="other", claim_label="Funding stage", value="Series B")
+    second = _rec(claim="other", claim_label="Headquarters", value="Berlin")
+    assert second.contradicts == []
+    assert store.open_contradictions("Acme Co") == []
+
+
+def test_other_claims_same_label_case_insensitive_contradict(data_dir):
+    first = _rec(claim="other", claim_label="Funding stage", value="Series B")
+    second = _rec(claim="other", claim_label=" funding STAGE ", value="Series C")
+    assert second.contradicts == [first.id]
+    assert len(store.open_contradictions("Acme Co")) == 1
+
+
+def test_supersede_other_with_different_label_raises(data_dir):
+    first = _rec(claim="other", claim_label="Funding stage", value="Series B")
+    with pytest.raises(ValueError, match="different claim"):
+        _rec(claim="other", claim_label="Headquarters", value="Berlin", supersedes=first.id)
+
+
+def test_group_clears_once_one_side_superseded(data_dir):
+    first = _rec()
+    _rec(value="3.0")
+    assert len(store.open_contradictions("Acme Co")) == 1
+    _rec(value="3.0", supersedes=first.id)
+    assert store.open_contradictions("Acme Co") == []
+
+
 def test_all_open_contradictions_matches_per_company_concatenation(data_dir):
     """all_open_contradictions() equals concatenation of per-company groups.
 

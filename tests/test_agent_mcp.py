@@ -1207,8 +1207,10 @@ def test_company_research_tools_registered_with_full_input_schema(data_dir):
 
     fn, _ = _TOOL_REGISTRY["record_company_finding"]
     schema = _input_schema(fn)
-    for name in ("company", "claim", "value", "source_url", "source_class", "as_of", "note"):
+    for name in ("company", "claim", "value", "source_url", "source_class", "as_of", "note", "claim_label"):
         assert name in schema["properties"], name
+    assert "claim_label" not in schema["required"]
+    assert "supersedes" not in schema["properties"]
     assert set(schema["required"]) == {"company", "claim", "value", "source_url", "source_class"}
 
     fn2, _ = _TOOL_REGISTRY["get_company_findings"]

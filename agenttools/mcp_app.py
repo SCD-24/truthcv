@@ -127,8 +127,9 @@ _TOOL_REGISTRY = {
     ),
     "record_company_finding": (
         _record_company_finding,
-        "Records one sourced, dated company research finding (e.g. employment entity, employer rating). "
-        "Every field is required except as_of and note. source_url must be the page the claim was actually "
+        "Records one sourced, dated company research finding (claim is one of employment_entity, "
+        "employer_rating, other — other requires claim_label). "
+        "Every field is required except as_of, note and claim_label. source_url must be the page the claim was actually "
         "read from — a company-level claim must be traceable. source_class is one of the ranked classes, "
         "strongest first: audited_accounts, regulatory_filing, listed_bond_price, company_statement, press, "
         "review_site, unattributed — pick the strongest source actually available, not the first one found. "

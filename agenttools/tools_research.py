@@ -13,12 +13,14 @@ def record_company_finding(
     source_class: str,
     as_of: str = "",
     note: str = "",
+    claim_label: str = "",
 ) -> dict:
     """Record one sourced, dated company research finding. Never overwrites.
 
     Args:
         company: The employing entity the claim is about.
-        claim: What kind of fact this is (e.g. "employment_entity", "employer_rating").
+        claim: The claim type: exactly one of employment_entity, employer_rating,
+            other. Use "other" only with a claim_label.
         value: The claimed value.
         source_url: The page this was actually read from.
         source_class: One of the ranked source classes, strongest first:
@@ -27,6 +29,8 @@ def record_company_finding(
         as_of: The date the SOURCE is dated. Leave empty when the source
             carries no date — never infer it, never use today's date.
         note: Free-text context.
+        claim_label: Free-text label naming the fact; required when claim is
+            "other", otherwise leave empty.
 
     Returns:
         The stored finding as a dict, with "contradicts" (ids of findings it
@@ -41,6 +45,7 @@ def record_company_finding(
         as_of=as_of,
         recorded_by="agent",
         note=note,
+        claim_label=claim_label,
     )
     result = finding.to_dict()
     if finding.contradicts:

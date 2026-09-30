@@ -70,6 +70,31 @@ def test_contradictions_route_resolves_ahead_of_company_route(client):
     assert len(r2.json()) == 1
 
 
+def test_create_rejects_claim_outside_enum(client):
+    assert _create(client, claim="glassdoor").status_code == 422
+
+
+def test_create_other_without_label_is_400(client):
+    assert _create(client, claim="other").status_code == 400
+
+
+def test_company_key_present_on_wire(client):
+    from screening.company import company_identity_key
+
+    body = _create(client, company="RobCo GmbH").json()
+    assert body["companyKey"] == company_identity_key("RobCo GmbH")
+
+
+def test_supersede_via_post(client):
+    first = _create(client, value="4.5").json()
+    second = _create(client, value="3.0", supersedes=first["id"])
+    assert second.status_code == 201, second.text
+    assert second.json()["supersedes"] == first["id"]
+    assert second.json()["contradicts"] == []
+    assert _create(client, value="2.0", supersedes=first["id"]).status_code == 400
+    assert client.get("/api/company-findings/contradictions").json() == []
+
+
 def test_create_rejects_invalid_source_class(client):
     r = _create(client, sourceClass="rumor")
     assert r.status_code == 422
