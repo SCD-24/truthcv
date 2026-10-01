@@ -40,27 +40,12 @@ from api.diagnostics_paging import (  # noqa: F401
     _MAX_LIST_LIMIT,
     _clamp_limit,
 )
+from api.diagnostics_runs import get_run, list_runs
 from api.diagnostics_screenings import (
     get_screening,
     list_screenings,
     search_screening_text,
 )
-
-
-def list_runs(limit: int = 0, offset: int = 0) -> dict:
-    """One page of run records, newest-started first, with the total drawn from.
-
-    `limit` is clamped by `_clamp_limit`: <=0 (or omitted) means the default
-    of 20, and anything above 200 is capped there — never "all records".
-    """
-    records, total = _runs_store.list_page(limit=_clamp_limit(limit), offset=offset)
-    return {"total": total, "runs": [r.to_dict() for r in records]}
-
-
-def get_run(run_id: str) -> dict:
-    """The run record with this id as a dict, or {} if none exists."""
-    record = _runs_store.get(run_id)
-    return record.to_dict() if record else {}
 
 
 def _application_summary(a) -> dict:
@@ -173,12 +158,19 @@ def list_gmail_suggestions(limit: int = 0, offset: int = 0) -> dict:
 _DIAG_TOOL_REGISTRY = {
     "list_runs": (
         list_runs,
-        "Lists agent run records, newest-started first. Read-only. "
+        "Lists run summaries (counters, item_error_count, coverage_counts), "
+        "newest-started first. Read-only. "
         "limit defaults to 20, capped at 200; limit<=0 means the default.",
     ),
     "get_run": (
         get_run,
-        "Returns one run record by id, or {} if none exists. Read-only.",
+        "Returns bounded detail for one run by id, or {} if none exists. "
+        "Read-only. item_errors and discovery_coverage are paged: "
+        "errors_offset/errors_limit/coverage_offset/coverage_limit default 20, "
+        "max 100, with next_offset (null at the end). The recovery instruction "
+        "is shown once, not per error. coverage_status filters coverage by "
+        "exact status. Fields are capped: error 500, coverage board/reason "
+        "200, note 2000, stopped_reason 300 chars.",
     ),
     "list_screenings": (
         list_screenings,
@@ -308,7 +300,8 @@ async def _handle_diag_call_tool(ctx, params) -> types.CallToolResult:
             content=[
                 types.TextContent(
                     type="text",
-                    text=json.dumps(result, ensure_ascii=False),
+                    # Output goes to a model client: whitespace is spent tokens.
+                    text=json.dumps(result, ensure_ascii=False, separators=(",", ":")),
                 )
             ]
         )

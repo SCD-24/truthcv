@@ -290,7 +290,7 @@ The app's bearer-gated `/mcp/diagnostics` surface offers three additional
 `get_run_events(run_id, limit=50, before_sequence=null)`, and
 `get_run_logs(run_id, limit=50, before_offset=null)` (both page limits 1–200;
 `run_id` is a retained run id of 1–80 ASCII letters/digits/underscores/hyphens).
-Use `list_runs` to find a stored run id, then `get_agent_status` for current
+Use `list_runs` to find a stored run id (`get_run` carries the per-run detail), then `get_agent_status` for current
 supervisor state, `get_run_events` for metadata-only execution boundaries, and
 `get_run_logs` for classified, sanitized excerpts of the agent's run log.
 Page events backward using `next_before_sequence` as `before_sequence` and

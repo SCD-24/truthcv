@@ -472,6 +472,14 @@ text preview. `get_screening` returns one screening plus its full stored
 within that text (context default 200 / max 1000 characters; matches default
 20 / max 50).
 
+`list_runs` returns per-run summaries (counters, `item_error_count`,
+`coverage_counts`), not full records. `get_run` is the bounded detail view:
+`item_errors` and `discovery_coverage` are paged (default 20, max 100, with
+`next_offset`), `coverage_status` filters coverage, the agent's recovery
+instruction is shown once, and fields are capped (errors 500, coverage
+board/reason 200, note 2000, `stopped_reason` 300 characters). Results are
+compact JSON.
+
 To enable it, set a non-empty `DIAGNOSTICS_MCP_TOKEN` in `.env` (e.g.
 `openssl rand -hex 32`) and restart the `app` service. Every request must
 carry it as a bearer token:
