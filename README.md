@@ -453,14 +453,32 @@ CI/CD = Continuous Integration and Continuous Delivery
 `/mcp/diagnostics` is a second, separate MCP streamable-HTTP JSON-RPC endpoint
 on the `app` service, for a remote MCP client (Claude Desktop, an inspector,
 your own tooling) to inspect a running TruthCV without touching the
-operational `/mcp` surface the agent uses. It exposes exactly ten read-only
+operational `/mcp` surface the agent uses. It exposes exactly twelve read-only
 tools — `list_runs`, `get_run`, `get_run_events`, `get_run_logs`,
-`get_agent_status`, `list_screenings`, `list_applications`, `get_status`,
+`get_agent_status`, `list_screenings`, `get_screening`,
+`search_screening_text`, `list_applications`, `get_status`,
 `get_gmail_sync_status`, `list_gmail_suggestions` — and none of
 them can start a run, record a screening or application, or generate a
 document. `get_status` reports per-store counts (including Gmail suggestion
 count and last sync time) and whether secret encryption is available; it
 never returns any secret material.
+
+The `list_*` tools page 20 records by default (cap 200). `list_screenings`
+accepts the filters `url_contains`, `screening_blocker`, `verdict`, `approval`,
+`run_id` and `text_contains`, and returns `posting_text_length` instead of a
+text preview. `get_screening` returns one screening plus its full stored
+`posting_text` in pages (default 8000 characters, max 20000, with
+`next_offset`). `search_screening_text` does a literal, case-insensitive search
+within that text (context default 200 / max 1000 characters; matches default
+20 / max 50).
+
+`list_runs` returns per-run summaries (counters, `item_error_count`,
+`coverage_counts`), not full records. `get_run` is the bounded detail view:
+`item_errors` and `discovery_coverage` are paged (default 20, max 100, with
+`next_offset`), `coverage_status` filters coverage, the agent's recovery
+instruction is shown once, and fields are capped (errors 500, coverage
+board/reason 200, note 2000, `stopped_reason` 300 characters). Results are
+compact JSON.
 
 To enable it, set a non-empty `DIAGNOSTICS_MCP_TOKEN` in `.env` (e.g.
 `openssl rand -hex 32`) and restart the `app` service. Every request must

@@ -35,82 +35,17 @@ import secretstore
 from agenttools.mcp_app import _input_schema
 from api.agent_diagnostics import get_agent_status, get_run_events
 from api.agent_run_logs import get_run_logs
-
-# A diagnostics summary line only needs enough of a posting to identify it,
-# not the whole body (which can run to several KB and is not itself
-# diagnostic information).
-_POSTING_TEXT_PREVIEW_CHARS = 280
-
-# Bounds applied to every list_* tool's `limit` argument by _clamp_limit.
-_DEFAULT_LIST_LIMIT = 50
-_MAX_LIST_LIMIT = 200
-
-
-def _clamp_limit(limit: int | None) -> int:
-    """Clamp a caller-supplied list `limit` into a safe, bounded range.
-
-    A missing or non-positive limit (None, 0, or negative) means "use the
-    default" — `_DEFAULT_LIST_LIMIT` — rather than "no limit", so a remote
-    MCP client can never force an unbounded page by passing 0 or -1. Any
-    limit above `_MAX_LIST_LIMIT` is capped there.
-    """
-    if not limit or limit <= 0:
-        return _DEFAULT_LIST_LIMIT
-    return min(limit, _MAX_LIST_LIMIT)
-
-
-def list_runs(limit: int = 50, offset: int = 0) -> dict:
-    """One page of run records, newest-started first, with the total drawn from.
-
-    `limit` is clamped by `_clamp_limit`: <=0 (or omitted) means the default
-    of 50, and anything above 200 is capped there — never "all records".
-    """
-    records, total = _runs_store.list_page(limit=_clamp_limit(limit), offset=offset)
-    return {"total": total, "runs": [r.to_dict() for r in records]}
-
-
-def get_run(run_id: str) -> dict:
-    """The run record with this id as a dict, or {} if none exists."""
-    record = _runs_store.get(run_id)
-    return record.to_dict() if record else {}
-
-
-def _screening_summary(s) -> dict:
-    """A read-only summary of one screening, with posting_text truncated."""
-    posting_text = s.posting_text or ""
-    return {
-        "id": s.id,
-        "company": s.company,
-        "role": s.role,
-        "url": s.url,
-        "screened_date": s.screened_date,
-        "verdict": s.verdict,
-        "screening_blocker": s.screening_blocker,
-        "approval": s.approval,
-        "profile": s.profile,
-        "run_id": s.run_id,
-        "posting_text_preview": posting_text[:_POSTING_TEXT_PREVIEW_CHARS],
-        "posting_text_truncated": len(posting_text) > _POSTING_TEXT_PREVIEW_CHARS,
-    }
-
-
-def list_screenings(limit: int = 50, offset: int = 0) -> dict:
-    """A summarised page of screening records, newest-created first.
-
-    Each entry carries only a truncated preview of `posting_text`; the full
-    posting body is not diagnostic information and can be large. `limit` is
-    clamped by `_clamp_limit` (default 50, cap 200; <=0 means the default).
-    """
-    records = sorted(
-        _screening_store.load_all(),
-        key=lambda s: s.created_at or (f"{s.screened_date}T00:00:00+00:00" if s.screened_date else ""),
-        reverse=True,
-    )
-    total = len(records)
-    if offset > 0:
-        records = records[offset:]
-    records = records[:_clamp_limit(limit)]
-    return {"total": total, "screenings": [_screening_summary(s) for s in records]}
+from api.diagnostics_paging import (  # noqa: F401
+    _DEFAULT_LIST_LIMIT,
+    _MAX_LIST_LIMIT,
+    _clamp_limit,
+)
+from api.diagnostics_runs import get_run, list_runs
+from api.diagnostics_screenings import (
+    get_screening,
+    list_screenings,
+    search_screening_text,
+)
 
 
 def _application_summary(a) -> dict:
@@ -129,10 +64,10 @@ def _application_summary(a) -> dict:
     }
 
 
-def list_applications(limit: int = 50, offset: int = 0) -> dict:
+def list_applications(limit: int = 0, offset: int = 0) -> dict:
     """A summarised page of tracked applications, newest-created first.
 
-    `limit` is clamped by `_clamp_limit` (default 50, cap 200; <=0 means
+    `limit` is clamped by `_clamp_limit` (default 20, cap 200; <=0 means
     the default).
     """
     records = sorted(
@@ -197,12 +132,12 @@ def _suggestion_timestamp(s) -> float:
         return 0.0
 
 
-def list_gmail_suggestions(limit: int = 50, offset: int = 0) -> dict:
+def list_gmail_suggestions(limit: int = 0, offset: int = 0) -> dict:
     """A page of Gmail response-sync suggestions, newest-first by `date`.
 
     Ordering parses the stored Gmail `Date` header (see
     `_suggestion_timestamp`) rather than comparing strings. `limit` is
-    clamped by `_clamp_limit` (default 50, cap 200; <=0 means the
+    clamped by `_clamp_limit` (default 20, cap 200; <=0 means the
     default). `offset` is applied before the limit. Each entry is the
     suggestion's own to_dict() — snippets are already short, so nothing is
     truncated further.
@@ -217,29 +152,53 @@ def list_gmail_suggestions(limit: int = 50, offset: int = 0) -> dict:
     return {"total": total, "suggestions": [s.to_dict() for s in records]}
 
 
-# Exactly ten read-only tools. Nothing here writes to a store, starts a
+# Exactly twelve read-only tools. Nothing here writes to a store, starts a
 # run, or generates a document — this registry is deliberately smaller than
 # agenttools.mcp_app._TOOL_REGISTRY, not a superset of it.
 _DIAG_TOOL_REGISTRY = {
     "list_runs": (
         list_runs,
-        "Lists agent run records, newest-started first. Read-only. "
-        "limit defaults to 50, capped at 200; limit<=0 means the default.",
+        "Lists run summaries (counters, item_error_count, coverage_counts), "
+        "newest-started first. Read-only. "
+        "limit defaults to 20, capped at 200; limit<=0 means the default.",
     ),
     "get_run": (
         get_run,
-        "Returns one run record by id, or {} if none exists. Read-only.",
+        "Returns bounded detail for one run by id, or {} if none exists. "
+        "Read-only. item_errors and discovery_coverage are paged: "
+        "errors_offset/errors_limit/coverage_offset/coverage_limit default 20, "
+        "max 100, with next_offset (null at the end). The recovery instruction "
+        "is shown once, not per error. coverage_status filters coverage by "
+        "exact status. Fields are capped: error 500, coverage board/reason "
+        "200, note 2000, stopped_reason 300 chars.",
     ),
     "list_screenings": (
         list_screenings,
         "Lists screening records, newest-created first, summarised with "
-        "posting_text truncated to a short preview. Read-only. "
-        "limit defaults to 50, capped at 200; limit<=0 means the default.",
+        "posting_text_length (no posting text). Read-only. Optional filters: "
+        "url_contains and text_contains (case-insensitive substring of the "
+        "URL / posting_text), screening_blocker, verdict, approval, run_id "
+        "(exact); total is the filtered count. "
+        "limit defaults to 20, capped at 200; limit<=0 means the default.",
+    ),
+    "get_screening": (
+        get_screening,
+        "Returns one screening by id (without posting_text) plus a page of "
+        "its full stored posting_text, or {} if none exists. Read-only. "
+        "limit defaults to 8000 chars, capped at 20000; limit<=0 means the "
+        "default; negative offset is 0; next_offset is null at the end.",
+    ),
+    "search_screening_text": (
+        search_screening_text,
+        "Literal, case-insensitive search within a screening's posting_text; "
+        "returns {} if the id is unknown. Read-only. context_chars defaults "
+        "to 200, max 1000; max_matches defaults to 20, max 50; values <=0 "
+        "mean the default; truncated is true if more matches exist.",
     ),
     "list_applications": (
         list_applications,
         "Lists tracked applications, newest-created first, summarised. "
-        "Read-only. limit defaults to 50, capped at 200; limit<=0 means "
+        "Read-only. limit defaults to 20, capped at 200; limit<=0 means "
         "the default.",
     ),
     "get_status": (
@@ -256,7 +215,7 @@ _DIAG_TOOL_REGISTRY = {
     "list_gmail_suggestions": (
         list_gmail_suggestions,
         "Lists Gmail response-sync suggestions, newest-first by date. "
-        "Read-only. limit defaults to 50, capped at 200; limit<=0 means "
+        "Read-only. limit defaults to 20, capped at 200; limit<=0 means "
         "the default.",
     ),
     "get_agent_status": (
@@ -341,7 +300,8 @@ async def _handle_diag_call_tool(ctx, params) -> types.CallToolResult:
             content=[
                 types.TextContent(
                     type="text",
-                    text=json.dumps(result, ensure_ascii=False),
+                    # Output goes to a model client: whitespace is spent tokens.
+                    text=json.dumps(result, ensure_ascii=False, separators=(",", ":")),
                 )
             ]
         )
