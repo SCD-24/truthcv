@@ -4,7 +4,7 @@
 These pin down the two things that matter about a second, bearer-token-only
 MCP surface: that it is unreachable without the right token (404, never a
 hint-carrying 401/403), and that once authenticated it exposes only the
-ten read-only diagnostics tools — never any tool from the operational
+twelve read-only diagnostics tools — never any tool from the operational
 registry that can write.
 
 The 404-gate tests use a bare ``TestClient(app)`` (no lifespan): the auth
@@ -146,8 +146,10 @@ def test_existing_operational_mcp_endpoint_has_no_auth_gate(data_dir, monkeypatc
     assert r.status_code != 404
 
 
-def test_registry_holds_exactly_the_ten_read_only_tools():
+def test_registry_holds_exactly_the_twelve_read_only_tools():
     assert set(_DIAG_TOOL_REGISTRY) == {
+        "get_screening",
+        "search_screening_text",
         "list_runs",
         "get_run",
         "list_screenings",
@@ -161,10 +163,12 @@ def test_registry_holds_exactly_the_ten_read_only_tools():
     }
 
 
-def test_tools_list_handler_advertises_exactly_the_ten_diagnostics_tools():
+def test_tools_list_handler_advertises_exactly_the_twelve_diagnostics_tools():
     result = _run_sync(_handle_diag_list_tools(None, None))
     names = {tool.name for tool in result.tools}
     assert names == {
+        "get_screening",
+        "search_screening_text",
         "list_runs",
         "get_run",
         "list_screenings",
@@ -251,9 +255,9 @@ def test_list_runs_round_trips_a_seeded_run(data_dir):
 
 
 def test_clamp_limit_non_positive_yields_the_default():
-    assert _clamp_limit(0) == 50
-    assert _clamp_limit(-1) == 50
-    assert _clamp_limit(None) == 50
+    assert _clamp_limit(0) == 20
+    assert _clamp_limit(-1) == 20
+    assert _clamp_limit(None) == 20
 
 
 def test_clamp_limit_caps_above_the_maximum():
@@ -309,7 +313,9 @@ def test_list_runs_non_positive_limit_is_clamped_to_the_default_not_unbounded(
     import api.diagnostics_mcp as diagnostics_mcp
     import runs.store as runs_store
 
-    monkeypatch.setattr(diagnostics_mcp, "_DEFAULT_LIST_LIMIT", 2)
+    import api.diagnostics_paging as diagnostics_paging
+
+    monkeypatch.setattr(diagnostics_paging, "_DEFAULT_LIST_LIMIT", 2)
     for i in range(3):
         runs_store.start(f"diag-clamp-run-{i}", trigger="scheduled", apply_cap=0)
 
@@ -331,7 +337,9 @@ def test_list_gmail_suggestions_non_positive_limit_is_clamped_to_the_default_not
     import api.diagnostics_mcp as diagnostics_mcp
     import gmailsync.store as gmailsync_store
 
-    monkeypatch.setattr(diagnostics_mcp, "_DEFAULT_LIST_LIMIT", 2)
+    import api.diagnostics_paging as diagnostics_paging
+
+    monkeypatch.setattr(diagnostics_paging, "_DEFAULT_LIST_LIMIT", 2)
     gmailsync_store.save_suggestions(
         [GmailSuggestion(id=f"g-{i}", date=f"2024-01-0{i+1}T00:00:00+00:00") for i in range(3)]
     )
