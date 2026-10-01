@@ -3,7 +3,9 @@
  * settle while loading, wait a few times while the page is still a thin
  * client-rendered shell). The snapshot is pruned to plain posting text
  * (chrome, urls and refs removed) before measuring and returning. LinkedIn
- * pages additionally wait until the "Primary content" region is filled.
+ * pages additionally wait until the "Primary content" region is filled, and
+ * rely on the operator's persisted signed-in browser profile (Agents → Site
+ * sign-ins); an authwall/login URL is reported as a sign-in wall.
  * Returns the text or an explicit unreadable marker; never throws.
  */
 import { navigateAndSnapshot, settleIfLoading } from '../builtins/harvestNavigate.js';
@@ -31,6 +33,18 @@ export const MIN_READABLE_CHARS = 200;
 
 /** Phrases marking a sign-in wall instead of a posting. */
 const LOGIN_WALL_RE = /\b(sign in to (?:view|continue|apply)|log in to (?:view|continue)|please (?:sign|log) in)\b/i;
+
+/** Page URL header of a snapshot that landed on a LinkedIn sign-in page. */
+const LINKEDIN_SIGNED_OUT_RE = /^- Page URL:\s*https?:\/\/(?:[\w-]+\.)*linkedin\.com\/(?:(?:authwall|login|uas\/login|signup)(?:[/?#]|\s*$)|checkpoint\/)/im;
+
+/**
+ * Whether a raw snapshot's page URL is a LinkedIn sign-in/authwall page.
+ *
+ * @param snapshot Raw snapshot text.
+ */
+export function linkedInSignedOut(snapshot: string): boolean {
+  return LINKEDIN_SIGNED_OUT_RE.test(snapshot);
+}
 
 /** Max extra snapshot retries while a page body is still thin. */
 export const THIN_SETTLE_ATTEMPTS = 4;
@@ -111,6 +125,7 @@ function isSettled(text: string, linkedIn: boolean): boolean {
 async function settleIfThin(call: BrowserToolCall, snapshot: string, linkedIn: boolean): Promise<string> {
   let text = snapshot;
   if (LOGIN_WALL_RE.test(pruneSnapshot(text))) return text;
+  if (linkedIn && linkedInSignedOut(text)) return text;
   for (let i = 0; i < THIN_SETTLE_ATTEMPTS; i++) {
     if (isSettled(text, linkedIn)) break;
     try {
@@ -129,6 +144,7 @@ const signInWall: UnreadablePosting = { unreadable: true, blocker: 'login_requir
 
 /** Classify the settled raw snapshot as readable text or an unreadable marker. */
 function judgePosting(raw: string, linkedIn: boolean): FetchedPosting {
+  if (linkedIn && linkedInSignedOut(raw)) return signInWall;
   const text = pruneSnapshot(raw);
   const wall = LOGIN_WALL_RE.test(text);
   const length = readableLength(text);

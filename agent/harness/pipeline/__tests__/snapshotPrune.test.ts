@@ -48,6 +48,28 @@ describe('pruneSnapshot attribute tokens', () => {
   });
 });
 
+describe('pruneSnapshot consent banners', () => {
+  const post = '- paragraph: Posting body stays.';
+  it('drops a cookie-named dialog with its subtree', () => {
+    const dlg = '- dialog "Cookie consent" [ref=e1]:\n  - paragraph: We use cookies to improve your experience.\n  - button "Accept all"';
+    expect(pruneSnapshot(dlg + '\n' + post)).toBe('Posting body stays.');
+  });
+  it('drops an unnamed alertdialog with a consent button', () => {
+    const dlg = '- alertdialog [ref=e2]:\n  - button "Reject all" [ref=e3]';
+    expect(pruneSnapshot(dlg + '\n' + post)).toBe('Posting body stays.');
+  });
+  it('drops a cookie-named region', () => {
+    expect(pruneSnapshot('- region "Cookie banner" [ref=e4]:\n  - paragraph: Hello there\n' + post)).toBe('Posting body stays.');
+  });
+  it('keeps a dialog without a consent button', () => {
+    const dlg = '- dialog "Job details" [ref=e5]:\n  - paragraph: Details here\n  - button "Apply"';
+    expect(pruneSnapshot(dlg)).toBe('Job details\nDetails here\nApply');
+  });
+  it('keeps ordinary text mentioning cookies', () => {
+    expect(pruneSnapshot('- paragraph: You will bake cookies daily.')).toBe('You will bake cookies daily.');
+  });
+});
+
 describe('pruneSnapshot', () => {
   const out = pruneSnapshot(FIXTURE);
   it('drops chrome text', () => {

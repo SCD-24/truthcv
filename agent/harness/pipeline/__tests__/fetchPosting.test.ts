@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fetchPosting, postingBodyText } from '../fetchPosting.js';
+import { fetchPosting, linkedInSignedOut, postingBodyText } from '../fetchPosting.js';
 import type { BrowserToolCall } from '../../builtins/harvestTypes.js';
 
 type Snap = { content: string; isError: boolean };
@@ -94,6 +94,27 @@ describe('fetchPosting LinkedIn readiness', () => {
   });
 });
 
+describe('fetchPosting LinkedIn signed-out', () => {
+  const wallSnap = '- Page URL: https://www.linkedin.com/authwall?trk=x\n' + liChrome;
+  it('maps an authwall URL to a sign-in wall without waiting', async () => {
+    const { call, names } = stub([ok(wallSnap)]);
+    const r = await fetchPosting(call, LI_URL);
+    expect(r).toEqual({ unreadable: true, blocker: 'login_required', reason: 'sign-in wall' });
+    expect(waits(names)).toBe(0);
+  });
+  it('keeps the unready reason for a normal job URL', async () => {
+    const { call, names } = stub([ok('- Page URL: https://www.linkedin.com/jobs/view/123\n' + liChrome)]);
+    const r = await fetchPosting(call, LI_URL);
+    expect(r).toMatchObject({ reason: 'LinkedIn job details did not load' });
+    expect(waits(names)).toBe(4);
+  });
+  it('does not map a non-LinkedIn URL', async () => {
+    const { call } = stub([ok(wallSnap)]);
+    const r = await fetchPosting(call, 'https://x.test/j');
+    expect(r).toMatchObject({ unreadable: true, blocker: 'unreadable' });
+  });
+});
+
 describe('fetchPosting readability measure', () => {
   it('keeps waiting when the sign-in phrase is only in a dropped banner', async () => {
     const banner = '- banner [ref=e1]:\n  - text: Please sign in to view jobs\n- main [ref=e2]:\n  - paragraph [ref=e3]: short';
@@ -108,6 +129,15 @@ describe('fetchPosting readability measure', () => {
     const { call } = stub([ok(spaced)]);
     const r = await fetchPosting(call, 'https://x.test/j');
     expect(r).toMatchObject({ unreadable: true, blocker: 'unreadable' });
+  });
+});
+
+describe('linkedInSignedOut', () => {
+  it.each(['https://www.linkedin.com/authwall?trk=x', 'https://www.linkedin.com/login', 'https://ie.linkedin.com/uas/login?x=1', 'https://www.linkedin.com/checkpoint/lg/login'])('flags %s', (u) => {
+    expect(linkedInSignedOut(`- Page URL: ${u}\n- main`)).toBe(true);
+  });
+  it.each(['https://www.linkedin.com/login-help', 'https://www.linkedin.com/jobs/view/123', 'https://www.linkedin.com/signups-closed'])('does not flag %s', (u) => {
+    expect(linkedInSignedOut(`- Page URL: ${u}\n- main`)).toBe(false);
   });
 });
 
