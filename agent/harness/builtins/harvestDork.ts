@@ -59,11 +59,21 @@ export function unwrapGoogleRedirect(href: URL): URL {
   }
 }
 
+/** A LinkedIn single-job path: `/jobs/view/[slug-]<digits>`. */
+const LINKEDIN_JOB_PATH_RE = /^\/jobs\/view\/(?:[^/]*-)?\d+$/;
+
+/** Whether `host` is linkedin.com or a subdomain. */
+function isLinkedInHost(host: string): boolean {
+  const lower = host.toLowerCase();
+  return lower === 'linkedin.com' || lower.endsWith('.linkedin.com');
+}
+
 /** Whether `url` is a result for `target`. */
 function matchesTarget(url: URL, target: DorkTarget): boolean {
   if (GOOGLE_OWNED_RE.test(url.hostname)) return false;
   if (!hostsRelated(url.hostname, target.host)) return false;
   const path = url.pathname.toLowerCase().replace(/\/+$/, '');
+  if (isLinkedInHost(url.hostname) && !LINKEDIN_JOB_PATH_RE.test(path)) return false;
   if (path === target.pathPrefix) return false;
   return target.pathPrefix === '' || path.startsWith(`${target.pathPrefix}/`);
 }

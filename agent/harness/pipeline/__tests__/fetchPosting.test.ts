@@ -62,6 +62,55 @@ describe('fetchPosting thin-page wait', () => {
   });
 });
 
+const LI_URL = 'https://www.linkedin.com/jobs/view/senior-architect-123';
+const liChrome =
+  '- Page Title: Architect | LinkedIn\n- banner [ref=e1]:\n' +
+  '  - navigation "Primary" [ref=e2]:\n' +
+  ['Home', 'My Network', 'Jobs', 'Messaging', 'Notifications'].map((n) => `    - link "${n}" [ref=e3]:\n      - /url: https://www.linkedin.com/${n}`).join('\n') +
+  '\n- main [ref=e9]:\n  - region "Primary content" [ref=e10]\n';
+const LI_DESC = 'Design enterprise data platforms for large clients. '.repeat(5);
+const liFilled =
+  liChrome.replace('region "Primary content" [ref=e10]', 'region "Primary content" [ref=e10]:\n    - paragraph [ref=e11]: ' + LI_DESC) +
+  '- complementary "Aside" [ref=e12]:\n  - heading "Try Premium" [ref=e13]\n';
+
+describe('fetchPosting LinkedIn readiness', () => {
+  it('chrome-only snapshot waits four times and reports the LinkedIn reason', async () => {
+    expect(liChrome.length).toBeGreaterThan(200);
+    const { call, names } = stub([ok(liChrome)]);
+    const r = await fetchPosting(call, LI_URL);
+    expect(r).toEqual({ unreadable: true, blocker: 'unreadable', reason: 'LinkedIn job details did not load' });
+    expect(waits(names)).toBe(4);
+  });
+  it('waits through the loading marker then returns pruned text', async () => {
+    const loading = liChrome + '  - status "Loading the job description"\n';
+    const { call } = stub([ok(loading), ok(liFilled)]);
+    const r = await fetchPosting(call, LI_URL);
+    expect(r.unreadable).toBeFalsy();
+    const text = (r as { text: string }).text;
+    expect(text).toContain('Design enterprise data platforms');
+    expect(text).not.toContain('Premium');
+    expect(text).not.toContain('[ref=');
+    expect(text).not.toContain('/url:');
+  });
+});
+
+describe('fetchPosting readability measure', () => {
+  it('keeps waiting when the sign-in phrase is only in a dropped banner', async () => {
+    const banner = '- banner [ref=e1]:\n  - text: Please sign in to view jobs\n- main [ref=e2]:\n  - paragraph [ref=e3]: short';
+    const { call, names } = stub([ok(banner), ok(BODY)]);
+    const r = await fetchPosting(call, 'https://x.test/j');
+    expect(r.unreadable).toBeFalsy();
+    expect((r as { text: string }).text).toContain('Electrical Design Engineer');
+    expect(waits(names)).toBe(1);
+  });
+  it('measures length after whitespace collapse', async () => {
+    const spaced = '- paragraph: ' + 'ab      '.repeat(30);
+    const { call } = stub([ok(spaced)]);
+    const r = await fetchPosting(call, 'https://x.test/j');
+    expect(r).toMatchObject({ unreadable: true, blocker: 'unreadable' });
+  });
+});
+
 describe('postingBodyText', () => {
   it('strips header, fences and ref tokens but keeps headings', () => {
     const out = postingBodyText(SHELL + '\n- heading "Electrical Design Engineer" [ref=e9]');

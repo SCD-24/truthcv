@@ -230,6 +230,7 @@ const LOADING_RE = new RegExp(
     'finding jobs',
     'loading\\s*(?:\\.{2,}|…|jobs|results|more)',
     'text:\\s*"?loading"?\\s*$',
+    'loading\\s+(?:the\\s+)?job\\s+(?:description|details)',
     'searching\\s*(?:\\.{2,}|…|for\\b|jobs)',
     'lädt|wird geladen|bitte warten',
     '-\\s*(?:progressbar|busy)\\b',
