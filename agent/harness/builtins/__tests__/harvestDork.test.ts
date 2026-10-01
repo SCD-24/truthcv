@@ -28,6 +28,13 @@ describe('extractDorkPostings', () => {
     const out = extractDorkPostings([link('Arch', 'https://linkedin.com/jobs-archive/345'), link('Job', 'https://linkedin.com/jobs/view/123')], target);
     expect(out.map((p) => p.url)).toEqual(['https://linkedin.com/jobs/view/123']);
   });
+  it('accepts LinkedIn slugged job URLs and rejects non-job paths', () => {
+    const target = { host: 'linkedin.com', pathPrefix: '/jobs' };
+    const good = 'https://ie.linkedin.com/jobs/view/senior-data-architect-at-archer-4473914860';
+    const bad = ['https://ie.linkedin.com/jobs/%E7%B3%96%E6%9E%9C-jobs', 'https://www.linkedin.com/jobs/search?keywords=x', 'https://linkedin.com/jobs/view/abc'];
+    const out = extractDorkPostings([good, ...bad].map((u) => link('t', u)), target);
+    expect(out.map((p) => p.url)).toEqual([good]);
+  });
   it('matches subdomains', () => {
     const out = extractDorkPostings([link('Role', 'https://acme.wd3.myworkdayjobs.com/en/job/1')], { host: 'myworkdayjobs.com', pathPrefix: '' });
     expect(out).toHaveLength(1);

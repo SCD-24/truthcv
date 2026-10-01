@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fetchPosting, postingBodyText } from '../fetchPosting.js';
+import { fetchPosting, linkedInSignedOut, postingBodyText } from '../fetchPosting.js';
 import type { BrowserToolCall } from '../../builtins/harvestTypes.js';
 
 type Snap = { content: string; isError: boolean };
@@ -59,6 +59,85 @@ describe('fetchPosting thin-page wait', () => {
     const r = await fetchPosting(call, 'https://x.test/j');
     expect(r).toMatchObject({ unreadable: true, blocker: 'unreadable' });
     expect(waits(names)).toBe(1);
+  });
+});
+
+const LI_URL = 'https://www.linkedin.com/jobs/view/senior-architect-123';
+const liChrome =
+  '- Page Title: Architect | LinkedIn\n- banner [ref=e1]:\n' +
+  '  - navigation "Primary" [ref=e2]:\n' +
+  ['Home', 'My Network', 'Jobs', 'Messaging', 'Notifications'].map((n) => `    - link "${n}" [ref=e3]:\n      - /url: https://www.linkedin.com/${n}`).join('\n') +
+  '\n- main [ref=e9]:\n  - region "Primary content" [ref=e10]\n';
+const LI_DESC = 'Design enterprise data platforms for large clients. '.repeat(5);
+const liFilled =
+  liChrome.replace('region "Primary content" [ref=e10]', 'region "Primary content" [ref=e10]:\n    - paragraph [ref=e11]: ' + LI_DESC) +
+  '- complementary "Aside" [ref=e12]:\n  - heading "Try Premium" [ref=e13]\n';
+
+describe('fetchPosting LinkedIn readiness', () => {
+  it('chrome-only snapshot waits four times and reports the LinkedIn reason', async () => {
+    expect(liChrome.length).toBeGreaterThan(200);
+    const { call, names } = stub([ok(liChrome)]);
+    const r = await fetchPosting(call, LI_URL);
+    expect(r).toEqual({ unreadable: true, blocker: 'unreadable', reason: 'LinkedIn job details did not load' });
+    expect(waits(names)).toBe(4);
+  });
+  it('waits through the loading marker then returns pruned text', async () => {
+    const loading = liChrome + '  - status "Loading the job description"\n';
+    const { call } = stub([ok(loading), ok(liFilled)]);
+    const r = await fetchPosting(call, LI_URL);
+    expect(r.unreadable).toBeFalsy();
+    const text = (r as { text: string }).text;
+    expect(text).toContain('Design enterprise data platforms');
+    expect(text).not.toContain('Premium');
+    expect(text).not.toContain('[ref=');
+    expect(text).not.toContain('/url:');
+  });
+});
+
+describe('fetchPosting LinkedIn signed-out', () => {
+  const wallSnap = '- Page URL: https://www.linkedin.com/authwall?trk=x\n' + liChrome;
+  it('maps an authwall URL to a sign-in wall without waiting', async () => {
+    const { call, names } = stub([ok(wallSnap)]);
+    const r = await fetchPosting(call, LI_URL);
+    expect(r).toEqual({ unreadable: true, blocker: 'login_required', reason: 'sign-in wall' });
+    expect(waits(names)).toBe(0);
+  });
+  it('keeps the unready reason for a normal job URL', async () => {
+    const { call, names } = stub([ok('- Page URL: https://www.linkedin.com/jobs/view/123\n' + liChrome)]);
+    const r = await fetchPosting(call, LI_URL);
+    expect(r).toMatchObject({ reason: 'LinkedIn job details did not load' });
+    expect(waits(names)).toBe(4);
+  });
+  it('does not map a non-LinkedIn URL', async () => {
+    const { call } = stub([ok(wallSnap)]);
+    const r = await fetchPosting(call, 'https://x.test/j');
+    expect(r).toMatchObject({ unreadable: true, blocker: 'unreadable' });
+  });
+});
+
+describe('fetchPosting readability measure', () => {
+  it('keeps waiting when the sign-in phrase is only in a dropped banner', async () => {
+    const banner = '- banner [ref=e1]:\n  - text: Please sign in to view jobs\n- main [ref=e2]:\n  - paragraph [ref=e3]: short';
+    const { call, names } = stub([ok(banner), ok(BODY)]);
+    const r = await fetchPosting(call, 'https://x.test/j');
+    expect(r.unreadable).toBeFalsy();
+    expect((r as { text: string }).text).toContain('Electrical Design Engineer');
+    expect(waits(names)).toBe(1);
+  });
+  it('measures length after whitespace collapse', async () => {
+    const spaced = '- paragraph: ' + 'ab      '.repeat(30);
+    const { call } = stub([ok(spaced)]);
+    const r = await fetchPosting(call, 'https://x.test/j');
+    expect(r).toMatchObject({ unreadable: true, blocker: 'unreadable' });
+  });
+});
+
+describe('linkedInSignedOut', () => {
+  it.each(['https://www.linkedin.com/authwall?trk=x', 'https://www.linkedin.com/login', 'https://ie.linkedin.com/uas/login?x=1', 'https://www.linkedin.com/checkpoint/lg/login'])('flags %s', (u) => {
+    expect(linkedInSignedOut(`- Page URL: ${u}\n- main`)).toBe(true);
+  });
+  it.each(['https://www.linkedin.com/login-help', 'https://www.linkedin.com/jobs/view/123', 'https://www.linkedin.com/signups-closed'])('does not flag %s', (u) => {
+    expect(linkedInSignedOut(`- Page URL: ${u}\n- main`)).toBe(false);
   });
 });
 

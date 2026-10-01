@@ -26,6 +26,16 @@ describe('settleIfLoading', () => {
     await settleIfLoading(call, '- link "Loading Dock Manager" [ref=e1]:\n  - /url: https://a.example/1');
     expect(names).toEqual([]);
   });
+  it('does not trigger on Job Details Analyst', async () => {
+    const { call, names } = stub([]);
+    await settleIfLoading(call, '- link "Job Details Analyst" [ref=e1]');
+    expect(names).toEqual([]);
+  });
+  it.each(['- status "Loading the job description"', '- alert [ref=e1]: Loading job details'])('waits while %s', async (marker) => {
+    const { call, names } = stub([ok(marker), ok('ready')]);
+    expect(await settleIfLoading(call, marker)).toBe('ready');
+    expect(names.filter((n) => n === 'browser_wait_for')).toHaveLength(2);
+  });
   it('resolves on first retry', async () => {
     const { call, names } = stub([ok('results ready')]);
     expect(await settleIfLoading(call, 'Finding jobs...')).toBe('results ready');
