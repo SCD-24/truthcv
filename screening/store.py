@@ -32,20 +32,22 @@ from .model import APPROVAL_VALUES, Screening, new_id, validate_blocker
 from .url import posting_dedupe_key
 
 # screening_blocker values that stay operator-actionable: the operator can sign
-# in themselves (login_required) or paste the posting text back in
-# (unreadable). 'not_found' and 'expired' are deliberately excluded — there is
-# no decision to make and nothing to draft from a posting that no longer
-# exists, so those records must not reach the approval queue.
-QUEUEING_BLOCKERS = ("login_required", "unreadable")
+# in themselves (login_required). 'not_found', 'expired' and 'unreadable' are
+# deliberately excluded — unreadable records do not queue: they are
+# placeholders that a later real screening of the same posting supersedes, and
+# there is no decision to put to the operator.
+QUEUEING_BLOCKERS = ("login_required",)
 
 # screening_blocker values describing a posting that was never evaluated and
-# never put to the operator either: the agent saw a dead link or an expired
-# listing, and (being outside QUEUEING_BLOCKERS) the record did not queue. A
+# never put to the operator either: the agent saw a dead link, an expired
+# listing or an unreadable page, and (being outside QUEUEING_BLOCKERS) the
+# record did not queue. Unreadable records are placeholders that a later real
+# screening of the same posting supersedes. A
 # record like that holds no judgement, so it must not permanently suppress a
 # re-screen the way a real verdict does — a board that 404s for an afternoon
 # would otherwise blacklist a live posting that nobody ever sees again. See
 # `_is_unread_placeholder`.
-UNREAD_BLOCKERS = ("not_found", "expired")
+UNREAD_BLOCKERS = ("not_found", "expired", "unreadable")
 
 
 def screenings_path() -> Path:
@@ -242,7 +244,7 @@ def create_or_get(fields: dict) -> tuple[Screening, bool]:
 
     Returns ``(record, created)``. ``created`` is False when a blocking record
     exists (URL-wide, same profile, queueing vs queueing, or a profile-less
-    new record vs any record) or a placeholder was superseded; the blocking
+    new record vs any record); the blocking
     record is returned untouched, nothing is written, and the screening passed
     in is discarded. A record under a different profile with no blocking rule
     gives ``created=True``.
@@ -250,7 +252,7 @@ def create_or_get(fields: dict) -> tuple[Screening, bool]:
     The placeholder case is an unread placeholder — a dead-link or expired-listing
     blocker nobody was ever asked about (``_is_unread_placeholder``) — which is
     overwritten in place by the new screening, keeping the original record's id
-    and created_at. It is still ``created=False``: no record was added. This is
+    and created_at. It is ``created=True``: the call recorded a new screening. This is
     what stops a board that 404s for an afternoon from permanently suppressing
     a live posting, which would be invisible because such records never queue.
 
@@ -310,12 +312,11 @@ def create_or_get(fields: dict) -> tuple[Screening, bool]:
     # A deferred screening is an unresolved decision, so it enters the operator's
     # approval queue. In semi-auto a *passing* one does too: the operator, not
     # the agent, decides whether to apply. A screening_blocker means the agent
-    # could not even read the posting to reach a verdict — that is equally an
-    # unresolved decision only the operator can settle, so it queues the same
-    # way, but only when the blocker is one the operator can actually act on
-    # (QUEUEING_BLOCKERS): 'not_found' and 'expired' describe a posting that no
-    # longer exists, so there is nothing for the operator to decide or draft
-    # from and the record must not queue. Set here rather than accepted from
+    # could not even read the posting to reach a verdict — that queues only when
+    # the blocker is one the operator can actually act on (QUEUEING_BLOCKERS,
+    # i.e. login_required): 'not_found' and 'expired' describe a posting that no
+    # longer exists, and 'unreadable' records do not queue either — they are
+    # placeholders a later real screening supersedes. Set here rather than accepted from
     # `fields`: the agent's record_screening reaches this function directly,
     # and approval is not its to grant.
     if screening.verdict == "deferred" or screening.screening_blocker in QUEUEING_BLOCKERS:
@@ -339,18 +340,19 @@ def create_or_get(fields: dict) -> tuple[Screening, bool]:
                 None,
             )
             if existing is not None:
-                # Supersede: the new screening takes the old record's identity
+                # Supersede (created=True: this call did record a new
+                # screening, so callers must treat it as one): the new screening takes the old record's identity
                 # so nothing referring to it by id is orphaned, and keeps the
                 # run that first recorded the posting when this call names
-                # none. Every other field on `existing` is a default —
-                # `_is_unread_placeholder` established that — so replacing the
-                # record wholesale loses nothing.
+                # none. Unreadable records are placeholders; every other field on
+                # `existing` is a default, except that an unreadable record may
+                # carry posting_text, which this supersede drops.
                 screening.id = existing.id
                 screening.created_at = existing.created_at
                 screening.run_id = screening.run_id or existing.run_id
                 screenings[screenings.index(existing)] = screening
                 _write_all(screenings)
-                return screening, False
+                return screening, True
         screenings.append(screening)
         _write_all(screenings)
     return screening, True

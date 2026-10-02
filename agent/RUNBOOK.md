@@ -867,10 +867,11 @@ left empty and `screening_blocker` set to one of: `login_required`,
 `report_apply_failure`'s `blocker="login_required"` in §4 above, which is for
 an approved posting you already screened but could not submit the form for;
 `screening_blocker` is for a posting you never got to screen at all.
-`login_required` and `unreadable` reach the operator's approval queue — they
-can sign in themselves, or you can paste the posting text back in.
-`not_found` and `expired` do not queue: there is nothing the operator can
-decide about, or draft from, a posting that no longer exists.
+Only `login_required` reaches the operator's approval queue — they can sign
+in themselves. An `unreadable` posting is not put to the operator and is
+re-screened on a later run. `not_found` and `expired` do not queue either:
+there is nothing the operator can decide about, or draft from, a posting that
+no longer exists.
 
 When `generate_cover_letter` returns `blocked: true`, it means the letter
 contains at least one factual claim its guardrail could not ground in the

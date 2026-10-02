@@ -141,6 +141,10 @@ async function screenProfiles(d: ScreenStageDeps, c: Candidate, text: string, me
 /** Process one candidate end to end. */
 async function processCandidate(d: ScreenStageDeps, fetchOne: ScreenStageDeps['fetch'], c: Candidate, res: ScreenStageResult): Promise<void> {
   const fetched = await fetchOne(c.url);
+  if ('failed' in fetched) {
+    res.errors.push(`${c.url}: posting could not be loaded: ${fetched.reason}`);
+    return;
+  }
   if (fetched.unreadable) return recordBlocker(d, c, fetched.blocker, res);
   const meta = await extractMeta(d.extractAdapter, fetched.text, c.title);
   if (!meta.ok) return recordBlocker(d, c, meta.screening_blocker, res);

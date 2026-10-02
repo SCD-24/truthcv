@@ -54,11 +54,42 @@ describe('fetchPosting thin-page wait', () => {
     expect(r).toMatchObject({ unreadable: true, blocker: 'login_required' });
     expect(waits(names)).toBe(0);
   });
-  it('survives a snapshot error during the wait', async () => {
+  it('snapshot error during the wait → failed', async () => {
     const { call, names } = stub([ok(SHELL), { content: BODY, isError: true }]);
     const r = await fetchPosting(call, 'https://x.test/j');
-    expect(r).toMatchObject({ unreadable: true, blocker: 'unreadable' });
+    expect(r).toMatchObject({ failed: true });
+    expect((r as { reason: string }).reason).toContain(BODY);
     expect(waits(names)).toBe(1);
+  });
+  it('call throwing during the wait → failed', async () => {
+    const call: BrowserToolCall = async (name) => {
+      if (name === 'browser_wait_for') throw new Error('transport closed');
+      return ok(SHELL);
+    };
+    expect(await fetchPosting(call, 'https://x.test/j')).toEqual({ failed: true, reason: 'transport closed' });
+  });
+});
+
+describe('fetchPosting load failures', () => {
+  const MCP = "MCP server 'browser' is not connected: MCP error -32001: Request timed out";
+  it('navigate isError → failed, not unreadable', async () => {
+    const call: BrowserToolCall = async () => ({ content: MCP, isError: true });
+    const r = await fetchPosting(call, 'https://x.test/j');
+    expect(r).toMatchObject({ failed: true });
+    expect((r as { reason: string }).reason).toContain(MCP);
+    expect(r.unreadable).toBeFalsy();
+  });
+  it('navigate throwing → failed', async () => {
+    const call: BrowserToolCall = async () => { throw new Error('transport closed'); };
+    expect(await fetchPosting(call, 'https://x.test/j')).toEqual({ failed: true, reason: 'transport closed' });
+  });
+  it('snapshot isError after navigate → failed', async () => {
+    const call: BrowserToolCall = async (name) => (name === 'browser_snapshot' ? { content: 'boom', isError: true } : ok('ok'));
+    expect(await fetchPosting(call, 'https://x.test/j')).toMatchObject({ failed: true });
+  });
+  it('thin page is still unreadable', async () => {
+    const { call } = stub([ok('- paragraph: hi')]);
+    expect(await fetchPosting(call, 'https://x.test/j')).toMatchObject({ unreadable: true, blocker: 'unreadable' });
   });
 });
 

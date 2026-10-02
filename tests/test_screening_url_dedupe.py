@@ -227,7 +227,7 @@ class TestPerProfileRecords:
              "screening_blocker": "not_found"}
         )
         again, created = self._rec("A")
-        assert created is False
+        assert created is True
         assert again.id == first.id
         assert len(store.load_all()) == 1
 
@@ -285,7 +285,7 @@ class TestApiRefusesTheDuplicate:
 class TestUnreadPlaceholdersAreSuperseded:
     """A posting the agent could not read at all is not a judgement.
 
-    `not_found` and `expired` records never queue (QUEUEING_BLOCKERS), so the
+    `not_found`, `expired` and `unreadable` records never queue (QUEUEING_BLOCKERS), so the
     operator never sees them — if one of those suppressed re-screening
     forever, a board that 404s for an afternoon would blacklist a live posting
     invisibly, with no record for anyone to delete.
@@ -304,7 +304,7 @@ class TestUnreadPlaceholdersAreSuperseded:
             }
         )
 
-    @pytest.mark.parametrize("blocker", ["not_found", "expired"])
+    @pytest.mark.parametrize("blocker", ["not_found", "expired", "unreadable"])
     def test_a_later_real_screening_replaces_it_in_place(self, blocker):
         first, _ = self._blocked(blocker)
 
@@ -312,13 +312,32 @@ class TestUnreadPlaceholdersAreSuperseded:
             _fields(self.URL, company="Acme", verdict="deferred")
         )
 
-        assert created is False
+        assert created is True
         assert again.id == first.id
         assert again.created_at == first.created_at
         assert again.verdict == "deferred"
         assert again.screening_blocker == ""
         assert again.approval == "pending"
         assert len(store.load_all()) == 1
+
+    def test_agent_tool_reports_created_true_when_a_pass_supersedes(self):
+        import agentconfig.store as config_store
+
+        cfg = config_store.load()
+        cfg.profiles = [config_store.JobProfile(name="default", enabled=True)]
+        config_store.save(cfg)
+        self._blocked("unreadable")
+        text = "Backend Engineer at Acme. Remote. " + "Build reliable services. " * 20
+        got = tools_ledger.record_screening(
+            url=self.URL,
+            role="Backend Engineer",
+            company="Acme",
+            verdict="passed",
+            posting_text=text,
+            profile="default",
+            remote_arrangement="remote",
+        )
+        assert got["created"] is True
 
     def test_the_superseding_record_keeps_the_original_run(self):
         """Nothing else records that this posting was first seen by that run."""
@@ -335,7 +354,7 @@ class TestUnreadPlaceholdersAreSuperseded:
         again, _ = store.create_or_get(_fields(self.URL, company="Acme"))
         assert again.run_id == "run-1"
 
-    @pytest.mark.parametrize("blocker", ["login_required", "unreadable"])
+    @pytest.mark.parametrize("blocker", ["login_required"])
     def test_a_queued_blocker_is_a_pending_decision_and_is_not_replaced(self, blocker):
         """These DO reach the operator, so overwriting one would change a
         record they are currently looking at."""

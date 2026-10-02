@@ -6,7 +6,8 @@
  * pages additionally wait until the "Primary content" region is filled, and
  * rely on the operator's persisted signed-in browser profile (Agents → Site
  * sign-ins); an authwall/login URL is reported as a sign-in wall.
- * Returns the text or an explicit unreadable marker; never throws.
+ * Returns the text, an explicit unreadable marker (page loaded but unusable),
+ * or a failed marker (page could not be loaded at all); never throws.
  */
 import { navigateAndSnapshot, settleIfLoading } from '../builtins/harvestNavigate.js';
 import type { BrowserToolCall } from '../builtins/harvestTypes.js';
@@ -26,7 +27,14 @@ export interface ReadablePosting {
   text: string;
 }
 
-export type FetchedPosting = ReadablePosting | UnreadablePosting;
+/** The posting could not be loaded at all (navigate/snapshot error, transport failure); a run error, not a screening blocker. */
+export interface FailedFetch {
+  unreadable?: false;
+  failed: true;
+  reason: string;
+}
+
+export type FetchedPosting = ReadablePosting | UnreadablePosting | FailedFetch;
 
 /** Snapshots shorter than this carry no posting body. */
 export const MIN_READABLE_CHARS = 200;
@@ -121,8 +129,11 @@ function isSettled(text: string, linkedIn: boolean): boolean {
   return !linkedIn || linkedInJobReady(text);
 }
 
-/** Re-snapshot a thin (or unready LinkedIn), non-login page up to THIN_SETTLE_ATTEMPTS times. */
-async function settleIfThin(call: BrowserToolCall, snapshot: string, linkedIn: boolean): Promise<string> {
+/**
+ * Re-snapshot a thin (or unready LinkedIn), non-login page up to THIN_SETTLE_ATTEMPTS times.
+ * Returns the settled text, or `{ error }` when a retry snapshot errors or a call throws.
+ */
+async function settleIfThin(call: BrowserToolCall, snapshot: string, linkedIn: boolean): Promise<string | { error: string }> {
   let text = snapshot;
   if (LOGIN_WALL_RE.test(pruneSnapshot(text))) return text;
   if (linkedIn && linkedInSignedOut(text)) return text;
@@ -131,10 +142,10 @@ async function settleIfThin(call: BrowserToolCall, snapshot: string, linkedIn: b
     try {
       await call('browser_wait_for', { time: THIN_SETTLE_SECONDS });
       const snap = await call('browser_snapshot', {});
-      if (snap.isError) return text;
+      if (snap.isError) return { error: snap.content };
       text = snap.content;
-    } catch {
-      return text;
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
     }
   }
   return text;
@@ -167,11 +178,12 @@ function judgePosting(raw: string, linkedIn: boolean): FetchedPosting {
 export async function fetchPosting(call: BrowserToolCall, url: string): Promise<FetchedPosting> {
   try {
     const nav = await navigateAndSnapshot(call, url);
-    if ('error' in nav) return { unreadable: true, blocker: 'unreadable', reason: nav.error };
+    if ('error' in nav) return { failed: true, reason: nav.error };
     const linkedIn = isLinkedInUrl(url);
     const raw = await settleIfThin(call, await settleIfLoading(call, nav.snapshot), linkedIn);
+    if (typeof raw !== 'string') return { failed: true, reason: raw.error };
     return judgePosting(raw, linkedIn);
   } catch (err) {
-    return { unreadable: true, blocker: 'unreadable', reason: err instanceof Error ? err.message : String(err) };
+    return { failed: true, reason: err instanceof Error ? err.message : String(err) };
   }
 }
