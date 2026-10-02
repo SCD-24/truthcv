@@ -189,8 +189,9 @@ def queues_for_approval(verdict: str, blocker: str = "") -> bool:
     not run it, so a record whose verdict is only being recovered now would keep
     an empty approval and stay invisible — which is the exact failure this
     script exists to undo. A ``blocker`` only queues when it is one of
-    ``screening.store.QUEUEING_BLOCKERS`` (login_required, unreadable) — a
-    not_found/expired blocker describes a posting that no longer exists, and
+    ``screening.store.QUEUEING_BLOCKERS`` (login_required only) — a
+    not_found/expired blocker describes a posting that no longer exists, an
+    unreadable one is a placeholder a later screening supersedes, and
     the constant is imported rather than re-listed so the two rules cannot
     drift apart again.
     """

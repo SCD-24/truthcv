@@ -167,7 +167,7 @@ def test_run_record_full_field_set_survives_the_wire(client):
     # Derived counters: counted from the three screenings and one application.
     assert body["screeningsRecorded"] == 3
     assert body["blockedCount"] == 1
-    assert body["queuedForApproval"] == 2
+    assert body["queuedForApproval"] == 1
     assert body["applicationsSubmitted"] == 1
     assert body["stoppedReason"] == "browser died"
     assert body["note"] == "context"

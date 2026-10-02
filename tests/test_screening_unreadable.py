@@ -16,7 +16,7 @@ def client(data_dir):
     return TestClient(app)
 
 
-def test_blocked_record_round_trips_with_pending_approval(data_dir):
+def test_unreadable_record_round_trips_without_queueing(client):
     s = store.create(
         {
             "company": "Acme",
@@ -27,7 +27,9 @@ def test_blocked_record_round_trips_with_pending_approval(data_dir):
     )
     assert s.screening_blocker == "unreadable"
     assert s.verdict == ""
-    assert s.approval == "pending"
+    assert s.approval == ""
+    r = client.get("/api/screenings", params={"approval": "pending"})
+    assert all(rec["id"] != s.id for rec in r.json())
 
 
 def test_login_required_blocker_still_queues_for_approval(data_dir):

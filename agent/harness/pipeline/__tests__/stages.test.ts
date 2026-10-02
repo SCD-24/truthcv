@@ -63,6 +63,22 @@ describe('screenCandidates', () => {
     expect(res.errors[0]).toContain(long);
   });
 
+  it('reports a failed fetch as a run error without recording', async () => {
+    const record = vi.fn(async () => ({ content: '{}' }));
+    const res = await screenCandidates([cands[1]], {
+      runId: 'r', criteria: { P1: 'c1' },
+      fetch: async () => ({ failed: true, reason: "MCP server 'browser' is not connected" }),
+      extractAdapter: textAdapter('{"role":"R","company":"Co"}'),
+      screeningAdapter: textAdapter(JSON.stringify({ verdict: 'passed' })),
+      record,
+    });
+    expect(record).not.toHaveBeenCalled();
+    expect(res.blockers).toBe(0);
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors[0]).toContain('https://a.test/2');
+    expect(res.errors[0]).toContain("MCP server 'browser' is not connected");
+  });
+
   it('stops at the first actionable pass and records blockers for unreadable text', async () => {
     const record = vi.fn(async (args: Record<string, unknown>) => ({
       content: JSON.stringify({ id: 'i', created: true, verdict: args.verdict === '' ? '' : 'passed', screening_blocker: args.screening_blocker ?? '' }),

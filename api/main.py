@@ -18,6 +18,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from agenttools.server import router as mcp_router
 from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
 from companyresearch.claim_migration import migrate_claims_if_needed
+from screening.purge_unreadable import purge_unreadable_once
 from services.errors import Conflict, NotFound, Refused, ServiceError, Unavailable
 from storage import data_dir
 
@@ -147,6 +148,26 @@ def _migrate_company_claims() -> None:
     )
 
 
+def _purge_unreadable_screenings() -> None:
+    """Run the one-shot unreadable-screening purge; never block startup.
+
+    Logs only counts and the backup path - never URLs or posting text.
+    """
+    try:
+        report = purge_unreadable_once()
+    except Exception:
+        logger.exception("startup unreadable-screening purge failed")
+        return
+    if report is None:
+        return
+    logger.info(
+        "startup unreadable-screening purge: deleted=%s protected=%s backup=%s",
+        report["deleted"],
+        report["protected"],
+        report["backup"],
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Run the MCP streamable-HTTP session manager for the app's lifetime.
@@ -162,6 +183,7 @@ async def lifespan(app: FastAPI):
         # Startup must not fail because of runs.json
 
     _migrate_company_claims()
+    _purge_unreadable_screenings()
 
     async with _mcp_server.session_manager.run():
         async with diagnostics_session_manager.run():
