@@ -132,6 +132,28 @@ export function globToRegExp(pattern: string): RegExp {
   return new RegExp('^' + parts.join('\\S*'));
 }
 
+/** Like {@link globToRegExp}, but when `pattern` ends in `*` that final
+ * wildcard is a greedy capturing group (earlier ones are lazy so they
+ * cannot swallow it), so the caller can inspect the text it matched. Leaves `globToRegExp` itself untouched. */
+function globToTailCaptureRegExp(pattern: string): RegExp {
+  const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = pattern.split('*').map(escapeRegex);
+  const last = parts.pop() ?? '';
+  return new RegExp('^' + parts.join('\\S*?') + '(\\S*)' + last + '$');
+}
+
+/** Whether `href` fails the empty-wildcard guard for a `pattern` ending in
+ * `*`: with query and hash stripped it no longer matches, or the text the
+ * final `*` captured is empty or only `/`. A pattern containing `?` is matched
+ * against the hash-stripped href with its query kept. False for a pattern not ending in `*`. */
+export function hasEmptyWildcardTail(pattern: string, href: string): boolean {
+  if (!pattern.endsWith('*')) return false;
+  const noHash = stripHash(href);
+  const stripped = pattern.includes('?') ? noHash : noHash.split('?')[0];
+  const match = globToTailCaptureRegExp(pattern).exec(stripped);
+  return match === null || !/[^/]/.test(match[1]);
+}
+
 /** Whether hostnames `a` and `b` are the same site: equal, or one a
  * subdomain of the other. */
 export function hostsRelated(a: string, b: string): boolean {
@@ -172,6 +194,17 @@ export function hasJobPath(pathname: string): boolean {
     }
   }
   return false;
+}
+
+/** Whether any segment of `pathname` is a pagination segment (`page`,
+ * `page-2`, `seite-3`, …). */
+export function hasPaginationSegment(pathname: string): boolean {
+  return pathname.split('/').some((segment) => PAGE_SEITE_RE.test(segment));
+}
+
+/** Whether `title`, trimmed, contains at least one Unicode letter. */
+export function hasLetter(title: string): boolean {
+  return /\p{L}/u.test(title.trim());
 }
 
 /** Whether `title`, trimmed, is purely digits — never a real posting title. */

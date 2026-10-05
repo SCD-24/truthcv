@@ -241,8 +241,8 @@ class AgentConfig:
     # means "unset"; 0 disables the window entirely (any age), mirroring how 0
     # disables a cooldown window.
     max_posting_age_days: int | None = None
-    # Google dork recency (after:<date> operator): one of DORK_RECENCIES. Default past day.
-    dork_recency: str = "d"
+    # Google dork recency (after:<date> operator): one of DORK_RECENCIES. Default past week.
+    dork_recency: str = "w"
     # The operator's OWN boards, beyond the four defaults. The defaults
     # (agentconfig.boards.DEFAULT_BOARD_SOURCES) are unioned in at resolve
     # time via resolved_board_sources(), so they cannot be lost to a bad PUT
@@ -465,7 +465,7 @@ class AgentConfig:
             kwargs["max_posting_age_days"] = value if usable else None
 
         # dork_recency: one of DORK_RECENCIES; anything else (including a legacy
-        # "h") keeps the default "d".
+        # "h") keeps the default "w".
         if "dork_recency" in raw and raw["dork_recency"] in DORK_RECENCIES:
             kwargs["dork_recency"] = raw["dork_recency"]
 

@@ -516,7 +516,7 @@ class AgentConfigModel(_Camel):
     cooldown_days_same_company: int | None = None
     max_applications_per_run: int | None = None
     max_posting_age_days: int | None = None
-    dork_recency: str = "d"
+    dork_recency: str = "w"
     company_boards: list[CompanyBoardModel] = Field(default_factory=list)
     search_queries: list[SearchQueryModel] = Field(default_factory=list)
     # One entry per direct-mode board (searched on-site rather than via a

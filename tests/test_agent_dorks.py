@@ -86,7 +86,7 @@ def test_configuring_a_default_board_explicitly_does_not_duplicate_it():
     assert len(ashby_entries) == 1
 
 
-def test_rejected_role_types_render_as_negatives():
+def test_rejected_role_types_never_render_as_negatives():
     p = JobProfile(
         name="p",
         enabled=True,
@@ -94,8 +94,25 @@ def test_rejected_role_types_render_as_negatives():
         rejected_role_types=["contract", "unpaid internship"],
     )
     q = dorks.compose_queries([p], None, ["ashby"])[0]["query"]
-    assert '-"contract"' in q
-    assert '-"unpaid internship"' in q
+    assert '-"' not in q
+
+
+def test_six_titles_fit_one_query_per_domain_with_rejected_types():
+    titles = [f"Title{i} Engineer" for i in range(6)]
+    p = JobProfile(
+        name="p",
+        enabled=True,
+        title_keywords=titles,
+        locations=["Germany", "Karlsruhe"],
+        remote_model="remote",
+        rejected_role_types=["contract", "unpaid internship"],
+    )
+    entries = dorks.compose_profile_queries(p, None, None, today=TODAY)
+    assert len(entries) == len(dorks.DEFAULT_BOARD_DOMAINS)
+    assert len({e["source"] for e in entries}) == len(entries)
+    for e in entries:
+        assert all(f'"{t}"' in e["query"] for t in titles)
+        assert dorks._word_count(e["query"]) <= dorks.MAX_QUERY_WORDS
 
 
 def test_remote_model_remote_adds_or_group_to_query_and_url():
@@ -187,9 +204,9 @@ def _entry(recency):
     return dorks.compose_queries([p], recency, ["ashby"], today=TODAY)[0]
 
 
-def test_unset_recency_defaults_to_the_past_24_hours():
-    assert _entry(None)["query"].endswith(" after:2026-03-09")
-    assert "after:2026-03-03" not in _entry(None)["query"]
+def test_unset_recency_defaults_to_the_past_week():
+    assert _entry(None)["query"].endswith(" after:2026-03-03")
+    assert "after:2026-03-09" not in _entry(None)["query"]
 
 
 def test_none_recency_adds_no_operator():
@@ -210,16 +227,17 @@ def test_each_recency_letter_renders_its_after_date(letter, expected):
 
 @pytest.mark.parametrize("value", ["bogus", "h"])
 def test_invalid_or_legacy_recency_falls_back_to_default(value):
-    assert _entry(value)["query"].endswith(" after:2026-03-09")
+    assert _entry(value)["query"].endswith(" after:2026-03-03")
 
 
 def test_recency_operator_values():
     assert dorks.recency_operator("d", TODAY) == "after:2026-03-09"
     assert dorks.recency_operator("none", TODAY) == ""
     assert dorks.recency_operator("y", TODAY) == "after:2025-03-10"
-    assert dorks.recency_operator(None, TODAY) == "after:2026-03-09"
-    assert dorks.recency_operator("x", TODAY) == "after:2026-03-09"
-    assert dorks.recency_operator("h", TODAY) == "after:2026-03-09"
+    assert dorks.recency_operator(None, TODAY) == "after:2026-03-03"
+    assert dorks.recency_operator("x", TODAY) == "after:2026-03-03"
+    assert dorks.recency_operator("h", TODAY) == "after:2026-03-03"
+    assert dorks.recency_operator("d", TODAY) == "after:2026-03-09"
 
 
 def test_recency_operator_defaults_to_utc_today(monkeypatch):
@@ -450,7 +468,7 @@ def test_query_exactly_at_budget_with_after_token_stays_within_limit():
     assert dorks._word_count(entries[0]["query"]) == dorks.MAX_QUERY_WORDS
 
 
-def test_negatives_dropped_rather_than_exceeding_budget():
+def test_no_negatives_and_budget_holds():
     p = JobProfile(
         name="p",
         enabled=True,
@@ -464,7 +482,7 @@ def test_negatives_dropped_rather_than_exceeding_budget():
     entries = dorks.compose_profile_queries(p, None, ["ashby"], today=TODAY)
     assert all(dorks._word_count(e["query"]) == dorks.MAX_QUERY_WORDS for e in entries)
     assert all(dorks._word_count(e["query"]) <= dorks.MAX_QUERY_WORDS for e in entries)
-    assert all('-"contract"' not in e["query"] for e in entries)
+    assert all('-"' not in e["query"] for e in entries)
 
 
 def test_padded_titles_are_stripped_so_budget_holds():

@@ -31,7 +31,7 @@ def test_get_returns_defaults(client, data_dir):
         "cooldownDaysSameCompany": None,
         "maxApplicationsPerRun": None,
         "maxPostingAgeDays": None,
-        "dorkRecency": "d",
+        "dorkRecency": "w",
         "companyBoards": [],
         "mode": "full",
         "searchQueries": [],
@@ -1097,12 +1097,12 @@ class TestDorkRecency:
     def test_past_hour_is_no_longer_accepted(self, client, data_dir):
         assert client.put("/api/agent/config", json={"dorkRecency": "h"}).status_code == 422
 
-    def test_defaults_to_d_for_stored_config_missing_the_key(self, client, data_dir):
+    def test_defaults_to_w_for_stored_config_missing_the_key(self, client, data_dir):
         import json as _json
         from agentconfig import store
 
         store.config_path().write_text(_json.dumps({"mode": "full"}), encoding="utf-8")
-        assert client.get("/api/agent/config").json()["dorkRecency"] == "d"
+        assert client.get("/api/agent/config").json()["dorkRecency"] == "w"
 
     def test_omitting_the_field_leaves_a_stored_window_untouched(self, client, data_dir):
         """PUT merges: an unrelated edit must not clear the window."""

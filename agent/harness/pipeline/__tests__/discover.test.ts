@@ -38,7 +38,7 @@ describe('discover', () => {
       'https://www.google.com/search?q=q2': GOOD,
       'https://board.test/jobs': '- Page URL: https://board.test/jobs\nNo matching jobs found',
     });
-    const out = await discover(CONFIG, 'run1', call, mcp);
+    const out = await discover(CONFIG, 'run1', call, mcp, { sleep: async () => {} });
     const cov = mcp.mock.calls.filter((c) => c[0] === 'record_discovery_coverage').map((c) => c[1]);
     expect(cov.filter((c) => c.channel === 'dork')).toHaveLength(2);
     expect(cov.filter((c) => c.channel === 'direct')).toHaveLength(1);
@@ -66,6 +66,45 @@ describe('discover', () => {
     const mcp = vi.fn(async (_tool: string, _args: Record<string, unknown>) => ({ content: 'boom', isError: true }));
     const out = await discover({ searchQueries: [CONFIG.searchQueries[0]] }, 'r', browser({}), mcp);
     expect(out.coverageComplete).toBe(false);
+  });
+});
+
+describe('discover dork pacing', () => {
+  const SORRY = '- Page URL: https://www.google.com/sorry/index\nunusual traffic';
+  const dorks = (n: number) => ({
+    searchQueries: Array.from({ length: n }, (_, i) => ({ profiles: ['A'], source: 'g', query: `q${i}`, url: `https://www.google.com/search?q=q${i}` })),
+  });
+  const okMcp = () => vi.fn(async (_t: string, _a: Record<string, unknown>) => ({ content: '{"recorded":true}', isError: false }));
+  const covs = (m: ReturnType<typeof okMcp>) => m.mock.calls.filter((c) => c[0] === 'record_discovery_coverage').map((c) => c[1]);
+
+  it('sleeps 4000ms between dorks (N-1 times)', async () => {
+    const sleep = vi.fn(async (_ms: number) => {});
+    await discover(dorks(3), 'r', browser({}), okMcp(), { sleep });
+    expect(sleep).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(4000);
+  });
+
+  it('skips remaining dorks after 2 consecutive Google blocks', async () => {
+    const navigated: string[] = [];
+    const inner = browser({ 'https://www.google.com/search?q=q0': SORRY, 'https://www.google.com/search?q=q1': SORRY });
+    const call: BrowserToolCall = async (tool, args) => {
+      if (tool === 'browser_navigate') navigated.push(String(args.url));
+      return inner(tool, args);
+    };
+    const mcp = okMcp();
+    await discover(dorks(3), 'r', call, mcp, { sleep: async () => {} });
+    expect(navigated).not.toContain('https://www.google.com/search?q=q2');
+    const c = covs(mcp);
+    expect(c).toHaveLength(3);
+    expect(c[0].status).toBe('blocked');
+    expect(c[2]).toMatchObject({ status: 'skipped', postings_found: 0 });
+  });
+
+  it('resets the block counter after a success', async () => {
+    const call = browser({ 'https://www.google.com/search?q=q0': SORRY, 'https://www.google.com/search?q=q1': GOOD, 'https://www.google.com/search?q=q2': SORRY });
+    const mcp = okMcp();
+    await discover(dorks(4), 'r', call, mcp, { sleep: async () => {} });
+    expect(covs(mcp).some((c) => c.status === 'skipped')).toBe(false);
   });
 });
 

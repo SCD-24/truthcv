@@ -106,7 +106,7 @@ function JobSearchPolicyContent() {
   const [values, setValues] = useState<Record<JobSearchPolicyKeys, string>>({
     cooldownDays: "", cooldownDaysSameRole: "", cooldownDaysSameCompany: "",
   });
-  const [recency, setRecency] = useState<DorkRecency>("d");
+  const [recency, setRecency] = useState<DorkRecency>("w");
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -120,7 +120,7 @@ function JobSearchPolicyContent() {
           cooldownDaysSameRole: cfg.cooldownDaysSameRole?.toString() ?? "",
           cooldownDaysSameCompany: cfg.cooldownDaysSameCompany?.toString() ?? "",
         });
-        setRecency(cfg.dorkRecency ?? "d");
+        setRecency(cfg.dorkRecency ?? "w");
         setLoaded(true);
       })
       .catch((e: unknown) => {

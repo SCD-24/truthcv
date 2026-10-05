@@ -1958,7 +1958,7 @@
         "widgets": [
           {
             "data": {
-              "text": "Owns the unattended agent's configuration (agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed, but any board (default or the operator's own) can be switched off, and a disabled board is not searched. Also composes the deterministic dork-style search queries handed to each run."
+              "text": "Owns the unattended agent's configuration (agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed, but any board (default or the operator's own) can be switched off, and a disabled board is not searched. Also composes the deterministic dork-style search queries handed to each run (titles, locations, remote terms and recency only; rejected role types are enforced by screening, not search), and supplies built-in search/posting URL presets for known direct boards."
             },
             "h": 200,
             "id": "widget-text-agent-config",
@@ -2010,7 +2010,7 @@
                 {
                   "flags": "",
                   "name": "dork_recency",
-                  "notes": "Google dork recency, rendered as an after:YYYY-MM-DD query operator (today UTC minus 1/7/30/365 days); none omits it; default d; camelCase dorkRecency",
+                  "notes": "Recency as an after:YYYY-MM-DD operator in composed dork queries; default w (past week); camelCase dorkRecency",
                   "type": "\"d\"|\"w\"|\"m\"|\"y\"|\"none\""
                 }
               ]

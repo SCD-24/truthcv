@@ -96,7 +96,7 @@ Projected from `schema` widgets on the architecture canvas.
 | `profiles[].title_keywords` | list[str] | optional | Job titles used to compose Google dork queries. When empty, titles are detected from keywords by title noun (Engineer, Developer, Analyst…), falling back to the raw keywords. Each dork is capped at 32 words and split into several queries per board when needed. |
 | `job_boards` | list[JobBoard] |  | The operator's OWN boards. The four default boards are unioned in at resolve time and are stored here only when carrying a signin_url override or when disabled. |
 | `job_boards[].enabled` | bool | optional | Defaults to true. False keeps the board listed but excludes it from dorks, direct boards and API feeds. Applies to default boards too. |
-| `dork_recency` | "d"\|"w"\|"m"\|"y"\|"none" |  | Google dork recency, rendered as an after:YYYY-MM-DD query operator (today UTC minus 1/7/30/365 days); none omits it; default d; camelCase dorkRecency |
+| `dork_recency` | "d"\|"w"\|"m"\|"y"\|"none" |  | Recency as an after:YYYY-MM-DD operator in composed dork queries; default w (past week); camelCase dorkRecency |
 <!-- generated:end comp:agent-config -->
 
 <!-- generated:start comp:api -->
