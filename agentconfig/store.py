@@ -20,8 +20,9 @@ from screening.company import company_identity_key
 from storage import data_dir
 
 
-# Google dork recency letters (tbs=qdr:<x>); "none" omits the recency param.
-DORK_RECENCIES: tuple[str, ...] = ("h", "d", "w", "m", "y", "none")
+# Google dork recency letters, rendered as an after:<date> query operator;
+# "none" omits the operator.
+DORK_RECENCIES: tuple[str, ...] = ("d", "w", "m", "y", "none")
 
 
 def config_path() -> Path:
@@ -240,7 +241,7 @@ class AgentConfig:
     # means "unset"; 0 disables the window entirely (any age), mirroring how 0
     # disables a cooldown window.
     max_posting_age_days: int | None = None
-    # Google dork recency (tbs=qdr:<x>): one of DORK_RECENCIES. Default past day.
+    # Google dork recency (after:<date> operator): one of DORK_RECENCIES. Default past day.
     dork_recency: str = "d"
     # The operator's OWN boards, beyond the four defaults. The defaults
     # (agentconfig.boards.DEFAULT_BOARD_SOURCES) are unioned in at resolve
@@ -449,8 +450,8 @@ class AgentConfig:
         # never blocks the run.
         #
         # `isinstance(True, int)` is True in Python, so a bare isinstance check
-        # stores the bool: `true` then rendered as the Google parameter
-        # "qdr:dTrue", which Google ignores — silently widening discovery to all
+        # stores the bool: `true` then rendered as a malformed Google recency
+        # value that Google ignores — silently widening discovery to all
         # time while the run prompt announced an active filter. Booleans are
         # excluded explicitly, and the API's own bounds are applied here too,
         # since this path reads the file directly and never sees the validator.
@@ -463,7 +464,8 @@ class AgentConfig:
             )
             kwargs["max_posting_age_days"] = value if usable else None
 
-        # dork_recency: one of DORK_RECENCIES; anything else keeps the default.
+        # dork_recency: one of DORK_RECENCIES; anything else (including a legacy
+        # "h") keeps the default "d".
         if "dork_recency" in raw and raw["dork_recency"] in DORK_RECENCIES:
             kwargs["dork_recency"] = raw["dork_recency"]
 

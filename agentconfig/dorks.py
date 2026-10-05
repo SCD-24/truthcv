@@ -20,11 +20,12 @@ see compose_profile_queries.
 
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta, timezone
 from itertools import zip_longest
 from urllib.parse import quote_plus
 
 from agentconfig.boards import DEFAULT_BOARD_DOMAINS, is_api_source, resolve_domain, resolve_signin_url
-from agentconfig.store import DORK_RECENCIES, JobBoard, JobProfile
+from agentconfig.store import JobBoard, JobProfile
 
 # Google's search box silently truncates a query beyond roughly this many
 # whitespace-separated words; discovery must keep every composed query at
@@ -49,21 +50,23 @@ TITLE_NOUNS = frozenset({
     "researcher",
 })
 
-# Google's past-24-hours filter: an unset window searches only fresh postings.
-DEFAULT_RECENCY = "qdr:d"
+# Days counted back from today for each recency letter; an unset or invalid
+# letter uses the "d" (past day) offset so unset searches only fresh postings.
+RECENCY_DAYS = {"d": 1, "w": 7, "m": 30, "y": 365}
 
 
-def recency_param(dork_recency: str | None) -> str:
-    """Google ``tbs`` recency value for a dork recency letter, or "" for none.
+def recency_operator(dork_recency: str | None, today: date | None = None) -> str:
+    """Google ``after:YYYY-MM-DD`` operator for a dork recency letter, or "" for none.
 
-    One of DORK_RECENCIES: h/d/w/m/y yield ``qdr:<x>``, "none" yields "";
-    anything invalid (or None) yields DEFAULT_RECENCY.
+    d/w/m/y count back 1/7/30/365 days from ``today`` (default: today's UTC
+    date); "none" yields ""; anything invalid (or None, or a legacy "h")
+    uses the "d" offset.
     """
     if dork_recency == "none":
         return ""
-    if dork_recency in DORK_RECENCIES:
-        return f"qdr:{dork_recency}"
-    return DEFAULT_RECENCY
+    days = RECENCY_DAYS.get(dork_recency, RECENCY_DAYS["d"])
+    today = today or datetime.now(timezone.utc).date()
+    return f"after:{(today - timedelta(days=days)).isoformat()}"
 
 
 def _quote_term(term: str) -> str:
@@ -249,6 +252,7 @@ def compose_profile_queries(
     profile: JobProfile,
     recency: str = "d",
     sources: list[JobBoard | str] | None = None,
+    today: date | None = None,
 ) -> list[dict]:
     """Compose dork queries + URLs per resolved source for a single profile.
 
@@ -260,8 +264,10 @@ def compose_profile_queries(
     chunked (see ``_chunk_titles``) into several queries per source, ordered
     chunk-major (every source for chunk 1, then every source for chunk 2, ...).
 
-    ``recency`` (a DORK_RECENCIES letter) sets the search URL's recency
-    filter; see ``recency_param``. ``sources`` is the operator's globally configured job
+    ``recency`` (a DORK_RECENCIES letter) adds an ``after:<date>`` operator
+    as the query's last term, counted back from ``today`` (default: today's
+    UTC date); see ``recency_operator``. Its word counts toward the budget.
+    ``sources`` is the operator's globally configured job
     boards — resolved, enabled JobBoard records (e.g.
     AgentConfig.searched_boards()) or bare source strings, which are treated
     as dork-mode/enabled; ``None`` means the four defaults (legacy), while an
@@ -277,18 +283,18 @@ def compose_profile_queries(
     remote_group = _remote_group(profile.remote_model)
     negative_terms = [f'-"{t}"' for t in profile.rejected_role_types]
 
-    fixed_words = 1 + _word_count(location_group) + _word_count(remote_group)
+    operator = recency_operator(recency, today)
+    fixed_words = 1 + _word_count(location_group) + _word_count(remote_group) + _word_count(operator)
     negative_terms = _fit_negatives(negative_terms, fixed_words, titles)
     negatives = " ".join(negative_terms)
     budget = max(MAX_QUERY_WORDS - fixed_words - _word_count(negatives), 1)
     chunks = _chunk_titles(titles, budget)
 
-    recency = recency_param(recency)
     results = []
     for chunk in chunks:
         title_group = _or_group(chunk)
         results.extend(
-            _profile_queries_for_chunk(profile, domains, location_group, remote_group, title_group, negatives, recency)
+            _profile_queries_for_chunk(profile, domains, location_group, remote_group, title_group, negatives, operator)
         )
     return results
 
@@ -300,18 +306,16 @@ def _profile_queries_for_chunk(
     remote_group: str,
     title_group: str,
     negatives: str,
-    recency: str,
+    operator: str,
 ) -> list[dict]:
     """Compose one query + URL per domain for a single title chunk."""
     results = []
     for domain in domains:
         parts = [f"site:{domain}"] + [
-            p for p in (location_group, remote_group, title_group, negatives) if p
+            p for p in (location_group, remote_group, title_group, negatives, operator) if p
         ]
         query = " ".join(parts)
         url = f"https://www.google.com/search?q={quote_plus(query)}"
-        if recency:
-            url += f"&tbs={recency}"
         results.append({
             "profile": profile.name,
             "source": domain,
@@ -360,6 +364,7 @@ def compose_queries(
     profiles: list[JobProfile],
     recency: str = "d",
     sources: list[JobBoard | str] | None = None,
+    today: date | None = None,
 ) -> list[dict]:
     """Compose dork queries for every enabled, keyword-bearing profile.
 
@@ -375,6 +380,6 @@ def compose_queries(
     """
     eligible = [p for p in profiles if p.enabled and (p.keywords or p.title_keywords)]
     per_profile = [
-        compose_profile_queries(p, recency, sources) for p in eligible
+        compose_profile_queries(p, recency, sources, today) for p in eligible
     ]
     return _dedupe_by_url(_round_robin(per_profile))

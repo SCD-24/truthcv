@@ -22,7 +22,6 @@ const OWNED_KEYS = [
 export type JobSearchPolicyKeys = Exclude<(typeof OWNED_KEYS)[number], "dorkRecency">;
 
 const RECENCY_OPTIONS: { value: DorkRecency; label: string }[] = [
-  { value: "h", label: "Past hour" },
   { value: "d", label: "Past day" },
   { value: "w", label: "Past week" },
   { value: "m", label: "Past month" },

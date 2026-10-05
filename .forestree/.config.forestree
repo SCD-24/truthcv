@@ -2010,8 +2010,8 @@
                 {
                   "flags": "",
                   "name": "dork_recency",
-                  "notes": "Google tbs qdr for composed dork URLs; default d; camelCase dorkRecency",
-                  "type": "\"h\"|\"d\"|\"w\"|\"m\"|\"y\"|\"none\""
+                  "notes": "Google dork recency, rendered as an after:YYYY-MM-DD query operator (today UTC minus 1/7/30/365 days); none omits it; default d; camelCase dorkRecency",
+                  "type": "\"d\"|\"w\"|\"m\"|\"y\"|\"none\""
                 }
               ]
             },
@@ -2968,6 +2968,10 @@
       },
       "fail_fast": {
         "checked": false,
+        "value": ""
+      },
+      "fast_tests": {
+        "checked": true,
         "value": ""
       },
       "focused_prs": {
