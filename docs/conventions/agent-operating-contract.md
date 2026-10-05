@@ -27,10 +27,11 @@ Define general standards, style guides, and testing rules for your AI agents to 
 ## Testing & Validation
 - **Target a minimum unit test coverage of** `80` %
 - **Primary testing framework to use:** `Jest for Frontend, Vitest for Backend Node`
-- **Require integration tests for all primary API routing contracts**
+- **Require integration tests for primary API routing contracts, run in-process with external dependencies mocked**
 - **Mock all outbound network requests and external API endpoints**
 - **Add a regression test for every bug fix before it is merged**
 - **Keep tests deterministic - no reliance on real time, randomness, or live network**
+- **Keep tests fast and isolated - mock external boundaries, use fake timers, no real sleeps, subprocesses, or disk/git I/O in unit tests**
 
 ## AI Agent Rules
 - **Before writing code, explain your implementation plan first**

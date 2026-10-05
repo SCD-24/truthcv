@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import unquote_plus
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -1040,8 +1042,8 @@ class TestMaxPostingAgeDays:
         )
         queries = client.get("/api/agent/config").json()["searchQueries"]
         assert queries
-        assert all("tbs=qdr:d3" not in q["url"] for q in queries)
-        assert all(q["url"].endswith("tbs=qdr:d") for q in queries)
+        assert all("tbs=" not in q["url"] for q in queries)
+        assert all("after:" in q["query"] for q in queries)
 
 
 def test_get_search_queries_carry_all_deduped_profiles(tmp_path, monkeypatch):
@@ -1080,7 +1082,9 @@ class TestDorkRecency:
         )
         queries = client.get("/api/agent/config").json()["searchQueries"]
         assert queries
-        assert all(q["url"].endswith("tbs=qdr:m") for q in queries)
+        assert all("after:" in q["query"] for q in queries)
+        assert all("after:" in unquote_plus(q["url"]) for q in queries)
+        assert all("tbs=" not in q["url"] for q in queries)
 
     def test_partial_put_preserves_it(self, client, data_dir):
         client.put("/api/agent/config", json={"dorkRecency": "y"})
@@ -1089,6 +1093,9 @@ class TestDorkRecency:
 
     def test_invalid_value_is_rejected(self, client, data_dir):
         assert client.put("/api/agent/config", json={"dorkRecency": "x"}).status_code == 422
+
+    def test_past_hour_is_no_longer_accepted(self, client, data_dir):
+        assert client.put("/api/agent/config", json={"dorkRecency": "h"}).status_code == 422
 
     def test_defaults_to_d_for_stored_config_missing_the_key(self, client, data_dir):
         import json as _json

@@ -752,12 +752,13 @@ export interface AgentConfig {
    * within this many days. null leaves it unset (the historical past-week
    * search filter); 0 disables the window entirely. */
   maxPostingAgeDays: number | null;
-  /** Google dork search recency (h/d/w/m/y); "none" means any time. */
+  /** Google dork search recency (d/w/m/y), applied as an after:<date> operator
+   * in the query text; "none" means any time. */
   dorkRecency: DorkRecency;
   readonly companyBoards: CompanyBoard[];
 }
 
-export type DorkRecency = "h" | "d" | "w" | "m" | "y" | "none";
+export type DorkRecency = "d" | "w" | "m" | "y" | "none";
 
 /** A partial patch of agent configuration; the PUT route merges only the
  * keys you send. Limited to what PUT /api/agent/config actually accepts

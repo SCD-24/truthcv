@@ -20,7 +20,10 @@ describe("job search policy autosave", () => {
     const select = await screen.findByRole("combobox", { name: /google search recency/i });
     expect(select.textContent).toBe("Past day");
     fireEvent.mouseDown(select);
-    fireEvent.click(await screen.findByRole("option", { name: "Past week" }));
+    const labels = (await screen.findAllByRole("option")).map((o) => o.textContent);
+    expect(labels).toEqual(["Past day", "Past week", "Past month", "Past year", "Any time"]);
+    expect(screen.queryByRole("option", { name: "Past hour" })).toBeNull();
+    fireEvent.click(screen.getByRole("option", { name: "Past week" }));
     await vi.waitFor(() => expect(updateAgentConfig).toHaveBeenCalledWith({ dorkRecency: "w" }));
   });
 

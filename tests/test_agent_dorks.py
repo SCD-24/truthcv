@@ -1,6 +1,7 @@
 """Dork-query composer: query shape, source resolution, filtering, caps."""
 
-from urllib.parse import unquote_plus
+from datetime import date
+from urllib.parse import parse_qs, unquote_plus, urlparse
 
 import pytest
 
@@ -99,27 +100,27 @@ def test_rejected_role_types_render_as_negatives():
 
 def test_remote_model_remote_adds_or_group_to_query_and_url():
     p = JobProfile(name="p", enabled=True, keywords=["backend"], remote_model="remote")
-    entry = dorks.compose_queries([p], None, ["ashby"])[0]
+    entry = dorks.compose_queries([p], "none", ["ashby"])[0]
     expected_query = 'site:jobs.ashbyhq.com (remote OR "fully remote" OR "work from home") backend'
     assert entry["query"] == expected_query
-    assert unquote_plus(entry["url"].split("q=")[1].split("&tbs=")[0]) == expected_query
+    assert unquote_plus(entry["url"].split("q=")[1]) == expected_query
 
 
 def test_remote_model_hybrid_adds_remote_or_hybrid_group():
     p = JobProfile(name="p", enabled=True, keywords=["backend"], remote_model="hybrid")
-    q = dorks.compose_queries([p], None, ["ashby"])[0]["query"]
+    q = dorks.compose_queries([p], "none", ["ashby"])[0]["query"]
     assert q == "site:jobs.ashbyhq.com (remote OR hybrid) backend"
 
 
 def test_remote_model_on_site_leaves_query_unchanged():
     p = JobProfile(name="p", enabled=True, keywords=["backend"], remote_model="on_site")
-    q = dorks.compose_queries([p], None, ["ashby"])[0]["query"]
+    q = dorks.compose_queries([p], "none", ["ashby"])[0]["query"]
     assert q == "site:jobs.ashbyhq.com backend"
 
 
 def test_remote_model_none_leaves_query_unchanged():
     p = JobProfile(name="p", enabled=True, keywords=["backend"], remote_model=None)
-    q = dorks.compose_queries([p], None, ["ashby"])[0]["query"]
+    q = dorks.compose_queries([p], "none", ["ashby"])[0]["query"]
     assert q == "site:jobs.ashbyhq.com backend"
 
 
@@ -133,12 +134,14 @@ def test_empty_keywords_produces_nothing():
     assert dorks.compose_queries([p]) == []
 
 
-def test_url_is_percent_encoded_and_carries_recency_param():
+def test_url_is_percent_encoded_and_carries_recency_in_query():
     p = JobProfile(name="p", enabled=True, keywords=["platform engineer"])
-    entry = dorks.compose_queries([p], None, ["ashby"])[0]
+    entry = dorks.compose_queries([p], "d", ["ashby"], today=TODAY)[0]
     assert "%22platform+engineer%22" in entry["url"] or "%22platform%20engineer%22" in entry["url"]
-    assert entry["url"].endswith("&tbs=qdr:d")
-    assert unquote_plus(entry["url"].split("q=")[1].split("&tbs=")[0]) == entry["query"]
+    assert "tbs=" not in entry["url"]
+    assert entry["query"].endswith(" after:2026-03-09")
+    assert unquote_plus(entry["url"].split("q=")[1]) == entry["query"]
+    assert parse_qs(urlparse(entry["url"]).query) == {"q": [entry["query"]]}
 
 
 def test_all_queries_are_returned_uncapped():
@@ -176,45 +179,72 @@ def test_disabled_and_keywordless_profiles_are_excluded_before_sharing_the_budge
 # Posting freshness window
 # ---------------------------------------------------------------------------
 
-def _url(recency):
+TODAY = date(2026, 3, 10)
+
+
+def _entry(recency):
     p = JobProfile(name="p", enabled=True, keywords=["backend"])
-    return dorks.compose_queries([p], recency, ["ashby"])[0]["url"]
+    return dorks.compose_queries([p], recency, ["ashby"], today=TODAY)[0]
 
 
 def test_unset_recency_defaults_to_the_past_24_hours():
-    assert "&tbs=qdr:d" in _url(None)
-    assert "&tbs=qdr:d" in dorks.compose_queries(
-        [JobProfile(name="p", enabled=True, keywords=["backend"])]
-    )[0]["url"]
-    assert "qdr:w" not in _url(None)
+    assert _entry(None)["query"].endswith(" after:2026-03-09")
+    assert "after:2026-03-03" not in _entry(None)["query"]
 
 
-def test_none_recency_omits_tbs_entirely():
-    assert "tbs=" not in _url("none")
+def test_none_recency_adds_no_operator():
+    entry = _entry("none")
+    assert "after:" not in entry["query"]
+    assert "after" not in entry["url"]
 
 
-@pytest.mark.parametrize("letter", ["h", "d", "w", "m", "y"])
-def test_each_recency_letter_renders_its_qdr_form(letter):
-    assert _url(letter).endswith(f"&tbs=qdr:{letter}")
+@pytest.mark.parametrize(
+    "letter,expected",
+    [("d", "2026-03-09"), ("w", "2026-03-03"), ("m", "2026-02-08"), ("y", "2025-03-10")],
+)
+def test_each_recency_letter_renders_its_after_date(letter, expected):
+    entry = _entry(letter)
+    assert entry["query"].endswith(f" after:{expected}")
+    assert "tbs=" not in entry["url"]
 
 
-def test_invalid_recency_falls_back_to_default():
-    assert _url("bogus").endswith("&tbs=qdr:d")
+@pytest.mark.parametrize("value", ["bogus", "h"])
+def test_invalid_or_legacy_recency_falls_back_to_default(value):
+    assert _entry(value)["query"].endswith(" after:2026-03-09")
 
 
-def test_recency_param_values():
-    assert dorks.recency_param("d") == "qdr:d"
-    assert dorks.recency_param("none") == ""
-    assert dorks.recency_param("y") == "qdr:y"
-    assert dorks.recency_param(None) == "qdr:d"
-    assert dorks.recency_param("x") == "qdr:d"
+def test_recency_operator_values():
+    assert dorks.recency_operator("d", TODAY) == "after:2026-03-09"
+    assert dorks.recency_operator("none", TODAY) == ""
+    assert dorks.recency_operator("y", TODAY) == "after:2025-03-10"
+    assert dorks.recency_operator(None, TODAY) == "after:2026-03-09"
+    assert dorks.recency_operator("x", TODAY) == "after:2026-03-09"
+    assert dorks.recency_operator("h", TODAY) == "after:2026-03-09"
+
+
+def test_recency_operator_defaults_to_utc_today(monkeypatch):
+    from datetime import datetime, timezone
+
+    seen_tz = []
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            seen_tz.append(tz)
+            return datetime(2026, 3, 10, 23, 30, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(dorks, "datetime", FrozenDatetime)
+    assert dorks.recency_operator("w") == "after:2026-03-03"
+    assert seen_tz == [timezone.utc]
 
 
 def test_recency_applies_to_every_composed_query_not_just_the_first():
     p = JobProfile(name="p", enabled=True, keywords=["backend"])
-    entries = dorks.compose_queries([p], "w")
+    entries = dorks.compose_queries([p], "w", today=TODAY)
     assert len(entries) == len(dorks.DEFAULT_BOARD_DOMAINS)
-    assert all("&tbs=qdr:w" in e["url"] for e in entries)
+    assert all(e["query"].endswith(" after:2026-03-03") for e in entries)
+    assert all("tbs=" not in e["url"] for e in entries)
+    assert all(unquote_plus(e["url"].split("q=")[1]) == e["query"] for e in entries)
 
 
 def test_duplicate_urls_merge_profiles_into_a_profiles_list():
@@ -226,14 +256,10 @@ def test_duplicate_urls_merge_profiles_into_a_profiles_list():
     assert entries[0]["profiles"] == ["a", "b"]
 
 
-def test_window_does_not_alter_the_query_string_itself():
-    """The recency filter is a URL parameter; the query text the agent feeds to
-    WebSearch must be unchanged, since WebSearch ignores tbs anyway."""
-    p = JobProfile(name="p", enabled=True, keywords=["backend"])
-    assert (
-        dorks.compose_queries([p], "w", ["ashby"])[0]["query"]
-        == dorks.compose_queries([p], None, ["ashby"])[0]["query"]
-    )
+def test_window_is_carried_in_the_query_text():
+    """Recency is an after: operator in the query text, so WebSearch honours it."""
+    assert _entry("w")["query"] == "site:jobs.ashbyhq.com backend after:2026-03-03"
+    assert _entry("none")["query"] == "site:jobs.ashbyhq.com backend"
 
 
 # ---------------------------------------------------------------------------
@@ -410,17 +436,33 @@ def test_chunks_ordered_chunk_major_across_domains():
     assert len(set(first_block)) == domain_count
 
 
+def _edge_locations():
+    return [f"City{i}" for i in range(13)] + ["New City"]
+
+
+def test_query_exactly_at_budget_with_after_token_stays_within_limit():
+    p = JobProfile(
+        name="p", enabled=True, keywords=["Backend Engineer"], locations=_edge_locations()
+    )
+    entries = dorks.compose_profile_queries(p, "w", ["ashby"], today=TODAY)
+    assert len(entries) == 1
+    assert entries[0]["query"].endswith(" after:2026-03-03")
+    assert dorks._word_count(entries[0]["query"]) == dorks.MAX_QUERY_WORDS
+
+
 def test_negatives_dropped_rather_than_exceeding_budget():
     p = JobProfile(
         name="p",
         enabled=True,
         keywords=["Backend Engineer"],
-        # 15 locations -> 29-word OR-group; with site: and the 2-word title
-        # that is exactly MAX_QUERY_WORDS, leaving no room for any negative.
-        locations=[f"City{i}" for i in range(15)],
+        # 13 one-word + 1 two-word location -> 28-word OR-group; with site:,
+        # the after: token and the 2-word title that is exactly
+        # MAX_QUERY_WORDS, leaving no room for any negative.
+        locations=_edge_locations(),
         rejected_role_types=["contract", "unpaid internship", "temporary work"],
     )
-    entries = dorks.compose_profile_queries(p, None, ["ashby"])
+    entries = dorks.compose_profile_queries(p, None, ["ashby"], today=TODAY)
+    assert all(dorks._word_count(e["query"]) == dorks.MAX_QUERY_WORDS for e in entries)
     assert all(dorks._word_count(e["query"]) <= dorks.MAX_QUERY_WORDS for e in entries)
     assert all('-"contract"' not in e["query"] for e in entries)
 
@@ -431,9 +473,9 @@ def test_padded_titles_are_stripped_so_budget_holds():
         enabled=True,
         keywords=["x"],
         title_keywords=[" Backend Engineer ", "  "],
-        locations=[f"City{i}" for i in range(15)],
+        locations=_edge_locations(),
     )
-    entries = dorks.compose_profile_queries(p, None, ["ashby"])
+    entries = dorks.compose_profile_queries(p, None, ["ashby"], today=TODAY)
     assert entries
     assert all(dorks._word_count(e["query"]) <= dorks.MAX_QUERY_WORDS for e in entries)
     assert all('"Backend Engineer"' in e["query"] for e in entries)
