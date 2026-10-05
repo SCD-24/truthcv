@@ -371,11 +371,25 @@ def test_compose_direct_boards_shape():
         {
             "profile": "active",
             "keywords": ["backend"],
+            "title_keywords": ["backend"],
             "locations": ["Berlin"],
             "rejected_role_types": ["contract"],
             "remote_model": "remote",
         }
     ]
+
+
+def test_compose_direct_boards_title_only_profile_included():
+    p = JobProfile(name="titles", enabled=True, keywords=[], title_keywords=["Staff Engineer"])
+    board = JobBoard(source="https://boards.acme.io/careers", mode="direct")
+
+    entries = dorks.compose_direct_boards([p], [board])
+
+    assert len(entries) == 1
+    assert len(entries[0]["profiles"]) == 1
+    assert entries[0]["profiles"][0]["profile"] == "titles"
+    assert entries[0]["profiles"][0]["keywords"] == []
+    assert entries[0]["profiles"][0]["title_keywords"] == ["Staff Engineer"]
 
 
 def test_compose_direct_boards_carries_none_remote_model_through():

@@ -13,7 +13,7 @@
 import type { BlockKind, HarvestBoardRequest, HarvestBoardResult, HarvestedPosting } from './harvestTypes.js';
 import { GOOGLE_HOST_RE, extractDorkPostings, parseDorkTarget } from './harvestDork.js';
 import { compactSnapshot } from './harvestExcerpt.js';
-import { globToRegExp, hasEmptyWildcardTail, hasLetter, hasPaginationSegment, isNumericTitle, resolveLinks, resolveSnapshotBase, sameSiteLinkQualifies, stripHash, type ResolvedLink } from './harvestLinks.js';
+import { globToRegExp, hasEmptyWildcardTail, hasLetter, hasPaginationSegment, hostsRelated, isNumericTitle, resolveLinks, resolveSnapshotBase, sameSiteLinkQualifies, stripHash, type ResolvedLink } from './harvestLinks.js';
 
 /** Cap on postings returned per board — bounds the structured result's size. */
 const MAX_POSTINGS_PER_BOARD = 50;
@@ -99,6 +99,15 @@ const ANY_LINK_LINE_RE = /-\s*link\s+"[^"]+"/i;
 /** Below this snapshot length, with no link line at all, a page is deemed to
  * show no substantive content of its own — see {@link hasSubstantiveContent}. */
 const MIN_SUBSTANTIVE_SNAPSHOT_LENGTH = 200;
+
+/** Sample same-host link paths listed in a needs_review note. */
+const NOTE_SAMPLE_PATHS = 3;
+
+/** Max chars of one sample path or of the pattern in a needs_review note. */
+const NOTE_FIELD_MAX_CHARS = 60;
+
+/** Max chars of a needs_review note. */
+const NOTE_MAX_CHARS = 300;
 
 /** Max chars of a needs_review result's raw snapshot excerpt. */
 const RAW_SNAPSHOT_MAX_CHARS = 6000;
@@ -286,6 +295,16 @@ function extractPostings(board: HarvestBoardRequest, snapshot: string): Harveste
   return extractSameSitePostings(links, board, base);
 }
 
+/** Compact diagnostics: links seen, pattern tried, sample same-host link paths. */
+function linkDiagnostics(board: HarvestBoardRequest, snapshot: string): string {
+  const links = resolveLinks(board, snapshot);
+  const host = safeHostname(resolveSnapshotBase(board, snapshot));
+  const paths = links.filter((l) => host !== '' && hostsRelated(l.url.hostname, host)).map((l) => l.url.pathname);
+  const sample = [...new Set(paths)].slice(0, NOTE_SAMPLE_PATHS).map((p) => p.slice(0, NOTE_FIELD_MAX_CHARS));
+  const pattern = board.postingUrlPattern ? board.postingUrlPattern.slice(0, NOTE_FIELD_MAX_CHARS) : 'no pattern';
+  return ` (links seen: ${links.length}; pattern: ${pattern}; sample paths: ${sample.join(', ') || 'none'})`;
+}
+
 /**
  * Classify a board's final snapshot into its {@link HarvestBoardResult}.
  * Extraction runs FIRST: postings found always win, even over an incidental
@@ -306,8 +325,9 @@ export function classifySnapshot(board: HarvestBoardRequest, snapshot: string): 
     const note = `${postings.length} posting(s) extracted by ${tierLabel(postings[0].ats)}`;
     return { ...base, outcome: 'searched', tier: 'harvest', postings, note };
   }
-  if (isGoogleInterstitial(resolveSnapshotBase(board, snapshot))) {
-    return blockedResult(board, 'Google consent/rate-limit interstitial blocked the search results from being read', 'wall');
+  const snapshotUrl = resolveSnapshotBase(board, snapshot);
+  if (isGoogleInterstitial(snapshotUrl)) {
+    return blockedResult({ ...board, url: snapshotUrl }, 'Google consent/rate-limit interstitial blocked the search results from being read', 'wall');
   }
   if (isExplicitlyEmpty(snapshot)) {
     return { ...base, outcome: 'empty', tier: '', postings: [], note: 'search ran; the board reported no matches' };
@@ -321,7 +341,7 @@ export function classifySnapshot(board: HarvestBoardRequest, snapshot: string): 
   }
   const note = wallKind === 'wall'
     ? 'a consent/bot-check phrase was seen, but the page also shows substantive content of its own; raw snapshot attached for manual review'
-    : 'no recognised posting URLs found; raw snapshot attached for manual review';
+    : ('no recognised posting URLs found; raw snapshot attached for manual review' + linkDiagnostics(board, snapshot)).slice(0, NOTE_MAX_CHARS);
   const excerpt = compactSnapshot(snapshot, RAW_SNAPSHOT_MAX_CHARS);
   const truncated = excerpt.truncated ? { rawSnapshotTruncated: true } : {};
   return { ...base, outcome: 'needs_review', tier: '', postings: [], note, rawSnapshot: excerpt.text, ...truncated };

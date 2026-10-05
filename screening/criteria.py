@@ -194,6 +194,31 @@ def evaluate(
     return ("", "")
 
 
+def holds_for_review(
+    verdict: str, failing_criterion: str, remote_arrangement: str
+) -> bool:
+    """Whether a remote-model rejection should be held for the operator instead.
+
+    True only when the verdict is 'rejected', the posting's remote arrangement
+    (validated/normalised) is 'unstated', and the failing criterion
+    (casefolded, spaces/hyphens -> '_') is 'remote_model' or contains
+    'remote'. A rejection resting on a posting that never stated its remote
+    arrangement is not a real contradiction, so the operator decides.
+    """
+    if verdict != "rejected":
+        return False
+    try:
+        arrangement = validate_remote_arrangement(remote_arrangement)
+    except ValueError:
+        return False
+    if arrangement != "unstated":
+        return False
+    criterion = re.sub(
+        r"[\s-]+", "_", (failing_criterion or "").strip().casefold()
+    )
+    return criterion == "remote_model" or "remote" in criterion
+
+
 def validate_eor_stated(value: str) -> str:
     """Return the normalized EOR-stated value, or raise ``ValueError`` if unknown.
 

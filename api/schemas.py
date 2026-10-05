@@ -410,6 +410,7 @@ class DirectBoardProfileModel(_Camel):
 
     profile: str = ""
     keywords: list[str] = Field(default_factory=list)
+    title_keywords: list[str] = Field(default_factory=list)
     locations: list[str] = Field(default_factory=list)
     rejected_role_types: list[str] = Field(default_factory=list)
     remote_model: str | None = None

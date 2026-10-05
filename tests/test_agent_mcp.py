@@ -832,6 +832,43 @@ def test_record_screening_downgrades_verdict_on_language_contradiction(data_dir)
     assert s["approval"] != "pending"
 
 
+def test_record_screening_holds_unstated_remote_rejection_for_review(data_dir):
+    _enable_profile(remote_model="remote")
+    s = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/unstated-remote-held",
+        role="Data Engineer",
+        company="ExampleCo",
+        verdict="rejected",
+        failing_criterion="Remote model",
+        reason="Looks on site.",
+        posting_text=_long_posting_text("Data Engineer", "ExampleCo"),
+        profile="default",
+        remote_arrangement="unstated",
+    )
+    assert s["verdict"] == "deferred"
+    assert s["approval"] == "pending"
+    assert s["failing_criterion"] == ""
+    assert s["reason"].startswith("Remote arrangement not stated")
+
+
+def test_record_screening_unstated_remote_does_not_hide_language_contradiction(data_dir):
+    _enable_profile(working_language="English")
+    s = tools_ledger.record_screening(
+        url="https://jobs.example.com/postings/unstated-remote-german",
+        role="Data Engineer",
+        company="ExampleCo",
+        verdict="rejected",
+        failing_criterion="Remote model",
+        posting_text=_long_posting_text("Data Engineer", "ExampleCo"),
+        profile="default",
+        remote_arrangement="unstated",
+        language_requirement="German C1",
+    )
+    assert s["verdict"] == "rejected"
+    assert s["failing_criterion"] == "working_language"
+    assert s["approval"] != "pending"
+
+
 def test_record_screening_passes_through_when_evidence_is_compatible(data_dir):
     """A posting written in German with no stated language_requirement passes
     through untouched — the requirement, not the posting's own language, is

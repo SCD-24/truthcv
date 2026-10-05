@@ -426,6 +426,33 @@ describe("JobBoardsPage", () => {
     );
   });
 
+  it("warns when a custom board's search URL has no {location}", async () => {
+    vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
+    const board: JobBoard = {
+      source: "custom.example.com",
+      signinUrl: "",
+      enabled: true,
+      mode: "direct",
+      modeLocked: false,
+      domain: "custom.example.com",
+      effectiveSigninUrl: "",
+      isDefault: false,
+      isApi: false,
+      keyRequired: false,
+      searchUrl: "",
+      postingUrlPattern: "",
+    };
+    await renderPage(makeConfig([board]));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const field = await screen.findByLabelText("Search URL template");
+    expect(screen.queryByText(/No \{location\} in this URL/)).toBeNull();
+    fireEvent.change(field, { target: { value: "https://custom.example.com/jobs?q={keywords}" } });
+    expect(screen.getByText(/No \{location\} in this URL/)).toBeTruthy();
+    fireEvent.change(field, { target: { value: "https://custom.example.com/jobs?q={keywords}&l={location}" } });
+    expect(screen.queryByText(/No \{location\} in this URL/)).toBeNull();
+  });
+
   it("edits a custom board's posting link pattern and persists it", async () => {
     vi.mocked(getSigninQueue).mockResolvedValue({ sites: [] });
     const board: JobBoard = {

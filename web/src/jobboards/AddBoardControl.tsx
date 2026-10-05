@@ -117,7 +117,19 @@ export function AddBoardControl({ onAdd, existing }: { onAdd: (board: JobBoard) 
             label="Search URL template (optional)"
             value={customSearchUrl}
             onChange={(e) => setCustomSearchUrl(e.target.value)}
-            helperText="e.g. https://www.adzuna.de/search?q={keywords}&w={location} — {keywords} required, {location} optional"
+            helperText={
+              customSearchUrl.trim() && !customSearchUrl.includes("{location}")
+                ? "No {location} in this URL — your profiles' locations won't be applied on this board."
+                : "e.g. https://www.adzuna.de/search?q={keywords}&w={location} — {keywords} required, {location} optional"
+            }
+            slotProps={{
+              formHelperText: {
+                sx:
+                  customSearchUrl.trim() && !customSearchUrl.includes("{location}")
+                    ? { color: "warning.main" }
+                    : undefined,
+              },
+            }}
             sx={{ minWidth: 320 }}
           />
           <TextField

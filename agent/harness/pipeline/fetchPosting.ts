@@ -12,6 +12,7 @@
 import { navigateAndSnapshot, settleIfLoading } from '../builtins/harvestNavigate.js';
 import type { BrowserToolCall } from '../builtins/harvestTypes.js';
 import { pruneSnapshot } from './snapshotPrune.js';
+import { findOnwardUrl } from './followOnward.js';
 
 /** A posting whose text could not be read, with the blocker to record. */
 export interface UnreadablePosting {
@@ -169,6 +170,26 @@ function judgePosting(raw: string, linkedIn: boolean): FetchedPosting {
   return wall && length < MIN_READABLE_CHARS * 5 ? signInWall : { text };
 }
 
+/** Reason for a thin page whose onward link could not be found or followed. */
+const NO_ONWARD_REASON = 'page had no readable posting text (intermediate page; onward link not found)';
+
+/** Reason `judgePosting` gives a thin non-LinkedIn page. */
+const THIN_REASON = 'page had no readable posting text';
+
+/**
+ * For a thin page, follow its onward link ONCE and judge the landing page;
+ * on no link or any failure return the unreadable result with {@link NO_ONWARD_REASON}.
+ */
+async function followOnwardOnce(call: BrowserToolCall, raw: string, url: string, thin: UnreadablePosting): Promise<FetchedPosting> {
+  const failed = { ...thin, reason: NO_ONWARD_REASON };
+  const target = findOnwardUrl(raw, url);
+  if (!target) return failed;
+  const nav = await navigateAndSnapshot(call, target);
+  if ('error' in nav) return failed;
+  const next = await settleIfThin(call, await settleIfLoading(call, nav.snapshot), false);
+  return typeof next === 'string' ? judgePosting(next, false) : failed;
+}
+
 /**
  * Navigate to `url` and return its readable text.
  *
@@ -182,7 +203,11 @@ export async function fetchPosting(call: BrowserToolCall, url: string): Promise<
     const linkedIn = isLinkedInUrl(url);
     const raw = await settleIfThin(call, await settleIfLoading(call, nav.snapshot), linkedIn);
     if (typeof raw !== 'string') return { failed: true, reason: raw.error };
-    return judgePosting(raw, linkedIn);
+    const judged = judgePosting(raw, linkedIn);
+    if (judged.unreadable && judged.blocker === 'unreadable' && judged.reason === THIN_REASON) {
+      return await followOnwardOnce(call, raw, url, judged);
+    }
+    return judged;
   } catch (err) {
     return { failed: true, reason: err instanceof Error ? err.message : String(err) };
   }

@@ -7,6 +7,7 @@
 import { harvestPostings } from '../builtins/harvestPostings.js';
 import type { BrowserToolCall, HarvestBoardRequest, HarvestBoardResult } from '../builtins/harvestPostings.js';
 import { isGoogleInterstitial } from '../builtins/harvestClassify.js';
+import { tryPassGoogleConsent } from './googleConsent.js';
 import type { Candidate, DiscoveryChannel, McpCall } from './types.js';
 
 /** Max keywords typed into a direct board's search box. */
@@ -52,7 +53,7 @@ const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => set
 /** Coverage recorded for a dork never searched because Google kept blocking. */
 const SKIPPED_COVERAGE: Coverage = {
   status: 'skipped',
-  reason: `not searched: Google blocked ${MAX_CONSECUTIVE_GOOGLE_BLOCKS} consecutive dorks; stopped to avoid further rate-limiting`,
+  reason: `not searched: Google kept blocking searches (consent page could not be passed); stopped after ${MAX_CONSECUTIVE_GOOGLE_BLOCKS} consecutive blocks to avoid rate-limiting`,
   tier: '',
   found: 0,
 };
@@ -99,6 +100,13 @@ function dorkEntries(cfg: Record<string, unknown>): Entry[] {
   return out;
 }
 
+/** Search keywords for a direct board: the first title keyword when present, else the leading generic keywords. */
+function directKeywords(p: Record<string, unknown>): string | undefined {
+  const title = strList(pick(p, 'title_keywords', 'titleKeywords'))[0];
+  if (title) return title;
+  return strList(p.keywords).slice(0, MAX_DIRECT_KEYWORDS).join(' ') || undefined;
+}
+
 /** One harvest entry for a direct board searched with one profile's criteria and one location. */
 function directEntry(b: Record<string, unknown>, url: string, p: Record<string, unknown>, location?: string): Entry {
   const name = str(p.profile);
@@ -110,7 +118,7 @@ function directEntry(b: Record<string, unknown>, url: string, p: Record<string, 
     request: {
       board: label ? `${url} ${label}` : url,
       url,
-      keywords: strList(p.keywords).slice(0, MAX_DIRECT_KEYWORDS).join(' ') || undefined,
+      keywords: directKeywords(p),
       location,
       searchUrl: str(pick(b, 'search_url', 'searchUrl')),
       postingUrlPattern: str(pick(b, 'posting_url_pattern', 'postingUrlPattern')),
@@ -217,6 +225,20 @@ async function runFeed(cfg: Record<string, unknown>, mcp: McpCall, runId: string
   }
 }
 
+/** Record how many unique postings were seen; returns an error string on failure. */
+async function recordPostingsSeen(mcp: McpCall, runId: string, count: number): Promise<string | undefined> {
+  try {
+    const res = await mcp('record_postings_seen', { run_id: runId, count });
+    if (res.isError) return 'postings seen count not recorded';
+    try {
+      if ((JSON.parse(res.content) as { recorded?: boolean }).recorded === false) return 'postings seen count not recorded';
+    } catch { /* non-JSON ok payload: treat as recorded */ }
+    return undefined;
+  } catch (err) {
+    return `postings seen failed: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
 /** Keep only URLs the server says are unscreened (all, if the call fails). */
 async function filterUnscreened(mcp: McpCall, map: Map<string, Candidate>): Promise<Candidate[]> {
   const all = [...map.values()];
@@ -231,6 +253,22 @@ async function filterUnscreened(mcp: McpCall, map: Map<string, Candidate>): Prom
   }
 }
 
+/** Whether `url` is Google's consent host. */
+function isConsentPage(url: string): boolean {
+  try {
+    return new URL(url).hostname.toLowerCase().startsWith('consent.');
+  } catch {
+    return false;
+  }
+}
+
+/** Harvest one dork entry; harvest tool errors are pushed to `errors`. */
+async function harvestOne(entry: Entry, call: BrowserToolCall, errors: string[]): Promise<Harvested> {
+  const res = await harvestPostings({ boards: [entry.request] }, call, false);
+  if (res.isError) errors.push(res.content);
+  return { r: res.isError ? undefined : parseResults(res.content)[0] };
+}
+
 /**
  * Harvest dork entries sequentially with pacing; after too many consecutive Google blocks the rest are skipped.
  *
@@ -242,12 +280,15 @@ async function filterUnscreened(mcp: McpCall, map: Map<string, Candidate>): Prom
 async function harvestDorks(dorks: Entry[], call: BrowserToolCall, sleep: (ms: number) => Promise<void>, errors: string[]): Promise<Harvested[]> {
   const out: Harvested[] = [];
   let blocks = 0;
+  let consentTried = false;
   for (let i = 0; i < dorks.length; i++) {
     if (blocks >= MAX_CONSECUTIVE_GOOGLE_BLOCKS) { out.push({ skipped: true }); continue; }
     if (i > 0) await sleep(DORK_PACING_MS);
-    const res = await harvestPostings({ boards: [dorks[i].request] }, call, false);
-    if (res.isError) errors.push(res.content);
-    const r = res.isError ? undefined : parseResults(res.content)[0];
+    let { r } = await harvestOne(dorks[i], call, errors);
+    if (!consentTried && isGoogleBlock(r) && r && isConsentPage(r.url)) {
+      consentTried = true;
+      if (await tryPassGoogleConsent(call, r.url)) r = (await harvestOne(dorks[i], call, errors)).r;
+    }
     blocks = isGoogleBlock(r) ? blocks + 1 : 0;
     out.push({ r });
   }
@@ -293,6 +334,10 @@ export async function discover(jobConfig: Record<string, unknown>, runId: string
   }
   for (const [board, covs] of direct) {
     const err = await recordCoverage(mcp, runId, 'direct', board, aggregateCoverage(covs));
+    if (err) errors.push(err);
+  }
+  if (map.size > 0) {
+    const err = await recordPostingsSeen(mcp, runId, map.size);
     if (err) errors.push(err);
   }
   return { candidates: await filterUnscreened(mcp, map), coverageComplete: errors.length === 0, errors };

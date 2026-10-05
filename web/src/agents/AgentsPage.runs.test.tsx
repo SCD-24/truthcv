@@ -58,7 +58,7 @@ describe("RecentRunsSection", () => {
     await waitFor(() => expect(screen.getByText("run-finished")).toBeTruthy());
     expect(screen.getByText(/Postings seen: 10/)).toBeTruthy();
     expect(screen.getByText(/Screenings recorded: 8/)).toBeTruthy();
-    expect(screen.getByText(/Blocked: 1/)).toBeTruthy();
+    expect(screen.getByText(/Couldn't read: 1/)).toBeTruthy();
     expect(screen.getByText(/Queued for approval: 2/)).toBeTruthy();
     expect(screen.getByText(/Applied: 3\/5/)).toBeTruthy();
     expect(screen.getByText(/Stopped: apply cap reached/)).toBeTruthy();
@@ -85,11 +85,54 @@ describe("RecentRunsSection", () => {
     render(<RecentRunsSection />);
 
     await waitFor(() => expect(screen.getByText("run-with-coverage")).toBeTruthy());
-    expect(
-      screen.getByText(
-        "Feed: 11 postings · Direct boards: 3 searched, 1 extraction-failed, 2 login-walled · Dorks: not reached",
-      ),
-    ).toBeTruthy();
+    expect(screen.getByTestId("run-coverage").textContent).toBe(
+      "Feed: 11 postings · Direct boards: 3 searched, 1 couldn't find job links, 2 sign-in required · Dorks: not reached",
+    );
+  });
+
+  it("explains a Google-blocked dork channel and lists reasons in a focusable tooltip", async () => {
+    const long = "g".repeat(300);
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([
+        makeRun({
+          id: "run-google",
+          discoveryCoverage: [
+            { channel: "direct", board: "Indeed", status: "extraction_failed", postingsFound: 0, reason: long },
+            { channel: "dork", board: "q1", status: "blocked", postingsFound: 0, reason: "Google captcha" },
+            { channel: "dork", board: "q2", status: "skipped", postingsFound: 0, reason: "" },
+            { channel: "dork", board: "q3", status: "skipped", postingsFound: 0, reason: "" },
+          ],
+        }),
+      ]),
+    );
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("run-google")).toBeTruthy());
+    expect(screen.getByTestId("run-coverage").textContent).toBe(
+      "Feed: not reached · Direct boards: 1 couldn't find job links · Dorks: Google blocked the searches (1 blocked, 2 not tried)",
+    );
+    const clause = screen.getByText(/Direct boards:/);
+    expect(clause.getAttribute("tabindex")).toBe("0");
+    fireEvent.mouseOver(clause);
+    const detail = await screen.findByText(/^Indeed \(couldn't find job links\)/);
+    expect(detail.textContent).toContain("g".repeat(119) + "…");
+    expect(detail.textContent).not.toContain("g".repeat(121));
+  });
+
+  it("shows counter tooltips, the renamed Couldn't read label, and (so far) while running", async () => {
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([makeRun({ id: "run-live", status: "running", finishedAt: "" })]),
+    );
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("run-live")).toBeTruthy());
+    const counter = screen.getByText(/Couldn't read: 1/);
+    expect(counter.getAttribute("tabindex")).toBe("0");
+    expect(screen.getByText("(so far)")).toBeTruthy();
+    fireEvent.mouseOver(counter);
+    expect(await screen.findByText(/no verdict was reached/)).toBeTruthy();
   });
 
   it("shows no discovery coverage recorded when a run has none", async () => {
@@ -248,6 +291,43 @@ describe("RecentRunsSection", () => {
         return false;
       })).toBeTruthy();
     });
+  });
+
+  it("Enter on a focused tooltip target does not open the dialog; Enter on the row does", async () => {
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([makeRun({ id: "run-bubble", boardBreakdown: [] })]),
+    );
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("run-bubble")).toBeTruthy());
+    const counter = screen.getByText(/Couldn't read: 1/);
+    fireEvent.keyDown(counter, { key: "Enter" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    fireEvent.keyDown(screen.getByRole("button", { name: /run-bubble/ }), { key: "Enter" });
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+  });
+
+  it("explains a feed extraction failure in a focusable tooltip", async () => {
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([
+        makeRun({
+          id: "run-feed-fail",
+          discoveryCoverage: [
+            { channel: "feed", board: "LinkedIn", status: "extraction_failed", postingsFound: 0, reason: "markup changed" },
+          ],
+        }),
+      ]),
+    );
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("run-feed-fail")).toBeTruthy());
+    const clause = screen.getByText(/Feed:/);
+    expect(clause.getAttribute("tabindex")).toBe("0");
+    fireEvent.mouseOver(clause);
+    expect(await screen.findByText(/^LinkedIn \(couldn't find job links\): markup changed/)).toBeTruthy();
   });
 
   it("closing the modal hides it", async () => {

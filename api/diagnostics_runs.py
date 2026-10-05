@@ -7,7 +7,10 @@ of text fields here is lossy and silent: a capped value carries no marker.
 
 from __future__ import annotations
 
+import applications as _app_store
 import runs.store as _runs_store
+from screening import store as _screening_store
+from runs.derive import counters_by_run
 from api.diagnostics_paging import _clamp_limit
 
 # Start of the agent's recovery boilerplate, which the harness appends to item
@@ -27,8 +30,22 @@ def _coverage_list(r) -> list[dict]:
     return [c for c in (r.discovery_coverage or []) if isinstance(c, dict)]
 
 
-def _run_summary(r) -> dict:
-    """Counters and status of one run, without any heavy list or text field."""
+def _derived_counters(records: list) -> dict:
+    """Derived counters per run id; stores loaded once. {} if a store fails to load."""
+    try:
+        screenings = _screening_store.load_all()
+        applications = _app_store.load_all()
+    except Exception:
+        return {}
+    return counters_by_run([r.id for r in records], screenings, applications)
+
+
+def _run_summary(r, derived: dict | None = None) -> dict:
+    """Counters and status of one run, without any heavy list or text field.
+
+    `derived` (run id -> counters) overrides the four stored coverage counters.
+    """
+    d = (derived or {}).get(r.id, {})
     counts: dict = {}
     for entry in _coverage_list(r):
         status = entry.get("status", "")
@@ -42,10 +59,10 @@ def _run_summary(r) -> dict:
         "stopped_reason": (r.stopped_reason or "")[:_STOPPED_REASON_MAX_CHARS],
         "apply_cap": r.apply_cap,
         "postings_seen": r.postings_seen,
-        "screenings_recorded": r.screenings_recorded,
-        "blocked_count": r.blocked_count,
-        "applications_submitted": r.applications_submitted,
-        "queued_for_approval": r.queued_for_approval,
+        "screenings_recorded": d.get("screenings_recorded", r.screenings_recorded),
+        "blocked_count": d.get("blocked_count", r.blocked_count),
+        "applications_submitted": d.get("applications_submitted", r.applications_submitted),
+        "queued_for_approval": d.get("queued_for_approval", r.queued_for_approval),
         "over_cap_writes": r.over_cap_writes,
         "items_failed": r.items_failed,
         "finish_refused": r.finish_refused,
@@ -63,7 +80,8 @@ def list_runs(limit: int = 0, offset: int = 0) -> dict:
     coverage entries or note; use `get_run` for those.
     """
     records, total = _runs_store.list_page(limit=_clamp_limit(limit), offset=offset)
-    return {"total": total, "runs": [_run_summary(r) for r in records]}
+    derived = _derived_counters(records)
+    return {"total": total, "runs": [_run_summary(r, derived) for r in records]}
 
 
 def _page(items: list, offset: int, limit: int) -> tuple[list, int, int | None]:
@@ -149,7 +167,7 @@ def get_run(
     r = _runs_store.get(run_id)
     if not r:
         return {}
-    out = _run_summary(r)
+    out = _run_summary(r, _derived_counters([r]))
     note = r.note or ""
     out["note"] = note[:_NOTE_MAX_CHARS]
     out["note_length"] = len(note)

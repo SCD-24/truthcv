@@ -102,6 +102,35 @@ function resolveHref(href: string, base: string): URL | undefined {
   }
 }
 
+/** Lowercase onward-link labels ("read more"-style buttons), compared via {@link normaliseLabel}. */
+export const ONWARD_LABELS: readonly string[] = [
+  'weitere informationen', 'mehr informationen', 'zur stellenanzeige', 'zum stellenangebot',
+  'view job', 'more information', 'continue to job',
+];
+
+/** Lowercase labels that are generic call-to-action text, not a posting title. */
+const GENERIC_LABELS: readonly string[] = [...ONWARD_LABELS, 'apply', 'apply now', 'jetzt bewerben', 'details', 'more'];
+
+/** Trailing chevron/arrow characters ignored when comparing a label. */
+const TRAILING_CHEVRON_RE = /[\s❯›>]+$/;
+
+/** A link label lowercased, trimmed, with trailing ❯/›/> removed. */
+export function normaliseLabel(label: string): string {
+  return label.trim().replace(TRAILING_CHEVRON_RE, '').toLowerCase();
+}
+
+/** Whether a link title is generic (call-to-action or punctuation only). */
+function isGenericTitle(title: string): boolean {
+  return !hasLetter(title) || GENERIC_LABELS.includes(normaliseLabel(title));
+}
+
+/** The URL's `title` query parameter, decoded with underscores as spaces. */
+function titleFromUrl(url: URL): string | undefined {
+  const raw = url.searchParams.get('title');
+  const title = raw?.replace(/_/g, ' ').trim();
+  return title || undefined;
+}
+
 /** Parse and resolve every link in `snapshot` to an absolute http(s) URL,
  * dropping any that are non-http(s) or fail to parse even against the
  * resolved base. */
@@ -110,7 +139,9 @@ export function resolveLinks(board: HarvestBoardRequest, snapshot: string): Reso
   const resolved: ResolvedLink[] = [];
   for (const link of parseSnapshotLinks(snapshot)) {
     const url = resolveHref(link.href, base);
-    if (url) resolved.push({ title: link.title, url });
+    if (!url) continue;
+    const title = isGenericTitle(link.title) ? titleFromUrl(url) ?? link.title : link.title;
+    resolved.push({ title, url });
   }
   return resolved;
 }

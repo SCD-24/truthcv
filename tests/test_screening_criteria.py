@@ -12,6 +12,7 @@ from screening.criteria import (
     eor_compatible,
     evaluate,
     evaluate_hard_requirements,
+    holds_for_review,
     language_compatible,
     remote_compatible,
     role_type_compatible,
@@ -391,3 +392,21 @@ class TestEvaluateHardRequirements:
             "eor_stated": "yes",
         }
         assert evaluate_hard_requirements(profile, evidence) == ("", "")
+
+
+class TestHoldsForReview:
+    @pytest.mark.parametrize("label", ["Remote model", "remote_model", "remote-model"])
+    def test_remote_labels_held(self, label):
+        assert holds_for_review("rejected", label, "unstated") is True
+
+    @pytest.mark.parametrize("arrangement", ["hybrid", "on_site", "remote", ""])
+    def test_stated_arrangement_not_held(self, arrangement):
+        assert holds_for_review("rejected", "remote_model", arrangement) is False
+
+    @pytest.mark.parametrize("criterion", ["working_language", "salary_floor", ""])
+    def test_other_criteria_not_held(self, criterion):
+        assert holds_for_review("rejected", criterion, "unstated") is False
+
+    @pytest.mark.parametrize("verdict", ["passed", "deferred", ""])
+    def test_non_rejected_not_held(self, verdict):
+        assert holds_for_review(verdict, "remote_model", "unstated") is False

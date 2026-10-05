@@ -197,6 +197,10 @@ their application history is this tool surface. You have the following tools:
   salary floor, employment country, rejected role types, or EOR) is stored
   as an automatic rejection (the verdict is downgraded to `rejected`) — not
   an error to retry, and never fabricate `remote`/`""` to get past it.
+  A posting that does not state its remote arrangement (`remoteArrangement`
+  `"unstated"`) does NOT fail a remote-model requirement: if nothing else
+  fails, use verdict `"deferred"` so the operator decides; never `"rejected"`
+  on remote model alone when it is unstated.
   A posting gets one record per profile. When the call comes back with
   `"created": false`, nothing new was written and the existing record is
   returned; your verdict is discarded. If that record is under the SAME

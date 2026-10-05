@@ -112,7 +112,16 @@ export function EditBoardDialog({
               size="small"
               value={searchUrl}
               onChange={(e) => setSearchUrl(e.target.value)}
-              helperText="e.g. https://www.adzuna.de/search?q={keywords}&w={location} — {keywords} required, {location} optional"
+              helperText={
+                searchUrl.trim() && !searchUrl.includes("{location}")
+                  ? "No {location} in this URL — your profiles' locations won't be applied on this board."
+                  : "e.g. https://www.adzuna.de/search?q={keywords}&w={location} — {keywords} required, {location} optional"
+              }
+              slotProps={{
+                formHelperText: {
+                  sx: searchUrl.trim() && !searchUrl.includes("{location}") ? { color: "warning.main" } : undefined,
+                },
+              }}
             />
           )}
           {board.mode === "direct" && (
