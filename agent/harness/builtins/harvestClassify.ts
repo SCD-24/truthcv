@@ -13,7 +13,7 @@
 import type { BlockKind, HarvestBoardRequest, HarvestBoardResult, HarvestedPosting } from './harvestTypes.js';
 import { GOOGLE_HOST_RE, extractDorkPostings, parseDorkTarget } from './harvestDork.js';
 import { compactSnapshot } from './harvestExcerpt.js';
-import { globToRegExp, resolveLinks, resolveSnapshotBase, sameSiteLinkQualifies, stripHash, type ResolvedLink } from './harvestLinks.js';
+import { globToRegExp, hasEmptyWildcardTail, hasLetter, hasPaginationSegment, isNumericTitle, resolveLinks, resolveSnapshotBase, sameSiteLinkQualifies, stripHash, type ResolvedLink } from './harvestLinks.js';
 
 /** Cap on postings returned per board — bounds the structured result's size. */
 const MAX_POSTINGS_PER_BOARD = 50;
@@ -142,10 +142,25 @@ function extractAtsPostings(links: ResolvedLink[]): HarvestedPosting[] {
   return dedupeCap(entries);
 }
 
-/** Tier 2: links matching the board's own `postingUrlPattern` glob. */
-function extractPatternPostings(links: ResolvedLink[], pattern: string): HarvestedPosting[] {
+/** Whether `link` passes tier 2's generic guards: no pagination segment, a
+ * non-empty final wildcard, not a self link (`excludeHrefs`), and a title
+ * with a letter that is not purely digits. */
+function passesPatternGuards(link: ResolvedLink, pattern: string, excludeHrefs: ReadonlySet<string>): boolean {
+  if (hasPaginationSegment(link.url.pathname)) return false;
+  if (hasEmptyWildcardTail(pattern, link.url.href)) return false;
+  if (excludeHrefs.has(stripHash(link.url.href))) return false;
+  return hasLetter(link.title) && !isNumericTitle(link.title);
+}
+
+/** Tier 2: links matching the board's own `postingUrlPattern` glob and the
+ * generic guards in {@link passesPatternGuards}, whatever the pattern. */
+function extractPatternPostings(links: ResolvedLink[], board: HarvestBoardRequest, baseUrl: string): HarvestedPosting[] {
+  const pattern = board.postingUrlPattern ?? '';
   const re = globToRegExp(pattern);
-  const entries = links.filter((l) => re.test(l.url.href)).map((l) => ({ ...l, ats: 'board-pattern' }));
+  const excludeHrefs = new Set([stripHash(baseUrl), stripHash(board.url)]);
+  const entries = links
+    .filter((l) => re.test(l.url.href) && passesPatternGuards(l, pattern, excludeHrefs))
+    .map((l) => ({ ...l, ats: 'board-pattern' }));
   return dedupeCap(entries);
 }
 
@@ -246,7 +261,9 @@ export function blockedResult(board: HarvestBoardRequest, note: string, blockKin
 /**
  * Extract postings from a `browser_snapshot` accessibility tree, trying
  * tiers in order and returning the first that yields anything: (1) known ATS
- * URL shapes; (2) `board.postingUrlPattern`, when set; (3) the general
+ * URL shapes; (2) `board.postingUrlPattern`, when set, minus links failing
+ * generic guards (pagination segment, empty trailing wildcard, self link,
+ * letterless or numeric title); (3) the general
  * same-site job-link rule, which counts only with ≥{@link MIN_SAME_SITE_LINKS}
  * distinct qualifying URLs. Every candidate link is parsed and resolved by
  * harvestLinks.ts, covering both the same-line and Playwright indented
@@ -256,11 +273,11 @@ function extractPostings(board: HarvestBoardRequest, snapshot: string): Harveste
   const links = resolveLinks(board, snapshot);
   const atsPostings = extractAtsPostings(links);
   if (atsPostings.length > 0) return atsPostings;
+  const base = resolveSnapshotBase(board, snapshot);
   if (board.postingUrlPattern) {
-    const patternPostings = extractPatternPostings(links, board.postingUrlPattern);
+    const patternPostings = extractPatternPostings(links, board, base);
     if (patternPostings.length > 0) return patternPostings;
   }
-  const base = resolveSnapshotBase(board, snapshot);
   const dorkTarget = parseDorkTarget(base);
   if (dorkTarget) {
     const dorkPostings = extractDorkPostings(links, dorkTarget);

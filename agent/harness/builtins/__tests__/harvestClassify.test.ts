@@ -87,6 +87,88 @@ describe('isExplicitlyEmpty', () => {
   });
 });
 
+/** Posting URLs tier 2 keeps for a board with `pattern`, given link lines. */
+function patternUrls(url: string, pattern: string, links: Array<[string, string]>, pageUrl?: string): string[] {
+  const lines = links.map(([title, href], i) => `- link "${title}" [ref=e${i}]: ${href}`);
+  if (pageUrl) lines.unshift(`- Page URL: ${pageUrl}`);
+  const result = classifySnapshot({ board: 'B', url, postingUrlPattern: pattern }, lines.join('\n'));
+  return result.postings.filter((p) => p.ats === 'board-pattern').map((p) => p.url);
+}
+
+describe('classifySnapshot tier 2 generic guards', () => {
+  it('rejects pagination segments under a wildcard-prefixed pattern', () => {
+    const urls = patternUrls('https://acme.example/careers', 'https://acme.example/*jobs/*', [
+      ['Next', 'https://acme.example/jobs/page/2'],
+      ['Weiter', 'https://acme.example/en/jobs/seite-3'],
+      ['Real', 'https://acme.example/jobs/senior-backend-engineer'],
+    ]);
+    expect(urls).toEqual(['https://acme.example/jobs/senior-backend-engineer']);
+  });
+
+  it('rejects an empty trailing wildcard', () => {
+    const urls = patternUrls('https://acme.example/careers', 'https://acme.example/jobs/*', [
+      ['Page two', 'https://acme.example/jobs/?page=2'],
+      ['All jobs', 'https://acme.example/jobs/'],
+      ['Real', 'https://acme.example/jobs/senior-backend-engineer'],
+    ]);
+    expect(urls).toEqual(['https://acme.example/jobs/senior-backend-engineer']);
+  });
+
+  it('keeps a link under a double-star tail pattern', () => {
+    const urls = patternUrls('https://acme.example/careers', 'https://acme.example/jobs/**', [
+      ['Real', 'https://acme.example/jobs/senior-engineer'],
+    ]);
+    expect(urls).toEqual(['https://acme.example/jobs/senior-engineer']);
+  });
+
+  it('keeps query-keyed postings and rejects an empty query value', () => {
+    const urls = patternUrls('https://acme.example/careers', 'https://acme.example/job?id=*', [
+      ['Real', 'https://acme.example/job?id=123'],
+      ['Empty', 'https://acme.example/job?id='],
+    ]);
+    expect(urls).toEqual(['https://acme.example/job?id=123']);
+  });
+
+  it('rejects an empty tail after a wildcard-prefixed segment', () => {
+    const urls = patternUrls('https://startupjobs.de/jobs', 'https://startupjobs.de/*jobs/*', [
+      ['Index', 'https://startupjobs.de/en/jobs/'],
+    ]);
+    expect(urls).toEqual([]);
+  });
+
+  it('rejects links equal to the board URL or the snapshot page URL', () => {
+    const urls = patternUrls('https://acme.example/jobs/all', 'https://acme.example/jobs/*', [
+      ['Self board', 'https://acme.example/jobs/all#top'],
+      ['Self page', 'https://acme.example/jobs/current'],
+      ['Real', 'https://acme.example/jobs/other'],
+    ], 'https://acme.example/jobs/current');
+    expect(urls).toEqual(['https://acme.example/jobs/other']);
+  });
+
+  it('rejects numeric and letterless titles but keeps a short one', () => {
+    const urls = patternUrls('https://acme.example/careers', 'https://acme.example/jobs/*', [
+      ['2', 'https://acme.example/jobs/a1'],
+      ['»', 'https://acme.example/jobs/b2'],
+      ['CTO', 'https://acme.example/jobs/c3'],
+    ]);
+    expect(urls).toEqual(['https://acme.example/jobs/c3']);
+  });
+
+  it('handles the startupjobs.de and talentsift.de presets', () => {
+    const startup = patternUrls('https://startupjobs.de/jobs', 'https://startupjobs.de/*jobs/*', [
+      ['One', 'https://startupjobs.de/jobs/3f2a9c1e-uuid'],
+      ['Two', 'https://startupjobs.de/en/jobs/3f2a9c1e-uuid'],
+      ['Page', 'https://startupjobs.de/en/jobs/page/2'],
+    ]);
+    expect(startup).toEqual(['https://startupjobs.de/jobs/3f2a9c1e-uuid', 'https://startupjobs.de/en/jobs/3f2a9c1e-uuid']);
+    const talent = patternUrls('https://talentsift.de/jobs', 'https://talentsift.de/jobs/*', [
+      ['Dev', 'https://talentsift.de/jobs/senior-dev-berlin'],
+      ['Page', 'https://talentsift.de/jobs/?page=2'],
+    ]);
+    expect(talent).toEqual(['https://talentsift.de/jobs/senior-dev-berlin']);
+  });
+});
+
 describe('classifySnapshot link extraction', () => {
   const board = { board: 'Acme', url: 'https://acme.example/careers' };
 
