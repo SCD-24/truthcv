@@ -6,10 +6,15 @@
  */
 import { harvestPostings } from '../builtins/harvestPostings.js';
 import type { BrowserToolCall, HarvestBoardRequest, HarvestBoardResult } from '../builtins/harvestPostings.js';
+import { isGoogleInterstitial } from '../builtins/harvestClassify.js';
 import type { Candidate, DiscoveryChannel, McpCall } from './types.js';
 
 /** Max keywords typed into a direct board's search box. */
 const MAX_DIRECT_KEYWORDS = 5;
+/** Pause between consecutive dork searches, to avoid tripping Google's rate limiting. */
+const DORK_PACING_MS = 4000;
+/** Consecutive Google-blocked dorks after which the remaining dorks are skipped. */
+const MAX_CONSECUTIVE_GOOGLE_BLOCKS = 2;
 /** Marker of Google's CAPTCHA interstitial. */
 const GOOGLE_SORRY = 'google.com/sorry';
 
@@ -25,9 +30,37 @@ interface Entry {
 type Coverage = ReturnType<typeof coverageFor>;
 
 /** Coverage statuses from least to most severe (used to aggregate a board's profiles). */
-const SEVERITY = ['empty', 'extraction_failed', 'login_walled', 'blocked'];
+const SEVERITY = ['skipped', 'empty', 'extraction_failed', 'login_walled', 'blocked'];
 /** Board name the feed channel's failure is recorded under. */
 const FEED_BOARD = 'feed';
+
+/** Harvest outcome for one entry; `skipped` when never searched. */
+interface Harvested {
+  r?: HarvestBoardResult;
+  skipped?: boolean;
+}
+
+/** Options for {@link discover}. */
+export interface DiscoverOptions {
+  /** Delay function (injectable for tests). */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/** Default setTimeout-based sleep. */
+const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Coverage recorded for a dork never searched because Google kept blocking. */
+const SKIPPED_COVERAGE: Coverage = {
+  status: 'skipped',
+  reason: `not searched: Google blocked ${MAX_CONSECUTIVE_GOOGLE_BLOCKS} consecutive dorks; stopped to avoid further rate-limiting`,
+  tier: '',
+  found: 0,
+};
+
+/** True when a harvest result is a Google block/CAPTCHA interstitial. */
+function isGoogleBlock(r: HarvestBoardResult | undefined): boolean {
+  return r?.outcome === 'blocked' && (isGoogleInterstitial(r.url) || r.url.includes(GOOGLE_SORRY) || /google/i.test(r.note ?? ''));
+}
 
 /** Result of {@link discover}. */
 export interface DiscoveryOutcome {
@@ -199,29 +232,57 @@ async function filterUnscreened(mcp: McpCall, map: Map<string, Candidate>): Prom
 }
 
 /**
+ * Harvest dork entries sequentially with pacing; after too many consecutive Google blocks the rest are skipped.
+ *
+ * @param dorks Dork entries in order.
+ * @param call Browser tool caller.
+ * @param sleep Delay function.
+ * @param errors Collects harvest tool errors.
+ */
+async function harvestDorks(dorks: Entry[], call: BrowserToolCall, sleep: (ms: number) => Promise<void>, errors: string[]): Promise<Harvested[]> {
+  const out: Harvested[] = [];
+  let blocks = 0;
+  for (let i = 0; i < dorks.length; i++) {
+    if (blocks >= MAX_CONSECUTIVE_GOOGLE_BLOCKS) { out.push({ skipped: true }); continue; }
+    if (i > 0) await sleep(DORK_PACING_MS);
+    const res = await harvestPostings({ boards: [dorks[i].request] }, call, false);
+    if (res.isError) errors.push(res.content);
+    const r = res.isError ? undefined : parseResults(res.content)[0];
+    blocks = isGoogleBlock(r) ? blocks + 1 : 0;
+    out.push({ r });
+  }
+  return out;
+}
+
+/**
  * Run discovery for one run.
  *
  * @param jobConfig Parsed `agent-config.js job_config` JSON.
  * @param runId The run to attribute coverage to.
  * @param call Browser tool caller used by the harvest core.
  * @param mcp MCP tool caller (coverage, dedupe filter).
+ * @param options Optional overrides (sleep).
  */
-export async function discover(jobConfig: Record<string, unknown>, runId: string, call: BrowserToolCall, mcp: McpCall): Promise<DiscoveryOutcome> {
+export async function discover(jobConfig: Record<string, unknown>, runId: string, call: BrowserToolCall, mcp: McpCall, options: DiscoverOptions = {}): Promise<DiscoveryOutcome> {
+  const sleep = options.sleep ?? defaultSleep;
   const entries = [...directEntries(jobConfig), ...dorkEntries(jobConfig)];
   const map = new Map<string, Candidate>();
   const errors: string[] = [];
   await runFeed(jobConfig, mcp, runId, map, errors);
-  let results: HarvestBoardResult[] = [];
-  if (entries.length) {
-    const res = await harvestPostings({ boards: entries.map((e) => e.request) }, call, false);
-    results = res.isError ? [] : parseResults(res.content);
+  const directs = entries.filter((e) => e.channel === 'direct');
+  let results: Harvested[] = [];
+  if (directs.length) {
+    const res = await harvestPostings({ boards: directs.map((e) => e.request) }, call, false);
     if (res.isError) errors.push(res.content);
+    const parsed = res.isError ? [] : parseResults(res.content);
+    results = directs.map((_, i) => ({ r: parsed[i] }));
   }
+  results.push(...(await harvestDorks(entries.filter((e) => e.channel === 'dork'), call, sleep, errors)));
   const direct = new Map<string, Coverage[]>();
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
-    const r = results[i];
-    const cov = coverageFor(r);
+    const { r, skipped } = results[i] ?? {};
+    const cov = skipped ? SKIPPED_COVERAGE : coverageFor(r);
     for (const p of r?.postings ?? []) addCandidate(map, p.url, p.title, e.channel, e.profiles);
     if (e.channel === 'direct') {
       direct.set(e.coverageBoard, [...(direct.get(e.coverageBoard) ?? []), cov]);

@@ -11,11 +11,12 @@ are searched unless the operator has disabled them, with the operator's
 recognised extras added on top of whatever is enabled.
 
 Google's query box has a hard word-limit (~32 words); a query built from a
-large keyword list plus locations/remote/negatives can blow past it, and a
+large keyword list plus locations/remote can blow past it, and a
 truncated query silently drops the trailing filters. Discovery therefore
 renders TITLES (job-title terms), not free-form keywords, chunked so each
-rendered query fits the budget alongside location/remote/negative terms —
-see compose_profile_queries.
+rendered query fits the budget alongside location/remote terms — see
+compose_profile_queries. There are NO negative terms: rejected role types are
+enforced by screening (screening/criteria.py role_type_compatible), not search.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from itertools import zip_longest
 from urllib.parse import quote_plus
 
 from agentconfig.boards import DEFAULT_BOARD_DOMAINS, is_api_source, resolve_domain, resolve_signin_url
+from agentconfig.direct_board_presets import preset_for
 from agentconfig.store import JobBoard, JobProfile
 
 # Google's search box silently truncates a query beyond roughly this many
@@ -51,7 +53,7 @@ TITLE_NOUNS = frozenset({
 })
 
 # Days counted back from today for each recency letter; an unset or invalid
-# letter uses the "d" (past day) offset so unset searches only fresh postings.
+# letter uses the "w" (past week) offset.
 RECENCY_DAYS = {"d": 1, "w": 7, "m": 30, "y": 365}
 
 
@@ -60,11 +62,11 @@ def recency_operator(dork_recency: str | None, today: date | None = None) -> str
 
     d/w/m/y count back 1/7/30/365 days from ``today`` (default: today's UTC
     date); "none" yields ""; anything invalid (or None, or a legacy "h")
-    uses the "d" offset.
+    uses the "w" offset.
     """
     if dork_recency == "none":
         return ""
-    days = RECENCY_DAYS.get(dork_recency, RECENCY_DAYS["d"])
+    days = RECENCY_DAYS.get(dork_recency, RECENCY_DAYS["w"])
     today = today or datetime.now(timezone.utc).date()
     return f"after:{(today - timedelta(days=days)).isoformat()}"
 
@@ -146,23 +148,6 @@ def _chunk_titles(titles: list[str], budget: int) -> list[list[str]]:
     return chunks
 
 
-def _fit_negatives(negative_terms: list[str], fixed_words: int, titles: list[str]) -> list[str]:
-    """Drop trailing negative terms until the longest title fits the remaining budget.
-
-    Negatives are the lowest-priority filter: they narrow results but titles
-    drive discovery at all, so a negative term is sacrificed before a title
-    query is allowed to blow the word budget.
-    """
-    longest_title_words = max((_word_count(t) for t in titles), default=0)
-    terms = list(negative_terms)
-    while terms:
-        budget = MAX_QUERY_WORDS - fixed_words - _word_count(" ".join(terms))
-        if longest_title_words <= budget:
-            break
-        terms.pop()
-    return terms
-
-
 def _resolve_sources(boards: list[JobBoard] | None) -> list[str]:
     """Resolve dork-mode boards to site domains.
 
@@ -238,11 +223,12 @@ def compose_direct_boards(
     for board in boards or []:
         if getattr(board, "mode", "") != "direct" or not getattr(board, "enabled", True):
             continue
+        preset = preset_for(board.source) or {}
         results.append({
             "url": board.source,
             "signin_url": resolve_signin_url(board.source, board.signin_url),
-            "search_url": board.search_url,
-            "posting_url_pattern": board.posting_url_pattern,
+            "search_url": board.search_url or preset.get("search_url", ""),
+            "posting_url_pattern": board.posting_url_pattern or preset.get("posting_url_pattern", ""),
             "profiles": profile_entries,
         })
     return results
@@ -250,7 +236,7 @@ def compose_direct_boards(
 
 def compose_profile_queries(
     profile: JobProfile,
-    recency: str = "d",
+    recency: str = "w",
     sources: list[JobBoard | str] | None = None,
     today: date | None = None,
 ) -> list[dict]:
@@ -258,7 +244,8 @@ def compose_profile_queries(
 
     Titles (see ``_dork_titles``), not the full keyword list, drive the
     ``site:`` query so it stays inside Google's ~32-word query limit
-    (MAX_QUERY_WORDS) alongside the location/remote/negative filters — a
+    (MAX_QUERY_WORDS) alongside the location/remote filters (no negative terms: rejected role
+    types are enforced by screening, not search) — a
     query that overflows the limit is truncated by Google, silently dropping
     those filters. When titles alone would not fit one query, they are
     chunked (see ``_chunk_titles``) into several queries per source, ordered
@@ -281,20 +268,17 @@ def compose_profile_queries(
 
     location_group = _or_group(profile.locations)
     remote_group = _remote_group(profile.remote_model)
-    negative_terms = [f'-"{t}"' for t in profile.rejected_role_types]
 
     operator = recency_operator(recency, today)
     fixed_words = 1 + _word_count(location_group) + _word_count(remote_group) + _word_count(operator)
-    negative_terms = _fit_negatives(negative_terms, fixed_words, titles)
-    negatives = " ".join(negative_terms)
-    budget = max(MAX_QUERY_WORDS - fixed_words - _word_count(negatives), 1)
+    budget = max(MAX_QUERY_WORDS - fixed_words, 1)
     chunks = _chunk_titles(titles, budget)
 
     results = []
     for chunk in chunks:
         title_group = _or_group(chunk)
         results.extend(
-            _profile_queries_for_chunk(profile, domains, location_group, remote_group, title_group, negatives, operator)
+            _profile_queries_for_chunk(profile, domains, location_group, remote_group, title_group, operator)
         )
     return results
 
@@ -305,14 +289,13 @@ def _profile_queries_for_chunk(
     location_group: str,
     remote_group: str,
     title_group: str,
-    negatives: str,
     operator: str,
 ) -> list[dict]:
     """Compose one query + URL per domain for a single title chunk."""
     results = []
     for domain in domains:
         parts = [f"site:{domain}"] + [
-            p for p in (location_group, remote_group, title_group, negatives, operator) if p
+            p for p in (location_group, remote_group, title_group, operator) if p
         ]
         query = " ".join(parts)
         url = f"https://www.google.com/search?q={quote_plus(query)}"
@@ -362,7 +345,7 @@ def _dedupe_by_url(entries: list[dict]) -> list[dict]:
 
 def compose_queries(
     profiles: list[JobProfile],
-    recency: str = "d",
+    recency: str = "w",
     sources: list[JobBoard | str] | None = None,
     today: date | None = None,
 ) -> list[dict]:
