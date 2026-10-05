@@ -212,12 +212,13 @@ def compose_direct_boards(
         {
             "profile": profile.name,
             "keywords": profile.keywords,
+            "title_keywords": _dork_titles(profile),
             "locations": profile.locations,
             "rejected_role_types": profile.rejected_role_types,
             "remote_model": profile.remote_model,
         }
         for profile in profiles
-        if profile.enabled and profile.keywords
+        if profile.enabled and (profile.keywords or profile.title_keywords)
     ]
     results: list[dict] = []
     for board in boards or []:

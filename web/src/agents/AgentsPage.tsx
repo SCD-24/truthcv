@@ -30,6 +30,7 @@ import {
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { SettingsModal } from "../settings/SettingsModal";
 import { RunCoverage } from "./RunCoverage";
+import { RunCounters } from "./RunCounters";
 import { RunItemErrors } from "./RunItemErrors";
 import { RunDetailModal } from "./RunDetailModal";
 import {
@@ -613,6 +614,7 @@ function RunSummaryRow({
   const capLabel = run.applyCap > 0 ? `${run.applicationsSubmitted}/${run.applyCap}` : `${run.applicationsSubmitted}`;
   
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return;
     if ((e.key === "Enter" || e.key === " ") && onSelect) {
       e.preventDefault();
       onSelect();
@@ -664,33 +666,7 @@ function RunSummaryRow({
           <Chip size="small" variant="outlined" label={run.trigger === "manual" ? "manual" : "scheduled"} />
         )}
       </Stack>
-      <Stack direction="row" spacing={2} sx={{ mt: 0.5, flexWrap: "wrap" }}>
-        <Typography variant="caption" color="text.secondary">
-          Postings seen: {run.postingsSeen}
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          Screenings recorded: {run.screeningsRecorded}
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          Blocked: {run.blockedCount}
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          Queued for approval: {run.queuedForApproval}
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          Applied: {capLabel}
-        </Typography>
-        {run.overCapWrites > 0 && (
-          <Typography variant="caption" color="warning.main">
-            Over cap: {run.overCapWrites}
-          </Typography>
-        )}
-        {(run.itemsFailed ?? 0) > 0 && (
-          <Typography variant="caption" color="warning.main">
-            Items failed: {run.itemsFailed}
-          </Typography>
-        )}
-      </Stack>
+      <RunCounters run={run} capLabel={capLabel} isRunning={isRunning} />
       <RunCoverage coverage={run.discoveryCoverage} status={run.status} />
       {run.stoppedReason && (
         <Typography

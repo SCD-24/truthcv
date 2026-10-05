@@ -183,7 +183,10 @@ const SCREENING_SYSTEM_PROMPT =
   '"" if not applicable). Never ' +
   'guess a verdict for a posting you could not read — use screeningBlocker instead. Never ' +
   'report a stated value the posting does not itself state, and never copy it from the ' +
-  'profile — judge and report only what the posting says.';
+  'profile — judge and report only what the posting says. ' +
+  'A posting that does not state its remote arrangement (remoteArrangement "unstated") does NOT ' +
+  'fail a remote-model requirement: if nothing else fails, use verdict "deferred" so the operator ' +
+  'decides; never "rejected" on remote model alone when it is unstated.';
 
 /** Build the isolated conversation's one user turn from the tool arguments. */
 function buildScreeningPrompt(args: ScreenPostingArgs): string {

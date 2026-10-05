@@ -55,6 +55,40 @@ def test_list_runs_summaries_and_default_limit(monkeypatch):
         assert k not in s
 
 
+class _S:
+    def __init__(self, run_id, blocker=""):
+        self.run_id = run_id
+        self.screening_blocker = blocker
+        self.approval = ""
+
+
+def test_summary_counters_derived_from_stores(monkeypatch):
+    monkeypatch.setattr(
+        dr._screening_store, "load_all", lambda: [_S("r1"), _S("r1", "unreadable"), _S("other")]
+    )
+    monkeypatch.setattr(dr._app_store, "load_all", lambda: [])
+    monkeypatch.setattr(
+        dr._runs_store,
+        "list_page",
+        lambda limit, offset: ([_run(status="running", screenings_recorded=9)], 1),
+    )
+    s = dr.list_runs()["runs"][0]
+    assert s["screenings_recorded"] == 2 and s["blocked_count"] == 1
+    _seed(monkeypatch, _run(status="running"))
+    assert dr.get_run("r1")["screenings_recorded"] == 2
+
+
+def test_summary_falls_back_to_stored_on_store_failure(monkeypatch):
+    def boom():
+        raise OSError("x")
+
+    monkeypatch.setattr(dr._screening_store, "load_all", boom)
+    monkeypatch.setattr(dr._app_store, "load_all", lambda: [])
+    _seed(monkeypatch, _run(screenings_recorded=9, blocked_count=3))
+    out = dr.get_run("r1")
+    assert out["screenings_recorded"] == 9 and out["blocked_count"] == 3
+
+
 def test_get_run_unknown(monkeypatch):
     monkeypatch.setattr(dr._runs_store, "get", lambda rid: None)
     assert dr.get_run("nope") == {}

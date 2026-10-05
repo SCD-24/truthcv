@@ -242,6 +242,30 @@ def test_direct_boards_profile_entry_carries_remote_model_on_the_wire(client, da
     assert profile_entry["remoteModel"] == "remote"
 
 
+def test_direct_boards_profile_entry_carries_title_keywords_on_the_wire(client, data_dir):
+    """Regression: DirectBoardProfileModel used to drop title_keywords."""
+    client.put(
+        "/api/agent/config",
+        json={
+            "jobBoards": [{"source": "custom-direct.example.com", "mode": "direct"}],
+            "profiles": [
+                {
+                    "name": "both",
+                    "enabled": True,
+                    "keywords": ["backend"],
+                    "titleKeywords": ["Data Engineer"],
+                },
+                {"name": "titleonly", "enabled": True, "titleKeywords": ["Platform Engineer"]},
+            ],
+        },
+    )
+    got = client.get("/api/agent/config").json()
+    board = next(b for b in got["directBoards"] if b["url"] == "custom-direct.example.com")
+    entries = {p["profile"]: p for p in board["profiles"]}
+    assert entries["both"]["titleKeywords"] == ["Data Engineer"]
+    assert entries["titleonly"]["titleKeywords"] == ["Platform Engineer"]
+
+
 def test_direct_boards_carries_posting_url_pattern(client, data_dir):
     """postingUrlPattern set on a direct-mode board reaches GET's directBoards."""
     client.put(

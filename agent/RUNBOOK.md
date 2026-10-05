@@ -838,7 +838,10 @@ is set, and the record never reaches the approval queue. This is not an
 error to retry and not a bug to work around: it is the gate doing its job.
 Do not vary the profile, the
 arrangement, or the language and call it again to see if a different
-combination gets through.
+combination gets through. A posting that does not state its remote arrangement
+(remoteArrangement "unstated") does NOT fail a remote-model requirement: if
+nothing else fails, use verdict "deferred" so the operator decides; never
+"rejected" on remote model alone when it is unstated.
 
 Fabricating `remote_arrangement` as `"remote"` when the posting doesn't say
 so, or leaving `language_requirement` empty when the posting names one, to

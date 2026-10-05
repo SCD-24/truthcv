@@ -48,6 +48,7 @@ from screening.criteria import validate_language_requirement as _validate_langua
 from screening.criteria import validate_eor_stated as _validate_eor_stated
 from screening.criteria import validate_stated_text as _validate_stated_text
 from screening.criteria import evaluate_hard_requirements as _evaluate_hard_requirements
+from screening.criteria import holds_for_review as _holds_for_review
 import screening.jev as _jev
 from services.screenings import create_screening as create_or_get_screening
 import services.applications as _applications_service
@@ -619,6 +620,15 @@ def record_screening(
     fields["company"] = _validate_company_name(company)
     validated_blocker = _validate_blocker(screening_blocker) if screening_blocker else ""
     validated_verdict = _validate_verdict(verdict, blocker=validated_blocker)
+    if not validated_blocker and _holds_for_review(
+        validated_verdict, failing_criterion, remote_arrangement
+    ):
+        validated_verdict = "deferred"
+        failing_criterion = ""
+        reason = (
+            "Remote arrangement not stated in the posting — held for your "
+            "review. " + reason
+        )
     fields["verdict"] = validated_verdict
     if validated_verdict in ("passed", "deferred") and not validated_blocker:
         # This is about to queue for the operator's decision: see
