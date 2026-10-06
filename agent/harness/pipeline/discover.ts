@@ -12,8 +12,10 @@ import type { Candidate, DiscoveryChannel, McpCall } from './types.js';
 
 /** Max keywords typed into a direct board's search box. */
 const MAX_DIRECT_KEYWORDS = 5;
-/** Pause between consecutive dork searches, to avoid tripping Google's rate limiting. */
-const DORK_PACING_MS = 4000;
+/** Minimum pause (ms) between consecutive dork searches, to avoid tripping Google's rate limiting. */
+const DORK_PACING_MIN_MS = 4000;
+/** Maximum pause (ms) between consecutive dork searches. */
+const DORK_PACING_MAX_MS = 7000;
 /** Consecutive Google-blocked dorks after which the remaining dorks are skipped. */
 const MAX_CONSECUTIVE_GOOGLE_BLOCKS = 2;
 /** Marker of Google's CAPTCHA interstitial. */
@@ -45,6 +47,19 @@ interface Harvested {
 export interface DiscoverOptions {
   /** Delay function (injectable for tests). */
   sleep?: (ms: number) => Promise<void>;
+  /** Random source in [0, 1) (injectable for tests). Defaults to Math.random. */
+  random?: () => number;
+}
+
+/**
+ * Draw a pacing delay in [DORK_PACING_MIN_MS, DORK_PACING_MAX_MS] inclusive.
+ *
+ * @param random Random source in [0, 1).
+ */
+function dorkPacingMs(random: () => number): number {
+  const ms = DORK_PACING_MIN_MS + Math.floor(random() * (DORK_PACING_MAX_MS - DORK_PACING_MIN_MS + 1));
+  if (Number.isNaN(ms)) return DORK_PACING_MIN_MS;
+  return Math.min(DORK_PACING_MAX_MS, Math.max(DORK_PACING_MIN_MS, ms));
 }
 
 /** Default setTimeout-based sleep. */
@@ -276,14 +291,15 @@ async function harvestOne(entry: Entry, call: BrowserToolCall, errors: string[])
  * @param call Browser tool caller.
  * @param sleep Delay function.
  * @param errors Collects harvest tool errors.
+ * @param random Random source for pacing delays.
  */
-async function harvestDorks(dorks: Entry[], call: BrowserToolCall, sleep: (ms: number) => Promise<void>, errors: string[]): Promise<Harvested[]> {
+async function harvestDorks(dorks: Entry[], call: BrowserToolCall, sleep: (ms: number) => Promise<void>, errors: string[], random: () => number): Promise<Harvested[]> {
   const out: Harvested[] = [];
   let blocks = 0;
   let consentTried = false;
   for (let i = 0; i < dorks.length; i++) {
     if (blocks >= MAX_CONSECUTIVE_GOOGLE_BLOCKS) { out.push({ skipped: true }); continue; }
-    if (i > 0) await sleep(DORK_PACING_MS);
+    if (i > 0) await sleep(dorkPacingMs(random));
     let { r } = await harvestOne(dorks[i], call, errors);
     if (!consentTried && isGoogleBlock(r) && r && isConsentPage(r.url)) {
       consentTried = true;
@@ -306,6 +322,7 @@ async function harvestDorks(dorks: Entry[], call: BrowserToolCall, sleep: (ms: n
  */
 export async function discover(jobConfig: Record<string, unknown>, runId: string, call: BrowserToolCall, mcp: McpCall, options: DiscoverOptions = {}): Promise<DiscoveryOutcome> {
   const sleep = options.sleep ?? defaultSleep;
+  const random = options.random ?? Math.random;
   const entries = [...directEntries(jobConfig), ...dorkEntries(jobConfig)];
   const map = new Map<string, Candidate>();
   const errors: string[] = [];
@@ -318,7 +335,7 @@ export async function discover(jobConfig: Record<string, unknown>, runId: string
     const parsed = res.isError ? [] : parseResults(res.content);
     results = directs.map((_, i) => ({ r: parsed[i] }));
   }
-  results.push(...(await harvestDorks(entries.filter((e) => e.channel === 'dork'), call, sleep, errors)));
+  results.push(...(await harvestDorks(entries.filter((e) => e.channel === 'dork'), call, sleep, errors, random)));
   const direct = new Map<string, Coverage[]>();
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
