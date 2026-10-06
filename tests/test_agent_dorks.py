@@ -12,22 +12,25 @@ from agentconfig.store import JobBoard, JobProfile
 
 def test_multi_word_keyword_is_quoted_single_word_is_not():
     p = JobProfile(name="p", enabled=True, title_keywords=["platform engineer", "SRE"])
-    q = dorks.compose_queries([p], None, ["ashby"])[0]["query"]
-    assert '"platform engineer"' in q
-    assert "SRE" in q
-    assert '"SRE"' not in q
+    q1, q2 = [e["query"] for e in dorks.compose_queries([p], None, ["ashby"])]
+    assert '"platform engineer"' in q1
+    assert "SRE" in q2
+    assert '"SRE"' not in q2
 
 
-def test_multiple_keywords_and_locations_become_separate_or_groups():
+def test_multiple_keywords_become_separate_queries_and_locations_an_or_group():
     p = JobProfile(
         name="p",
         enabled=True,
         keywords=["backend", "platform"],
         locations=["Berlin", "Remote"],
     )
-    q = dorks.compose_queries([p], None, ["ashby"])[0]["query"]
-    assert "(backend OR platform)" in q
-    assert "(Berlin OR Remote)" in q
+    qs = [e["query"] for e in dorks.compose_queries([p], "none", ["ashby"])]
+    assert qs == [
+        "site:jobs.ashbyhq.com (Berlin OR Remote) backend",
+        "site:jobs.ashbyhq.com (Berlin OR Remote) platform",
+    ]
+    assert all(" OR backend" not in q and "backend OR" not in q for q in qs)
 
 
 def test_preferred_source_containing_dot_used_verbatim():
@@ -86,18 +89,50 @@ def test_configuring_a_default_board_explicitly_does_not_duplicate_it():
     assert len(ashby_entries) == 1
 
 
-def test_rejected_role_types_never_render_as_negatives():
+def test_rejected_role_types_render_as_negatives_before_after_operator():
     p = JobProfile(
         name="p",
         enabled=True,
-        keywords=["backend"],
+        title_keywords=["A", "B"],
         rejected_role_types=["contract", "unpaid internship"],
     )
-    q = dorks.compose_queries([p], None, ["ashby"])[0]["query"]
-    assert '-"' not in q
+    qs = [e["query"] for e in dorks.compose_queries([p], "w", ["ashby"], today=TODAY)]
+    assert qs == [
+        'site:jobs.ashbyhq.com A -contract -"unpaid internship" after:2026-03-03',
+        'site:jobs.ashbyhq.com B -contract -"unpaid internship" after:2026-03-03',
+    ]
 
 
-def test_six_titles_fit_one_query_per_domain_with_rejected_types():
+def test_blank_rejected_role_types_are_ignored():
+    p = JobProfile(
+        name="p", enabled=True, keywords=["backend"], rejected_role_types=["", "  ", " contract "]
+    )
+    q = dorks.compose_queries([p], "none", ["ashby"])[0]["query"]
+    assert q == "site:jobs.ashbyhq.com backend -contract"
+
+
+def test_embedded_quotes_in_rejected_role_types_are_stripped():
+    p = JobProfile(
+        name="p", enabled=True, keywords=["backend"], rejected_role_types=['contract" OR "intern']
+    )
+    q = dorks.compose_queries([p], "none", ["ashby"])[0]["query"]
+    assert q == 'site:jobs.ashbyhq.com backend -"contract OR intern"'
+
+
+def test_partial_budget_keeps_leading_negatives_and_drops_trailing():
+    p = JobProfile(
+        name="p",
+        enabled=True,
+        keywords=["Backend"],
+        locations=[f"City{i}" for i in range(13)],
+        rejected_role_types=["a", "b", "c", "x y", "d"],
+    )
+    q = dorks.compose_profile_queries(p, "w", ["ashby"], today=TODAY)[0]["query"]
+    assert q.endswith(" Backend -a -b -c after:2026-03-03")
+    assert dorks._word_count(q) == 31
+
+
+def test_six_titles_make_one_query_per_title_per_domain_with_rejected_types():
     titles = [f"Title{i} Engineer" for i in range(6)]
     p = JobProfile(
         name="p",
@@ -108,10 +143,11 @@ def test_six_titles_fit_one_query_per_domain_with_rejected_types():
         rejected_role_types=["contract", "unpaid internship"],
     )
     entries = dorks.compose_profile_queries(p, None, None, today=TODAY)
-    assert len(entries) == len(dorks.DEFAULT_BOARD_DOMAINS)
-    assert len({e["source"] for e in entries}) == len(entries)
+    assert len(entries) == 6 * len(dorks.DEFAULT_BOARD_DOMAINS)
     for e in entries:
-        assert all(f'"{t}"' in e["query"] for t in titles)
+        assert sum(f'"{t}"' in e["query"] for t in titles) == 1
+        assert " OR Title" not in e["query"]
+        assert '-contract -"unpaid internship"' in e["query"]
         assert dorks._word_count(e["query"]) <= dorks.MAX_QUERY_WORDS
 
 
@@ -406,7 +442,7 @@ def test_compose_direct_boards_empty_when_no_direct_boards():
 
 
 # ---------------------------------------------------------------------------
-# Google's ~32-word query limit: titles drive the dork, chunked to fit.
+# Google's ~32-word query limit: titles drive the dork, one query per title.
 # ---------------------------------------------------------------------------
 
 
@@ -452,20 +488,19 @@ def test_fallback_detects_titles_among_keywords_not_bare_skills():
 
 def test_fallback_to_raw_keywords_when_nothing_matches_title_nouns():
     p = JobProfile(name="p", enabled=True, keywords=["Python", "SQL"])
-    q = dorks.compose_queries([p], None, ["ashby"])[0]["query"]
-    assert "Python" in q
-    assert "SQL" in q
+    qs = [e["query"] for e in dorks.compose_queries([p], "none", ["ashby"])]
+    assert qs == ["site:jobs.ashbyhq.com Python", "site:jobs.ashbyhq.com SQL"]
 
 
-def test_chunks_ordered_chunk_major_across_domains():
-    p = _big_profile()
-    entries = dorks.compose_profile_queries(p, None, ["ashby", "greenhouse"])
-    sources_seen = [e["source"] for e in entries]
-    # 5 default+extra domains repeat once per chunk; chunk-major means the
-    # first block covers every domain before any domain repeats.
-    domain_count = len(dorks._resolve_sources(["ashby", "greenhouse"]))
-    first_block = sources_seen[:domain_count]
-    assert len(set(first_block)) == domain_count
+def test_queries_ordered_title_major_across_domains():
+    p = JobProfile(name="p", enabled=True, title_keywords=["A", "B"])
+    entries = dorks.compose_profile_queries(p, "none", ["ashby", "greenhouse"])
+    assert [(e["source"], e["query"].split()[-1]) for e in entries] == [
+        ("jobs.ashbyhq.com", "A"),
+        ("job-boards.greenhouse.io", "A"),
+        ("jobs.ashbyhq.com", "B"),
+        ("job-boards.greenhouse.io", "B"),
+    ]
 
 
 def _edge_locations():
@@ -482,7 +517,7 @@ def test_query_exactly_at_budget_with_after_token_stays_within_limit():
     assert dorks._word_count(entries[0]["query"]) == dorks.MAX_QUERY_WORDS
 
 
-def test_no_negatives_and_budget_holds():
+def test_no_room_drops_all_negatives_and_budget_holds():
     p = JobProfile(
         name="p",
         enabled=True,
