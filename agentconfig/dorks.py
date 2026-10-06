@@ -13,9 +13,10 @@ recognised extras added on top of whatever is enabled.
 Google's query box has a hard word-limit (~32 words); a query built from a
 large keyword list plus locations/remote can blow past it, and a
 truncated query silently drops the trailing filters. Discovery therefore
-renders TITLES (job-title terms), not free-form keywords, one query per title
-per board. Rejected role types are appended as negatives (-term) best-effort
-within the word budget; screening (screening/criteria.py
+renders TITLES (job-title terms), not free-form keywords, '|'-grouped as many
+per query as fit the word budget, one query per title chunk per board.
+Rejected role types are appended as negatives (-term) best-effort in
+whatever room the titles leave; screening (screening/criteria.py
 role_type_compatible) still enforces role types.
 """
 
@@ -77,12 +78,15 @@ def _quote_term(term: str) -> str:
 
 
 def _or_group(terms: list[str]) -> str:
-    """Build a parenthesized OR-group from terms, or '' if terms is empty."""
+    """Build a parenthesized '|'-separated OR-group, or '' if terms is empty.
+
+    Shape ``(A | "B C")``; a single term is left unparenthesised.
+    """
     if not terms:
         return ""
     if len(terms) == 1:
         return _quote_term(terms[0])
-    return "(" + " OR ".join(_quote_term(t) for t in terms) + ")"
+    return "(" + " | ".join(_quote_term(t) for t in terms) + ")"
 
 
 def _remote_group(remote_model: str | None) -> str:
@@ -131,6 +135,28 @@ def _negative_terms(profile: JobProfile) -> list[str]:
     # `contract" OR "intern`), so strip them before quoting.
     cleaned = [(t or "").replace('"', "").strip() for t in profile.rejected_role_types]
     return ["-" + _quote_term(t) for t in cleaned if t]
+
+
+def _chunk_titles(titles: list[str], budget: int) -> list[list[str]]:
+    """Greedily pack titles into chunks whose '|'-joined word cost fits ``budget``.
+
+    A chunk's cost is the sum of its titles' word counts plus one separator
+    per join. Every chunk holds at least one title and no title is dropped,
+    so an oversized single title gets a chunk of its own.
+    """
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    cost = 0
+    for title in titles:
+        words = _word_count(title)
+        if current and cost + 1 + words > budget:
+            chunks.append(current)
+            current, cost = [], 0
+        cost += words + (1 if current else 0)
+        current.append(title)
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def _resolve_sources(boards: list[JobBoard] | None) -> list[str]:
@@ -229,11 +255,13 @@ def compose_profile_queries(
     """Compose dork queries + URLs per resolved source for a single profile.
 
     Titles (see ``_dork_titles``), not the full keyword list, drive the
-    ``site:`` queries: ONE query per title per source, ordered title-major
-    (every source for title 1, then every source for title 2, ...). Rejected
-    role types render as negatives (``-term``) best-effort within the word
-    budget (MAX_QUERY_WORDS); negatives that would overflow it are dropped
-    first. Screening still enforces role types.
+    ``site:`` queries: titles are '|'-grouped and chunked to fit the word
+    budget (MAX_QUERY_WORDS) after the fixed site/location/remote/recency
+    terms, one query per chunk per source, ordered chunk-major (every source
+    for chunk 1, then every source for chunk 2, ...). Rejected role types
+    render as negatives (``-term``) best-effort in the leftover room only;
+    negatives that would overflow are dropped. Screening still enforces
+    role types.
 
     ``recency`` (a DORK_RECENCIES letter) adds an ``after:<date>`` operator
     as the query's last term, counted back from ``today`` (default: today's
@@ -255,23 +283,28 @@ def compose_profile_queries(
     operator = recency_operator(recency, today)
     negatives = _negative_terms(profile)
 
+    fixed_words = (
+        1 + _word_count(location_group) + _word_count(remote_group) + _word_count(operator)
+    )
+    budget = max(MAX_QUERY_WORDS - fixed_words, 1)
+
     results = []
-    for title in titles:
-        groups = [location_group, remote_group, _or_group([title])]
-        results.extend(_profile_queries_for_title(profile, domains, groups, negatives, operator))
+    for chunk in _chunk_titles(titles, budget):
+        groups = [location_group, remote_group, _or_group(chunk)]
+        results.extend(_profile_queries_for_chunk(profile, domains, groups, negatives, operator))
     return results
 
 
-def _profile_queries_for_title(
+def _profile_queries_for_chunk(
     profile: JobProfile,
     domains: list[str],
     groups: list[str],
     negatives: list[str],
     operator: str,
 ) -> list[dict]:
-    """Compose one query + URL per domain for a single title.
+    """Compose one query + URL per domain for a single title chunk.
 
-    ``groups`` are the location/remote/title terms; negatives are appended
+    ``groups`` are the location/remote/title-group terms; negatives are appended
     in order while the query stays within MAX_QUERY_WORDS, before ``operator``.
     """
     results = []
