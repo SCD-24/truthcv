@@ -77,11 +77,34 @@ describe('discover dork pacing', () => {
   const okMcp = () => vi.fn(async (_t: string, _a: Record<string, unknown>) => ({ content: '{"recorded":true}', isError: false }));
   const covs = (m: ReturnType<typeof okMcp>) => m.mock.calls.filter((c) => c[0] === 'record_discovery_coverage').map((c) => c[1]);
 
-  it('sleeps 4000ms between dorks (N-1 times)', async () => {
+  const sleeps = async (random?: () => number) => {
     const sleep = vi.fn(async (_ms: number) => {});
-    await discover(dorks(3), 'r', browser({}), okMcp(), { sleep });
-    expect(sleep).toHaveBeenCalledTimes(2);
-    expect(sleep).toHaveBeenCalledWith(4000);
+    await discover(dorks(3), 'r', browser({}), okMcp(), { sleep, random });
+    return sleep.mock.calls.map((c) => c[0]);
+  };
+
+  it('sleeps the minimum between dorks (N-1 times) when random is 0', async () => {
+    expect(await sleeps(() => 0)).toEqual([4000, 4000]);
+  });
+
+  it('sleeps the maximum when random is just below 1', async () => {
+    expect(await sleeps(() => 0.999999)).toEqual([7000, 7000]);
+  });
+
+  it('draws a fresh delay per gap', async () => {
+    const seq = [0, 0.5];
+    let i = 0;
+    expect(await sleeps(() => seq[i++])).toEqual([4000, 5500]);
+  });
+
+  it('default random yields integer delays within [4000, 7000]', async () => {
+    const s = await sleeps();
+    expect(s).toHaveLength(2);
+    for (const ms of s) {
+      expect(Number.isInteger(ms)).toBe(true);
+      expect(ms).toBeGreaterThanOrEqual(4000);
+      expect(ms).toBeLessThanOrEqual(7000);
+    }
   });
 
   it('skips remaining dorks after 2 consecutive Google blocks', async () => {
