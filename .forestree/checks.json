@@ -2,6 +2,14 @@
   "version": 2,
   "checks": [
     {
+      "id": "lint",
+      "name": "ESLint (web)",
+      "kind": "lint",
+      "command": "web/node_modules/.bin/eslint --config web/eslint.config.js --no-warn-ignored --no-error-on-unmatched-pattern",
+      "enabled": true,
+      "scope": "changed"
+    },
+    {
       "id": "agent-responses-tests",
       "name": "Agent Responses and sibling adapter tests",
       "kind": "test",
@@ -14,14 +22,6 @@
       "name": "Agent TypeScript",
       "kind": "lint",
       "command": "npm --prefix agent run typecheck",
-      "enabled": true,
-      "scope": "repo"
-    },
-    {
-      "id": "lint",
-      "name": "Typecheck (web + agent)",
-      "kind": "lint",
-      "command": "bash scripts/check.sh lint",
       "enabled": true,
       "scope": "repo"
     },

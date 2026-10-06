@@ -40,7 +40,7 @@ function makePage(
     total,
     limit,
     offset,
-    sort: sort as any,
+    sort: sort as ApplicationPage["sort"],
     direction,
   };
 }

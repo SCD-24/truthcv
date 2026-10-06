@@ -107,6 +107,13 @@ describe("approval writers", () => {
     expect(JSON.parse(init.body)).toEqual({ force: false });
   });
 
+  it("generateScreeningLetter sends length and presetId when given", async () => {
+    const fetchMock = stubFetch({ text: "Dear team,", source: "generated" });
+    await generateScreeningLetter("s1", { length: "short", presetId: "concise" });
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({ force: false, length: "short", presetId: "concise" });
+  });
+
   it("saveScreeningLetter PUTs the text verbatim", async () => {
     const fetchMock = stubFetch({ text: "Mine.", source: "operator" });
     await saveScreeningLetter("s1", "Mine.");

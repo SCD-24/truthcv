@@ -2,6 +2,7 @@
 /** Approvals page: the operator's queue. Stubbing follows ScreeningsPage.test.tsx. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import {
   bulkDeleteScreenings,
   bulkSetApproval,
@@ -15,6 +16,7 @@ import {
   listContradictions,
   listDidNotPass,
   listPendingApprovals,
+  listPromptPresets,
   listRejectedApprovals,
   saveScreeningLetter,
   setScreeningApproval,
@@ -53,6 +55,7 @@ vi.mock("../api/client", () => ({
   },
   markScreeningApplied: vi.fn(),
   saveScreeningLetter: vi.fn(),
+  listPromptPresets: vi.fn(),
 }));
 
 afterEach(() => {
@@ -71,6 +74,10 @@ beforeEach(() => {
   vi.mocked(listDidNotPass).mockResolvedValue([]);
   vi.mocked(listAppliedScreenings).mockResolvedValue([]);
   vi.mocked(listContradictions).mockResolvedValue([]);
+  vi.mocked(listPromptPresets).mockResolvedValue([
+    { id: "default", name: "Default", fragmentIds: [], isDefault: true, seeded: true },
+    { id: "concise", name: "Concise", fragmentIds: [], isDefault: false, seeded: false },
+  ]);
 });
 
 function makeRecord(overrides: Partial<ScreeningRecord> = {}): ScreeningRecord {
@@ -116,7 +123,12 @@ async function renderPage(
   if (lists.rejected) vi.mocked(listRejectedApprovals).mockResolvedValue(lists.rejected);
   if (lists.didNotPass) vi.mocked(listDidNotPass).mockResolvedValue(lists.didNotPass);
   if (lists.applied) vi.mocked(listAppliedScreenings).mockResolvedValue(lists.applied);
-  render(<ApprovalsPage onBack={() => {}} />);
+  // The style picker links to the preset editor, so it needs a router.
+  render(
+    <MemoryRouter>
+      <ApprovalsPage onBack={() => {}} />
+    </MemoryRouter>,
+  );
   await waitFor(() => expect(listPendingApprovals).toHaveBeenCalled());
 }
 
@@ -363,7 +375,11 @@ describe("ApprovalsPage cover letter", () => {
     });
     await renderPage([makeRecord()]);
     fireEvent.click(await screen.findByRole("button", { name: /Generate cover letter/ }));
-    await waitFor(() => expect(generateScreeningLetter).toHaveBeenCalledWith("s1"));
+    await waitFor(() => expect(generateScreeningLetter).toHaveBeenCalledWith("s1", {
+        length: "standard",
+        presetId: "default",
+      }),
+    );
     expect(await screen.findByDisplayValue("Dear hiring team,")).toBeTruthy();
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled")).toBe(false),
@@ -528,8 +544,64 @@ describe("ApprovalsPage cover letter", () => {
       expect(generateScreeningLetter).toHaveBeenLastCalledWith("s1", {
         approvals: { approvedClaimIds: ["c1"], deniedClaimIds: ["c2"] },
         paragraphs: [{ text: "para", claims: ["invented Kubernetes", "ran a Mars mission"] }],
+        length: "standard",
+        presetId: "default",
       }),
     );
+  });
+
+  it("sends the chosen length and style on Generate and on the re-check", async () => {
+    vi.mocked(getScreeningLetter).mockResolvedValue(null);
+    vi.mocked(generateScreeningLetter).mockRejectedValue(blockedLetterError());
+    await renderPage([makeRecord()]);
+    fireEvent.click(await screen.findByRole("button", { name: "Short" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Concise" }));
+    fireEvent.click(screen.getByRole("button", { name: /Generate cover letter/ }));
+    await waitFor(() => expect(claimDivs()).toHaveLength(2));
+    expect(generateScreeningLetter).toHaveBeenCalledWith("s1", {
+      length: "short",
+      presetId: "concise",
+    });
+
+    const claims = claimDivs();
+    fireEvent.click(within(claims[0]).getByRole("button", { name: "Approve" }));
+    fireEvent.click(within(claims[1]).getByRole("button", { name: "Deny" }));
+    // Changing the pickers while the panel is up must not alter the re-check:
+    // it re-validates the same paragraphs, written Short/Concise.
+    fireEvent.click(screen.getByRole("button", { name: "Standard" }));
+    fireEvent.click(screen.getByRole("button", { name: "Default" }));
+    fireEvent.click(screen.getByRole("button", { name: "Re-check & continue" }));
+    await waitFor(() =>
+      expect(generateScreeningLetter).toHaveBeenLastCalledWith("s1", {
+        approvals: { approvedClaimIds: ["c1"], deniedClaimIds: ["c2"] },
+        paragraphs: [{ text: "para", claims: ["invented Kubernetes", "ran a Mars mission"] }],
+        length: "short",
+        presetId: "concise",
+      }),
+    );
+  });
+
+  it("renders one page-level settings block and loads presets once", async () => {
+    await renderPage([
+      makeRecord(),
+      makeRecord({ id: "s2", company: "Fabrikam", url: "https://fabrikam.example/jobs/2" }),
+    ]);
+    await screen.findAllByRole("button", { name: /Generate cover letter/ });
+    expect(listPromptPresets).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByRole("button", { name: "Short" })).toHaveLength(1);
+  });
+
+  it("keeps the page-level letter settings while a card shows a draft", async () => {
+    vi.mocked(getScreeningLetter).mockResolvedValue({
+      text: "Dear hiring team,",
+      paragraphs: [],
+      source: "generated",
+      updatedAt: "2026-08-24T10:00:00Z",
+    });
+    await renderPage([makeRecord()]);
+    expect(await screen.findByDisplayValue("Dear hiring team,")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Short" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Concise" })).toBeTruthy();
   });
 
   it("a successful re-check shows the returned draft and clears the panel", async () => {

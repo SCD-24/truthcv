@@ -703,7 +703,6 @@ function ApplicationForm({
           label="Company"
           value={draft.company ?? ""}
           onChange={(e) => set("company", e.target.value)}
-          // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
           required
         />

@@ -101,7 +101,6 @@ export function DocumentEditor({
 
   useEffect(() => {
     loadApplications();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const label = kind === "cv" ? "CV" : "cover letter";

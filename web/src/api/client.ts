@@ -616,10 +616,20 @@ export async function getScreeningLetter(id: string): Promise<CoverLetterDraft |
  * blocked (never persisted to truth), and `paragraphs` echoes back that
  * attempt's paragraphs so the retry re-validates the SAME letter instead of
  * paying for a second LLM call. Both are optional; omit them for a fresh
- * generation. */
+ * generation.
+ *
+ * `length` ("short" | "standard") and `presetId` (a prompt preset's id) pick
+ * the letter's length and style; omitted, the server uses "Standard" and the
+ * operator's default preset. */
 export function generateScreeningLetter(
   id: string,
-  opts?: { force?: boolean; approvals?: CoverLetterApprovals; paragraphs?: unknown[] },
+  opts?: {
+    force?: boolean;
+    approvals?: CoverLetterApprovals;
+    paragraphs?: unknown[];
+    length?: string;
+    presetId?: string;
+  },
 ): Promise<CoverLetterDraft> {
   return request("/api/screenings/" + encodeURIComponent(id) + "/letter", {
     method: "POST",
@@ -628,6 +638,8 @@ export function generateScreeningLetter(
       force: opts?.force ?? false,
       approvals: opts?.approvals,
       paragraphs: opts?.paragraphs,
+      length: opts?.length,
+      presetId: opts?.presetId,
     }),
   });
 }
