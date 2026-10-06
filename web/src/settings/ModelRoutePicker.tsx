@@ -178,7 +178,8 @@ export function ModelRoutePicker({
     });
     return () => {
       alive = false;
-      requestId.current++;
+      // The counter is intentionally read live at cleanup to invalidate the latest in-flight request (do not capture it at effect start).
+      requestId.current += 1;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection, connectedKey]);

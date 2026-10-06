@@ -47,7 +47,8 @@ export function ModelRoutingPage() {
     }).finally(() => {
       if (mounted.current && request === connectionRequest.current) setLoading(false);
     });
-    return () => { mounted.current = false; connectionRequest.current++; };
+    // The counter is intentionally read live at cleanup to invalidate the latest in-flight request (do not capture it at effect start).
+    return () => { mounted.current = false; connectionRequest.current += 1; };
   }, [attempt, reload, coordinator, completeReload]);
 
   function refreshConnections() {
