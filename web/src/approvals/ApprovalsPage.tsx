@@ -41,7 +41,9 @@ import {
   listContradictions,
   listDidNotPass,
   listPendingApprovals,
+  listPromptPresets,
   listRejectedApprovals,
+  type PromptPreset,
   saveScreeningLetter,
   setScreeningApproval,
   setScreeningPostingText,
@@ -54,6 +56,7 @@ import type {
   ScreeningRecord,
 } from "../api/types";
 import { approvalsFrom, BlockedClaimsPanel, type Decision } from "../components/BlockedClaimsPanel";
+import { ChoiceGroup, LENGTHS, StyleSelector, type Length } from "../components/LetterOptions";
 import { safeHref } from "../utils/safeUrl";
 
 /** The letter draft for one posting: fetches its own state on mount because
@@ -61,8 +64,14 @@ import { safeHref } from "../utils/safeUrl";
  * Generate when there is none, an editable field with Save when there is —
  * the caption is the audit trail, since "generated" means the guardrail
  * checked this exact text and "operator" means the operator's words went in
- * unchecked. */
-function CoverLetterSection({ record }: { record: ScreeningRecord }) {
+ * unchecked. Style and length come from the page-level settings. */
+function CoverLetterSection({
+  record,
+  letterStyle,
+}: {
+  record: ScreeningRecord;
+  letterStyle: { length: string; presetId?: string };
+}) {
   const [draft, setDraft] = useState<CoverLetterDraft | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [text, setText] = useState("");
@@ -74,6 +83,10 @@ function CoverLetterSection({ record }: { record: ScreeningRecord }) {
   const [blockedClaims, setBlockedClaims] = useState<BlockedClaim[]>([]);
   const [blockedParagraphs, setBlockedParagraphs] = useState<unknown[]>([]);
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
+  // The length/style the blocked attempt used, so its re-check matches it.
+  const [blockedStyle, setBlockedStyle] = useState<{ length: string; presetId?: string }>({
+    length: "standard",
+  });
 
   useEffect(() => {
     let live = true;
@@ -86,16 +99,21 @@ function CoverLetterSection({ record }: { record: ScreeningRecord }) {
     return () => {
       live = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record.id]);
 
-  async function generate(opts?: { approvals?: CoverLetterApprovals; paragraphs?: unknown[] }) {
+  async function generate(opts?: {
+    approvals?: CoverLetterApprovals;
+    paragraphs?: unknown[];
+    length?: string;
+    presetId?: string;
+  }) {
     setBusy(true);
     setError("");
+    const style = opts
+      ? { length: opts.length ?? letterStyle.length, presetId: opts.presetId }
+      : { length: letterStyle.length, presetId: letterStyle.presetId };
     try {
-      const d = opts
-        ? await generateScreeningLetter(record.id, opts)
-        : await generateScreeningLetter(record.id);
+      const d = await generateScreeningLetter(record.id, { ...opts, ...style });
       setDraft(d);
       setText(d.text);
       setBlockedClaims([]);
@@ -105,6 +123,7 @@ function CoverLetterSection({ record }: { record: ScreeningRecord }) {
       if (e instanceof GuardrailBlockedError && e.claims.length > 0) {
         setBlockedClaims(e.claims);
         setBlockedParagraphs(e.paragraphs);
+        setBlockedStyle(style);
         setDecisions({});
       } else {
         setError(String(e));
@@ -119,7 +138,13 @@ function CoverLetterSection({ record }: { record: ScreeningRecord }) {
   }
 
   function recheck() {
-    generate({ approvals: approvalsFrom(blockedClaims, decisions), paragraphs: blockedParagraphs });
+    // Re-validate the SAME letter: echo the blocked attempt's paragraphs AND
+    // the length/style they were written with, not whatever the pickers now say.
+    generate({
+      approvals: approvalsFrom(blockedClaims, decisions),
+      paragraphs: blockedParagraphs,
+      ...blockedStyle,
+    });
   }
 
   async function save() {
@@ -406,7 +431,9 @@ function PendingCard({
   onDecide,
   onSaveUrl,
   onMarkApplied,
+  letterStyle,
 }: {
+  letterStyle: { length: string; presetId?: string };
   record: ScreeningRecord;
   checked: boolean;
   busy: boolean;
@@ -452,7 +479,7 @@ function PendingCard({
               .
             </Alert>
           ) : null}
-          <CoverLetterSection record={record} />
+          <CoverLetterSection record={record} letterStyle={letterStyle} />
         </Box>
         <Stack spacing={1}>
           <Button
@@ -790,6 +817,25 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [tab, setTab] = useState(0);
+  const [presets, setPresets] = useState<PromptPreset[]>([]);
+  const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
+  const [length, setLength] = useState<Length>("Standard");
+  const letterStyle = { length: length.toLowerCase(), presetId: selectedPresetId ?? undefined };
+
+  useEffect(() => {
+    let cancelled = false;
+    listPromptPresets()
+      .then((ps) => {
+        if (cancelled) return;
+        setPresets(ps);
+        const def = ps.find((p) => p.isDefault) ?? ps[0] ?? null;
+        setSelectedPresetId(def ? def.id : null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // Companies with at least one open research contradiction: the agent will
   // not apply to these until it is resolved, so each affected card says so.
   const [contestedCompanies, setContestedCompanies] = useState<Set<string>>(new Set());
@@ -1056,6 +1102,26 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
               <Typography variant="body1">Nothing waiting.</Typography>
             ) : (
               <Stack spacing={2}>
+                <Box
+                  component="section"
+                  aria-labelledby="letter-settings-heading"
+                  sx={{ pb: 2, borderBottom: 1, borderColor: "divider" }}
+                >
+                  <Typography id="letter-settings-heading" variant="subtitle2" component="h2">
+                    Cover letter settings
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: "text.secondary", mb: 1 }}>
+                    Used for every cover letter you generate on this tab.
+                  </Typography>
+                  <Stack direction="row" useFlexGap sx={{ flexWrap: "wrap", columnGap: 3 }}>
+                    <StyleSelector
+                      presets={presets}
+                      selectedPresetId={selectedPresetId}
+                      onChange={setSelectedPresetId}
+                    />
+                    <ChoiceGroup label="Length" options={LENGTHS} value={length} onChange={setLength} />
+                  </Stack>
+                </Box>
                 <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
                   <FormControlLabel
                     control={
@@ -1095,6 +1161,7 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
                     onDecide={decide}
                     onSaveUrl={saveUrl}
                     onMarkApplied={markApplied}
+                    letterStyle={letterStyle}
                   />
                 ))}
               </Stack>

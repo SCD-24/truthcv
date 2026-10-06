@@ -683,6 +683,7 @@ function RunSummaryRow({
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- only used to derive a type
 const MODES = ["off", "semi", "full"] as const;
 type Mode = (typeof MODES)[number];
 

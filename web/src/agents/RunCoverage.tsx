@@ -128,6 +128,7 @@ function ChannelClause({
   if (forChannel.length === 0) {
     return (
       <Tooltip title="Not reached: the run never touched this channel." arrow>
+        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- focusable so the tooltip is keyboard-reachable */}
         <span tabIndex={0}>{`${label}: not reached`}</span>
       </Tooltip>
     );
@@ -149,6 +150,7 @@ function ChannelClause({
   }
   return (
     <Tooltip title={<ClauseTooltip entries={forChannel} />} arrow>
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- focusable so the tooltip is keyboard-reachable */}
       <span tabIndex={0}>
         {label}: {body}
       </span>

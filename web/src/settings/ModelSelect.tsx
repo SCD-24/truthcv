@@ -132,7 +132,6 @@ export function ModelSelect({
           fullWidth
           type="text"
           value={model}
-          // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
           onChange={(e) => onChange({ model: e.target.value, customModel: true })}
           placeholder="Exact model id"

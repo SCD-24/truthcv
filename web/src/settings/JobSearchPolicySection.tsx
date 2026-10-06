@@ -13,6 +13,7 @@ import { SettingsSection } from "./SettingsModal";
 import { SettingsAutosaveProvider, useHasSettingsAutosaveProvider, useSettingsAutosave } from "./SettingsAutosave";
 
 /** Only these cooldown keys are owned by this panel; every PUT is partial. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- only used to derive a type
 const OWNED_KEYS = [
   "cooldownDays",
   "cooldownDaysSameRole",
