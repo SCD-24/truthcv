@@ -13,10 +13,10 @@ recognised extras added on top of whatever is enabled.
 Google's query box has a hard word-limit (~32 words); a query built from a
 large keyword list plus locations/remote can blow past it, and a
 truncated query silently drops the trailing filters. Discovery therefore
-renders TITLES (job-title terms), not free-form keywords, chunked so each
-rendered query fits the budget alongside location/remote terms — see
-compose_profile_queries. There are NO negative terms: rejected role types are
-enforced by screening (screening/criteria.py role_type_compatible), not search.
+renders TITLES (job-title terms), not free-form keywords, one query per title
+per board. Rejected role types are appended as negatives (-term) best-effort
+within the word budget; screening (screening/criteria.py
+role_type_compatible) still enforces role types.
 """
 
 from __future__ import annotations
@@ -125,27 +125,12 @@ def _word_count(s: str) -> int:
     return len(s.split())
 
 
-def _chunk_titles(titles: list[str], budget: int) -> list[list[str]]:
-    """Greedily group titles into OR-group chunks that fit ``budget`` words each.
-
-    Cost of a candidate chunk is measured the same way _or_group renders it:
-    each title's own word count, plus one word per "OR" joining them. Every
-    chunk holds at least one title, even if that title alone exceeds the
-    budget, so no title is ever dropped silently.
-    """
-    chunks: list[list[str]] = []
-    current: list[str] = []
-    for title in titles:
-        candidate = current + [title]
-        cost = sum(_word_count(t) for t in candidate) + max(0, len(candidate) - 1)
-        if current and cost > budget:
-            chunks.append(current)
-            current = [title]
-        else:
-            current = candidate
-    if current:
-        chunks.append(current)
-    return chunks
+def _negative_terms(profile: JobProfile) -> list[str]:
+    """Rejected role types as ``-term`` / ``-"multi word"`` operators, in order."""
+    # Embedded double quotes would break out of the quoted phrase (e.g.
+    # `contract" OR "intern`), so strip them before quoting.
+    cleaned = [(t or "").replace('"', "").strip() for t in profile.rejected_role_types]
+    return ["-" + _quote_term(t) for t in cleaned if t]
 
 
 def _resolve_sources(boards: list[JobBoard] | None) -> list[str]:
@@ -244,13 +229,11 @@ def compose_profile_queries(
     """Compose dork queries + URLs per resolved source for a single profile.
 
     Titles (see ``_dork_titles``), not the full keyword list, drive the
-    ``site:`` query so it stays inside Google's ~32-word query limit
-    (MAX_QUERY_WORDS) alongside the location/remote filters (no negative terms: rejected role
-    types are enforced by screening, not search) — a
-    query that overflows the limit is truncated by Google, silently dropping
-    those filters. When titles alone would not fit one query, they are
-    chunked (see ``_chunk_titles``) into several queries per source, ordered
-    chunk-major (every source for chunk 1, then every source for chunk 2, ...).
+    ``site:`` queries: ONE query per title per source, ordered title-major
+    (every source for title 1, then every source for title 2, ...). Rejected
+    role types render as negatives (``-term``) best-effort within the word
+    budget (MAX_QUERY_WORDS); negatives that would overflow it are dropped
+    first. Screening still enforces role types.
 
     ``recency`` (a DORK_RECENCIES letter) adds an ``after:<date>`` operator
     as the query's last term, counted back from ``today`` (default: today's
@@ -269,36 +252,37 @@ def compose_profile_queries(
 
     location_group = _or_group(profile.locations)
     remote_group = _remote_group(profile.remote_model)
-
     operator = recency_operator(recency, today)
-    fixed_words = 1 + _word_count(location_group) + _word_count(remote_group) + _word_count(operator)
-    budget = max(MAX_QUERY_WORDS - fixed_words, 1)
-    chunks = _chunk_titles(titles, budget)
+    negatives = _negative_terms(profile)
 
     results = []
-    for chunk in chunks:
-        title_group = _or_group(chunk)
-        results.extend(
-            _profile_queries_for_chunk(profile, domains, location_group, remote_group, title_group, operator)
-        )
+    for title in titles:
+        groups = [location_group, remote_group, _or_group([title])]
+        results.extend(_profile_queries_for_title(profile, domains, groups, negatives, operator))
     return results
 
 
-def _profile_queries_for_chunk(
+def _profile_queries_for_title(
     profile: JobProfile,
     domains: list[str],
-    location_group: str,
-    remote_group: str,
-    title_group: str,
+    groups: list[str],
+    negatives: list[str],
     operator: str,
 ) -> list[dict]:
-    """Compose one query + URL per domain for a single title chunk."""
+    """Compose one query + URL per domain for a single title.
+
+    ``groups`` are the location/remote/title terms; negatives are appended
+    in order while the query stays within MAX_QUERY_WORDS, before ``operator``.
+    """
     results = []
     for domain in domains:
-        parts = [f"site:{domain}"] + [
-            p for p in (location_group, remote_group, title_group, operator) if p
-        ]
-        query = " ".join(parts)
+        base = [f"site:{domain}"] + [g for g in groups if g]
+        tail = [operator] if operator else []
+        for neg in negatives:
+            if _word_count(" ".join(base + [neg] + tail)) > MAX_QUERY_WORDS:
+                break
+            base.append(neg)
+        query = " ".join(base + tail)
         url = f"https://www.google.com/search?q={quote_plus(query)}"
         results.append({
             "profile": profile.name,
