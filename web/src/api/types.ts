@@ -567,6 +567,12 @@ export interface RunRecord {
   note: string;
   discoveryCoverage: DiscoveryCoverage[];
   boardBreakdown: BoardBreakdown[];
+  /** Unique-URL totals across all sources; null for a legacy run. */
+  boardBreakdownTotal: BoardBreakdownTotal | null;
+  /** Sources (or "totals") whose funnel counts did not add up. */
+  funnelMismatches: string[];
+  /** True when the run's URL ledger was capped. */
+  urlLedgerTruncated: boolean;
 }
 
 /** One discovery attempt's outcome on a board/channel, for coverage reporting. */
@@ -582,9 +588,52 @@ export interface DiscoveryCoverage {
 /** Per-board screening summary for a run. */
 export interface BoardBreakdown {
   board: string;
-  postingsSeen: number;
+  /** '' for a legacy host row. */
+  channel: "feed" | "direct" | "dork" | "";
+  /** The first five counts are null for a legacy run (no stored funnel). */
+  postingsSeen: number | null;
+  previouslyScreened: number | null;
+  notAPosting: number | null;
+  duplicate: number | null;
+  failed: number | null;
   forReview: number;
   rejected: number;
+  blocked: number;
+}
+
+/** Unique-URL funnel totals across all sources of a run. */
+export interface BoardBreakdownTotal {
+  postingsSeen: number;
+  previouslyScreened: number;
+  notAPosting: number;
+  duplicate: number;
+  failed: number;
+  forReview: number;
+  rejected: number;
+  blocked: number;
+}
+
+export type RunUrlOutcome =
+  | "previously_screened"
+  | "not_a_posting"
+  | "duplicate"
+  | "failed"
+  | "for_review"
+  | "rejected"
+  | "blocked";
+
+/** One URL from a run's ledger and the outcome it ended in. */
+export interface RunUrlEntry {
+  url: string;
+  outcome: RunUrlOutcome;
+  detail: string;
+  sources: { source: string; channel: string }[];
+}
+
+/** One page of GET /api/runs/:id/urls. */
+export interface RunUrlsPage {
+  entries: RunUrlEntry[];
+  total: number;
 }
 
 /** Result of POST /api/runs/:id/stop. "cancelling" means the supervisor was

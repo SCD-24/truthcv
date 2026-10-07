@@ -34,7 +34,7 @@ describe('screenCandidates fixes', () => {
   it('serializes browser fetches so they never interleave', async () => {
     let inFlight = 0;
     let max = 0;
-    const cands: Candidate[] = [1, 2, 3, 4].map((n) => ({ url: `https://a.test/${n}`, title: 't', channel: 'dork', profiles: ['P'] }));
+    const cands: Candidate[] = [1, 2, 3, 4].map((n) => ({ url: `https://a.test/${n}`, title: 't', channel: 'dork', sources: [], profiles: ['P'] }));
     await screenCandidates(cands, {
       runId: 'r', criteria: { P: 'CRIT-P' },
       fetch: async () => {
@@ -50,7 +50,7 @@ describe('screenCandidates fixes', () => {
 
   it('records a blocker with a valid role and a hostname company, never "unknown"', async () => {
     const record = recordOk();
-    const res = await screenCandidates([{ url: 'https://www.jobs.example.com/p/1', title: '', channel: 'dork', profiles: ['P'] }], {
+    const res = await screenCandidates([{ url: 'https://www.jobs.example.com/p/1', title: '', channel: 'dork', sources: [], profiles: ['P'] }], {
       runId: 'r', criteria: { P: 'c' }, fetch: async () => ({ unreadable: true, blocker: 'login_required', reason: 'x' }),
       extractAdapter: extract, screeningAdapter: keyedAdapter({}, PASS), record,
     });
@@ -63,7 +63,7 @@ describe('screenCandidates fixes', () => {
   });
 
   const run = (record: ReturnType<typeof recordOk>, replies: Record<string, unknown>, extra: Partial<Parameters<typeof screenCandidates>[1]> = {}) =>
-    screenCandidates([{ url: 'https://a.test/1', title: 'T', channel: 'dork', profiles: ['A', 'B'] }], {
+    screenCandidates([{ url: 'https://a.test/1', title: 'T', channel: 'dork', sources: [], profiles: ['A', 'B'] }], {
       runId: 'r', criteria: { A: 'CRIT-A', B: 'CRIT-B' }, fetch: async () => ({ text: 'posting text' }),
       extractAdapter: extract, screeningAdapter: keyedAdapter(replies, REJECT), record, ...extra,
     });
@@ -101,7 +101,7 @@ describe('screenCandidates fixes', () => {
 
   it('(d2) does not treat a same-profile rejected created:false record as covered despite padding/case', async () => {
     const record = vi.fn(async () => ({ content: JSON.stringify({ id: 'i', created: false, profile: 'backend', verdict: 'rejected', screening_blocker: '' }) }));
-    const res = await screenCandidates([{ url: 'https://a.test/1', title: 'T', channel: 'dork', profiles: [' Backend ', 'B'] }], {
+    const res = await screenCandidates([{ url: 'https://a.test/1', title: 'T', channel: 'dork', sources: [], profiles: [' Backend ', 'B'] }], {
       runId: 'r', criteria: { ' Backend ': 'CRIT-A', B: 'CRIT-B' }, fetch: async () => ({ text: 'posting text' }),
       extractAdapter: extract, screeningAdapter: keyedAdapter({}, REJECT), record: record as unknown as ReturnType<typeof recordOk>,
     });

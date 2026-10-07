@@ -77,60 +77,76 @@ def derive_counters(run_id: str, screenings: list, applications: list) -> dict:
     return counters_by_run([run_id], screenings, applications)[run_id]
 
 
-def board_breakdown_by_run(run_ids, screenings) -> dict[str, list[dict]]:
-    """Derive a per-board summary of screenings for each run in one pass.
+# Outcome columns of a funnel row, in display order.
+_OUTCOME_COLUMNS = (
+    "previously_screened",
+    "not_a_posting",
+    "duplicate",
+    "failed",
+    "for_review",
+    "rejected",
+    "blocked",
+)
+# Columns a legacy (host-grouped) row cannot know: reported as None.
+_UNKNOWN_COLUMNS = ("postings_seen", "previously_screened", "not_a_posting", "duplicate", "failed")
 
-    Attributes each screening to a board derived from its URL host. For each
-    board, accumulates postings_seen (all screenings for that board), for_review
-    (approval == 'pending'), and rejected (verdict == 'rejected').
 
-    Args:
-        run_ids: A list of run ids to initialize in the result dict. Empty ids
-                 are included but yield empty lists (unlinked screenings are
-                 skipped).
-        screenings: A list of Screening records. Only those with a run_id in
-                    run_ids are attributed to a board.
+def _funnel_rows(record) -> list[dict]:
+    """Rows from a run's stored source_funnel, board = source name, sorted by
+    postings_seen descending then board ascending."""
+    rows = []
+    for raw in record.source_funnel:
+        row = {"board": raw.get("source", ""), "channel": raw.get("channel", "")}
+        row["postings_seen"] = int(raw.get("postings_seen", 0))
+        row.update({c: int(raw.get(c, 0)) for c in _OUTCOME_COLUMNS})
+        rows.append(row)
+    return sorted(rows, key=lambda x: (-x["postings_seen"], x["board"]))
 
-    Returns:
-        A dict mapping each run_id to a list of {board, postings_seen,
-        for_review, rejected} dicts, sorted by postings_seen descending, then
-        board ascending. A run with no screenings attributed to it has an empty
-        list.
-    """
+
+def _host_rows(run_id: str, screenings) -> list[dict]:
+    """Legacy rows: this run's screenings grouped by URL host/board. Columns
+    that need the agent's funnel report are None; for_review (approval ==
+    'pending'), rejected (verdict == 'rejected') and blocked (a truthy
+    screening_blocker) are counted from the screenings."""
     from agentconfig.boards import board_for_url
 
-    wanted = {rid for rid in run_ids if rid}
-    result = {rid: {} for rid in run_ids}
-
-    for screening in screenings:
-        rid = getattr(screening, "run_id", "")
-        if rid not in wanted:
+    rows: dict[str, dict] = {}
+    seen: dict[str, int] = {}
+    for s in screenings:
+        if getattr(s, "run_id", "") != run_id:
             continue
+        board = board_for_url(getattr(s, "url", ""))
+        row = rows.setdefault(board, {
+            "board": board, "channel": "",
+            **dict.fromkeys(_UNKNOWN_COLUMNS), "for_review": 0, "rejected": 0, "blocked": 0,
+        })
+        seen[board] = seen.get(board, 0) + 1
+        row["for_review"] += getattr(s, "approval", "") == "pending"
+        row["rejected"] += getattr(s, "verdict", "") == "rejected"
+        row["blocked"] += bool(getattr(s, "screening_blocker", ""))
+    # Most screenings first, then board, as the pre-funnel breakdown did.
+    return sorted(rows.values(), key=lambda x: (-seen[x["board"]], x["board"]))
 
-        url = getattr(screening, "url", "")
-        board = board_for_url(url)
-        verdict = getattr(screening, "verdict", "")
-        approval = getattr(screening, "approval", "")
 
-        if board not in result[rid]:
-            result[rid][board] = {
-                "board": board,
-                "postings_seen": 0,
-                "for_review": 0,
-                "rejected": 0,
-            }
+def board_breakdown_by_run(records, screenings) -> dict[str, dict]:
+    """Per-source breakdown rows and total for each run.
 
-        result[rid][board]["postings_seen"] += 1
-        if approval == "pending":
-            result[rid][board]["for_review"] += 1
-        if verdict == "rejected":
-            result[rid][board]["rejected"] += 1
+    Args:
+        records: RunRecords. A run with a stored ``source_funnel`` gets its
+            rows straight from it (board = source, channel, postings_seen and
+            the seven outcome columns) and ``funnel_totals`` as its total.
+            A legacy run without one falls back to grouping its screenings by
+            URL host, with the unknowable columns None and total None.
+        screenings: Already-loaded Screening records (not re-read here).
 
-    # Convert dict of dicts to list of dicts, sorted
-    return {
-        rid: sorted(
-            list(breakdown.values()),
-            key=lambda x: (-x["postings_seen"], x["board"]),
-        )
-        for rid, breakdown in result.items()
-    }
+    Returns:
+        {run_id: {"rows": [row dicts], "total": dict | None}}.
+    """
+    result: dict[str, dict] = {}
+    for record in records:
+        if record.funnel_totals:
+            result[record.id] = {"rows": _funnel_rows(record), "total": dict(record.funnel_totals)}
+        else:
+            rows = _host_rows(record.id, screenings) if record.id else []
+            result[record.id] = {"rows": rows, "total": None}
+    return result

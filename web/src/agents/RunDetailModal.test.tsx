@@ -1,9 +1,16 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { RunDetailModal } from "./RunDetailModal";
 import * as client from "../api/client";
 import type { RunRecord, BoardBreakdown } from "../api/types";
+
+function row(board: string, over: Partial<BoardBreakdown> = {}): BoardBreakdown {
+  return {
+    board, channel: "direct", postingsSeen: 0, previouslyScreened: 0, notAPosting: 0, duplicate: 0,
+    failed: 0, forReview: 0, rejected: 0, blocked: 0, ...over,
+  };
+}
 
 function makeRun(overrides: Partial<RunRecord> & { boardBreakdown?: BoardBreakdown[] } = {}): RunRecord {
   return {
@@ -25,9 +32,17 @@ function makeRun(overrides: Partial<RunRecord> & { boardBreakdown?: BoardBreakdo
     note: "",
     discoveryCoverage: [],
     boardBreakdown: [],
+    boardBreakdownTotal: null,
+    funnelMismatches: [],
+    urlLedgerTruncated: false,
     ...overrides,
   };
 }
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("RunDetailModal", () => {
   it("renders title with run id", () => {
@@ -47,22 +62,23 @@ describe("RunDetailModal", () => {
   it("renders board breakdown table with two boards", () => {
     const run = makeRun({
       boardBreakdown: [
-        { board: "lever", postingsSeen: 3, forReview: 1, rejected: 1 },
-        { board: "linkedin", postingsSeen: 2, forReview: 0, rejected: 1 },
+        row("lever", { postingsSeen: 3, forReview: 1, rejected: 1 }),
+        row("linkedin", { postingsSeen: 2, rejected: 1, channel: "dork" }),
+        row("jobs.example/feed", { postingsSeen: 1, channel: "feed" }),
       ],
     });
     const onClose = () => {};
     render(<RunDetailModal run={run} onClose={onClose} />);
 
-    // Check headers
-    expect(screen.getByText("Job board")).toBeTruthy();
+    expect(screen.getByText("linkedin (search)")).toBeTruthy();
+    expect(screen.getByText("jobs.example/feed (feed)")).toBeTruthy();
+    expect(screen.getByText("Source")).toBeTruthy();
     expect(screen.getByText("Postings seen")).toBeTruthy();
     expect(screen.getByText("For review")).toBeTruthy();
     expect(screen.getByText("Rejected")).toBeTruthy();
 
     // Check board rows
     expect(screen.getByText("lever")).toBeTruthy();
-    expect(screen.getByText("linkedin")).toBeTruthy();
 
     // Check total row
     expect(screen.getByText("Total")).toBeTruthy();
@@ -71,23 +87,38 @@ describe("RunDetailModal", () => {
   it("renders totals row with correct sums", () => {
     const run = makeRun({
       boardBreakdown: [
-        { board: "lever", postingsSeen: 3, forReview: 1, rejected: 1 },
-        { board: "linkedin", postingsSeen: 2, forReview: 0, rejected: 1 },
+        row("https://lever.co/", { postingsSeen: 3, forReview: 1, rejected: 1 }),
+        row("linkedin", { postingsSeen: 2, rejected: 1 }),
       ],
     });
-    const onClose = () => {};
-    render(<RunDetailModal run={run} onClose={onClose} />);
+    render(<RunDetailModal run={run} onClose={() => {}} />);
 
+    expect(screen.getByText("lever.co")).toBeTruthy();
     const rows = screen.getAllByRole("row");
-    // Header + 2 boards + totals = 4 rows
-    expect(rows.length).toBe(4);
+    const totalRow = rows[rows.length - 1];
+    expect(totalRow.textContent).toBe("Total50000120");
+  });
 
-    // Total should be 5 postings seen, 1 for review, 2 rejected
-    const totalRow = rows[3];
-    expect(totalRow.textContent).toContain("Total");
-    expect(totalRow.textContent).toContain("5");
-    expect(totalRow.textContent).toContain("1");
-    expect(totalRow.textContent).toContain("2");
+  it("uses stored totals, and sums with dashes for a legacy run", () => {
+    const legacy = makeRun({
+      boardBreakdown: [row("a.com", { postingsSeen: null, previouslyScreened: null, notAPosting: null, duplicate: null, failed: null, forReview: 2 })],
+    });
+    const { unmount } = render(<RunDetailModal run={legacy} onClose={() => {}} />);
+    const rows = screen.getAllByRole("row");
+    expect(rows[rows.length - 1].textContent).toBe("Total—————200");
+    expect(screen.queryByRole("button", { name: "a.com" })).toBeNull();
+    unmount();
+  });
+
+  it("warns naming mismatched sources and shows a toggle button per row", () => {
+    const run = makeRun({
+      boardBreakdown: [row("lever", { postingsSeen: 1 })],
+      funnelMismatches: ["lever", "totals"],
+    });
+    render(<RunDetailModal run={run} onClose={() => {}} />);
+    expect(screen.getByRole("alert").textContent).toContain("lever, the totals");
+    const btn = screen.getByRole("button", { name: "lever" });
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("renders empty state when no screenings were recorded", () => {
@@ -100,6 +131,32 @@ describe("RunDetailModal", () => {
     // And the empty state message should appear (match partial text)
     const texts = screen.queryAllByText((content) => content.includes("No screenings"));
     expect(texts.length > 0).toBe(true);
+  });
+
+  it("renders the table and mismatch alert when only a stored total exists", () => {
+    const total = { postingsSeen: 0, previouslyScreened: 0, notAPosting: 0, duplicate: 0, failed: 0, forReview: 0, rejected: 0, blocked: 0 };
+    const run = makeRun({
+      boardBreakdown: [],
+      boardBreakdownTotal: total as unknown as RunRecord["boardBreakdownTotal"],
+      funnelMismatches: ["totals"],
+    });
+    render(<RunDetailModal run={run} onClose={() => {}} />);
+    expect(screen.getByRole("table")).toBeTruthy();
+    const rows = screen.getAllByRole("row");
+    expect(rows[rows.length - 1].textContent).toBe("Total00000000");
+    expect(screen.getByRole("alert").textContent).toContain("the totals");
+    expect(screen.queryByText("No screenings recorded.")).toBeNull();
+  });
+
+  it("toggles an expandable row when a count cell is clicked", () => {
+    vi.spyOn(client, "getRunUrls").mockResolvedValue({ entries: [], total: 0 });
+    const run = makeRun({ boardBreakdown: [row("lever", { postingsSeen: 1 })] });
+    render(<RunDetailModal run={run} onClose={() => {}} />);
+    const btn = screen.getByRole("button", { name: "lever" });
+    fireEvent.click(btn.closest("tr")!.querySelectorAll("td")[1]);
+    expect(btn.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(btn);
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("Close button calls onClose", async () => {

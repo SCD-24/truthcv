@@ -105,6 +105,20 @@ class RunRecord:
     # before this field existed, which from_dict's known-field filter loads
     # the same as {}.
     phase_refusals: dict = field(default_factory=dict)
+    # Per-source outcome funnel reported by the agent (record_source_funnel):
+    # rows {source, channel, postings_seen, previously_screened, not_a_posting,
+    # duplicate, failed, for_review, rejected, blocked}. A run-time snapshot.
+    # Absent from older records, which load as [] (the API then falls back to
+    # grouping screenings by host).
+    source_funnel: list[dict] = field(default_factory=list)
+    # The same counts over UNIQUE URLs across all sources. Absent -> {}.
+    funnel_totals: dict = field(default_factory=dict)
+    # Names of sources whose row does not add up (postings_seen != sum of the
+    # outcome columns), computed server-side. Absent -> [].
+    funnel_mismatches: list[str] = field(default_factory=list)
+    # True when the per-run URL ledger (runs/url_ledger.py) hit its cap and
+    # dropped entries; the counts above stay complete. Absent -> False.
+    url_ledger_truncated: bool = False
 
     @classmethod
     def from_dict(cls, raw: dict) -> "RunRecord":

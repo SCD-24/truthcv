@@ -370,6 +370,71 @@ def test_limit_zero_means_every_retained_run(client):
     assert body["runs"][0]["id"] == "run-9"
 
 
+def _legacy_wire_row(board: str, **kw) -> dict:
+    """A legacy host row as served: unknowable columns null."""
+    base = {
+        "board": board, "channel": "", "postingsSeen": None,
+        "previouslyScreened": None, "notAPosting": None, "duplicate": None,
+        "failed": None, "forReview": 0, "rejected": 0, "blocked": 0,
+    }
+    return {**base, **kw}
+
+
+_FUNNEL_ROW = {
+    "source": "linkedin.com", "channel": "feed", "postings_seen": 3,
+    "previously_screened": 1, "not_a_posting": 0, "duplicate": 0,
+    "failed": 0, "for_review": 1, "rejected": 1, "blocked": 0,
+}
+
+
+def _funnel_run(run_id: str, urls: list[dict]) -> None:
+    """Start a run and record a funnel + ledger for it."""
+    from agenttools.tools_funnel import record_source_funnel
+
+    store.start(run_id, trigger="manual", apply_cap=0)
+    totals = {k: v for k, v in _FUNNEL_ROW.items() if k not in ("source", "channel")}
+    record_source_funnel(run_id, [_FUNNEL_ROW], totals, urls)
+
+
+def _ledger(n: int) -> list[dict]:
+    srcs = [{"source": "linkedin.com", "channel": "feed"}]
+    return [
+        {"url": f"https://x.test/{i}", "outcome": "rejected" if i % 2 else "for_review",
+         "detail": "", "sources": srcs}
+        for i in range(n)
+    ]
+
+
+def test_funnel_run_serves_rows_total_and_flags(client):
+    _funnel_run("fr", _ledger(2))
+    run = client.get("/api/runs/fr").json()
+    assert run["boardBreakdown"] == [{
+        "board": "linkedin.com", "channel": "feed", "postingsSeen": 3,
+        "previouslyScreened": 1, "notAPosting": 0, "duplicate": 0,
+        "failed": 0, "forReview": 1, "rejected": 1, "blocked": 0,
+    }]
+    assert run["boardBreakdownTotal"]["postingsSeen"] == 3
+    assert run["funnelMismatches"] == []
+    assert run["urlLedgerTruncated"] is False
+
+
+def test_run_urls_filters_and_paginates(client):
+    _funnel_run("fu", _ledger(6))
+    body = client.get("/api/runs/fu/urls?outcome=rejected&limit=2&offset=1").json()
+    assert body["total"] == 3
+    assert [e["url"] for e in body["entries"]] == ["https://x.test/3", "https://x.test/5"]
+    assert body["entries"][0]["sources"] == [{"source": "linkedin.com", "channel": "feed"}]
+    assert client.get("/api/runs/fu/urls?source=nope").json() == {"entries": [], "total": 0}
+    assert client.get("/api/runs/fu/urls?limit=9999").json()["total"] == 6
+
+
+def test_run_urls_404_unknown_run_and_400_unknown_outcome(client):
+    assert client.get("/api/runs/missing/urls").status_code == 404
+    store.start("u2", trigger="manual", apply_cap=0)
+    assert client.get("/api/runs/u2/urls?outcome=bogus").status_code == 400
+    assert client.get("/api/runs/u2/urls").json() == {"entries": [], "total": 0}
+
+
 def test_board_breakdown_on_list_runs(client):
     """GET /api/runs returns boardBreakdown with per-board screening counts."""
     from screening import store as screening_store
@@ -399,18 +464,9 @@ def test_board_breakdown_on_list_runs(client):
     run = [r for r in runs if r["id"] == "bd-run"][0]
     assert "boardBreakdown" in run
     assert len(run["boardBreakdown"]) == 2
-    assert run["boardBreakdown"][0] == {
-        "board": "lever",
-        "postingsSeen": 1,
-        "forReview": 1,
-        "rejected": 0,
-    }
-    assert run["boardBreakdown"][1] == {
-        "board": "linkedin",
-        "postingsSeen": 1,
-        "forReview": 0,
-        "rejected": 1,
-    }
+    assert run["boardBreakdown"][0] == _legacy_wire_row("lever", forReview=1)
+    assert run["boardBreakdown"][1] == _legacy_wire_row("linkedin", rejected=1)
+    assert run["boardBreakdownTotal"] is None
 
 
 def test_board_breakdown_custom_host_fallback(client):
@@ -456,12 +512,7 @@ def test_board_breakdown_on_get_run(client):
     run = r.json()
     assert "boardBreakdown" in run
     assert len(run["boardBreakdown"]) == 1
-    assert run["boardBreakdown"][0] == {
-        "board": "linkedin",
-        "postingsSeen": 1,
-        "forReview": 0,
-        "rejected": 0,
-    }
+    assert run["boardBreakdown"][0] == _legacy_wire_row("linkedin")
 
 
 def test_board_breakdown_empty_for_run_with_no_screenings(client):

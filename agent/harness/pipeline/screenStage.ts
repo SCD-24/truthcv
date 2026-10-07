@@ -10,6 +10,7 @@ import type { ProviderAdapter } from '../providers/types.js';
 import { extractMeta } from './extractMeta.js';
 import type { FetchedPosting } from './fetchPosting.js';
 import type { Candidate } from './types.js';
+import { classifyStored, pickOutcome, type Classified, type ProfileClassified, type UrlOutcome } from './outcomes.js';
 import { BLOCKER_COMPANY_FALLBACK, BLOCKER_ROLE_FALLBACK, companyFromUrl, roleForBlocker } from './blockerIdentity.js';
 
 export { BLOCKER_COMPANY_FALLBACK, BLOCKER_ROLE_FALLBACK, companyFromUrl };
@@ -46,6 +47,8 @@ export interface ScreenStageResult {
   blockers: number;
   /** Screening/recording errors; a non-empty list means the stage was not clean. */
   errors: string[];
+  /** Exactly one outcome per candidate screened. */
+  outcomes: UrlOutcome[];
 }
 
 interface Meta { role: string; company: string; posted_date: string }
@@ -63,86 +66,102 @@ function createMutex(): <T>(fn: () => Promise<T>) => Promise<T> {
 /** Record a screening_blocker for a posting we could not use. */
 async function recordBlocker(d: ScreenStageDeps, c: Candidate, blocker: string, res: ScreenStageResult): Promise<void> {
   try {
+    const profile = c.profiles.find((p) => d.criteria[p]) ?? c.profiles[0] ?? '';
     const out = await d.record({
       run_id: d.runId, url: c.url, role: roleForBlocker(c.title), company: companyFromUrl(c.url),
-      profile: c.profiles.find((p) => d.criteria[p]) ?? c.profiles[0] ?? '',
-      verdict: '', screening_blocker: blocker,
+      profile, verdict: '', screening_blocker: blocker,
     });
-    if (out.isError) res.errors.push(`record_screening failed for ${c.url}`);
-    else res.blockers += 1;
+    if (out.isError) failOutcome(res, c, `record_screening failed for ${c.url}`);
+    else {
+      res.blockers += 1;
+      const created = !createdFalse(out.content);
+      const verdict: Classified = created ? { outcome: 'blocked', detail: blocker } : classifyStored(out.content, profile);
+      res.outcomes.push({ url: c.url, ...verdict });
+    }
   } catch (err) {
-    res.errors.push(`record_screening failed for ${c.url}: ${err instanceof Error ? err.message : String(err)}`);
+    failOutcome(res, c, `record_screening failed for ${c.url}: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
-/** Whether a stored-outcome result reports an actionable stored pass. */
-function isActionable(content: string): boolean {
+/** True when a record_screening reply reports an existing record (`created: false`), parsed not pattern-matched. */
+function createdFalse(content: string): boolean {
   try {
-    return (JSON.parse(content) as { actionable?: boolean }).actionable === true;
+    const parsed: unknown = JSON.parse(content);
+    return typeof parsed === 'object' && parsed !== null && (parsed as { created?: unknown }).created === false;
   } catch {
     return false;
   }
 }
 
-/** Profile identity as the store compares it: stripped and casefolded. */
-function normProfile(p: string): string {
-  return p.trim().toLowerCase();
+/** Record a candidate-level failure as both an error and the candidate's outcome. */
+function failOutcome(res: ScreenStageResult, c: Candidate, text: string): void {
+  res.errors.push(text);
+  res.outcomes.push({ url: c.url, outcome: 'failed', detail: text });
 }
 
-/**
- * Whether a stored result shows the posting is already covered: created:false
- * with a URL-wide record (different profile) or a queueing (passed/deferred) one.
- */
-function isCovered(content: string, sentProfile: string): boolean {
+/** One profile's result: its classified outcome and whether later profiles are unnecessary. */
+interface ProfileResult {
+  stop: boolean;
+  verdict: Classified;
+}
+
+/** A failed profile result; the text is also pushed to the stage errors. */
+function failedProfile(res: ScreenStageResult, text: string): ProfileResult {
+  res.errors.push(text);
+  return { stop: false, verdict: { outcome: 'failed', detail: text } };
+}
+
+/** Parse the screening result into evidence, or return the error text. */
+function parseEvidence(screened: { content: string; isError: boolean }): Record<string, unknown> | string {
+  if (screened.isError) return screened.content;
   try {
-    const s = JSON.parse(content) as { created?: boolean; profile?: string; verdict?: string };
-    if (s.created !== false) return false;
-    const differs = normProfile(s.profile ?? '') !== normProfile(sentProfile);
-    return differs || s.verdict === 'passed' || s.verdict === 'deferred';
+    return JSON.parse(screened.content) as Record<string, unknown>;
   } catch {
-    return false;
+    return 'invalid screening evidence';
   }
 }
 
-/** Screen one profile and persist its evidence; true when the posting needs no further profiles. */
-async function screenProfile(d: ScreenStageDeps, c: Candidate, text: string, meta: Meta, profile: string, res: ScreenStageResult): Promise<boolean> {
+/** Screen one profile and persist its evidence; `stop` is true when no further profiles are needed. */
+async function screenProfile(d: ScreenStageDeps, c: Candidate, text: string, meta: Meta, profile: string, res: ScreenStageResult): Promise<ProfileResult> {
   const args: Record<string, unknown> = {
     url: c.url, role: meta.role, company: meta.company, postingText: text, profile, criteria: d.criteria[profile],
     run_id: d.runId, source: c.channel,
   };
   if (meta.posted_date) args.posted_date = meta.posted_date;
   const screened = await screenPosting(args, d.screeningAdapter);
-  let evidence: Record<string, unknown>;
-  try {
-    if (screened.isError) throw new Error(screened.content);
-    evidence = JSON.parse(screened.content) as Record<string, unknown>;
-  } catch (err) {
-    res.errors.push(`${c.url} [${profile}]: ${screened.isError && err instanceof Error ? err.message : 'invalid screening evidence'}`);
-    return false;
-  }
+  const evidence = parseEvidence(screened);
+  if (typeof evidence === 'string') return failedProfile(res, `${c.url} [${profile}]: ${evidence}`);
   const out = await persistEvidence(args, evidence, d.record);
-  if (out.isError) {
-    res.errors.push(`${c.url} [${profile}]: ${out.content}`);
-    return false;
-  }
-  if (!isActionable(out.content)) return isCovered(out.content, profile);
-  res.passes.push({ url: c.url, title: c.title, ...meta, profile, channel: c.channel });
-  return true;
+  if (out.isError) return failedProfile(res, `${c.url} [${profile}]: ${out.content}`);
+  const verdict = classifyStored(out.content, profile);
+  if (verdict.outcome === 'for_review') res.passes.push({ url: c.url, title: c.title, ...meta, profile, channel: c.channel });
+  return { stop: verdict.outcome === 'for_review' || verdict.outcome === 'previously_screened', verdict };
 }
 
 /** Screen and record each profile with criteria in order, until a pass or existing coverage. */
 async function screenProfiles(d: ScreenStageDeps, c: Candidate, text: string, meta: Meta, res: ScreenStageResult): Promise<void> {
-  for (const profile of c.profiles) {
-    if (!d.criteria[profile]) continue;
-    if (await screenProfile(d, c, text, meta, profile, res)) return;
+  const results: ProfileClassified[] = [];
+  let current = '';
+  try {
+    for (const profile of c.profiles) {
+      if (!d.criteria[profile]) continue;
+      current = profile;
+      const r = await screenProfile(d, c, text, meta, profile, res);
+      results.push({ ...r.verdict, profile });
+      if (r.stop) break;
+    }
+  } catch (err) {
+    results.push({ ...failedProfile(res, `${c.url}: ${err instanceof Error ? err.message : String(err)}`).verdict, profile: current });
   }
+  const picked = pickOutcome(results, `no criteria for profiles: ${c.profiles.join(', ')}`);
+  res.outcomes.push({ url: c.url, ...picked });
 }
 
 /** Process one candidate end to end. */
 async function processCandidate(d: ScreenStageDeps, fetchOne: ScreenStageDeps['fetch'], c: Candidate, res: ScreenStageResult): Promise<void> {
   const fetched = await fetchOne(c.url);
   if ('failed' in fetched) {
-    res.errors.push(`${c.url}: posting could not be loaded: ${fetched.reason}`);
+    failOutcome(res, c, `${c.url}: posting could not be loaded: ${fetched.reason}`);
     return;
   }
   if (fetched.unreadable) return recordBlocker(d, c, fetched.blocker, res);
@@ -158,7 +177,7 @@ async function processCandidate(d: ScreenStageDeps, fetchOne: ScreenStageDeps['f
  * @returns Actionable passes (in candidate order), blocker count and errors.
  */
 export async function screenCandidates(candidates: Candidate[], d: ScreenStageDeps): Promise<ScreenStageResult> {
-  const perCandidate: ScreenStageResult[] = candidates.map(() => ({ passes: [], blockers: 0, errors: [] }));
+  const perCandidate: ScreenStageResult[] = candidates.map(() => ({ passes: [], blockers: 0, errors: [], outcomes: [] }));
   const exclusive = createMutex();
   const fetchOne = (url: string): Promise<FetchedPosting> => exclusive(() => d.fetch(url));
   let next = 0;
@@ -168,7 +187,9 @@ export async function screenCandidates(candidates: Candidate[], d: ScreenStageDe
       try {
         await processCandidate(d, fetchOne, candidates[i], perCandidate[i]);
       } catch (err) {
-        perCandidate[i].errors.push(`${candidates[i].url}: ${err instanceof Error ? err.message : String(err)}`);
+        const text = `${candidates[i].url}: ${err instanceof Error ? err.message : String(err)}`;
+        if (perCandidate[i].outcomes.length) perCandidate[i].errors.push(text);
+        else failOutcome(perCandidate[i], candidates[i], text);
       }
     }
   };
@@ -178,5 +199,6 @@ export async function screenCandidates(candidates: Candidate[], d: ScreenStageDe
     passes: perCandidate.flatMap((r) => r.passes),
     blockers: perCandidate.reduce((n, r) => n + r.blockers, 0),
     errors: perCandidate.flatMap((r) => r.errors),
+    outcomes: perCandidate.flatMap((r) => r.outcomes),
   };
 }

@@ -22,6 +22,7 @@ from agenttools.tools_ledger import (
     record_application as _record_application,
     record_screening as _record_screening,
 )
+from agenttools.tools_funnel import record_source_funnel as _record_source_funnel
 from agenttools.tools_letter import generate_cover_letter as _generate_cover_letter
 from agenttools.tools_pipeline import (
     filter_unscreened_urls as _filter_unscreened_urls,
@@ -197,8 +198,21 @@ _TOOL_REGISTRY = {
     ),
     "filter_unscreened_urls": (
         _filter_unscreened_urls,
-        "Given candidate posting URLs (urls), returns {unscreened: [...]}: only those not already "
-        "screened, in input order, deduplicated, with URL fragments ignored. Call before opening postings.",
+        "Given candidate posting URLs (urls), returns {unscreened: [...], dropped: [...]}: unscreened are those not already "
+        "screened, in input order, deduplicated, with URL fragments ignored. dropped lists every other "
+        "non-empty URL as {url, reason, duplicate_of?} with reason not_a_posting, duplicate (duplicate_of "
+        "is the earlier URL) or previously_screened, so unscreened + dropped accounts for every input. "
+        "Call before opening postings.",
+    ),
+    "record_source_funnel": (
+        _record_source_funnel,
+        "Reports this run's per-source funnel, REPLACING any earlier report (send the full picture each "
+        "time). run_id: your run. sources: one row per source {source, channel (feed, direct or dork), "
+        "postings_seen, previously_screened, not_a_posting, duplicate, failed, for_review, rejected, "
+        "blocked}; postings_seen must equal the sum of the seven outcome columns or the source is "
+        "reported back as a mismatch. totals: the same counts over UNIQUE URLs across all sources. "
+        "urls: the ledger [{url, outcome (one of the seven outcome columns), detail, sources: "
+        "[{source, channel}]}], capped at 1000 entries. Returns {recorded, mismatches, truncated}.",
     ),
     "finish_application": (
         _finish_application,

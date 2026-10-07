@@ -22,6 +22,7 @@ import { STAGE_REGISTRY, type StageName } from '../stages.js';
 import { discover } from './discover.js';
 import { fetchPosting } from './fetchPosting.js';
 import { screenCandidates } from './screenStage.js';
+import { buildFunnel, recordFunnel } from './funnel.js';
 import { composeStagePrompt, defaultAgentDir } from './stagePrompt.js';
 import type { McpCall } from './types.js';
 
@@ -171,6 +172,7 @@ async function cmdDiscoverScreen(a: PipelineArgs, env: NodeJS.ProcessEnv, pool: 
     screeningAdapter: stageAdapter(config, 'screening', d),
     record: (args) => mcp('record_screening', args),
   });
+  found.errors.push(...(await recordFunnel(mcp, runId, buildFunnel(found.allCandidates, found.dropped, screened.outcomes))));
   const ok = found.coverageComplete && found.errors.length === 0;
   await d.writeOutput(out, JSON.stringify({
     ok, coverageComplete: found.coverageComplete, errors: found.errors, itemErrors: screened.errors.map((e) => redactAll(e, tokensOf(config))),
@@ -238,7 +240,7 @@ async function cmdFinish(a: PipelineArgs, mcp: McpCall, d: Resolved, env: NodeJS
   const secrets = [env.AGENT_LLM_API_KEY ?? '', env.AGENT_SCREENING_API_KEY ?? ''].filter(Boolean);
   const itemErrors = [...(await stateItemErrors(a, d)), ...(await applyFailuresOf(a, d))].map((e) => redactAll(e, secrets));
   const counts = { items_failed: itemErrors.length, item_errors: itemErrors };
-  let res = await mcp('finish_run', { run_id: runId, status: reason ? 'failed' : 'completed', stopped_reason: reason, ...counts });
+  const res = await mcp('finish_run', { run_id: runId, status: reason ? 'failed' : 'completed', stopped_reason: reason, ...counts });
   if (failed(res) && !reason) {
     // The server's coverage guard refused `completed`: report the shortfall honestly.
     await mcp('finish_run', { run_id: runId, status: 'failed', stopped_reason: `coverage incomplete: ${res.content}`.slice(0, MAX_STOPPED_REASON_CHARS), ...counts });

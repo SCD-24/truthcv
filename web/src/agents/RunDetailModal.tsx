@@ -4,17 +4,13 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
   Button,
   Typography,
   Box,
   Alert,
 } from "@mui/material";
-import type { RunRecord, BoardBreakdown, RunStopResult } from "../api/types";
+import type { RunRecord, RunStopResult } from "../api/types";
+import { RunFunnelTable } from "./RunFunnelTable";
 import { stopRun } from "../api/client";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 
@@ -96,21 +92,10 @@ export function RunDetailModal({ run, timeZone, onClose, onStopped }: RunDetailM
     }
   };
 
-  const hasBreakdown = run.boardBreakdown && run.boardBreakdown.length > 0;
-
-  const totals = run.boardBreakdown
-    ? run.boardBreakdown.reduce(
-        (acc, entry) => ({
-          postingsSeen: acc.postingsSeen + entry.postingsSeen,
-          forReview: acc.forReview + entry.forReview,
-          rejected: acc.rejected + entry.rejected,
-        }),
-        { postingsSeen: 0, forReview: 0, rejected: 0 }
-      )
-    : { postingsSeen: 0, forReview: 0, rejected: 0 };
+  const hasBreakdown = (run.boardBreakdown && run.boardBreakdown.length > 0) || run.boardBreakdownTotal != null;
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth aria-labelledby="run-detail-title">
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth aria-labelledby="run-detail-title">
       <DialogTitle id="run-detail-title">Run <Box component="span" sx={{ fontFamily: "var(--font-mono)", fontSize: "0.9em" }}>{run.id}</Box></DialogTitle>
 
       <DialogContent>
@@ -135,38 +120,7 @@ export function RunDetailModal({ run, timeZone, onClose, onStopped }: RunDetailM
         )}
 
         {hasBreakdown ? (
-          <Table size="small" sx={{ mt: 2 }}>
-            <TableHead>
-              <TableRow>
-                <TableCell>Job board</TableCell>
-                <TableCell align="right">Postings seen</TableCell>
-                <TableCell align="right">For review</TableCell>
-                <TableCell align="right">Rejected</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {run.boardBreakdown.map((entry: BoardBreakdown, idx: number) => (
-                <TableRow key={`${entry.board}-${idx}`}>
-                  <TableCell>{entry.board}</TableCell>
-                  <TableCell align="right">{entry.postingsSeen}</TableCell>
-                  <TableCell align="right">{entry.forReview}</TableCell>
-                  <TableCell align="right">{entry.rejected}</TableCell>
-                </TableRow>
-              ))}
-              <TableRow sx={{ backgroundColor: "var(--ground)" }}>
-                <TableCell sx={{ fontWeight: "bold", borderTop: "2px solid var(--line)" }}>Total</TableCell>
-                <TableCell align="right" sx={{ fontWeight: "bold", borderTop: "2px solid var(--line)" }}>
-                  {totals.postingsSeen}
-                </TableCell>
-                <TableCell align="right" sx={{ fontWeight: "bold", borderTop: "2px solid var(--line)" }}>
-                  {totals.forReview}
-                </TableCell>
-                <TableCell align="right" sx={{ fontWeight: "bold", borderTop: "2px solid var(--line)" }}>
-                  {totals.rejected}
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
+          <RunFunnelTable run={run} />
         ) : (
           <Typography color="text.secondary" sx={{ mt: 2 }}>
             No screenings recorded.

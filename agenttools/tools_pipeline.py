@@ -32,26 +32,35 @@ def filter_unscreened_urls(urls: list[str] = []) -> dict:  # noqa: B006 - never 
         screened = _screening_store.screened_dedupe_keys(profiles)
     except Exception:
         screened = set()
-    seen: set[str] = set()
+    seen: dict[str, str] = {}  # posting key -> first bare URL
     unscreened: list[str] = []
+    dropped: list[dict] = []
     for url in urls or []:
-        if not isinstance(url, str):
+        if not isinstance(url, str) or not url:
             continue
         bare = _strip_fragment(url)
-        if not bare:
-            continue
-        if not is_posting_url(bare):
-            continue
-        # Dedupe on the store's own posting key so candidates the store
-        # treats as one posting are screened once.
-        key = posting_dedupe_key(bare) or bare
-        if key in seen:
-            continue
-        seen.add(key)
-        if key in screened:
-            continue
-        unscreened.append(bare)
-    return {"unscreened": unscreened}
+        reason = _drop_reason(bare, seen, screened)
+        if reason is None:
+            unscreened.append(bare)
+        else:
+            dropped.append({"url": bare or url, **reason})
+    return {"unscreened": unscreened, "dropped": dropped}
+
+
+def _drop_reason(bare: str, seen: dict[str, str], screened: set) -> dict | None:
+    """Why ``bare`` is dropped (a ``{reason, duplicate_of?}`` dict), or None
+    to keep it. Records the posting key in ``seen`` on first sight."""
+    if not bare or not is_posting_url(bare):
+        return {"reason": "not_a_posting"}
+    # Dedupe on the store's own posting key so candidates the store
+    # treats as one posting are screened once.
+    key = posting_dedupe_key(bare) or bare
+    if key in seen:
+        return {"reason": "duplicate", "duplicate_of": seen[key]}
+    seen[key] = bare
+    if key in screened:
+        return {"reason": "previously_screened"}
+    return None
 
 
 def finish_application(

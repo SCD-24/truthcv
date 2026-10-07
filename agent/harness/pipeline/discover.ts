@@ -8,7 +8,7 @@ import { harvestPostings } from '../builtins/harvestPostings.js';
 import type { BrowserToolCall, HarvestBoardRequest, HarvestBoardResult } from '../builtins/harvestPostings.js';
 import { isGoogleInterstitial } from '../builtins/harvestClassify.js';
 import { tryPassGoogleConsent } from './googleConsent.js';
-import type { Candidate, DiscoveryChannel, McpCall } from './types.js';
+import type { Candidate, DiscoveryChannel, DroppedUrl, McpCall } from './types.js';
 
 /** Max keywords typed into a direct board's search box. */
 const MAX_DIRECT_KEYWORDS = 5;
@@ -26,6 +26,8 @@ interface Entry {
   channel: 'dork' | 'direct';
   request: HarvestBoardRequest;
   profiles: string[];
+  /** Source name the entry's postings are attributed to in the funnel. */
+  source: string;
   /** Board name coverage is recorded under (a direct board shares one across its profiles). */
   coverageBoard: string;
 }
@@ -81,6 +83,10 @@ function isGoogleBlock(r: HarvestBoardResult | undefined): boolean {
 /** Result of {@link discover}. */
 export interface DiscoveryOutcome {
   candidates: Candidate[];
+  /** Every discovered candidate (before the unscreened filter). */
+  allCandidates: Candidate[];
+  /** URLs the server dropped before screening, with reasons. */
+  dropped: DroppedUrl[];
   /** True when every composed entry had its coverage recorded. */
   coverageComplete: boolean;
   errors: string[];
@@ -110,7 +116,7 @@ function dorkEntries(cfg: Record<string, unknown>): Entry[] {
     const url = str(q.url);
     if (!url) continue;
     const board = `${str(q.source) ?? 'google'}: ${str(q.query) ?? url}`;
-    out.push({ channel: 'dork', coverageBoard: board, request: { board, url }, profiles: strList(q.profiles).length ? strList(q.profiles) : strList([q.profile]) });
+    out.push({ channel: 'dork', source: str(q.source) ?? 'google', coverageBoard: board, request: { board, url }, profiles: strList(q.profiles).length ? strList(q.profiles) : strList([q.profile]) });
   }
   return out;
 }
@@ -128,6 +134,7 @@ function directEntry(b: Record<string, unknown>, url: string, p: Record<string, 
   const label = [name ? `[${name}]` : '', location ? `@ ${location}` : ''].filter(Boolean).join(' ');
   return {
     channel: 'direct',
+    source: url,
     coverageBoard: url,
     profiles: name ? [name] : [],
     request: {
@@ -198,16 +205,17 @@ function parseResults(content: string): HarvestBoardResult[] {
   }
 }
 
-/** Add candidates, deduplicating by URL and merging profile names. */
-function addCandidate(map: Map<string, Candidate>, url: string, title: string, channel: DiscoveryChannel, profiles: string[]): void {
+/** Add candidates, deduplicating by URL and merging profile names and sources. */
+function addCandidate(map: Map<string, Candidate>, url: string, title: string, channel: DiscoveryChannel, profiles: string[], source: string): void {
   const key = url.split('#')[0].trim();
   if (!key) return;
   const existing = map.get(key);
   if (!existing) {
-    map.set(key, { url: key, title, channel, profiles: [...new Set(profiles)] });
+    map.set(key, { url: key, title, channel, profiles: [...new Set(profiles)], sources: [{ source, channel }] });
     return;
   }
   existing.profiles = [...new Set([...existing.profiles, ...profiles])];
+  if (!existing.sources.some((s) => s.source === source)) existing.sources.push({ source, channel });
 }
 
 /** Names of the enabled profiles in job_config.profiles. */
@@ -225,7 +233,7 @@ async function runFeed(cfg: Record<string, unknown>, mcp: McpCall, runId: string
     const source = str(p.source) ?? 'feed';
     bySource.set(source, (bySource.get(source) ?? 0) + 1);
     const own = strList([p.profile]);
-    addCandidate(map, url, str(p.title) ?? '', 'feed', own.length ? own : all);
+    addCandidate(map, url, str(p.title) ?? '', 'feed', own.length ? own : all, source);
   }
   const feedError = str(cfg.feedError);
   if (feedError) {
@@ -254,17 +262,37 @@ async function recordPostingsSeen(mcp: McpCall, runId: string, count: number): P
   }
 }
 
+/** Candidates kept for screening plus the URLs the server dropped. */
+interface Filtered {
+  candidates: Candidate[];
+  dropped: DroppedUrl[];
+}
+
+/** Attach each dropped URL's discovery sources (unknown URLs are skipped). */
+function withSources(rows: unknown, byUrl: Map<string, Candidate>): DroppedUrl[] {
+  const out: DroppedUrl[] = [];
+  for (const r of objs(rows)) {
+    const c = byUrl.get(String(r.url));
+    if (!c) continue;
+    const d: DroppedUrl = { url: c.url, reason: r.reason as DroppedUrl['reason'], sources: c.sources };
+    if (typeof r.duplicate_of === 'string') d.duplicate_of = r.duplicate_of;
+    out.push(d);
+  }
+  return out;
+}
+
 /** Keep only URLs the server says are unscreened (all, if the call fails). */
-async function filterUnscreened(mcp: McpCall, map: Map<string, Candidate>): Promise<Candidate[]> {
+async function filterUnscreened(mcp: McpCall, map: Map<string, Candidate>): Promise<Filtered> {
   const all = [...map.values()];
-  if (all.length === 0) return all;
+  if (all.length === 0) return { candidates: all, dropped: [] };
   try {
     const res = await mcp('filter_unscreened_urls', { urls: all.map((c) => c.url) });
-    if (res.isError) return all;
-    const keep = new Set((JSON.parse(res.content) as { unscreened?: string[] }).unscreened ?? all.map((c) => c.url));
-    return all.filter((c) => keep.has(c.url));
+    if (res.isError) return { candidates: all, dropped: [] };
+    const parsed = JSON.parse(res.content) as { unscreened?: string[]; dropped?: unknown };
+    const keep = new Set(parsed.unscreened ?? all.map((c) => c.url));
+    return { candidates: all.filter((c) => keep.has(c.url)), dropped: withSources(parsed.dropped, map) };
   } catch {
-    return all;
+    return { candidates: all, dropped: [] };
   }
 }
 
@@ -341,7 +369,7 @@ export async function discover(jobConfig: Record<string, unknown>, runId: string
     const e = entries[i];
     const { r, skipped } = results[i] ?? {};
     const cov = skipped ? SKIPPED_COVERAGE : coverageFor(r);
-    for (const p of r?.postings ?? []) addCandidate(map, p.url, p.title, e.channel, e.profiles);
+    for (const p of r?.postings ?? []) addCandidate(map, p.url, p.title, e.channel, e.profiles, e.source);
     if (e.channel === 'direct') {
       direct.set(e.coverageBoard, [...(direct.get(e.coverageBoard) ?? []), cov]);
       continue;
@@ -357,5 +385,6 @@ export async function discover(jobConfig: Record<string, unknown>, runId: string
     const err = await recordPostingsSeen(mcp, runId, map.size);
     if (err) errors.push(err);
   }
-  return { candidates: await filterUnscreened(mcp, map), coverageComplete: errors.length === 0, errors };
+  const filtered = await filterUnscreened(mcp, map);
+  return { ...filtered, allCandidates: [...map.values()], coverageComplete: errors.length === 0, errors };
 }

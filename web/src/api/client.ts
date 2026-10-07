@@ -1,4 +1,6 @@
 import type {
+  RunUrlOutcome,
+  RunUrlsPage,
   ApprovedInference,
   TruthDoc,
   TailorResult,
@@ -737,6 +739,21 @@ export function getRun(id: string): Promise<RunRecord> {
  * Returns the outcome plus the updated run record. */
 export function stopRun(id: string): Promise<RunStopResult> {
   return request(`/api/runs/${encodeURIComponent(id)}/stop`, { method: "POST" });
+}
+
+/** One page of a run's URL ledger, filtered to a source and outcome. */
+export function getRunUrls(
+  runId: string,
+  params: { source: string; channel: string; outcome: RunUrlOutcome; limit: number; offset: number },
+): Promise<RunUrlsPage> {
+  const qs = new URLSearchParams({
+    source: params.source,
+    channel: params.channel,
+    outcome: params.outcome,
+    limit: String(params.limit),
+    offset: String(params.offset),
+  });
+  return request(`/api/runs/${encodeURIComponent(runId)}/urls?${qs.toString()}`);
 }
 
 /** List all provider connections and their status. */
