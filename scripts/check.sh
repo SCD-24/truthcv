@@ -15,6 +15,7 @@
 #        scripts/check.sh test-python
 #        scripts/check.sh test-web
 #        scripts/check.sh test-agent
+#        scripts/check.sh run <cmd...>
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
@@ -59,8 +60,16 @@ case "${1:-}" in
   test-agent)
     npm --prefix agent run test
     ;;
+  run)
+    shift
+    if [ "$#" -eq 0 ]; then
+      echo "usage: scripts/check.sh run <cmd...>" >&2
+      exit 2
+    fi
+    exec "$@"
+    ;;
   *)
-    echo "usage: scripts/check.sh {lint|test|test-python|test-web|test-agent}" >&2
+    echo "usage: scripts/check.sh {lint|test|test-python|test-web|test-agent|run}" >&2
     exit 2
     ;;
 esac

@@ -5,7 +5,7 @@
       "id": "lint",
       "name": "ESLint (web)",
       "kind": "lint",
-      "command": "web/node_modules/.bin/eslint --config web/eslint.config.js --no-warn-ignored --no-error-on-unmatched-pattern",
+      "command": "bash scripts/check.sh run web/node_modules/.bin/eslint --config web/eslint.config.js --no-warn-ignored --no-error-on-unmatched-pattern",
       "enabled": true,
       "scope": "changed"
     },
@@ -13,7 +13,7 @@
       "id": "agent-responses-tests",
       "name": "Agent Responses and sibling adapter tests",
       "kind": "test",
-      "command": "npm --prefix agent test -- __tests__/openaiResponses.test.ts harness/providers/__tests__/adapters.test.ts",
+      "command": "bash scripts/check.sh run npm --prefix agent test -- __tests__/openaiResponses.test.ts harness/providers/__tests__/adapters.test.ts",
       "enabled": true,
       "scope": "repo"
     },
@@ -21,7 +21,7 @@
       "id": "agent-typecheck",
       "name": "Agent TypeScript",
       "kind": "lint",
-      "command": "npm --prefix agent run typecheck",
+      "command": "bash scripts/check.sh run npm --prefix agent run typecheck",
       "enabled": true,
       "scope": "repo"
     },

@@ -110,7 +110,15 @@ def test_application_query_scopes_by_domain_and_company(data_dir):
     assert "after:" not in query
 
     query_after = service._application_query(app, 1700000000)
-    assert "after:1700000000" in query_after
+    assert "after:1699913600" in query_after
+    assert "after:1700000000" not in query_after
+
+
+def test_application_query_lookback_truncates_fractional_cursor(data_dir):
+    app = _make_app()
+
+    query = service._application_query(app, 1700000000.9)
+    assert "after:1699913600" in query
 
 
 def test_application_query_with_company_but_no_domains_still_searches(data_dir):

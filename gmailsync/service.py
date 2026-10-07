@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 SYNC_THROTTLE_S = 300
 
+#: Each sync re-searches one day before the previous sync's start; the
+#: processed_message_ids dedupe makes the overlap safe.
+SYNC_LOOKBACK_S = 24 * 60 * 60
+
 #: Bounded worker count for concurrent Gmail API fetches — both the per-
 #: application list_messages queries in _collect_message_ids and the
 #: per-message get_metadata prefetch in run_sync share this same pool size,
@@ -164,6 +168,9 @@ def _application_query(app, last_synced_at: float) -> str:
     Returns "" only when the application has neither domain nor company
     signal to search on, so the caller can skip it rather than issuing an
     unscoped query.
+
+    The after: cursor is the previous sync's start minus SYNC_LOOKBACK_S
+    (one day), so slightly late-indexed mail is still picked up.
     """
     domains = _app_domains(app)
     company = str(getattr(app, "company", "") or "").replace('"', "").strip()
@@ -176,7 +183,7 @@ def _application_query(app, last_synced_at: float) -> str:
     scoped = " OR ".join(terms)
     parts = [f"({scoped})"]
     if last_synced_at > 0:
-        parts.append(f"after:{int(last_synced_at)}")
+        parts.append(f"after:{max(0, int(last_synced_at) - SYNC_LOOKBACK_S)}")
     return " ".join(parts)
 
 
