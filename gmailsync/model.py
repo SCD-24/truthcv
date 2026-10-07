@@ -34,11 +34,14 @@ class GmailSuggestion:
     suggested_status: str = ""
     match_confidence: str = ""
     match_evidence: list[str] = field(default_factory=list)
+    # One of "pending", "applied" or "dismissed".
     state: str = "pending"
     # The Jev classification verdict: "confirmed" for an auto-applied
     # rejection/interview classification, "" otherwise (Jev confirmed
     # neither statement, so the suggestion stays pending).
     decision: str = ""
+    # Epoch seconds when state became "dismissed"; 0 otherwise or for legacy items.
+    dismissed_at: float = 0
 
     @classmethod
     def from_dict(cls, raw: dict | None) -> "GmailSuggestion":
@@ -58,6 +61,7 @@ class GmailSuggestion:
             match_evidence=[str(v) for v in raw.get("match_evidence") or []],
             state=str(raw.get("state", "pending")),
             decision=str(raw.get("decision", "")),
+            dismissed_at=float(raw.get("dismissed_at") or 0),
         )
 
     def to_dict(self) -> dict:

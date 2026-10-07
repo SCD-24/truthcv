@@ -207,6 +207,34 @@ export interface GmailSyncSummary {
   suggestions: number;
 }
 
+/** One Gmail-derived status suggestion (snake_case, as the backend emits). */
+export interface GmailSuggestion {
+  id: string;
+  application_id: string;
+  application_label: string;
+  sender: string;
+  sender_email: string;
+  subject: string;
+  date: string;
+  snippet: string;
+  classification: string;
+  suggested_status: string;
+  match_confidence: string;
+  match_evidence: string[];
+  state: string;
+  decision: string;
+}
+
+export interface GmailSuggestionPage {
+  items: GmailSuggestion[];
+  total: number;
+}
+
+export interface GmailDismissResult {
+  dismissed: number;
+  pending: number;
+}
+
 /** One selectable model, discovered live from the provider's API/SDK. */
 export interface ModelInfo {
   id: string;

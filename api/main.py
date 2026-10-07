@@ -28,6 +28,7 @@ from .diagnostics_mcp import (
     diagnostics_session_manager,
     diagnostics_token_ok,
 )
+from .gmail_suggestion_routes import router as gmail_suggestion_router
 from .job_routes import router as job_router
 from .prompt_routes import prompt_router
 from .routes import reconcile_orphaned_runs, router
@@ -203,6 +204,7 @@ app.include_router(router)
 app.include_router(mcp_router)
 app.include_router(prompt_router)
 app.include_router(job_router)
+app.include_router(gmail_suggestion_router)
 
 
 # services/* raises framework-free domain exceptions; map them to the HTTP

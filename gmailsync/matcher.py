@@ -35,8 +35,32 @@ def _domain_parts(value: str) -> list[str]:
     return [host] if host else []
 
 
+MIN_COMPANY_TOKEN_LEN = 3
+
+_COMPANY_STOPWORDS = frozenset(
+    {
+        "the", "a", "an", "and", "und", "of", "for", "der", "die", "das", "le", "la", "el", "de",
+        "von", "van", "at", "in", "on",
+        "gmbh", "mbh", "ag", "se", "kg", "ug", "ltd", "limited", "inc", "llc", "corp", "corporation",
+        "co", "plc", "bv", "nv", "sa", "sas", "srl", "spa", "oy", "ab", "as", "aps", "kft", "pty",
+        "group", "gruppe", "holding", "holdings", "company", "international", "germany", "deutschland",
+        "europe", "global", "technologies", "technology", "solutions", "services", "systems",
+        "digital", "labs", "team", "hiring", "careers", "jobs",
+    }
+)
+
+
 def _company_token(company: str) -> str:
-    return _normalize(company).split(" ")[0] if _normalize(company) else ""
+    """First distinctive word of a company name, or "" when none exists.
+
+    Skips stopwords (articles, legal forms, generic words) and tokens shorter
+    than MIN_COMPANY_TOKEN_LEN, so "The Quality Group GmbH" yields "quality"
+    rather than "the", which would substring-match nearly any message.
+    """
+    for token in _normalize(company).split():
+        if token not in _COMPANY_STOPWORDS and len(token) >= MIN_COMPANY_TOKEN_LEN:
+            return token
+    return ""
 
 
 def _app_domains(app) -> set[str]:

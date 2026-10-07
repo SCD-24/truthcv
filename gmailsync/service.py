@@ -16,7 +16,7 @@ from screening import jev
 
 from .matcher import _app_domains, _normalize, match_message
 from .model import GmailSuggestion, GmailSyncState
-from .store import load_suggestions, load_sync_state, save_suggestions, save_sync_state
+from .store import dismiss_suggestions, load_suggestions, load_sync_state, merge_new_suggestions, save_sync_state
 
 logger = logging.getLogger(__name__)
 
@@ -229,6 +229,17 @@ def pending_suggestions() -> list[GmailSuggestion]:
     return _sorted_pending(load_suggestions())
 
 
+def list_pending(limit: int, offset: int) -> tuple[list[GmailSuggestion], int]:
+    """One page of pending suggestions, newest first, plus the total pending count."""
+    pending = pending_suggestions()
+    return pending[offset : offset + limit], len(pending)
+
+
+def dismiss(ids) -> int:
+    """Dismiss the given pending suggestions; return how many changed."""
+    return dismiss_suggestions(ids)
+
+
 def _collect_message_ids(client: GmailClient, pending_apps: list, sync_state: GmailSyncState, processed_ids: set[str]) -> list[str]:
     """Distinct new message ids across every non-closed application's scoped query.
 
@@ -372,6 +383,7 @@ def run_sync(*, force: bool = False) -> dict:
     client = build_gmail_client()
     existing = load_suggestions()
     by_id = {item.id: item for item in existing}
+    existing_ids = set(by_id)
     processed_ids = set(sync_state.processed_message_ids)
     pending_apps = _pending_candidates()
     new_processed = _collect_message_ids(client, pending_apps, sync_state, processed_ids)
@@ -396,11 +408,11 @@ def run_sync(*, force: bool = False) -> dict:
                 raise
     sync_state.last_synced_at = now
     sync_state.processed_message_ids = sorted(processed_ids.union(new_processed))
-    save_suggestions(list(by_id.values()))
+    merged = merge_new_suggestions([s for i, s in by_id.items() if i not in existing_ids], now=now)
     save_sync_state(sync_state)
     return {
         "skipped": False,
         "last_synced_at": sync_state.last_synced_at,
         "processed": len(new_processed),
-        "suggestions": len(_sorted_pending(list(by_id.values()))),
+        "suggestions": len(_sorted_pending(merged)),
     }

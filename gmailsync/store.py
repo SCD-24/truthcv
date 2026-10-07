@@ -1,11 +1,22 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
+from collections.abc import Iterable
 from pathlib import Path
 
 from storage import atomic_write_text, data_dir
 
 from .model import GmailSuggestion, GmailSyncState
+
+
+#: Serializes load->save cycles on the suggestions file across threads.
+_SUGGESTIONS_LOCK = threading.Lock()
+
+
+#: Dismissed suggestions are deleted once dismissed longer than 30 days.
+DISMISSED_RETENTION_S = 30 * 24 * 60 * 60
 
 
 def sync_state_path() -> Path:
@@ -55,10 +66,66 @@ def save_suggestions(items: list[GmailSuggestion]) -> None:
 
 
 def update_suggestion_state(suggestion_id: str, state: str) -> GmailSuggestion | None:
-    suggestions = load_suggestions()
-    target = next((item for item in suggestions if item.id == suggestion_id), None)
-    if target is None:
-        return None
-    target.state = state
-    save_suggestions(suggestions)
-    return target
+    """Set one suggestion's state under the store lock; None if the id is unknown."""
+    with _SUGGESTIONS_LOCK:
+        suggestions = load_suggestions()
+        target = next((item for item in suggestions if item.id == suggestion_id), None)
+        if target is None:
+            return None
+        target.state = state
+        save_suggestions(suggestions)
+        return target
+
+
+def _prune_dismissed(items: list[GmailSuggestion], now: float) -> tuple[list[GmailSuggestion], bool]:
+    """Drop dismissed items older than the retention window.
+
+    Legacy dismissed items (dismissed_at == 0) are stamped with `now` and kept.
+    Returns (kept, changed).
+    """
+    kept: list[GmailSuggestion] = []
+    changed = False
+    for item in items:
+        if item.state == "dismissed":
+            if item.dismissed_at > 0 and now - item.dismissed_at > DISMISSED_RETENTION_S:
+                changed = True
+                continue
+            if item.dismissed_at == 0:
+                item.dismissed_at = now
+                changed = True
+        kept.append(item)
+    return kept, changed
+
+
+def dismiss_suggestions(ids: Iterable[str], now: float | None = None) -> int:
+    """Mark the given pending suggestions dismissed and prune expired ones; return how many were dismissed."""
+    wanted = set(ids)
+    if now is None:
+        now = time.time()
+    with _SUGGESTIONS_LOCK:
+        suggestions = load_suggestions()
+        dismissed = 0
+        for item in suggestions:
+            if item.id in wanted and item.state == "pending":
+                item.state = "dismissed"
+                item.dismissed_at = now
+                dismissed += 1
+        kept, pruned = _prune_dismissed(suggestions, now)
+        if dismissed or pruned:
+            save_suggestions(kept)
+        return dismissed
+
+
+def merge_new_suggestions(new_items: list[GmailSuggestion], now: float | None = None) -> list[GmailSuggestion]:
+    """Prune expired dismissed items, then append items whose id is not on disk yet; on-disk state wins."""
+    if now is None:
+        now = time.time()
+    with _SUGGESTIONS_LOCK:
+        merged, _ = _prune_dismissed(load_suggestions(), now)
+        present = {item.id for item in merged}
+        for item in new_items:
+            if item.id not in present:
+                present.add(item.id)
+                merged.append(item)
+        save_suggestions(merged)
+        return merged
