@@ -1383,12 +1383,55 @@ class DiscoveryCoverageModel(_Camel):
 
 
 class BoardBreakdownModel(_Camel):
-    """Per-board screening summary within a RunModel."""
+    """Per-source funnel row within a RunModel. The first five counts are None
+    for a legacy run (no stored funnel), whose rows are grouped by host."""
 
     board: str = ""
-    postings_seen: int = 0
+    channel: str = ""
+    postings_seen: int | None = None
+    previously_screened: int | None = None
+    not_a_posting: int | None = None
+    duplicate: int | None = None
+    failed: int | None = None
     for_review: int = 0
     rejected: int = 0
+    blocked: int = 0
+
+
+class BoardBreakdownTotalModel(_Camel):
+    """Unique-URL totals across all sources of a run's funnel."""
+
+    postings_seen: int = 0
+    previously_screened: int = 0
+    not_a_posting: int = 0
+    duplicate: int = 0
+    failed: int = 0
+    for_review: int = 0
+    rejected: int = 0
+    blocked: int = 0
+
+
+class UrlLedgerSourceModel(_Camel):
+    """One source a ledger URL was seen from."""
+
+    source: str = ""
+    channel: str = ""
+
+
+class UrlLedgerEntryModel(_Camel):
+    """One URL and the funnel outcome it ended in."""
+
+    url: str = ""
+    outcome: str = ""
+    detail: str = ""
+    sources: list[UrlLedgerSourceModel] = Field(default_factory=list)
+
+
+class UrlLedgerResponse(_Camel):
+    """GET /api/runs/{run_id}/urls: one page of the ledger and the filtered total."""
+
+    entries: list[UrlLedgerEntryModel] = Field(default_factory=list)
+    total: int = 0
 
 
 class RunModel(_Camel):
@@ -1413,6 +1456,12 @@ class RunModel(_Camel):
     note: str = ""
     discovery_coverage: list[DiscoveryCoverageModel] = Field(default_factory=list)
     board_breakdown: list[BoardBreakdownModel] = Field(default_factory=list)
+    # Unique-URL totals of the stored funnel; None for a legacy run without one.
+    board_breakdown_total: BoardBreakdownTotalModel | None = None
+    # Sources whose funnel row does not add up (postings_seen != sum of outcomes).
+    funnel_mismatches: list[str] = Field(default_factory=list)
+    # True when the URL ledger hit its cap; the funnel counts stay complete.
+    url_ledger_truncated: bool = False
 
 
 class ApplicationListResponse(_Camel):

@@ -59,6 +59,7 @@ const TRUTHCV_ALLOWED_TOOL_NAMES = [
   'record_run_note',
   'record_postings_seen',
   'record_discovery_coverage',
+  'record_source_funnel',
   'check_gmail_responses',
 ] as const;
 

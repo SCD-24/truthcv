@@ -46,8 +46,8 @@ describe('extractMeta', () => {
 
 describe('screenCandidates', () => {
   const cands: Candidate[] = [
-    { url: 'https://a.test/1', title: 'A', channel: 'dork', profiles: ['P1', 'P2'] },
-    { url: 'https://a.test/2', title: 'B', channel: 'dork', profiles: ['P1'] },
+    { url: 'https://a.test/1', title: 'A', channel: 'dork', sources: [], profiles: ['P1', 'P2'] },
+    { url: 'https://a.test/2', title: 'B', channel: 'dork', sources: [], profiles: ['P1'] },
   ];
 
   it('keeps a persistEvidence error longer than 200 chars whole', async () => {

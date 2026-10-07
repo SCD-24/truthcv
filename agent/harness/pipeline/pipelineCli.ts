@@ -22,6 +22,7 @@ import { STAGE_REGISTRY, type StageName } from '../stages.js';
 import { discover } from './discover.js';
 import { fetchPosting } from './fetchPosting.js';
 import { screenCandidates } from './screenStage.js';
+import { buildFunnel, recordFunnel } from './funnel.js';
 import { composeStagePrompt, defaultAgentDir } from './stagePrompt.js';
 import type { McpCall } from './types.js';
 
@@ -171,6 +172,7 @@ async function cmdDiscoverScreen(a: PipelineArgs, env: NodeJS.ProcessEnv, pool: 
     screeningAdapter: stageAdapter(config, 'screening', d),
     record: (args) => mcp('record_screening', args),
   });
+  found.errors.push(...(await recordFunnel(mcp, runId, buildFunnel(found.allCandidates, found.dropped, screened.outcomes))));
   const ok = found.coverageComplete && found.errors.length === 0;
   await d.writeOutput(out, JSON.stringify({
     ok, coverageComplete: found.coverageComplete, errors: found.errors, itemErrors: screened.errors.map((e) => redactAll(e, tokensOf(config))),

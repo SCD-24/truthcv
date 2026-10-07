@@ -69,6 +69,39 @@ describe('discover', () => {
   });
 });
 
+describe('discover sources and dropped', () => {
+  const U1 = 'https://boards.greenhouse.io/acme/jobs/1';
+  const U2 = 'https://boards.greenhouse.io/acme/jobs/2';
+  const cfg = {
+    searchQueries: [CONFIG.searchQueries[0]],
+    feedPostings: [{ url: U1, title: 'Feed', source: 'rr', profile: 'A' }],
+  };
+  const call = browser({ 'https://www.google.com/search?q=q1': GOOD });
+
+  it('merges two sources on one URL', async () => {
+    const mcp = vi.fn(async () => ({ content: '{"recorded":true}', isError: false }));
+    const out = await discover(cfg, 'r', call, mcp, { sleep: async () => {} });
+    const c = out.allCandidates.find((x) => x.url === U1)!;
+    expect(c.sources).toEqual([{ source: 'rr', channel: 'feed' }, { source: 'greenhouse.io', channel: 'dork' }]);
+    expect(out.allCandidates.find((x) => x.url === U2)!.sources).toEqual([{ source: 'greenhouse.io', channel: 'dork' }]);
+  });
+
+  it('maps dropped reasons with sources; fail-open gives no dropped', async () => {
+    const dropped = [{ url: U1, reason: 'previously_screened' }, { url: U2, reason: 'duplicate', duplicate_of: U1 }];
+    const mcp = vi.fn(async (tool: string) => ({
+      content: tool === 'filter_unscreened_urls' ? JSON.stringify({ unscreened: [], dropped }) : '{"recorded":true}', isError: false,
+    }));
+    const out = await discover(cfg, 'r', call, mcp, { sleep: async () => {} });
+    expect(out.candidates).toEqual([]);
+    expect(out.dropped).toEqual([
+      { url: U1, reason: 'previously_screened', sources: [{ source: 'rr', channel: 'feed' }, { source: 'greenhouse.io', channel: 'dork' }] },
+      { url: U2, reason: 'duplicate', duplicate_of: U1, sources: [{ source: 'greenhouse.io', channel: 'dork' }] },
+    ]);
+    const bad = vi.fn(async (tool: string) => ({ content: 'x', isError: tool === 'filter_unscreened_urls' }));
+    expect((await discover(cfg, 'r', call, bad, { sleep: async () => {} })).dropped).toEqual([]);
+  });
+});
+
 describe('discover dork pacing', () => {
   const SORRY = '- Page URL: https://www.google.com/sorry/index\nunusual traffic';
   const dorks = (n: number) => ({

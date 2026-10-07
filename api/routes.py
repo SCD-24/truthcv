@@ -72,6 +72,8 @@ from providers.base import supports_effort_levels
 from companyresearch import store as company_findings_store
 from screening import store as screening_store
 from runs import store as runs_store
+from agenttools.tools_funnel import OUTCOMES as _FUNNEL_OUTCOMES
+from runs import url_ledger as _url_ledger
 from runs.derive import board_breakdown_by_run, counters_by_run
 from screening.company import company_identity_key
 from screening.cooldown import cooldown as check_cooldown
@@ -137,6 +139,7 @@ from .schemas import (
     RenderResult,
     RouteModel,
     RunListResponse,
+    UrlLedgerResponse,
     RunModel,
     RunStopResult,
     RoutingModel,
@@ -222,10 +225,15 @@ def _run_models(records: list) -> list[RunModel]:
     except Exception:
         return [RunModel(**r.to_dict()) for r in records]
     counters = counters_by_run([r.id for r in records], screenings, applications)
-    breakdown = board_breakdown_by_run([r.id for r in records], screenings)
+    breakdown = board_breakdown_by_run(records, screenings)
     return [
         RunModel(
-            **{**r.to_dict(), **counters.get(r.id, {}), "board_breakdown": breakdown.get(r.id, [])}
+            **{
+                **r.to_dict(),
+                **counters.get(r.id, {}),
+                "board_breakdown": breakdown[r.id]["rows"],
+                "board_breakdown_total": breakdown[r.id]["total"],
+            }
         )
         for r in records
     ]
@@ -265,6 +273,31 @@ def get_run(run_id: str) -> RunModel:
     if record is None:
         raise HTTPException(status_code=404, detail="run not found")
     return _run_models([record])[0]
+
+
+# Page size bounds for GET /runs/{run_id}/urls.
+URL_LEDGER_DEFAULT_LIMIT = 50
+URL_LEDGER_MAX_LIMIT = 200
+
+
+@router.get("/runs/{run_id}/urls", response_model=UrlLedgerResponse)
+def get_run_urls(
+    run_id: str,
+    source: str = "",
+    outcome: str = "",
+    limit: int = URL_LEDGER_DEFAULT_LIMIT,
+    offset: int = 0,
+) -> UrlLedgerResponse:
+    """One page of the run's URL ledger, optionally filtered by source and
+    outcome. 404 for an unknown run, 400 for an unknown outcome; limit is
+    clamped to 1..URL_LEDGER_MAX_LIMIT and a negative offset to 0."""
+    if runs_store.get(run_id) is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    if outcome and outcome not in _FUNNEL_OUTCOMES:
+        raise HTTPException(status_code=400, detail="unknown outcome")
+    limit = min(max(1, limit), URL_LEDGER_MAX_LIMIT)
+    entries, total = _url_ledger.read(run_id, source, outcome, limit, max(0, offset))
+    return UrlLedgerResponse(entries=entries, total=total)
 
 
 def _supervisor_owns_run(run_id: str) -> bool:

@@ -252,6 +252,30 @@ def add_discovery_coverage(run_id: str, entry: dict) -> RunRecord | None:
         return record
 
 
+def set_source_funnel(
+    run_id: str,
+    rows: list[dict],
+    totals: dict,
+    mismatches: list[str],
+    truncated: bool,
+) -> RunRecord | None:
+    """Replace the run's per-source funnel snapshot under the store lock.
+
+    Replaces, never merges: a later report from the agent is the whole truth.
+    """
+    with locked(runs_path()):
+        runs = load_all()
+        record = next((r for r in runs if r.id == run_id), None)
+        if record is None:
+            return None
+        record.source_funnel = rows
+        record.funnel_totals = totals
+        record.funnel_mismatches = mismatches
+        record.url_ledger_truncated = bool(truncated)
+        _write_all(runs)
+        return record
+
+
 def finish_if_running(
     run_id: str,
     status: str = "failed",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from applications.model import Application
 from runs.derive import board_breakdown_by_run, counters_by_run, derive_counters
+from runs.model import RunRecord
 from screening.model import Screening
 
 
@@ -109,6 +110,56 @@ def test_counters_by_run_traverses_each_input_list_once():
 # --- board_breakdown_by_run ------------------------------------------------
 
 
+def _runs(*ids: str) -> list[RunRecord]:
+    """Legacy run records (no stored funnel) with the given ids."""
+    return [RunRecord(id=i) for i in ids]
+
+
+def _legacy_row(board: str, **kw) -> dict:
+    """A legacy host row: unknowable columns None."""
+    base = {
+        "board": board, "channel": "", "postings_seen": None,
+        "previously_screened": None, "not_a_posting": None, "duplicate": None,
+        "failed": None, "for_review": 0, "rejected": 0, "blocked": 0,
+    }
+    return {**base, **kw}
+
+
+def test_board_breakdown_funnel_run_uses_stored_rows_and_total():
+    rows = [
+        {"source": "b.test", "channel": "direct", "postings_seen": 2, "for_review": 2},
+        {"source": "a.test", "channel": "feed", "postings_seen": 5, "rejected": 3, "blocked": 2},
+        {"source": "c.test", "channel": "dork", "postings_seen": 2, "failed": 2},
+    ]
+    totals = {"postings_seen": 8, "for_review": 2}
+    rec = RunRecord(id="r", source_funnel=rows, funnel_totals=totals)
+    out = board_breakdown_by_run([rec], [_screening("r", url="https://x.test/1")])["r"]
+    assert [r["board"] for r in out["rows"]] == ["a.test", "b.test", "c.test"]
+    assert out["rows"][0] == {
+        "board": "a.test", "channel": "feed", "postings_seen": 5,
+        "previously_screened": 0, "not_a_posting": 0, "duplicate": 0,
+        "failed": 0, "for_review": 0, "rejected": 3, "blocked": 2,
+    }
+    assert out["total"] == totals
+
+
+def test_board_breakdown_zero_row_funnel_run_has_zero_total():
+    totals = {"postings_seen": 0, "for_review": 0}
+    rec = RunRecord(id="r", source_funnel=[], funnel_totals=totals)
+    out = board_breakdown_by_run([rec], [_screening("r", url="https://x.test/1")])["r"]
+    assert out == {"rows": [], "total": totals}
+
+
+def test_board_breakdown_legacy_run_counts_blocked_from_screenings():
+    screenings = [
+        _screening("r", url="https://linkedin.com/jobs/view/1", screening_blocker="unreadable"),
+        _screening("r", url="https://linkedin.com/jobs/view/2", verdict="rejected"),
+    ]
+    out = board_breakdown_by_run(_runs("r"), screenings)["r"]
+    assert out["rows"] == [_legacy_row("linkedin", rejected=1, blocked=1)]
+    assert out["total"] is None
+
+
 def test_board_breakdown_two_boards_mixed_verdicts_approvals():
     """Screenings for two boards with mixed verdicts and approvals are aggregated."""
     screenings = [
@@ -117,11 +168,11 @@ def test_board_breakdown_two_boards_mixed_verdicts_approvals():
         _screening("run-1", url="https://jobs.lever.co/acme/1", verdict="passed", approval=""),
         _screening("run-1", url="https://jobs.lever.co/acme/2", verdict="rejected", approval="pending"),
     ]
-    result = board_breakdown_by_run(["run-1"], screenings)
-    assert len(result["run-1"]) == 2
-    # Sorted by postings_seen desc, then board asc
-    assert result["run-1"][0] == {"board": "lever", "postings_seen": 2, "for_review": 1, "rejected": 1}
-    assert result["run-1"][1] == {"board": "linkedin", "postings_seen": 2, "for_review": 1, "rejected": 1}
+    result = board_breakdown_by_run(_runs("run-1"), screenings)["run-1"]["rows"]
+    assert len(result) == 2
+    # Equal screening counts: board asc
+    assert result[0] == _legacy_row("lever", for_review=1, rejected=1)
+    assert result[1] == _legacy_row("linkedin", for_review=1, rejected=1)
 
 
 def test_board_breakdown_empty_run_id_yields_empty_list():
@@ -129,8 +180,8 @@ def test_board_breakdown_empty_run_id_yields_empty_list():
     screenings = [
         _screening("", url="https://linkedin.com/jobs/view/1", verdict="rejected"),
     ]
-    result = board_breakdown_by_run([""], screenings)
-    assert result[""] == []
+    result = board_breakdown_by_run(_runs(""), screenings)
+    assert result[""]["rows"] == []
 
 
 def test_board_breakdown_sorting_order():
@@ -142,11 +193,8 @@ def test_board_breakdown_sorting_order():
         _screening("run-1", url="https://linkedin.com/jobs/1", verdict="passed"),
         _screening("run-1", url="https://linkedin.com/jobs/2", verdict="passed"),
     ]
-    result = board_breakdown_by_run(["run-1"], screenings)
-    boards = [b["board"] for b in result["run-1"]]
-    assert boards == ["ashby", "linkedin"]
-    counts = [b["postings_seen"] for b in result["run-1"]]
-    assert counts == [3, 2]
+    result = board_breakdown_by_run(_runs("run-1"), screenings)["run-1"]["rows"]
+    assert [b["board"] for b in result] == ["ashby", "linkedin"]
 
 
 def test_board_breakdown_unlinked_screenings_ignored():
@@ -156,8 +204,7 @@ def test_board_breakdown_unlinked_screenings_ignored():
         _screening("run-2", url="https://linkedin.com/jobs/view/2"),
         _screening("", url="https://linkedin.com/jobs/view/3"),
     ]
-    result = board_breakdown_by_run(["run-1", ""], screenings)
-    assert len(result["run-1"]) == 1
-    assert result["run-1"][0]["board"] == "linkedin"
-    assert result["run-1"][0]["postings_seen"] == 1
-    assert result[""] == []
+    result = board_breakdown_by_run(_runs("run-1", ""), screenings)
+    assert len(result["run-1"]["rows"]) == 1
+    assert result["run-1"]["rows"][0]["board"] == "linkedin"
+    assert result[""]["rows"] == []
