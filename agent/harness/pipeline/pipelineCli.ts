@@ -240,7 +240,7 @@ async function cmdFinish(a: PipelineArgs, mcp: McpCall, d: Resolved, env: NodeJS
   const secrets = [env.AGENT_LLM_API_KEY ?? '', env.AGENT_SCREENING_API_KEY ?? ''].filter(Boolean);
   const itemErrors = [...(await stateItemErrors(a, d)), ...(await applyFailuresOf(a, d))].map((e) => redactAll(e, secrets));
   const counts = { items_failed: itemErrors.length, item_errors: itemErrors };
-  let res = await mcp('finish_run', { run_id: runId, status: reason ? 'failed' : 'completed', stopped_reason: reason, ...counts });
+  const res = await mcp('finish_run', { run_id: runId, status: reason ? 'failed' : 'completed', stopped_reason: reason, ...counts });
   if (failed(res) && !reason) {
     // The server's coverage guard refused `completed`: report the shortfall honestly.
     await mcp('finish_run', { run_id: runId, status: 'failed', stopped_reason: `coverage incomplete: ${res.content}`.slice(0, MAX_STOPPED_REASON_CHARS), ...counts });

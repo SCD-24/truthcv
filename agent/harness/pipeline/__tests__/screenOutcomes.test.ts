@@ -115,7 +115,22 @@ describe('outcome helpers', () => {
   });
 
   it('orders for_review > blocked > rejected', () => {
-    const pick = pickOutcome([{ outcome: 'rejected', detail: 'a' }, { outcome: 'blocked', detail: 'b' }], '');
+    const pick = pickOutcome([{ profile: 'A', outcome: 'rejected', detail: 'a' }, { profile: 'B', outcome: 'blocked', detail: 'b' }], '');
     expect(pick.outcome).toBe('blocked');
+  });
+
+  it('ranks failed above previously_screened', () => {
+    const pick = pickOutcome([{ profile: 'A', outcome: 'previously_screened', detail: 'cov' }, { profile: 'B', outcome: 'failed', detail: 'boom' }], '');
+    expect(pick.outcome).toBe('failed');
+  });
+
+  it('lists every profile outcome in the detail for 2+ profiles', () => {
+    const pick = pickOutcome([{ profile: 'A', outcome: 'rejected', detail: 'rej' }, { profile: 'B', outcome: 'failed', detail: 'boom' }], '');
+    expect(pick).toEqual({ outcome: 'rejected', detail: 'rej (A: rejected; B: failed)' });
+  });
+
+  it('leaves a single-profile detail unchanged', () => {
+    const pick = pickOutcome([{ profile: 'A', outcome: 'rejected', detail: 'rej' }], '');
+    expect(pick).toEqual({ outcome: 'rejected', detail: 'rej' });
   });
 });

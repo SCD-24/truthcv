@@ -32,6 +32,9 @@ function makeRun(overrides: Partial<RunRecord> = {}): RunRecord {
     note: "",
     discoveryCoverage: [],
     boardBreakdown: [],
+    boardBreakdownTotal: null,
+    funnelMismatches: [],
+    urlLedgerTruncated: false,
     ...overrides,
   };
 }
@@ -250,8 +253,8 @@ describe("RecentRunsSection", () => {
         makeRun({
           id: "run-with-breakdown",
           boardBreakdown: [
-            { board: "linkedin", postingsSeen: 2, forReview: 0, rejected: 1 },
-            { board: "lever", postingsSeen: 1, forReview: 1, rejected: 0 },
+            { board: "linkedin", channel: "direct", postingsSeen: 2, previouslyScreened: 0, notAPosting: 0, duplicate: 0, failed: 0, forReview: 0, rejected: 1, blocked: 0 },
+            { board: "lever", channel: "direct", postingsSeen: 1, previouslyScreened: 0, notAPosting: 0, duplicate: 0, failed: 0, forReview: 1, rejected: 0, blocked: 0 },
           ],
         }),
       ]),
@@ -264,7 +267,7 @@ describe("RecentRunsSection", () => {
     fireEvent.click(runRow);
 
     await waitFor(() => {
-      expect(screen.getByText(/Job board/)).toBeTruthy();
+      expect(screen.getByText("Source")).toBeTruthy();
       expect(screen.getByText("linkedin")).toBeTruthy();
       expect(screen.getByText("lever")).toBeTruthy();
     });

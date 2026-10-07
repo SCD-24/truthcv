@@ -20,8 +20,15 @@ export interface UrlOutcome extends Classified {
 /** Detail recorded when another record already covers the posting. */
 export const COVERED_DETAIL = 'screened by another record during this run';
 
-/** Outcomes from strongest to weakest, used to merge several profiles' results. */
-const PRECEDENCE: Outcome[] = ['for_review', 'blocked', 'rejected', 'previously_screened', 'failed'];
+/**
+ * Outcomes from strongest to weakest, used to merge several profiles' results.
+ * previously_screened ranks last: nothing new happened this run, so any outcome
+ * produced this run, including a failure, is more accurate.
+ */
+const PRECEDENCE: Outcome[] = ['for_review', 'blocked', 'rejected', 'failed', 'previously_screened'];
+
+/** A classified result tagged with the profile that produced it. */
+export type ProfileClassified = Classified & { profile: string };
 
 /** The shape of a stored-outcome result (as built by persistEvidence). */
 interface Stored {
@@ -73,8 +80,11 @@ export function classifyStored(content: string, profile: string): Classified {
 }
 
 /** Merge per-profile results into one outcome; `emptyDetail` explains an empty list. */
-export function pickOutcome(results: Classified[], emptyDetail: string): Classified {
+export function pickOutcome(results: ProfileClassified[], emptyDetail: string): Classified {
   if (results.length === 0) return { outcome: 'failed', detail: emptyDetail };
   const rank = (c: Classified): number => PRECEDENCE.indexOf(c.outcome);
-  return results.reduce((best, c) => (rank(c) < rank(best) ? c : best));
+  const picked = results.reduce((best, c) => (rank(c) < rank(best) ? c : best));
+  if (results.length === 1) return { outcome: picked.outcome, detail: picked.detail };
+  const list = results.map((r) => `${r.profile}: ${r.outcome}`).join('; ');
+  return { outcome: picked.outcome, detail: `${picked.detail} (${list})` };
 }

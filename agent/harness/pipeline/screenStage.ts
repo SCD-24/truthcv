@@ -10,7 +10,7 @@ import type { ProviderAdapter } from '../providers/types.js';
 import { extractMeta } from './extractMeta.js';
 import type { FetchedPosting } from './fetchPosting.js';
 import type { Candidate } from './types.js';
-import { classifyStored, pickOutcome, type Classified, type UrlOutcome } from './outcomes.js';
+import { classifyStored, pickOutcome, type Classified, type ProfileClassified, type UrlOutcome } from './outcomes.js';
 import { BLOCKER_COMPANY_FALLBACK, BLOCKER_ROLE_FALLBACK, companyFromUrl, roleForBlocker } from './blockerIdentity.js';
 
 export { BLOCKER_COMPANY_FALLBACK, BLOCKER_ROLE_FALLBACK, companyFromUrl };
@@ -140,16 +140,18 @@ async function screenProfile(d: ScreenStageDeps, c: Candidate, text: string, met
 
 /** Screen and record each profile with criteria in order, until a pass or existing coverage. */
 async function screenProfiles(d: ScreenStageDeps, c: Candidate, text: string, meta: Meta, res: ScreenStageResult): Promise<void> {
-  const results: Classified[] = [];
+  const results: ProfileClassified[] = [];
+  let current = '';
   try {
     for (const profile of c.profiles) {
       if (!d.criteria[profile]) continue;
+      current = profile;
       const r = await screenProfile(d, c, text, meta, profile, res);
-      results.push(r.verdict);
+      results.push({ ...r.verdict, profile });
       if (r.stop) break;
     }
   } catch (err) {
-    results.push(failedProfile(res, `${c.url}: ${err instanceof Error ? err.message : String(err)}`).verdict);
+    results.push({ ...failedProfile(res, `${c.url}: ${err instanceof Error ? err.message : String(err)}`).verdict, profile: current });
   }
   const picked = pickOutcome(results, `no criteria for profiles: ${c.profiles.join(', ')}`);
   res.outcomes.push({ url: c.url, ...picked });

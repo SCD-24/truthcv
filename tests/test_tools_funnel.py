@@ -113,3 +113,13 @@ def test_ledger_read_filters_and_pages(data_dir):
     entries, total = url_ledger.read("r1", outcome="rejected", limit=2, offset=1)
     assert total == 3 and [e["url"] for e in entries] == ["u3", "u5"]
     assert url_ledger.read("r1", source="other")[1] == 0
+
+
+def test_ledger_read_filters_same_source_by_channel(data_dir):
+    url_ledger.write("r1", [
+        {**URL, "url": "a", "sources": [{"source": "x.com", "channel": "feed"}]},
+        {**URL, "url": "b", "sources": [{"source": "x.com", "channel": "dork"}]},
+    ])
+    assert [e["url"] for e in url_ledger.read("r1", source="x.com", channel="feed")[0]] == ["a"]
+    assert [e["url"] for e in url_ledger.read("r1", source="x.com", channel="dork")[0]] == ["b"]
+    assert url_ledger.read("r1", source="x.com")[1] == 2

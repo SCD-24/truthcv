@@ -57,8 +57,12 @@ def _load(run_id: str) -> list[dict]:
     return [e for e in raw if isinstance(e, dict)] if isinstance(raw, list) else []
 
 
-def _has_source(entry: dict, source: str) -> bool:
-    return any(s.get("source") == source for s in entry.get("sources") or [])
+def _has_source(entry: dict, source: str, channel: str = "") -> bool:
+    """Whether a source of the entry matches ``source`` (and ``channel`` if set)."""
+    return any(
+        s.get("source") == source and (not channel or s.get("channel") == channel)
+        for s in entry.get("sources") or []
+    )
 
 
 def read(
@@ -67,15 +71,16 @@ def read(
     outcome: str = "",
     limit: int = 50,
     offset: int = 0,
+    channel: str = "",
 ) -> tuple[list[dict], int]:
     """One page of the filtered ledger and the filtered total.
 
-    ``source`` and ``outcome`` narrow when non-empty; ``limit`` of 0 or less
+    ``source``, ``channel`` (with a source) and ``outcome`` narrow when non-empty; ``limit`` of 0 or less
     means no limit; a negative offset is clamped to 0.
     """
     entries = _load(run_id)
     if source:
-        entries = [e for e in entries if _has_source(e, source)]
+        entries = [e for e in entries if _has_source(e, source, channel)]
     if outcome:
         entries = [e for e in entries if e.get("outcome") == outcome]
     total = len(entries)

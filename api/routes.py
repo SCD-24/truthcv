@@ -287,6 +287,7 @@ def get_run_urls(
     outcome: str = "",
     limit: int = URL_LEDGER_DEFAULT_LIMIT,
     offset: int = 0,
+    channel: str = "",
 ) -> UrlLedgerResponse:
     """One page of the run's URL ledger, optionally filtered by source and
     outcome. 404 for an unknown run, 400 for an unknown outcome; limit is
@@ -295,8 +296,10 @@ def get_run_urls(
         raise HTTPException(status_code=404, detail="run not found")
     if outcome and outcome not in _FUNNEL_OUTCOMES:
         raise HTTPException(status_code=400, detail="unknown outcome")
+    if channel and channel not in ("feed", "direct", "dork"):
+        raise HTTPException(status_code=400, detail="unknown channel")
     limit = min(max(1, limit), URL_LEDGER_MAX_LIMIT)
-    entries, total = _url_ledger.read(run_id, source, outcome, limit, max(0, offset))
+    entries, total = _url_ledger.read(run_id, source, outcome, limit, max(0, offset), channel)
     return UrlLedgerResponse(entries=entries, total=total)
 
 
