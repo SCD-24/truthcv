@@ -15,6 +15,8 @@ import type {
   GmailStartResult,
   GmailStatus,
   GmailSyncSummary,
+  GmailSuggestionPage,
+  GmailDismissResult,
   TestResult,
   ProfileStatus,
   OnboardingState,
@@ -331,6 +333,20 @@ export function syncGmailResponses(): Promise<GmailSyncSummary> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ force: true }),
+  });
+}
+
+/** Page of pending Gmail suggestions. 403s when the Gmail tracking gate is closed. */
+export function listGmailSuggestions(limit: number, offset: number): Promise<GmailSuggestionPage> {
+  return request(`/api/gmail/suggestions?limit=${limit}&offset=${offset}`);
+}
+
+/** Dismiss suggestions by id. 403s when the Gmail tracking gate is closed. */
+export function dismissGmailSuggestions(ids: string[]): Promise<GmailDismissResult> {
+  return request("/api/gmail/suggestions/dismiss", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
   });
 }
 

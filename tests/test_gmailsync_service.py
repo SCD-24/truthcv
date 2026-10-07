@@ -10,6 +10,8 @@ make a live call to either.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import json
 import threading
 import urllib.error
@@ -19,7 +21,8 @@ import pytest
 import applications
 import secretstore
 from gmailsync import service
-from gmailsync.store import load_suggestions
+from gmailsync.model import GmailSuggestion
+from gmailsync.store import load_suggestions, save_suggestions
 from screening import jev
 from truth.answers import Answers, save as save_answers
 
@@ -346,6 +349,149 @@ def test_processed_message_ids_dedupe_across_runs(monkeypatch, data_dir):
     second = service.run_sync(force=True)
     assert second["processed"] == 0
     assert client.metadata_calls == 1
+
+
+# --- dismissed state, pagination, merge-on-save -----------------------------
+
+
+def _suggestion(sid: str, state: str = "pending", date: str = "2024-01-01") -> GmailSuggestion:
+    return GmailSuggestion(id=sid, state=state, date=date)
+
+
+def test_dismiss_only_flips_pending(data_dir):
+    save_suggestions([_suggestion("p1"), _suggestion("a1", "applied")])
+
+    assert service.dismiss(["p1", "a1", "nope"]) == 1
+
+    states = {s.id: s.state for s in load_suggestions()}
+    assert states == {"p1": "dismissed", "a1": "applied"}
+
+
+def test_dismissed_excluded_from_pending_and_list_pending(data_dir):
+    save_suggestions([_suggestion("p1"), _suggestion("p2")])
+    service.dismiss(["p1"])
+
+    assert [s.id for s in service.pending_suggestions()] == ["p2"]
+    page, total = service.list_pending(10, 0)
+    assert [s.id for s in page] == ["p2"]
+    assert total == 1
+
+
+def test_list_pending_paginates_with_total(data_dir):
+    save_suggestions([_suggestion(f"s{i}", date=f"2024-01-0{i}") for i in range(1, 6)])
+
+    page, total = service.list_pending(2, 1)
+
+    assert total == 5
+    assert [s.id for s in page] == ["s4", "s3"]
+
+
+def test_suggestion_dismissed_during_sync_stays_dismissed(monkeypatch, data_dir):
+    save_answers(Answers(email="me@example.com"))
+    _make_app(company="Acme Corp", website="https://acme.example", status="Applied")
+    save_suggestions([_suggestion("old")])
+
+    class DismissingClient(FakeGmailClient):
+        def list_messages(self, query):
+            service.dismiss(["old"])
+            return super().list_messages(query)
+
+    monkeypatch.setattr(service, "build_gmail_client", lambda: DismissingClient())
+
+    service.run_sync(force=True)
+
+    assert {s.id: s.state for s in load_suggestions()}["old"] == "dismissed"
+
+
+def test_dismissed_message_not_recreated_on_next_sync(monkeypatch, data_dir):
+    save_answers(Answers(email="me@example.com"))
+    _make_app(company="Acme Corp", website="https://acme.example", status="Applied")
+    meta = _metadata("m1", "Recruiter <no-reply@acme.example>", "Update", "Mon, 1 Jan 2024 00:00:00 +0000", "regret")
+    client = _AlwaysReturnsClient(metadata_by_id={"m1": meta})
+    monkeypatch.setattr(service, "build_gmail_client", lambda: client)
+
+    service.run_sync(force=True)
+    service.dismiss(["m1"])
+    service.run_sync(force=True)
+
+    suggestions = load_suggestions()
+    assert [(s.id, s.state) for s in suggestions] == [("m1", "dismissed")]
+    assert service.pending_suggestions() == []
+
+
+# --- dismissed retention pruning ---------------------------------------------
+
+_NOW = 10_000_000.0
+_RETENTION_S = 30 * 24 * 60 * 60
+
+
+def test_dismiss_stamps_dismissed_at(data_dir):
+    from gmailsync.store import dismiss_suggestions
+
+    save_suggestions([_suggestion("p1")])
+
+    dismiss_suggestions(["p1"], now=_NOW)
+
+    assert load_suggestions()[0].dismissed_at == _NOW
+
+
+def test_merge_prunes_expired_dismissed_keeps_recent(data_dir):
+    from gmailsync.store import merge_new_suggestions
+
+    old = GmailSuggestion(id="old", state="dismissed", dismissed_at=_NOW - _RETENTION_S - 1)
+    recent = GmailSuggestion(id="recent", state="dismissed", dismissed_at=_NOW - _RETENTION_S + 1)
+    save_suggestions([old, recent])
+
+    merge_new_suggestions([], now=_NOW)
+
+    assert [s.id for s in load_suggestions()] == ["recent"]
+
+
+def test_merge_backfills_legacy_dismissed(data_dir):
+    from gmailsync.store import merge_new_suggestions
+
+    save_suggestions([GmailSuggestion(id="legacy", state="dismissed")])
+
+    merge_new_suggestions([], now=_NOW)
+
+    items = load_suggestions()
+    assert [(s.id, s.dismissed_at) for s in items] == [("legacy", _NOW)]
+
+
+def test_merge_never_prunes_pending_or_applied(data_dir):
+    from gmailsync.store import merge_new_suggestions
+
+    ancient = _NOW - 10 * _RETENTION_S
+    save_suggestions(
+        [
+            GmailSuggestion(id="p", state="pending", dismissed_at=ancient),
+            GmailSuggestion(id="a", state="applied", dismissed_at=ancient),
+        ]
+    )
+
+    merge_new_suggestions([], now=_NOW)
+
+    assert {s.id for s in load_suggestions()} == {"p", "a"}
+
+
+def test_pruned_dismissed_message_not_recreated_by_run_sync(monkeypatch, data_dir):
+    save_answers(Answers(email="me@example.com"))
+    _make_app(company="Acme Corp", website="https://acme.example", status="Applied")
+    meta = _metadata("m1", "Recruiter <no-reply@acme.example>", "Update", "Mon, 1 Jan 2024 00:00:00 +0000", "regret")
+    client = _AlwaysReturnsClient(metadata_by_id={"m1": meta})
+    monkeypatch.setattr(service, "build_gmail_client", lambda: client)
+    # Pin run_sync's clock so pruning does not depend on the real wall clock.
+    monkeypatch.setattr(service, "time", SimpleNamespace(time=lambda: _NOW))
+
+    service.run_sync(force=True)
+    service.dismiss(["m1"])
+    items = load_suggestions()
+    items[0].dismissed_at = _NOW - _RETENTION_S - 1
+    save_suggestions(items)
+
+    service.run_sync(force=True)
+
+    assert load_suggestions() == []
 
 
 # --- concurrent metadata prefetch keeps serial processing order -----------
