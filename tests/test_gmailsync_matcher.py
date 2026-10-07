@@ -22,6 +22,10 @@ def _app(**overrides):
         ("TP Infinity Germany GmbH", "infinity"),
         ("Acme Corp", "acme"),
         ("The Group GmbH", ""),
+        ("EY", "ey"),
+        ("HP Inc", "hp"),
+        ("3M Deutschland GmbH", "3m"),
+        ("XY GmbH", ""),
     ],
 )
 def test_company_token(company, expected):
@@ -57,3 +61,25 @@ def test_quality_mention_matches_low():
     )
     assert result is not None
     assert result.confidence == "low"
+
+
+def test_short_name_matches_as_whole_word():
+    """EY matches low as a whole word, not inside 'key'."""
+    app = _app(company="EY")
+    hit = match_message([app], sender="x@unrelated.example", subject="Your EY application", snippet="")
+    assert hit is not None
+    assert hit.confidence == "low"
+    assert match_message([app], sender="x@unrelated.example", subject="They have the key to money", snippet="") is None
+
+
+def test_short_name_sender_domain_exact_label():
+    """ey.com matches an EY app; survey.com does not."""
+    app = _app(company="EY")
+    assert match_message([app], sender="no-reply@ey.com", subject="Hello", snippet="") is not None
+    assert match_message([app], sender="no-reply@survey.com", subject="Hello", snippet="") is None
+
+
+def test_hp_does_not_match_php():
+    """HP app ignores 'php developer'."""
+    result = match_message([_app(company="HP Inc")], sender="x@unrelated.example", subject="Jobs", snippet="php developer")
+    assert result is None
