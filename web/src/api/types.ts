@@ -235,6 +235,13 @@ export interface GmailDismissResult {
   pending: number;
 }
 
+/** Result of POST /api/gmail/suggestions/{id}/accept: the now-applied
+ * suggestion and how many remain pending. */
+export interface GmailAcceptResult {
+  suggestion: GmailSuggestion;
+  pending: number;
+}
+
 /** One selectable model, discovered live from the provider's API/SDK. */
 export interface ModelInfo {
   id: string;
