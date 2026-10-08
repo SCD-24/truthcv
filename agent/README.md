@@ -23,7 +23,7 @@ Keeping it in a sibling container rather than this one means a browser crash
 can never take the agent's own run loop down.
 
 > **A login-walled site (SSO, CAPTCHA, SMS MFA) needs a one-time manual
-> sign-in.** Open **Agents → Site sign-ins** in TruthCV and click Sign in; a
+> sign-in.** Open **Job boards → Needs attention** in TruthCV and click Sign in; a
 > browser you can drive opens in the app. The session persists on the named
 > volume `browser-profile`, so you should not need to sign in again. A run in
 > progress takes priority — the button is refused while the agent is applying,
@@ -103,13 +103,16 @@ under the operator's name. Watch it.
 | `RUN_AT` | `09:00,15:00` | Comma-separated `HH:MM` (24h, container TZ). Fallback only — used when the agent config API is unreachable; see below. |
 | `RUN_DAYS` | `1,2,3,4,5` | Days to run, `1`=Mon … `7`=Sun. Fallback only — used when the agent config API is unreachable; see below. |
 | `RUN_ONCE` | unset | `1` = run immediately and exit. |
-| `TZ` | container default | Fallback timezone the schedule is expressed in, used only when the Agents page's `run_timezone` is unset or unreachable. |
-| `RUN_TIMEZONE` | `TZ`, else `UTC` | Fallback IANA zone the `RUN_AT` slots are wall-clock times in. The app's stored `run_timezone` (Agents page) wins whenever the config API is reachable. |
+| `TZ` | `UTC` (compose sets `TZ=${TZ:-UTC}`) | Container timezone. Also the second link in the schedule-zone fallback chain below, used only when the Agents page's `run_timezone` is unset or unreachable and `RUN_TIMEZONE` is unset. |
+| `RUN_TIMEZONE` | unset → falls back to `TZ`, then `UTC` | Fallback IANA zone the `RUN_AT` slots are wall-clock times in. Full chain: the app's stored `run_timezone` (Agents page) when the config API is reachable, else `RUN_TIMEZONE`, else `TZ`, else `UTC`. Not set by `docker-compose.yml`; the fallback is applied by `entrypoint.sh` and `supervisor.js` (`agent-config.js` only reports the app's stored value, empty if absent). |
 | `TRUTHCV_MCP_URL` | `http://app:8080/mcp` | The `app` service's MCP streamable-HTTP JSON-RPC tool surface (`POST /mcp`, `agenttools/mcp_app.py`). In-network only — not reachable from the host or the internet. |
 | `AGENT_BROWSER_DRIVER` | `browser` | Which browser driver the agent uses. `browser` (the containerised Chromium) is currently the only supported value — kept as a validating seam so a second driver can be added later without every call site needing to change. |
 | `BROWSER_MCP_URL` | `http://browser:8931/mcp` | In-network address of the `browser` compose service's MCP endpoint (see [`browser/README.md`](../browser/README.md)). Also in-network only. Used by the `browser` driver. |
 | `MAX_APPLICATIONS_PER_RUN` | empty | Fallback only: `maxApplicationsPerRun` on the Agents page takes precedence. Empty in both means **no cap**, matching RUNBOOK §1 ("there is no daily quota"). Not zero. Enforced server-side on the approved-queue path (`get_approved_applications` caps and leases what it hands out); on a posting the agent discovers itself in FULL AUTO it is prompt-level only. |
 | `RUN_LOG_DIR` | `/app/runs` | Where `daily-apply.sh` writes per-run logs. Must stay inside the `agent-runs` volume or logs vanish on restart. |
+| `AGENT_CONTROL_PORT` | `9099` | Port the agent's `supervisor.js` control server listens on (`POST /run`, `POST /cancel`, `GET /status`, all gated by `X-Agent-Token` = `AGENT_API_TOKEN`). |
+| `SESSION_SERVER_PORT` | `8932` | Port of the `browser` service's session server. `daily-apply.sh` calls it at `browser:$SESSION_SERVER_PORT` to reclaim the browser from an attended sign-in session before each run. |
+| `SESSION_EVICT_TIMEOUT` | `240` (seconds) | How long `daily-apply.sh` waits for an evicted sign-in session to release the browser before aborting the run. **Must exceed the browser service's `SESSION_GRACE_MS`** (default `180000` ms = 180 s, `browser/session-server.js`) plus one 5 s poll tick and the close grace; raise them together or every run that meets an open session aborts. |
 
 The container no longer aborts at start without an LLM credential — it logs a warning and continues; each scheduled run aborts (with a recorded reason on the Agents page) until a credential is available.
 
@@ -157,10 +160,9 @@ flag that takes precedence; `daily-apply.sh` passes the flags explicitly).
 | `AGENT_LLM_API_KEY` | Credential token (api key or OAuth token). May be empty only for `ollama`. Never echoed — the harness redacts it from all output. |
 | `AGENT_LLM_BASE_URL` | Base URL. Required for `ollama`; optional elsewhere (falls back to the per-provider default above). |
 | `AGENT_LLM_AUTH_TYPE` | How to present the token: `oauth`, `api_key`, or `url`. |
-The model's **input** context window is no longer an operator-stated env var: the harness discovers it itself, per model, directly from the provider (OpenRouter's `/models` listing, Anthropic's `max_input_tokens` on `GET /v1/models/{id}`, Ollama's `/api/show`, or Codex's `/models` catalog reading `context_window` for the matching model slug — falling back to OpenAI's `/v1/models/{id}` when Codex is configured with an API key, which usually reports no context length) at startup, and uses that figure to trigger proactive compaction at 75%. When a provider cannot report one, or a discovery call fails or times out, the harness falls back to a conservative default (32768 tokens), logging that the fallback is in effect. The reactive path — compacting when the provider itself says the context is too long, then resending — still runs on top of this **on providers that report an overflow as an error** (Anthropic, OpenAI-wire hosted APIs), and is what rescues a discovered or fallback figure that turns out too high. For `ollama`, the discovered (or fallback) window is also passed to the adapter as `options.num_ctx`; whether the OpenAI-compatible endpoint honours that has not been verified here, so do not rely on it to raise a server-side window.
-| `AGENT_MAX_TURNS` | Runaway backstop on the agent loop's turns. Defaults to `400`. Applies **per session** — each apply session daily-apply.sh runs gets its own fresh `AGENT_MAX_TURNS` budget, not a share of one run-wide total. Not the operational bound on how much a run does — that is `maxApplicationsPerRun` on the Agents page. Driving one application form through the browser costs 15-25 turns. The last turns are reserved for the model to wind up in. The harness reports how many turns remain directly on the `finish_run`/`finish_phase` tool result (`turns_remaining`), so the agent is never left guessing at the limit. |
-| `AGENT_SESSION_MODE` | `daily-apply.sh` only. Removed: `pipeline` is the only mode; any other value aborts. Code performs discovery, coverage recording and screening (`pipelineCli`), then runs one short apply session per approved/passing posting, each ending with `finish_application`. Models are routed per stage (Settings agent stages → `llm_routes`, fetched into a temp `--routes-file`); `AGENT_SCREENING_*` env vars still override the screening stage. Dork recency is the `dorkRecency` setting on the Agents page. |
-| `AGENT_FINISH_TOOL` / `--finish-tool` | Names the tool (`finish_run` or `finish_phase`) the harness injects `turns_remaining` into and expects to end the session. `daily-apply.sh` sets it to `finish_application` for each pipeline apply session; the harness still accepts `finish_run`/`finish_phase`. |
+| `AGENT_MAX_TURNS` | Runaway backstop on the agent loop's turns. Defaults to `400`. Applies **per session** — each apply session daily-apply.sh runs gets its own fresh `AGENT_MAX_TURNS` budget, not a share of one run-wide total. Not the operational bound on how much a run does — that is `maxApplicationsPerRun` on the Agents page. Driving one application form through the browser costs 15-25 turns. The last turns are reserved for the model to wind up in. The harness reports how many turns remain directly on the configured finish tool's result (`turns_remaining`; `finish_application` in pipeline apply sessions), so the agent is never left guessing at the limit. |
+| `AGENT_SESSION_MODE` | `daily-apply.sh` only. Unset (the default) and `pipeline` behave identically — `pipeline` is the only mode; any other value aborts the run (exit 1, with a recorded reason) before the browser or app are touched. Code performs discovery, coverage recording and screening (`pipelineCli`), then runs one short apply session per approved/passing posting, each ending with `finish_application`. Models are routed per stage (Settings agent stages → `llm_routes`, fetched into a temp `--routes-file`); `AGENT_SCREENING_*` env vars still override the screening stage. Dork recency is the `dorkRecency` setting on the Agents page. |
+| `AGENT_FINISH_TOOL` / `--finish-tool` | Names the tool the harness injects `turns_remaining` into and expects to end the session: one of `finish_run`, `finish_phase`, `finish_application`; anything else is a config error (exit `5`). The harness default is `finish_run`; `daily-apply.sh` always passes `--finish-tool finish_application` for each pipeline apply session. The flag wins over the env var. |
 | `AGENT_MAX_RETRIES` | Cap on consecutive retryable-error retries within one turn, before the loop gives up on a persistently failing provider call rather than retrying forever. Defaults to `12`. |
 | `AGENT_MAX_RETRY_DELAY_MS` | Ceiling on a single retry's backoff delay, in ms, so a provider effectively saying "retry in hours" fails fast instead of parking an unattended run. Defaults to `300000` (5 minutes). |
 | `AGENT_MAX_TOOL_RESULT_CHARS` | Caps a single MCP tool result's character length at the moment it is inserted into the conversation. Defaults to `24000`. An over-long result — a full-page browser snapshot, a long file read — is truncated with an explicit marker naming how many characters were cut and instructing the model to re-request a narrower view, so it never receives silently partial data. Must be a positive integer. |
@@ -173,16 +175,25 @@ The model's **input** context window is no longer an operator-stated env var: th
 | `AGENT_SCREENING_API_KEY` | Credential token for the screening adapter. Defaults to `AGENT_LLM_API_KEY` when unset. Never echoed — redacted from all output like `AGENT_LLM_API_KEY`. |
 | `AGENT_SCREENING_BASE_URL` | Base URL for the screening adapter. Defaults to `AGENT_LLM_BASE_URL` when unset. |
 | `AGENT_SCREENING_AUTH_TYPE` | How to present the screening token: `oauth`, `api_key`, or `url`. Defaults to `AGENT_LLM_AUTH_TYPE` when unset. |
+| `AGENT_ROUTES_FILE` / `--routes-file` | Path to the per-stage model routes JSON; `daily-apply.sh` fetches it from the app into a temp file and passes `--routes-file`. Unreadable or unset means no routes. An explicit `AGENT_LLM_*` / flag value overrides only its own field of the apply route. |
+| `MCP_CONFIG_PATH` / `--mcp-config` | Path to the MCP config. Defaults to `mcp.json` in the working directory; `daily-apply.sh` passes `--mcp-config` from its own `MCP_CONFIG` (default `/app/agent/mcp.json`). |
+
+The model's **input** context window is no longer an operator-stated env var: the harness discovers it itself, per model, directly from the provider (OpenRouter's `/models` listing, Anthropic's `max_input_tokens` on `GET /v1/models/{id}`, Ollama's `/api/show`, or Codex's `/models` catalog reading `context_window` for the matching model slug — falling back to OpenAI's `/v1/models/{id}` when Codex is configured with an API key, which usually reports no context length) at startup, and uses that figure to trigger proactive compaction at 75%. When a provider cannot report one, or a discovery call fails or times out, the harness falls back to a conservative default (32768 tokens), logging that the fallback is in effect. The reactive path — compacting when the provider itself says the context is too long, then resending — still runs on top of this **on providers that report an overflow as an error** (Anthropic, OpenAI-wire hosted APIs), and is what rescues a discovered or fallback figure that turns out too high. For `ollama`, the discovered (or fallback) window is also passed to the adapter as `options.num_ctx`; whether the OpenAI-compatible endpoint honours that has not been verified here, so do not rely on it to raise a server-side window.
 
 **Harness binary.** `HARNESS_CLI` overrides the path to the compiled entry
 point; it defaults to `/app/agent/dist/harness/cli.js`.
 
 **Exit-code contract.** The harness's exit code is its machine interface, logged
 and propagated verbatim: `0` success — the loop ended cleanly *and* the agent
-called `finish_run` before stopping — `2` turn cap, `3` provider error, `4` MCP
-connection failure, `5` bad configuration, `6` the loop ended cleanly but
-`finish_run` was never executed, so the run was abandoned without reporting an
-outcome.
+executed the **configured finish tool** (`--finish-tool` / `AGENT_FINISH_TOOL`;
+`finish_run` by default, `finish_application` in the apply sessions
+`daily-apply.sh` launches) before stopping — `2` turn cap, `3` provider error,
+`4` MCP connection failure, `5` bad configuration (including an unrecognised
+finish-tool name), `6` the loop ended cleanly but the configured finish tool was
+never executed, so the session was abandoned without reporting an outcome. In
+pipeline mode `daily-apply.sh` treats `1`, `2` and `6` from one apply session as
+a per-posting failure (logged and counted, the run continues) and `3`/`4`/`5`
+as systemic (the apply loop stops).
 
 **Feed-first saved screening.** After the approved Phase 0 queue, the feed
 lists metadata and URLs, not guaranteed posting bodies. Retrieve full posting
@@ -423,6 +434,56 @@ operations. If telemetry is `absent_telemetry`, check that the run really
 started on the redeployed agent; if the supervisor is unreachable, investigate
 the network/token first rather than inferring the run has stopped. A live
 run can apply for real — follow the `RUN_ONCE=1` warning above.
+
+## How discovery works
+
+Discovery is code-driven (`agent/harness/pipeline/discover.ts`, run by
+`pipelineCli discover-screen`), not model-driven. From the app's `job_config` it
+runs three channels: API feed postings, direct boards (searched on-site), and
+Google dorks. One `record_discovery_coverage` is recorded per composed entry.
+
+**Dork construction** (`agentconfig/dorks.py`, `compose_queries`):
+
+- **Per title, not per keyword.** Queries are built from each enabled profile's
+  job titles (`title_keywords`; else keywords ending in a title noun such as
+  engineer/developer/analyst; else the raw keywords), one `site:<board>` query
+  per board. API-backed, direct-mode and disabled boards get no dork.
+- **Pipe-grouped, chunked.** Titles are OR-grouped as `(A | "B C")` and packed
+  greedily into chunks that fit Google's 32-word limit after the fixed
+  `site:`, location, remote and recency terms (a single title too long to fit
+  still gets its own chunk, so that query can exceed the limit); one query per chunk per board,
+  ordered chunk-major. No title is dropped.
+- **Negatives.** The profile's rejected role types are appended as `-term` /
+  `-"multi word"` in whatever word budget the titles leave; any that would
+  overflow are dropped. Screening still enforces role types.
+- **Recency.** The `dorkRecency` setting (Agents page: `d`/`w`/`m`/`y`/`none`)
+  adds a trailing `after:YYYY-MM-DD` operator counted back 1/7/30/365 days from
+  today (UTC); `none` omits it, and unset or invalid values behave as `w`.
+- Queries are interleaved round-robin across profiles and de-duplicated by URL.
+- **Pacing.** Dorks run one at a time with a randomized 4–7 s pause between
+  searches. After two consecutive Google blocks/CAPTCHAs the remaining dorks are
+  skipped and recorded as `skipped`; a Google consent page is attempted once.
+
+**Per-source funnel** (`pipeline/funnel.ts`). Every discovered URL gets exactly
+one outcome — `previously_screened`, `not_a_posting`, `duplicate`, `failed`,
+`for_review`, `rejected` or `blocked` — rolled up per discovery source and in
+total, and stored with `record_source_funnel`. A URL that reached no outcome is
+counted `failed` ("no outcome recorded").
+
+**Transient fetch failures** (`pipeline/fetchPosting.ts`, `screenStage.ts`). A
+posting that cannot be loaded at all (navigate/snapshot error) is a `failed`
+fetch: it is reported as a run error and a `failed` funnel outcome, and no
+screening blocker is recorded for it. A page that loads but is thin is
+re-snapshotted up to 4 times (2 s apart); if still unreadable it is recorded as
+an `unreadable` blocker (after following one onward link, if there is one) or
+`login_required` for a sign-in wall.
+
+**LinkedIn capture.** LinkedIn postings rely on the persisted signed-in browser
+profile (Job boards → Needs attention → Sign in). The fetch waits until the `Primary content`
+region is filled and no "loading job details" marker remains; an
+authwall/login/checkpoint URL is recorded as a `login_required` sign-in wall,
+and a job that never renders as `unreadable` ("LinkedIn job details did not
+load").
 
 ## What the agent may and may not do
 

@@ -76,7 +76,10 @@ provider choice from an older installation, then falls back to `LLM_PROVIDER`
 in `.env`. Save a new Default model to override that migrated choice.
 Credentials for a selected connection come from the saved sign-in or
 API key (encrypted at rest in `./data/secrets.enc`), with the corresponding
-environment credential as fallback when no saved credential is available.
+environment credential as fallback when no saved credential is available
+(`ANTHROPIC_API_KEY` for Claude, `OPENAI_API_KEY` for ChatGPT). OpenRouter has
+no environment fallback — its key must be saved in the UI. `LLM_PROVIDER`
+accepts only `anthropic`, `openai` or `ollama`.
 
 Routing choices autosave when you change them; account sign-ins, API keys and
 Ollama URLs still need their explicit Connect/Save action. Incomplete custom
@@ -109,18 +112,23 @@ lists:
   Arbeitnow feed, on by default), and **Needs attention**: the sites the
   agent hit a sign-in wall on, each with a **Sign in to …** button. A badge on
   the nav item counts them.
-- **Applications** — the job-application ledger (see below), employer-reply suggestions from [Gmail response tracking](#gmail-response-tracking-optional) are reviewed on the **Email responses** page.
+- **Applications** — the job-application ledger (see below).
 - **Analytics** — the page `/` redirects to.
-- **Agents** — the unattended agent's run history and schedule.
+- **Agents** — the unattended agent's run history and schedule, plus the
+  identity answers (name, email, phone, work authorisation, …) the agent
+  submits applications with.
 - **Model routing** — provider accounts, the default and task model routes, and
   the independent application-agent model route.
 - **Screenings** — screened postings and their verdicts.
 - **Company Research** — background TruthCV has gathered on a company, with
   its source recorded alongside each fact.
+- **Email responses** — employer-reply suggestions from
+  [Gmail response tracking](#gmail-response-tracking-optional), for you to
+  accept or dismiss.
 - **Approvals** — cover-letter and application approvals awaiting your
   decision, with a badge for the pending count.
-- **Settings** — a modal (not a page) for your identity answers, Jev and
-  Gmail connections.
+- **Settings** — a modal (not a page) holding the job search policy, Jev and
+  Gmail connections, and a replay-tour button.
 
 Job postings reach the agent through API-backed **job feeds** (Remote Rocketship,
 which is keyed and opt-in; Arbeitnow, keyless and on by default but can be
@@ -231,9 +239,11 @@ app requires it.
 
 Connect it from **Settings → Jev**, which saves the key into the same
 encrypted secret store as your other credentials. There's no `.env` variable
-for it in `.env.example` by design; if you'd rather not put the key through
-the UI, set the `JEV_API_KEY` environment variable instead — it's consulted
-as a fallback wherever the app would otherwise read the saved key. The env
+for it in `.env.example` by design; the `JEV_API_KEY` environment variable is
+consulted as a fallback wherever the app would otherwise read the saved key
+(`secretstore/__init__.py`, `_ENV_KEY_FALLBACK`). `docker-compose.yml` does
+not pass `JEV_API_KEY` into the `app` container, so that fallback only works
+when running outside Compose; under Compose, use **Settings → Jev**. The env
 var supplies only the key: the toggles below live in the settings store, so
 you still enable them from **Settings → Jev**.
 
@@ -348,7 +358,7 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work \
 5627 is only the default — the actual URL depends on `APP_PORT` in your
 `.env`. The app now prints its real URL at startup, so `docker compose logs
 app` (or `docker compose ps`, whose PORTS column shows
-`0.0.0.0:<host>->8080/tcp`) is the reliable way to find it. The app binds to
+`127.0.0.1:<host>->8080/tcp`) is the reliable way to find it. The app binds to
 loopback only (`docker-compose.yml` maps `127.0.0.1:<host>->8080`), so it's
 never reachable from another machine on your network.
 
@@ -360,7 +370,7 @@ with no built-in identity — every ATS screening answer (name, email, phone,
 work authorisation, ...) defaults to an empty string, and
 the [unattended application agent](#unattended-application-agent) refuses to
 submit while those fields are blank (`agent/RUNBOOK.md` §5). The normal route
-is the web UI's **Settings** modal (`PUT /api/profile/answers`). Alternatively,
+is the web UI's **Agents** page (`PUT /api/profile/answers`). Alternatively,
 copy the tracked template, fill in your own details, then write them into the
 data volume from inside a container — the volume is root-owned, so running
 this directly on the host fails with a `PermissionError`:
@@ -413,6 +423,11 @@ To generate `ENCRYPTION_KEY` or `AGENT_API_TOKEN` by hand, see step 2 of
 | `APP_PORT` | Host port the app is published on (default `5627`); the launcher advances this automatically if it's taken. |
 | `ENCRYPTION_KEY` | Required — encrypts saved provider credentials at rest (`./data/secrets.enc`). The launcher generates it for you. |
 | `AGENT_API_TOKEN` | Required, non-empty — shared secret the agent, app and browser containers authenticate to each other with. The launcher generates it for you. The agent also uses it to fetch its model credentials from the app (Application agent route). |
+| `APPLICATION_COOLDOWN_DAYS` | Optional — application cooldown window in days (default `90`; blank or unparsable also gives `90`; `screening/cooldown.py`). Not passed through by `docker-compose.yml`. |
+| `CORS_ORIGINS` | Optional — allowed CORS origins for the API (default `http://localhost:5173`, the Vite dev server; `api/config.py`). Not passed through by `docker-compose.yml`. |
+| `BROWSER_STREAM_ALLOWED_HOSTS` | Optional — comma-separated extra hostnames accepted in the Origin check of the browser sign-in viewport relay (default: loopback only; `api/browser_stream.py`). Only for deployments that deliberately publish the app beyond loopback. Not passed through by `docker-compose.yml`. |
+| `BROWSER_STREAM_ALLOWED_PEERS` | Optional — comma-separated extra peer addresses allowed to use that relay (default: loopback plus the container's default gateway; `api/browser_stream.py`). Not passed through by `docker-compose.yml`. |
+| `AGENT_CONTROL_PORT` / `SESSION_SERVER_PORT` / `BROWSER_NOVNC_PORT` | Compose-internal ports (defaults `9099`, `8932`, `7900`) wired between the app, agent and browser containers by `docker-compose.yml`; none is published to the host. You normally never set these. |
 | `DATA_DIR` | Host path for persisted data (default `./data`). |
 | `LLM_PROVIDER` | `anthropic` \| `openai` \| `ollama` — provider fallback when neither a default/task route nor a migrated provider choice is saved (defaults to `anthropic` when unset); connecting an account alone does not override it. (`fake` is accepted for tests only.) |
 | `LLM_MODEL` | Optional model id fallback after saved routes and any migrated model choice; blank uses the provider's default. Set a route on Model routing to override it. |
@@ -427,7 +442,7 @@ To generate `ENCRYPTION_KEY` or `AGENT_API_TOKEN` by hand, see step 2 of
 | `AGENT_PROMPT_CACHE` | On/off switch for Anthropic prompt-cache breakpoints (default `true`; only the literal `false` turns it off). Anthropic wire only. |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Optional — Google OAuth client credentials backing the Gmail connection. See [Gmail response tracking](#gmail-response-tracking-optional) above for full setup steps. Unset, connecting Gmail reports "Google OAuth is not configured on the server." |
 | `GOOGLE_OAUTH_REDIRECT_URI` | Optional — overrides the request-derived Gmail OAuth redirect URI. Needed behind a reverse proxy or when the app is reached at a non-localhost hostname; must match the Google console's registered redirect URI character-for-character. |
-| `JEV_API_KEY` | Optional — fallback credential for [Jev cross-checking](#jev-cross-checking-optional), consulted only when no key is saved via Settings → Jev. Not present in `.env.example` by design. Supplies the key only — the use-for toggles are still set from Settings → Jev. |
+| `JEV_API_KEY` | Optional — fallback credential for [Jev cross-checking](#jev-cross-checking-optional), consulted only when no key is saved via Settings → Jev. Not present in `.env.example` by design, and not passed into the container by `docker-compose.yml`, so it only takes effect outside Compose. Supplies the key only — the use-for toggles are still set from Settings → Jev. |
 | `DIAGNOSTICS_MCP_TOKEN` | Optional — bearer token guarding the read-only `/mcp/diagnostics` endpoint. Unset/empty (the default) disables the endpoint entirely: every request to it returns 404. See [Diagnostics MCP](#diagnostics-mcp-read-only) below. |
 
 ### Operator vocabulary (`data/vocabulary/`)
