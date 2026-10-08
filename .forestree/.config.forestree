@@ -238,6 +238,11 @@
                   "desc": "Dismiss pending Gmail suggestions by id (1–200 ids); returns dismissed count and remaining pending total; gated like the sync route",
                   "method": "POST",
                   "path": "/api/gmail/suggestions/dismiss"
+                },
+                {
+                  "desc": "Accept a pending Gmail suggestion: apply its suggested status to the matched application (404 unknown, 409 not pending or no suggested status)",
+                  "method": "POST",
+                  "path": "/api/gmail/suggestions/{id}/accept"
                 }
               ]
             },
