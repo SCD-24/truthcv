@@ -109,7 +109,7 @@ lists:
   Arbeitnow feed, on by default), and **Needs attention**: the sites the
   agent hit a sign-in wall on, each with a **Sign in to …** button. A badge on
   the nav item counts them.
-- **Applications** — the job-application ledger (see below), including Gmail-derived employer-reply suggestions when [Gmail response tracking](#gmail-response-tracking-optional) is connected.
+- **Applications** — the job-application ledger (see below), employer-reply suggestions from [Gmail response tracking](#gmail-response-tracking-optional) are reviewed on the **Email responses** page.
 - **Analytics** — the page `/` redirects to.
 - **Agents** — the unattended agent's run history and schedule.
 - **Model routing** — provider accounts, the default and task model routes, and
@@ -279,8 +279,18 @@ auto-applies anything, moving the application's status to **Rejected** or
 **Interviewing** respectively and appending an evidence note (message id,
 sender, subject, date) to its notes. Everything else — Jev confirms neither
 question — is classified unrelated and left as a pending suggestion for you
-to review and apply by hand; nothing is auto-applied without a Jev
-confirmation.
+to review; nothing is auto-applied without a Jev confirmation.
+
+A Jev-confirmed rejection or interview is only applied automatically when the
+email is matched to its application with medium or high confidence — a
+matching sender domain, mail from the same hiring platform (Greenhouse,
+Lever, Workable, …) as the application's posting that also names the
+company or role, or both the company and the role named in the email. Low-confidence matches, and replies Jev confirms as
+neither, appear on the **Email responses** page instead. There you can
+accept a rejection or interview in one click (**Mark Rejected** /
+**Mark Interviewing**), which updates the application with the same
+evidence note, or dismiss any response. Replies with no suggested status can
+only be dismissed.
 
 Connecting Gmail itself requires a saved Jev key with **useForEmailTracking**
 enabled — the connect button is blocked until that's set, since a Gmail

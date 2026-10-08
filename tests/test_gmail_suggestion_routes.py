@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+import applications
 import secretstore
 from api.main import app
 from gmailsync.model import GmailSuggestion
@@ -68,6 +69,64 @@ def test_dismiss_returns_counts(client):
     resp = client.post(URL + "/dismiss", json={"ids": ["a"]})
     assert resp.status_code == 200
     assert resp.json() == {"dismissed": 1, "pending": 1}
+
+
+def _accept_url(sid: str) -> str:
+    """URL of the accept route for one suggestion."""
+    return f"{URL}/{sid}/accept"
+
+
+def _rejection_for(app_id: str, sid: str = "r1", **overrides) -> GmailSuggestion:
+    """A pending rejection suggestion for the given application."""
+    fields = {
+        "id": sid,
+        "application_id": app_id,
+        "sender": "Recruiter <no-reply@acme.example>",
+        "subject": "Your application",
+        "date": "2024-01-01",
+        "classification": "rejection",
+        "suggested_status": "Rejected",
+        "state": "pending",
+    }
+    fields.update(overrides)
+    return GmailSuggestion(**fields)
+
+
+def test_accept_gate_closed_is_403(client):
+    """Accept 403s when the gate is closed."""
+    assert client.post(_accept_url("a")).status_code == 403
+
+
+def test_accept_applies_status_and_reports_pending(client):
+    """Accept updates the application and returns the applied suggestion plus pending count."""
+    _open_gate()
+    app_rec = applications.create({"company": "Acme Corp", "status": "Applied"})
+    save_suggestions([_rejection_for(app_rec.id), _s("other")])
+    resp = client.post(_accept_url("r1"))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["suggestion"]["state"] == "applied"
+    assert body["pending"] == 1
+    assert applications.get(app_rec.id).status == "Rejected"
+
+
+def test_accept_unknown_is_404(client):
+    """An unknown id is 404."""
+    _open_gate()
+    assert client.post(_accept_url("missing")).status_code == 404
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"state": "dismissed"}, {"classification": "other", "suggested_status": ""}],
+)
+def test_accept_not_acceptable_is_409(client, overrides):
+    """Dismissed or status-less suggestions are 409 and leave the application alone."""
+    _open_gate()
+    app_rec = applications.create({"company": "Acme Corp", "status": "Applied"})
+    save_suggestions([_rejection_for(app_rec.id, **overrides)])
+    assert client.post(_accept_url("r1")).status_code == 409
+    assert applications.get(app_rec.id).status == "Applied"
 
 
 def test_dismiss_empty_ids_is_422(client):

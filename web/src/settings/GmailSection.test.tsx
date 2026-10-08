@@ -1,16 +1,14 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
-  dismissGmailSuggestions,
-  listGmailSuggestions,
   getGmailStatus,
   getJevSettings,
   saveJevSettings,
   startGmailLogin,
   syncGmailResponses,
 } from "../api/client";
-import type { GmailStatus, GmailSuggestion, JevSettings } from "../api/types";
+import type { GmailStatus, JevSettings } from "../api/types";
 import { GmailSection } from "./GmailSection";
 
 /**
@@ -23,44 +21,7 @@ vi.mock("../api/client", () => ({
   saveJevSettings: vi.fn(),
   startGmailLogin: vi.fn(),
   syncGmailResponses: vi.fn(),
-  listGmailSuggestions: vi.fn(),
-  dismissGmailSuggestions: vi.fn(),
 }));
-
-function makeSuggestion(id: string, subject: string): GmailSuggestion {
-  return {
-    id,
-    application_id: "app1",
-    application_label: "Acme — Engineer",
-    sender: "Recruiter",
-    sender_email: "r@acme.com",
-    subject,
-    date: "2024-01-02",
-    snippet: "",
-    classification: "rejection",
-    suggested_status: "rejected",
-    match_confidence: "high",
-    match_evidence: [],
-    state: "pending",
-    decision: "",
-  };
-}
-
-async function renderWithRows() {
-  vi.mocked(getJevSettings).mockResolvedValueOnce(
-    makeJev({ keySet: true, useForEmailTracking: true }),
-  );
-  vi.mocked(getGmailStatus).mockResolvedValueOnce(
-    makeGmail({ connected: true, email: "person@example.com" }),
-  );
-  vi.mocked(listGmailSuggestions).mockResolvedValue({
-    items: [makeSuggestion("id", "Your application")],
-    total: 1,
-  });
-  vi.mocked(dismissGmailSuggestions).mockResolvedValue({ dismissed: 1, pending: 0 });
-  render(<GmailSection />);
-  await screen.findByText("Your application");
-}
 
 function makeJev(overrides: Partial<JevSettings> = {}): JevSettings {
   return {
@@ -81,11 +42,6 @@ function makeGmail(overrides: Partial<GmailStatus> = {}): GmailStatus {
     ...overrides,
   };
 }
-
-beforeEach(() => {
-  vi.mocked(listGmailSuggestions).mockResolvedValue({ items: [], total: 0 });
-  vi.mocked(dismissGmailSuggestions).mockResolvedValue({ dismissed: 0, pending: 0 });
-});
 
 afterEach(() => {
   cleanup();
@@ -230,61 +186,31 @@ describe("GmailSection", () => {
     expect(screen.queryByRole("button", { name: /sync now/i })).toBeNull();
   });
 
-  it("renders suggestion rows", async () => {
-    await renderWithRows();
-    expect(screen.getByText(/Acme — Engineer/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Dismiss suggestion: Your application" })).toBeTruthy();
-  });
-
-  it("per-row Dismiss calls dismiss and reloads", async () => {
-    await renderWithRows();
-    const before = vi.mocked(listGmailSuggestions).mock.calls.length;
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss suggestion: Your application" }));
-    await vi.waitFor(() => {
-      expect(dismissGmailSuggestions).toHaveBeenCalledWith(["id"]);
-      expect(vi.mocked(listGmailSuggestions).mock.calls.length).toBeGreaterThan(before);
-    });
-  });
-
-  it("bulk dismiss requires confirmation", async () => {
-    await renderWithRows();
-    fireEvent.click(screen.getByRole("button", { name: /dismiss all on this page/i }));
-    expect(dismissGmailSuggestions).not.toHaveBeenCalled();
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog.textContent).toMatch(/Dismiss 1 suggestion\?/);
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Dismiss" }));
-    await vi.waitFor(() => {
-      expect(dismissGmailSuggestions).toHaveBeenCalledWith(["id"]);
-    });
-  });
-
-  it("steps back a page when the server reports no rows left on it", async () => {
+  it("tracking on: Review email responses link calls onOpenEmailResponses", async () => {
     vi.mocked(getJevSettings).mockResolvedValueOnce(
       makeJev({ keySet: true, useForEmailTracking: true }),
     );
-    vi.mocked(getGmailStatus).mockResolvedValueOnce(makeGmail({ connected: true }));
-    vi.mocked(listGmailSuggestions).mockImplementation(async (_limit, offset) => ({
-      items: [makeSuggestion(`id${offset}`, `Subject ${offset}`)],
-      total: 21,
-    }));
-    vi.mocked(dismissGmailSuggestions).mockResolvedValue({ dismissed: 1, pending: 20 });
-    render(<GmailSection />);
-    await screen.findByText("Subject 0");
-    fireEvent.click(screen.getByRole("button", { name: /next page/i }));
-    await screen.findByText("Subject 20");
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss suggestion: Subject 20" }));
-    await screen.findByText("Subject 0");
-    const calls = vi.mocked(listGmailSuggestions).mock.calls;
-    expect(calls[calls.length - 1]).toEqual([20, 0]);
+    vi.mocked(getGmailStatus).mockResolvedValueOnce(
+      makeGmail({ connected: true, email: "person@example.com" }),
+    );
+    const open = vi.fn();
+    render(<GmailSection onOpenEmailResponses={open} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /review email responses/i }));
+    expect(open).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the empty state", async () => {
+  it("tracking off: Review email responses link is absent", async () => {
     vi.mocked(getJevSettings).mockResolvedValueOnce(
-      makeJev({ keySet: true, useForEmailTracking: true }),
+      makeJev({ keySet: true, useForEmailTracking: false }),
     );
-    vi.mocked(getGmailStatus).mockResolvedValueOnce(makeGmail({ connected: true }));
-    render(<GmailSection />);
-    expect(await screen.findByText("No pending suggestions.")).toBeTruthy();
+    vi.mocked(getGmailStatus).mockResolvedValueOnce(
+      makeGmail({ connected: true, email: "person@example.com" }),
+    );
+    render(<GmailSection onOpenEmailResponses={vi.fn()} />);
+
+    await screen.findByRole("button", { name: /sync now/i });
+    expect(screen.queryByRole("button", { name: /review email responses/i })).toBeNull();
   });
 
   it("sync failure shows the error alert", async () => {

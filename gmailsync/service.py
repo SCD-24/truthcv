@@ -1,22 +1,25 @@
 from __future__ import annotations
 
-import base64
-import html
 import logging
-import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from email.utils import parseaddr
-
-import httpx
 
 from applications.store import get as get_application, load_all, update as update_application
 from connections.auth.gmail import AuthError, get_valid_access_token
 from screening import jev
 
+from .client import GmailClient, GmailSyncError, _decode_body, _header
 from .matcher import _app_domains, _normalize, match_message
 from .model import GmailSuggestion, GmailSyncState
-from .store import dismiss_suggestions, load_suggestions, load_sync_state, merge_new_suggestions, save_sync_state
+from .store import (
+    claim_pending,
+    dismiss_suggestions,
+    load_suggestions,
+    load_sync_state,
+    merge_new_suggestions,
+    save_sync_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,94 +37,11 @@ SYNC_LOOKBACK_S = 24 * 60 * 60
 GMAIL_FETCH_MAX_WORKERS = 4
 
 
-class GmailSyncError(RuntimeError):
-    def __init__(self, message: str, *, reconnect_required: bool = False) -> None:
-        super().__init__(message)
-        self.reconnect_required = reconnect_required
-
-
-class GmailClient:
-    def __init__(self, access_token: str) -> None:
-        self._headers = {"Authorization": f"Bearer {access_token}"}
-
-    def _get(self, path: str, **params):
-        try:
-            resp = httpx.get(
-                f"https://gmail.googleapis.com/gmail/v1/users/me/{path}",
-                headers=self._headers,
-                params=params,
-                timeout=30,
-            )
-        except httpx.HTTPError as exc:
-            raise GmailSyncError("Gmail sync failed — could not reach Gmail.") from exc
-        if resp.status_code in (401, 403):
-            raise GmailSyncError(
-                "Gmail access was revoked or expired — reconnect Gmail in Settings.",
-                reconnect_required=True,
-            )
-        if resp.status_code != 200:
-            raise GmailSyncError(f"Gmail sync failed ({resp.status_code}).")
-        return resp.json()
-
-    def list_messages(self, query: str) -> list[dict]:
-        messages: list[dict] = []
-        page_token = None
-        while True:
-            payload = self._get(
-                "messages",
-                q=query,
-                maxResults=100,
-                pageToken=page_token,
-            )
-            messages.extend(payload.get("messages") or [])
-            page_token = payload.get("nextPageToken")
-            if not page_token:
-                return messages
-
-    def get_metadata(self, message_id: str) -> dict:
-        return self._get(
-            f"messages/{message_id}",
-            format="metadata",
-            metadataHeaders=["From", "Subject", "Date", "To"],
-        )
-
-    def get_full(self, message_id: str) -> dict:
-        return self._get(f"messages/{message_id}", format="full")
-
-
 def build_gmail_client() -> GmailClient:
     try:
         return GmailClient(get_valid_access_token())
     except AuthError as exc:
         raise GmailSyncError(str(exc), reconnect_required=exc.reconnect_required) from exc
-
-
-def _header(payload: dict, name: str) -> str:
-    headers = payload.get("payload", {}).get("headers") or []
-    target = name.lower()
-    for header in headers:
-        if str(header.get("name", "")).lower() == target:
-            return str(header.get("value", ""))
-    return ""
-
-
-def _decode_body(part: dict) -> str:
-    data = part.get("body", {}).get("data") or ""
-    if data:
-        try:
-            raw = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4)).decode("utf-8", errors="ignore")
-            if part.get("mimeType") == "text/html":
-                raw = re.sub(r"<[^>]+>", " ", raw)
-                raw = html.unescape(raw)
-            return raw
-        except Exception:
-            return ""
-    out = []
-    for child in part.get("parts") or []:
-        text = _decode_body(child)
-        if text:
-            out.append(text)
-    return "\n".join(out)
 
 
 def _classify_message(subject: str, body: str) -> tuple[str, str]:
@@ -196,7 +116,7 @@ def _pending_candidates():
     also dropped when another non-Draft, non-closed candidate shares its
     normalized company name — that company is already watched via the
     other application, and leaving both in would tie the matcher's scoring
-    (matcher.py is not touched) and cause match_message to return None,
+    and cause match_message to return None,
     silently dropping the message and burning its id from processed_message_ids.
     """
     candidates = [app for app in load_all() if app.status not in CLOSED_STATUSES]
@@ -233,6 +153,38 @@ def list_pending(limit: int, offset: int) -> tuple[list[GmailSuggestion], int]:
     """One page of pending suggestions, newest first, plus the total pending count."""
     pending = pending_suggestions()
     return pending[offset : offset + limit], len(pending)
+
+
+class SuggestionNotFound(LookupError):
+    """No suggestion exists with the requested id."""
+
+
+class SuggestionNotAcceptable(ValueError):
+    """The suggestion is not pending or carries no status to apply."""
+
+
+def accept(suggestion_id: str) -> GmailSuggestion:
+    """Apply a pending suggestion's status to its application and mark it applied/confirmed.
+
+    Raises SuggestionNotFound for an unknown id and SuggestionNotAcceptable when the
+    suggestion is not pending or has no suggested status; the application is untouched then.
+    """
+    item = next((s for s in load_suggestions() if s.id == suggestion_id), None)
+    if item is None:
+        raise SuggestionNotFound(suggestion_id)
+    if item.state != "pending" or not item.suggested_status:
+        raise SuggestionNotAcceptable(suggestion_id)
+    if get_application(item.application_id) is None:
+        raise SuggestionNotAcceptable(suggestion_id)
+    # Claim first, atomically: a concurrent dismiss/accept that already moved
+    # the suggestion out of pending wins, and the application stays untouched.
+    claimed = claim_pending(suggestion_id, "applied", "confirmed")
+    if claimed is None:
+        raise SuggestionNotAcceptable(suggestion_id)
+    _apply_decision(
+        item.application_id, item.suggested_status, item.id, item.sender, item.subject, item.date, accepted=True
+    )
+    return claimed
 
 
 def dismiss(ids) -> int:
@@ -298,19 +250,26 @@ _CONFIRM_STATEMENTS = {
 }
 
 
-def _evidence_note(message_id: str, sender: str, subject: str, date: str) -> str:
-    """One evidence paragraph documenting an auto-applied status change."""
+def _evidence_note(message_id: str, sender: str, subject: str, date: str, accepted: bool = False) -> str:
+    """One evidence paragraph documenting an auto-applied (or user-accepted) status change."""
+    prefix = (
+        "Gmail sync: status updated from an employer reply you accepted "
+        if accepted
+        else "Gmail sync: status auto-updated from an employer reply "
+    )
     return (
-        f"Gmail sync: status auto-updated from an employer reply "
+        f"{prefix}"
         f'(message {message_id}, from {sender}, subject "{subject}", {date}).'
     )
 
 
-def _apply_decision(app_id: str, status: str, message_id: str, sender: str, subject: str, date: str) -> None:
-    """Set an application's status from a Jev-confirmed employer reply, with evidence."""
+def _apply_decision(
+    app_id: str, status: str, message_id: str, sender: str, subject: str, date: str, accepted: bool = False
+) -> None:
+    """Set an application's status from an employer reply, with evidence (accepted marks a user accept)."""
     app = get_application(app_id)
     existing_notes = (app.notes if app else "").strip()
-    note = _evidence_note(message_id, sender, subject, date)
+    note = _evidence_note(message_id, sender, subject, date, accepted)
     notes = f"{existing_notes}\n\n{note}" if existing_notes else note
     update_application(app_id, {"status": status, "response_received": True, "notes": notes})
 
@@ -328,10 +287,9 @@ def _process_message(client: GmailClient, message_id: str, metadata: dict, pendi
     (see _classify_message), so it auto-applies immediately — the matched
     application's status is updated with evidence in its notes and the
     suggestion is recorded as applied — but only when the match itself is
-    not low-confidence (company keyword alone, score 2): a low-confidence
-    match is too weak a link between message and application to act on
-    unattended, so it stays a pending suggestion for the operator to apply
-    by hand even though the classification is recorded. Any other
+    not low-confidence: medium/high matches auto-apply, while a low match is
+    too weak a link to act on unattended, so it stays pending for the user to
+    accept (see accept) or dismiss, with the classification recorded. Any other
     classification is left pending and no application is touched.
     """
     sender = _header(metadata, "From")

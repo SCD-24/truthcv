@@ -15,6 +15,7 @@ describe("ROUTES", () => {
     expect(ROUTES.writingStyle).toBe("/writing-style");
     expect(ROUTES.documentEdit).toBe("/documents/edit");
     expect(ROUTES.jobBoards).toBe("/job-boards");
+    expect(ROUTES.emailResponses).toBe("/email-responses");
   });
 
   it("builds the filled-form path for an application id", () => {

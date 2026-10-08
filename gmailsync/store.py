@@ -65,14 +65,33 @@ def save_suggestions(items: list[GmailSuggestion]) -> None:
     _write_json(suggestions_path(), [item.to_dict() for item in items])
 
 
-def update_suggestion_state(suggestion_id: str, state: str) -> GmailSuggestion | None:
-    """Set one suggestion's state under the store lock; None if the id is unknown."""
+def update_suggestion_state(suggestion_id: str, state: str, decision: str | None = None) -> GmailSuggestion | None:
+    """Set one suggestion's state (and decision, when given) under the store lock; None if the id is unknown."""
     with _SUGGESTIONS_LOCK:
         suggestions = load_suggestions()
         target = next((item for item in suggestions if item.id == suggestion_id), None)
         if target is None:
             return None
         target.state = state
+        if decision is not None:
+            target.decision = decision
+        save_suggestions(suggestions)
+        return target
+
+
+def claim_pending(suggestion_id: str, state: str, decision: str) -> GmailSuggestion | None:
+    """Atomically move a still-pending suggestion to ``state``/``decision``.
+
+    Returns the updated suggestion, or None when the id is unknown or the
+    suggestion is no longer pending (e.g. a concurrent dismiss or accept won).
+    """
+    with _SUGGESTIONS_LOCK:
+        suggestions = load_suggestions()
+        target = next((item for item in suggestions if item.id == suggestion_id), None)
+        if target is None or target.state != "pending":
+            return None
+        target.state = state
+        target.decision = decision
         save_suggestions(suggestions)
         return target
 

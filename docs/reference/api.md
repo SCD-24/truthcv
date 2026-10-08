@@ -53,6 +53,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) - not ex
 | **GET** | `/api/agent/llm-routes` | Per-stage (apply/screening/extract) LLM credentials for the Application Agent; requires the X-Agent-Token header. |
 | **GET** | `/api/gmail/suggestions` | Paginated pending Gmail response suggestions (limit default 20, max 100; offset) with total, newest first; gated like the sync route |
 | **POST** | `/api/gmail/suggestions/dismiss` | Dismiss pending Gmail suggestions by id (1–200 ids); returns dismissed count and remaining pending total; gated like the sync route |
+| **POST** | `/api/gmail/suggestions/{id}/accept` | Accept a pending Gmail suggestion: apply its suggested status to the matched application (404 unknown, 409 not pending or no suggested status) |
 | **GET** | `/api/prompt-fragments` | List all prompt fragments (seeded + operator-defined) |
 | **POST** | `/api/prompt-fragments` | Create a prompt fragment; id derived from title if omitted (403 when clashing with a seeded fragment) |
 | **PUT** | `/api/prompt-fragments/{id}` | Update a prompt fragment by id (403 for seeded fragments) |

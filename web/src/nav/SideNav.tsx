@@ -12,6 +12,7 @@ import WorkOutlineOutlinedIcon from "@mui/icons-material/WorkOutlineOutlined";
 import PlaylistAddCheckOutlinedIcon from "@mui/icons-material/PlaylistAddCheckOutlined";
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
 import TravelExploreOutlinedIcon from "@mui/icons-material/TravelExploreOutlined";
+import MarkEmailReadOutlinedIcon from "@mui/icons-material/MarkEmailReadOutlined";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import { ROUTES } from "../routes";
 
@@ -118,6 +119,12 @@ export function SideNav({
       label: "Company Research",
       icon: <TravelExploreOutlinedIcon fontSize="small" />,
       dataTour: "nav-company-research",
+    },
+    {
+      path: ROUTES.emailResponses,
+      label: "Email responses",
+      icon: <MarkEmailReadOutlinedIcon fontSize="small" />,
+      dataTour: "nav-email-responses",
     },
     {
       path: ROUTES.approvals,

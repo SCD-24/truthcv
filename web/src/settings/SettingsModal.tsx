@@ -16,6 +16,7 @@ import { SettingsAutosaveProvider, useSettingsAutosaveCoordinator } from "./Sett
 import { JevSection } from "./JevSection";
 import { GmailSection } from "./GmailSection";
 import { useWizard } from "../wizard/store";
+import { ROUTES } from "../routes";
 import "../styles/settings.css";
 
 /** A titled group of settings fields, separated from its siblings by a
@@ -56,13 +57,15 @@ type ModalProps = {
   onClose: () => void;
   /** Deep link from the Agents page's cooldown summary. */
   initialSection?: "job-search-policy";
+  /** Navigates the app to a path (used by the Gmail section's link to Email responses). */
+  onNavigate?: (path: string) => void;
 };
 
 export function SettingsModal(props: ModalProps) {
   return <SettingsAutosaveProvider><SettingsModalContent {...props} /></SettingsAutosaveProvider>;
 }
 
-function SettingsModalContent({ onClose, initialSection }: ModalProps) {
+function SettingsModalContent({ onClose, initialSection, onNavigate }: ModalProps) {
   const autosave = useSettingsAutosaveCoordinator();
   const [closeBlocked, setCloseBlocked] = useState(false);
   const [discarding, setDiscarding] = useState(false);
@@ -115,7 +118,15 @@ function SettingsModalContent({ onClose, initialSection }: ModalProps) {
 
             <JevSection />
 
-            <GmailSection />
+            <GmailSection
+              onOpenEmailResponses={
+                onNavigate
+                  ? () => {
+                      void requestClose(async () => onNavigate(ROUTES.emailResponses));
+                    }
+                  : undefined
+              }
+            />
 
             <SettingsSection
               title="Replay tour"

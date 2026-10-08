@@ -24,6 +24,7 @@ import { TruthFilePage } from "./truth/TruthFilePage";
 import { ManualPage } from "./manual/ManualPage";
 import { WritingStylePage } from "./writingStyle/WritingStylePage";
 import { DocumentEditPage } from "./documents/DocumentEditPage";
+import { EmailResponsesPage } from "./emailResponses/EmailResponsesPage";
 import { OnboardingPage } from "./onboarding/OnboardingPage";
 import { Tour } from "./tour/Tour";
 import {
@@ -170,7 +171,13 @@ function NotFoundPage() {
 }
 
 /** The app's top-level page routes. */
-function TopLevelRoutes({ onOnboardingComplete }: { onOnboardingComplete: () => void }) {
+function TopLevelRoutes({
+  onOnboardingComplete,
+  onOpenSettings,
+}: {
+  onOnboardingComplete: () => void;
+  onOpenSettings: () => void;
+}) {
   const navigate = useNavigate();
   const onBack = () => navigate(ROUTES.analytics);
   const onEditDocument = (req: EditRequest) =>
@@ -209,6 +216,10 @@ function TopLevelRoutes({ onOnboardingComplete }: { onOnboardingComplete: () => 
       <Route path={ROUTES.documentEdit} element={<DocumentEditPage />} />
       <Route path={ROUTES.manual} element={<ManualPage />} />
       <Route path={ROUTES.writingStyle} element={<WritingStylePage />} />
+      <Route
+        path={ROUTES.emailResponses}
+        element={<EmailResponsesPage onOpenSettings={onOpenSettings} />}
+      />
       <Route
         path={ROUTES.browserSession}
         element={
@@ -291,13 +302,16 @@ export function App() {
             {showOnboardingGate ? (
               <Navigate to={ROUTES.onboarding} replace />
             ) : (
-              <TopLevelRoutes onOnboardingComplete={finishOnboarding} />
+              <TopLevelRoutes
+                onOnboardingComplete={finishOnboarding}
+                onOpenSettings={() => setSettingsOpen(true)}
+              />
             )}
           </ModelRoutingSession>
         </div>
       </main>
 
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} onNavigate={navigate} />}
       {showTour && <Tour onDone={finishTour} />}
     </div>
   );

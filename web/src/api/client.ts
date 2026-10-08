@@ -17,6 +17,7 @@ import type {
   GmailSyncSummary,
   GmailSuggestionPage,
   GmailDismissResult,
+  GmailAcceptResult,
   TestResult,
   ProfileStatus,
   OnboardingState,
@@ -347,6 +348,15 @@ export function dismissGmailSuggestions(ids: string[]): Promise<GmailDismissResu
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ids }),
+  });
+}
+
+/** Accept one pending suggestion: applies its suggested status to the
+ * application. 403 when the tracking gate is closed, 404 for an unknown id,
+ * 409 when it is no longer pending or has no status to apply. */
+export function acceptGmailSuggestion(id: string): Promise<GmailAcceptResult> {
+  return request(`/api/gmail/suggestions/${encodeURIComponent(id)}/accept`, {
+    method: "POST",
   });
 }
 
