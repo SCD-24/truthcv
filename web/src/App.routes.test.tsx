@@ -33,6 +33,9 @@ vi.mock("./api/client", async (importOriginal) => {
       hobbies: [],
       profile: { name: "", email: "", phone: "", location: "", links: [], summary: "" },
     }),
+    getJevSettings: vi.fn().mockResolvedValue({ keySet: true, useForEmailTracking: true }),
+    getGmailStatus: vi.fn().mockResolvedValue({ connected: true }),
+    listGmailSuggestions: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     listPendingApprovals: vi.fn().mockResolvedValue([]),
     listApplications: vi.fn().mockResolvedValue([]),
     listConnections: vi.fn().mockResolvedValue({ connections: [] }),
@@ -96,6 +99,11 @@ describe("App routing", () => {
     ]);
     renderAt("/applications/abc123/filled-form");
     expect(await screen.findByText("Jane Doe")).toBeTruthy();
+  });
+
+  it("shows the Email responses page at /email-responses", async () => {
+    renderAt(ROUTES.emailResponses);
+    expect(await screen.findByRole("heading", { name: "Email responses" })).toBeTruthy();
   });
 
   it("shows the Upload CV page at /cv", async () => {

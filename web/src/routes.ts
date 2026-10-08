@@ -14,6 +14,7 @@ export const ROUTES = {
   truthFile: "/truth",
   manual: "/manual",
   writingStyle: "/writing-style",
+  emailResponses: "/email-responses",
   documentEdit: "/documents/edit",
   browserSession: "/browser-session",
 } as const;

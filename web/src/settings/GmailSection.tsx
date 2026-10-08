@@ -1,14 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import FormHelperText from "@mui/material/FormHelperText";
+import Link from "@mui/material/Link";
 import Typography from "@mui/material/Typography";
 import {
-  dismissGmailSuggestions,
-  listGmailSuggestions,
   getGmailStatus,
   getJevSettings,
   saveJevSettings,
@@ -17,20 +16,20 @@ import {
 } from "../api/client";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { SettingsSection } from "./SettingsModal";
-import { GmailSuggestionsList, PAGE_SIZE } from "./GmailSuggestionsList";
-import type {
-  GmailStatus,
-  GmailSuggestion,
-  GmailSyncSummary,
-  JevSettings,
-} from "../api/types";
+import type { GmailStatus, GmailSyncSummary, JevSettings } from "../api/types";
 
 /** Gmail response tracking: reads Gmail for replies to submitted
  * applications and (when Jev confirms a transition) auto-applies it. Locked
  * behind the same Jev API key as screening cross-checks — Gmail sync
  * auto-applies Jev-confirmed transitions, so it must never run without an
- * explicit opt-in on top of a saved key. */
-export function GmailSection() {
+ * explicit opt-in on top of a saved key. Pending suggestions are reviewed on
+ * the Email responses page; `onOpenEmailResponses` links there. */
+export function GmailSection({
+  onOpenEmailResponses,
+}: {
+  /** Opens the Email responses page; the link shows only while tracking is on. */
+  onOpenEmailResponses?: () => void;
+}) {
   const [jev, setJev] = useState<JevSettings | null>(null);
   const [gmail, setGmail] = useState<GmailStatus | null>(null);
   const [toggling, setToggling] = useState(false);
@@ -38,60 +37,9 @@ export function GmailSection() {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<GmailSyncSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [suggestions, setSuggestions] = useState<GmailSuggestion[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(0);
-  const [pendingIds, setPendingIds] = useState<string[]>([]);
-  const [announcement, setAnnouncement] = useState("");
 
   // Mirrors the backend gate: saved Jev key AND opt-in (plus a connection).
   const trackingOn = !!(gmail?.connected && jev?.keySet && jev?.useForEmailTracking);
-  const loadSeq = useRef(0);
-  const mounted = useRef(true);
-
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-
-  async function loadPage(p: number) {
-    const seq = ++loadSeq.current;
-    try {
-      const res = await listGmailSuggestions(PAGE_SIZE, p * PAGE_SIZE);
-      if (!mounted.current || seq !== loadSeq.current) return;
-      setSuggestions(res.items);
-      setTotal(res.total);
-      setPage(p);
-    } catch (e) {
-      if (!mounted.current || seq !== loadSeq.current) return;
-      setError(e instanceof Error ? e.message : "Couldn't load suggestions.");
-    }
-  }
-
-  useEffect(() => {
-    if (trackingOn) void loadPage(0);
-  }, [trackingOn]);
-
-  async function handleDismiss(ids: string[]) {
-    setPendingIds(ids);
-    setError(null);
-    try {
-      const res = await dismissGmailSuggestions(ids);
-      setAnnouncement(`Dismissed ${res.dismissed} suggestion${res.dismissed === 1 ? "" : "s"}`);
-      let target = page;
-      if (page > 0 && page * PAGE_SIZE >= res.pending) {
-        target = Math.max(0, Math.ceil(res.pending / PAGE_SIZE) - 1);
-      }
-      await loadPage(target);
-    } catch (e) {
-      if (!mounted.current) return;
-      setError(e instanceof Error ? e.message : "Couldn't dismiss suggestions.");
-    } finally {
-      if (mounted.current) setPendingIds([]);
-    }
-  }
 
   useEffect(() => {
     let alive = true;
@@ -165,7 +113,6 @@ export function GmailSection() {
     try {
       const summary = await syncGmailResponses();
       setSyncResult(summary);
-      await loadPage(0);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't sync Gmail responses.");
     } finally {
@@ -269,17 +216,15 @@ export function GmailSection() {
         </Typography>
       )}
 
-      {trackingOn && (
-        <GmailSuggestionsList
-          items={suggestions}
-          total={total}
-          page={page}
-          pendingIds={pendingIds}
-          bulkBusy={pendingIds.length > 0}
-          announcement={announcement}
-          onPageChange={(p) => void loadPage(p)}
-          onDismiss={(ids) => void handleDismiss(ids)}
-        />
+      {trackingOn && onOpenEmailResponses && (
+        <Link
+          component="button"
+          type="button"
+          onClick={onOpenEmailResponses}
+          sx={{ alignSelf: "flex-start" }}
+        >
+          Review email responses
+        </Link>
       )}
     </SettingsSection>
   );
