@@ -76,7 +76,7 @@ services:
   # Started on a bare `docker compose up` (no profiles) so the agent can drive
   # it immediately without manual setup. The browser runs headful under Xvfb
   # with a noVNC viewport, reached only through the app's origin-checked
-  # relay at Agents page → Site sign-ins, for observation or manual one-time
+  # relay at Job boards page → Needs attention, for observation or manual one-time
   # login (CAPTCHA, SMS MFA, etc.). The persistent /browser-profile named
   # volume preserves sessions across restarts.
   browser:
