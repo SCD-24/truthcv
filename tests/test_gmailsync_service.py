@@ -289,6 +289,82 @@ def test_low_confidence_match_does_not_auto_apply(monkeypatch, data_dir):
     assert suggestions["m1"].suggested_status == "Rejected"
 
 
+def _save_suggestion(app_id: str, **overrides) -> GmailSuggestion:
+    fields = {
+        "id": "s1",
+        "application_id": app_id,
+        "sender": "Recruiter <news@x.example>",
+        "subject": "Rejected",
+        "date": "Mon, 1 Jan 2024",
+        "classification": "rejection",
+        "suggested_status": "Rejected",
+        "match_confidence": "low",
+        "state": "pending",
+    }
+    fields.update(overrides)
+    item = GmailSuggestion(**fields)
+    save_suggestions([item])
+    return item
+
+
+def test_accept_applies_pending_suggestion(data_dir):
+    app = _make_app()
+    _save_suggestion(app.id)
+
+    result = service.accept("s1")
+
+    updated = applications.get(app.id)
+    assert updated.status == "Rejected"
+    assert updated.response_received is True
+    assert "you accepted" in updated.notes
+    assert result.state == "applied"
+    assert result.decision == "confirmed"
+    stored = load_suggestions()[0]
+    assert (stored.state, stored.decision) == ("applied", "confirmed")
+
+
+def test_accept_unknown_id_raises(data_dir):
+    app = _make_app()
+    _save_suggestion(app.id)
+    with pytest.raises(service.SuggestionNotFound):
+        service.accept("nope")
+    assert applications.get(app.id).status == "Applied"
+
+
+@pytest.mark.parametrize("overrides", [{"state": "dismissed"}, {"suggested_status": "", "classification": "other"}])
+def test_accept_not_acceptable_raises_and_leaves_app(data_dir, overrides):
+    app = _make_app()
+    _save_suggestion(app.id, **overrides)
+    with pytest.raises(service.SuggestionNotAcceptable):
+        service.accept("s1")
+    updated = applications.get(app.id)
+    assert updated.status == "Applied"
+    assert updated.notes == ""
+
+
+def test_accept_missing_application_raises_and_keeps_pending(data_dir):
+    _save_suggestion("no-such-app")
+    with pytest.raises(service.SuggestionNotAcceptable):
+        service.accept("s1")
+    assert load_suggestions()[0].state == "pending"
+
+
+def test_accept_loses_race_to_concurrent_dismiss(monkeypatch, data_dir):
+    app = _make_app()
+    _save_suggestion(app.id)
+    real_claim = service.claim_pending
+
+    def dismiss_then_claim(*args, **kwargs):
+        service.dismiss(["s1"])
+        return real_claim(*args, **kwargs)
+
+    monkeypatch.setattr(service, "claim_pending", dismiss_then_claim)
+    with pytest.raises(service.SuggestionNotAcceptable):
+        service.accept("s1")
+    assert applications.get(app.id).status == "Applied"
+    assert load_suggestions()[0].state == "dismissed"
+
+
 def test_draft_with_non_draft_sibling_company_is_not_a_candidate(monkeypatch, data_dir):
     save_answers(Answers(email="me@example.com"))
     applied_app = _make_app(company="Acme Corp", website="https://acme.example", status="Applied")

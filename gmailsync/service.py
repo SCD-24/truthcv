@@ -16,7 +16,14 @@ from screening import jev
 
 from .matcher import _app_domains, _normalize, match_message
 from .model import GmailSuggestion, GmailSyncState
-from .store import dismiss_suggestions, load_suggestions, load_sync_state, merge_new_suggestions, save_sync_state
+from .store import (
+    claim_pending,
+    dismiss_suggestions,
+    load_suggestions,
+    load_sync_state,
+    merge_new_suggestions,
+    save_sync_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +203,7 @@ def _pending_candidates():
     also dropped when another non-Draft, non-closed candidate shares its
     normalized company name — that company is already watched via the
     other application, and leaving both in would tie the matcher's scoring
-    (matcher.py is not touched) and cause match_message to return None,
+    and cause match_message to return None,
     silently dropping the message and burning its id from processed_message_ids.
     """
     candidates = [app for app in load_all() if app.status not in CLOSED_STATUSES]
@@ -233,6 +240,38 @@ def list_pending(limit: int, offset: int) -> tuple[list[GmailSuggestion], int]:
     """One page of pending suggestions, newest first, plus the total pending count."""
     pending = pending_suggestions()
     return pending[offset : offset + limit], len(pending)
+
+
+class SuggestionNotFound(LookupError):
+    """No suggestion exists with the requested id."""
+
+
+class SuggestionNotAcceptable(ValueError):
+    """The suggestion is not pending or carries no status to apply."""
+
+
+def accept(suggestion_id: str) -> GmailSuggestion:
+    """Apply a pending suggestion's status to its application and mark it applied/confirmed.
+
+    Raises SuggestionNotFound for an unknown id and SuggestionNotAcceptable when the
+    suggestion is not pending or has no suggested status; the application is untouched then.
+    """
+    item = next((s for s in load_suggestions() if s.id == suggestion_id), None)
+    if item is None:
+        raise SuggestionNotFound(suggestion_id)
+    if item.state != "pending" or not item.suggested_status:
+        raise SuggestionNotAcceptable(suggestion_id)
+    if get_application(item.application_id) is None:
+        raise SuggestionNotAcceptable(suggestion_id)
+    # Claim first, atomically: a concurrent dismiss/accept that already moved
+    # the suggestion out of pending wins, and the application stays untouched.
+    claimed = claim_pending(suggestion_id, "applied", "confirmed")
+    if claimed is None:
+        raise SuggestionNotAcceptable(suggestion_id)
+    _apply_decision(
+        item.application_id, item.suggested_status, item.id, item.sender, item.subject, item.date, accepted=True
+    )
+    return claimed
 
 
 def dismiss(ids) -> int:
@@ -298,19 +337,26 @@ _CONFIRM_STATEMENTS = {
 }
 
 
-def _evidence_note(message_id: str, sender: str, subject: str, date: str) -> str:
-    """One evidence paragraph documenting an auto-applied status change."""
+def _evidence_note(message_id: str, sender: str, subject: str, date: str, accepted: bool = False) -> str:
+    """One evidence paragraph documenting an auto-applied (or user-accepted) status change."""
+    prefix = (
+        "Gmail sync: status updated from an employer reply you accepted "
+        if accepted
+        else "Gmail sync: status auto-updated from an employer reply "
+    )
     return (
-        f"Gmail sync: status auto-updated from an employer reply "
+        f"{prefix}"
         f'(message {message_id}, from {sender}, subject "{subject}", {date}).'
     )
 
 
-def _apply_decision(app_id: str, status: str, message_id: str, sender: str, subject: str, date: str) -> None:
-    """Set an application's status from a Jev-confirmed employer reply, with evidence."""
+def _apply_decision(
+    app_id: str, status: str, message_id: str, sender: str, subject: str, date: str, accepted: bool = False
+) -> None:
+    """Set an application's status from an employer reply, with evidence (accepted marks a user accept)."""
     app = get_application(app_id)
     existing_notes = (app.notes if app else "").strip()
-    note = _evidence_note(message_id, sender, subject, date)
+    note = _evidence_note(message_id, sender, subject, date, accepted)
     notes = f"{existing_notes}\n\n{note}" if existing_notes else note
     update_application(app_id, {"status": status, "response_received": True, "notes": notes})
 
@@ -328,10 +374,9 @@ def _process_message(client: GmailClient, message_id: str, metadata: dict, pendi
     (see _classify_message), so it auto-applies immediately — the matched
     application's status is updated with evidence in its notes and the
     suggestion is recorded as applied — but only when the match itself is
-    not low-confidence (company keyword alone, score 2): a low-confidence
-    match is too weak a link between message and application to act on
-    unattended, so it stays a pending suggestion for the operator to apply
-    by hand even though the classification is recorded. Any other
+    not low-confidence: medium/high matches auto-apply, while a low match is
+    too weak a link to act on unattended, so it stays pending for the user to
+    accept (see accept) or dismiss, with the classification recorded. Any other
     classification is left pending and no application is touched.
     """
     sender = _header(metadata, "From")

@@ -79,6 +79,59 @@ def test_short_name_sender_domain_exact_label():
     assert match_message([app], sender="no-reply@survey.com", subject="Hello", snippet="") is None
 
 
+def test_ats_sender_with_company_and_role_is_high():
+    """Greenhouse sender + greenhouse application URL + company + role -> high."""
+    app = _app(
+        company="Nebius",
+        role="Data Engineer",
+        application_url="https://job-boards.eu.greenhouse.io/nebius/jobs/123",
+    )
+    result = match_message(
+        [app],
+        sender="Nebius <no-reply@eu.greenhouse-mail.io>",
+        subject="Your application for Data Engineer",
+        snippet="Thanks from Nebius",
+    )
+    assert result is not None
+    assert result.confidence == "high"
+    assert "hiring platform matched greenhouse" in result.evidence
+
+
+def test_ats_with_company_only_is_medium():
+    """Lever platform + company keyword (no role) -> medium."""
+    app = _app(company="Acme", role="Data Engineer", application_url="https://jobs.lever.co/acme/1")
+    result = match_message([app], sender="hire@hire.eu.lever.co", subject="Update from Acme", snippet="")
+    assert result is not None
+    assert result.confidence == "medium"
+
+
+def test_ats_only_is_low():
+    """Same ATS family with no company/role text -> low."""
+    app = _app(company="Acme", role="Data Engineer", application_url="https://jobs.lever.co/acme/1")
+    result = match_message([app], sender="hire@hire.eu.lever.co", subject="Hello", snippet="")
+    assert result is not None
+    assert result.confidence == "low"
+
+
+def test_two_apps_same_ats_only_tie_returns_none():
+    """Two applications on one ATS with only platform evidence tie -> None."""
+    apps = [
+        _app(id="a1", company="Acme", application_url="https://boards.greenhouse.io/acme/1"),
+        _app(id="a2", company="Beta", application_url="https://boards.greenhouse.io/beta/2"),
+    ]
+    assert match_message(apps, sender="x@greenhouse-mail.io", subject="Hello", snippet="") is None
+
+
+def test_company_and_role_with_unrelated_sender_is_medium():
+    """Company + role in text floors at medium even with an unrelated sender."""
+    app = _app(company="Acme", role="Data Engineer")
+    result = match_message(
+        [app], sender="x@unrelated.example", subject="Acme: Data Engineer", snippet=""
+    )
+    assert result is not None
+    assert result.confidence == "medium"
+
+
 def test_hp_does_not_match_php():
     """HP app ignores 'php developer'."""
     result = match_message([_app(company="HP Inc")], sender="x@unrelated.example", subject="Jobs", snippet="php developer")
