@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-import base64
-import html
 import logging
-import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from email.utils import parseaddr
-
-import httpx
 
 from applications.store import get as get_application, load_all, update as update_application
 from connections.auth.gmail import AuthError, get_valid_access_token
 from screening import jev
 
+from .client import GmailClient, GmailSyncError, _decode_body, _header
 from .matcher import _app_domains, _normalize, match_message
 from .model import GmailSuggestion, GmailSyncState
 from .store import (
@@ -41,94 +37,11 @@ SYNC_LOOKBACK_S = 24 * 60 * 60
 GMAIL_FETCH_MAX_WORKERS = 4
 
 
-class GmailSyncError(RuntimeError):
-    def __init__(self, message: str, *, reconnect_required: bool = False) -> None:
-        super().__init__(message)
-        self.reconnect_required = reconnect_required
-
-
-class GmailClient:
-    def __init__(self, access_token: str) -> None:
-        self._headers = {"Authorization": f"Bearer {access_token}"}
-
-    def _get(self, path: str, **params):
-        try:
-            resp = httpx.get(
-                f"https://gmail.googleapis.com/gmail/v1/users/me/{path}",
-                headers=self._headers,
-                params=params,
-                timeout=30,
-            )
-        except httpx.HTTPError as exc:
-            raise GmailSyncError("Gmail sync failed — could not reach Gmail.") from exc
-        if resp.status_code in (401, 403):
-            raise GmailSyncError(
-                "Gmail access was revoked or expired — reconnect Gmail in Settings.",
-                reconnect_required=True,
-            )
-        if resp.status_code != 200:
-            raise GmailSyncError(f"Gmail sync failed ({resp.status_code}).")
-        return resp.json()
-
-    def list_messages(self, query: str) -> list[dict]:
-        messages: list[dict] = []
-        page_token = None
-        while True:
-            payload = self._get(
-                "messages",
-                q=query,
-                maxResults=100,
-                pageToken=page_token,
-            )
-            messages.extend(payload.get("messages") or [])
-            page_token = payload.get("nextPageToken")
-            if not page_token:
-                return messages
-
-    def get_metadata(self, message_id: str) -> dict:
-        return self._get(
-            f"messages/{message_id}",
-            format="metadata",
-            metadataHeaders=["From", "Subject", "Date", "To"],
-        )
-
-    def get_full(self, message_id: str) -> dict:
-        return self._get(f"messages/{message_id}", format="full")
-
-
 def build_gmail_client() -> GmailClient:
     try:
         return GmailClient(get_valid_access_token())
     except AuthError as exc:
         raise GmailSyncError(str(exc), reconnect_required=exc.reconnect_required) from exc
-
-
-def _header(payload: dict, name: str) -> str:
-    headers = payload.get("payload", {}).get("headers") or []
-    target = name.lower()
-    for header in headers:
-        if str(header.get("name", "")).lower() == target:
-            return str(header.get("value", ""))
-    return ""
-
-
-def _decode_body(part: dict) -> str:
-    data = part.get("body", {}).get("data") or ""
-    if data:
-        try:
-            raw = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4)).decode("utf-8", errors="ignore")
-            if part.get("mimeType") == "text/html":
-                raw = re.sub(r"<[^>]+>", " ", raw)
-                raw = html.unescape(raw)
-            return raw
-        except Exception:
-            return ""
-    out = []
-    for child in part.get("parts") or []:
-        text = _decode_body(child)
-        if text:
-            out.append(text)
-    return "\n".join(out)
 
 
 def _classify_message(subject: str, body: str) -> tuple[str, str]:
