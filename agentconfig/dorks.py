@@ -26,7 +26,7 @@ from datetime import date, datetime, timedelta, timezone
 from itertools import zip_longest
 from urllib.parse import quote_plus
 
-from agentconfig.boards import DEFAULT_BOARD_DOMAINS, is_api_source, resolve_domain, resolve_signin_url
+from agentconfig.boards import DEFAULT_BOARD_DOMAINS, DORK_QUALIFIERS, is_api_source, resolve_domain, resolve_signin_url
 from agentconfig.direct_board_presets import preset_for
 from agentconfig.store import JobBoard, JobProfile
 
@@ -253,6 +253,27 @@ def compose_direct_boards(
     return results
 
 
+def _fitting_qualifier(domain: str, rest: list[str]) -> list[str]:
+    """``domain``'s DORK_QUALIFIERS term as a list, or [] if none or it would overflow.
+
+    Best-effort like negatives: when the fixed terms already exhaust
+    MAX_QUERY_WORDS the qualifier is dropped (the agent still filters
+    LinkedIn links to job postings), so the query never exceeds the budget
+    because of it.
+    """
+    qualifier = DORK_QUALIFIERS.get(domain)
+    if not qualifier:
+        return []
+    if _word_count(" ".join([f"site:{domain}", qualifier] + rest)) > MAX_QUERY_WORDS:
+        return []
+    return [qualifier]
+
+
+def _qualifier_words(domains: list[str]) -> int:
+    """Largest word count of any DORK_QUALIFIERS entry among ``domains`` (0 if none)."""
+    return max((_word_count(DORK_QUALIFIERS.get(d, "")) for d in domains), default=0)
+
+
 def compose_profile_queries(
     profile: JobProfile,
     recency: str = "w",
@@ -264,7 +285,9 @@ def compose_profile_queries(
     Titles (see ``_dork_titles``), not the full keyword list, drive the
     ``site:`` queries: titles are '|'-grouped and chunked to fit the word
     budget (MAX_QUERY_WORDS) after the fixed site/location/remote/recency
-    terms, one query per chunk per source, ordered chunk-major (every source
+    terms (plus the widest per-domain qualifier such as LinkedIn's
+    ``inurl:jobs/view``, reserved across all domains since title chunks are
+    shared), one query per chunk per source, ordered chunk-major (every source
     for chunk 1, then every source for chunk 2, ...). Rejected role types
     render as negatives (``-"term"``) best-effort in the leftover room only;
     negatives that would overflow are dropped. Screening still enforces
@@ -291,7 +314,7 @@ def compose_profile_queries(
     negatives = _negative_terms(profile)
 
     fixed_words = (
-        1 + _word_count(location_group) + _word_count(remote_group) + _word_count(operator)
+        1 + _qualifier_words(domains) + _word_count(location_group) + _word_count(remote_group) + _word_count(operator)
     )
     budget = max(MAX_QUERY_WORDS - fixed_words, 1)
 
@@ -316,8 +339,9 @@ def _profile_queries_for_chunk(
     """
     results = []
     for domain in domains:
-        base = [f"site:{domain}"] + [g for g in groups if g]
         tail = [operator] if operator else []
+        terms = [g for g in groups if g]
+        base = [f"site:{domain}"] + _fitting_qualifier(domain, terms + tail) + terms
         for neg in negatives:
             if _word_count(" ".join(base + [neg] + tail)) > MAX_QUERY_WORDS:
                 break

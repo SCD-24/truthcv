@@ -11,6 +11,9 @@ describe('parseDorkTarget', () => {
   it('parses a path prefix', () => {
     expect(parseDorkTarget('https://www.google.de/search?q=site:LinkedIn.com/jobs+x')).toEqual({ host: 'linkedin.com', pathPrefix: '/jobs' });
   });
+  it('parses site:linkedin.com with an inurl qualifier as host only', () => {
+    expect(parseDorkTarget('https://www.google.com/search?q=site%3Alinkedin.com+inurl%3Ajobs%2Fview+engineer')).toEqual({ host: 'linkedin.com', pathPrefix: '' });
+  });
   it('returns null for non-Google pages', () => {
     expect(parseDorkTarget('https://example.com/search?q=site:jobs.lever.co')).toBeNull();
   });
@@ -34,6 +37,13 @@ describe('extractDorkPostings', () => {
     const bad = ['https://ie.linkedin.com/jobs/%E7%B3%96%E6%9E%9C-jobs', 'https://www.linkedin.com/jobs/search?keywords=x', 'https://linkedin.com/jobs/view/abc'];
     const out = extractDorkPostings([good, ...bad].map((u) => link('t', u)), target);
     expect(out.map((p) => p.url)).toEqual([good]);
+  });
+  it('keeps only jobs/view links for a host-only linkedin target', () => {
+    const target = { host: 'linkedin.com', pathPrefix: '' };
+    const view = 'https://www.linkedin.com/jobs/view/123';
+    const others = ['https://www.linkedin.com/in/bob', 'https://www.linkedin.com/jobs/search?keywords=x', 'https://www.linkedin.com/company/acme'];
+    const out = extractDorkPostings([view, ...others].map((u) => link('t', u)), target);
+    expect(out.map((p) => p.url)).toEqual([view]);
   });
   it('matches subdomains', () => {
     const out = extractDorkPostings([link('Role', 'https://acme.wd3.myworkdayjobs.com/en/job/1')], { host: 'myworkdayjobs.com', pathPrefix: '' });

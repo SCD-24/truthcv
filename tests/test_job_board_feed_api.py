@@ -117,7 +117,7 @@ def test_a_non_api_extra_board_still_composes_a_dork():
     """Guards the exclusion above against over-reach: only API boards are skipped."""
     profile = JobProfile(name="p", enabled=True, keywords=["backend"])
     entries = dorks.compose_profile_queries(profile, None, ["remoterocketship", "linkedin"])
-    assert "linkedin.com/jobs" in {e["source"] for e in entries}
+    assert "linkedin.com" in {e["source"] for e in entries}
 
 
 # --- resolved board list ---------------------------------------------------

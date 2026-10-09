@@ -134,7 +134,7 @@ describe("JobBoardsPage", () => {
       enabled: true,
       mode: "dork",
       modeLocked: true,
-      domain: "linkedin.com/jobs",
+      domain: "linkedin.com",
       effectiveSigninUrl: "https://www.linkedin.com/login",
       isDefault: false,
       isApi: false,
