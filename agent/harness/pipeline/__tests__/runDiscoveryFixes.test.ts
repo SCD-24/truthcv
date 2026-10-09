@@ -63,12 +63,12 @@ describe('discover Google consent pass', () => {
   it('behaves as before when the button is absent, and tries at most once', async () => {
     const { call, clicks } = consentBrowser(false);
     const mcp = okMcp();
-    await discover(dork(3), 'r', call, mcp, { sleep });
+    await discover(dork(3), 'r', call, mcp, { sleep, now: () => 1_000_000 });
     expect(clicks).toHaveLength(0);
     const cov = mcp.mock.calls.filter((c) => c[0] === 'record_discovery_coverage').map((c) => c[1]);
     expect(cov[0].status).toBe('blocked');
-    expect(cov[2].status).toBe('skipped');
-    expect(String(cov[2].reason)).toContain('consent page could not be passed');
+    expect(cov[2].status).toBe('deferred');
+    expect(String(cov[2].reason)).toContain('queued first for the next run');
   });
   it('never clicks on the /sorry CAPTCHA', async () => {
     const clicks: string[] = [];

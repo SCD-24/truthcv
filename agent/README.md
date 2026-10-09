@@ -462,9 +462,15 @@ Google dorks. One `record_discovery_coverage` is recorded per composed entry.
   adds a trailing `after:YYYY-MM-DD` operator counted back 1/7/30/365 days from
   today (UTC); `none` omits it, and unset or invalid values behave as `w`.
 - Queries are interleaved round-robin across profiles and de-duplicated by URL.
-- **Pacing.** Dorks run one at a time with a randomized 4–7 s pause between
-  searches. After two consecutive Google blocks/CAPTCHAs the remaining dorks are
-  skipped and recorded as `skipped`; a Google consent page is attempted once.
+- **Pacing.** Dorks run one at a time with a randomized 15–30 s pause between
+  searches, measured from the previous search even across runs (state in
+  `--dork-state-file`, kept as `dork-state.json` in the run log dir; absent flag
+  = defaults, nothing persisted). Searching runs alongside screening: the browser
+  lock is held only while a query is harvested, never while waiting. After two
+  consecutive Google blocks/CAPTCHAs searching pauses for a 30-minute cooldown;
+  the queries not searched are recorded as `deferred` (never `skipped`, and a
+  deferral is not a coverage shortfall) and are searched first in the next run.
+  A Google consent page is attempted once.
 
 **Per-source funnel** (`pipeline/funnel.ts`). Every discovered URL gets exactly
 one outcome — `previously_screened`, `not_a_posting`, `duplicate`, `failed`,

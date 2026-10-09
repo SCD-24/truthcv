@@ -81,6 +81,32 @@ def test_skipped_entry_is_flagged_by_name(monkeypatch, data_dir):
     assert "BoardBlocked" in str(excinfo.value)
 
 
+def test_searched_blocked_deferred_dorks_finish_completed(monkeypatch, data_dir):
+    _patch_expected_counts(monkeypatch, direct_count=1, query_count=3)
+    tools_runs.start_run("run-deferred")
+    _cover("run-deferred", "direct", "BoardOne")
+    _cover("run-deferred", "dork", "QueryOne", status="searched")
+    _cover("run-deferred", "dork", "QueryTwo", status="blocked")
+    _cover("run-deferred", "dork", "QueryThree", status="deferred")
+
+    result = tools_runs.finish_run(run_id="run-deferred", status="completed")
+
+    assert result["recorded"] is True
+    assert result["status"] == "completed"
+
+
+def test_skipped_dork_entry_still_refuses_alongside_deferred(monkeypatch, data_dir):
+    _patch_expected_counts(monkeypatch, direct_count=1, query_count=2)
+    tools_runs.start_run("run-dork-skip")
+    _cover("run-dork-skip", "direct", "BoardOne")
+    _cover("run-dork-skip", "dork", "QueryDeferred", status="deferred")
+    _cover("run-dork-skip", "dork", "QuerySkipped", status="skipped")
+
+    with pytest.raises(ValueError) as excinfo:
+        tools_runs.finish_run(run_id="run-dork-skip", status="completed")
+    assert "QuerySkipped" in str(excinfo.value)
+
+
 def test_non_completed_status_never_raises(monkeypatch, data_dir):
     _patch_expected_counts(monkeypatch, direct_count=2, query_count=3)
     tools_runs.start_run("run-c")

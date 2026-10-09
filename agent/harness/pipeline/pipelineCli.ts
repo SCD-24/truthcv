@@ -11,7 +11,7 @@
  * `--mcp-config`, `--screening-*`). Exit codes follow cli.ts: 0 ok, 3 a stage
  * failed, 4 MCP unavailable, 5 bad arguments/configuration.
  */
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import { ExitCode, parseArgs, redactAll, resolveConfig, validateConfig, type CliConfig } from '../cli.js';
 import { loadMcpConfig, type McpServerConfig } from '../mcp/config.js';
 import { createMcpClientPool, type McpClientPool } from '../mcp/client.js';
@@ -19,12 +19,15 @@ import { createProviderAdapter, type ProviderAdapterOptions } from '../providers
 import type { ProviderAdapter } from '../providers/types.js';
 import type { BrowserToolCall } from '../builtins/harvestTypes.js';
 import { STAGE_REGISTRY, type StageName } from '../stages.js';
-import { discover } from './discover.js';
+import { discover, type DiscoveryOutcome } from './discover.js';
 import { fetchPosting } from './fetchPosting.js';
-import { screenCandidates } from './screenStage.js';
+import { createMutex, screenCandidates } from './screenStage.js';
+import { CandidateQueue } from './candidateQueue.js';
+import { createIntake } from './candidateIntake.js';
+import { loadDorkState, saveDorkState, type DorkState } from './dorkState.js';
 import { buildFunnel, recordFunnel } from './funnel.js';
 import { composeStagePrompt, defaultAgentDir } from './stagePrompt.js';
-import type { McpCall } from './types.js';
+import type { Candidate, McpCall } from './types.js';
 
 /** Server name of the browser MCP server. */
 const BROWSER_SERVER = 'browser';
@@ -38,6 +41,8 @@ export interface PipelineDeps {
   createAdapter?: (opts: ProviderAdapterOptions) => ProviderAdapter;
   readFileText?: (path: string) => Promise<string>;
   writeOutput?: (path: string, text: string) => Promise<void>;
+  /** Atomic rename (used for the dork state file). */
+  renameFile?: (from: string, to: string) => Promise<void>;
   stdout?: (line: string) => void;
   stderr?: (line: string) => void;
 }
@@ -65,6 +70,7 @@ function withDefaults(d: PipelineDeps): Resolved {
     createAdapter: d.createAdapter ?? createProviderAdapter,
     readFileText: d.readFileText ?? ((p) => readFile(p, 'utf8')),
     writeOutput: d.writeOutput ?? ((p, t) => writeFile(p, t, 'utf8')),
+    renameFile: d.renameFile ?? ((a, b) => rename(a, b)),
     stdout: d.stdout ?? ((l) => void process.stdout.write(`${l}\n`)),
     stderr: d.stderr ?? ((l) => void process.stderr.write(`${l}\n`)),
   };
@@ -155,6 +161,13 @@ function tokensOf(config: CliConfig): string[] {
   return [...new Set([config.token, config.screeningToken, ...t])].filter(Boolean);
 }
 
+/** Log a discovery crash (redacted) and stand in an incomplete outcome so screening still finishes. */
+function discoveryFailed(err: unknown, d: Resolved, config: CliConfig, accepted: Candidate[]): DiscoveryOutcome {
+  const message = redactAll(err instanceof Error ? err.message : String(err), tokensOf(config));
+  d.stderr(JSON.stringify({ event: 'discover-failed', error: message }));
+  return { candidates: accepted, allCandidates: accepted, dropped: [], coverageComplete: false, errors: [`discovery failed: ${message}`] };
+}
+
 /** `discover-screen`: discovery, fetch, extract and screening. */
 async function cmdDiscoverScreen(a: PipelineArgs, env: NodeJS.ProcessEnv, pool: McpClientPool, d: Resolved, config: CliConfig): Promise<number> {
   const { 'run-id': runId, 'job-config': jobPath, criteria: critPath, out } = a.flags;
@@ -165,14 +178,24 @@ async function cmdDiscoverScreen(a: PipelineArgs, env: NodeJS.ProcessEnv, pool: 
   const criteria = JSON.parse(await d.readFileText(critPath)) as Record<string, string>;
   const mcp = mcpCaller(pool);
   const browser = browserCaller(pool);
-  const found = await discover(jobConfig, runId, browser, mcp);
-  const screened = await screenCandidates(found.candidates, {
-    runId, criteria, fetch: (url) => fetchPosting(browser, url),
+  const lock = createMutex();
+  const queue = new CandidateQueue();
+  const intake = createIntake(mcp, queue);
+  const stateFile = a.flags['dork-state-file'];
+  const fs = { readFileText: d.readFileText, writeFileText: d.writeOutput, renameFile: d.renameFile };
+  const dorkState: DorkState | undefined = stateFile ? await loadDorkState(stateFile, fs) : undefined;
+  const discovering = discover(jobConfig, runId, browser, mcp, {
+    browserLock: lock, onCandidates: intake.push, dorkState,
+    saveDorkState: stateFile ? (s) => saveDorkState(stateFile, s, fs) : undefined,
+  }).catch((err) => discoveryFailed(err, d, config, intake.accepted)).finally(() => queue.close());
+  const screening = screenCandidates(queue, {
+    runId, criteria, fetch: (url) => lock(() => fetchPosting(browser, url)),
     extractAdapter: stageAdapter(config, 'extract', d),
     screeningAdapter: stageAdapter(config, 'screening', d),
     record: (args) => mcp('record_screening', args),
   });
-  found.errors.push(...(await recordFunnel(mcp, runId, buildFunnel(found.allCandidates, found.dropped, screened.outcomes))));
+  const [found, screened] = await Promise.all([discovering, screening]);
+  found.errors.push(...(await recordFunnel(mcp, runId, buildFunnel(found.allCandidates, intake.dropped, screened.outcomes))));
   const ok = found.coverageComplete && found.errors.length === 0;
   await d.writeOutput(out, JSON.stringify({
     ok, coverageComplete: found.coverageComplete, errors: found.errors, itemErrors: screened.errors.map((e) => redactAll(e, tokensOf(config))),

@@ -22,7 +22,10 @@ const SRC = [{ source: 'g', channel: 'dork' }];
 
 function setup(found: { errors: string[]; coverageComplete: boolean }, funnelReply = '{"recorded":true,"mismatches":[],"truncated":false}') {
   const cand = { url: 'https://a.test/1', title: 'T', channel: 'dork', sources: SRC, profiles: ['P'] };
-  discoverMock.mockResolvedValue({ candidates: [cand], allCandidates: [cand], dropped: [], ...found });
+  discoverMock.mockImplementation(async (_j: unknown, _r: unknown, _b: unknown, _m: unknown, opts?: { onCandidates?: (b: unknown[]) => Promise<void> }) => {
+    await opts?.onCandidates?.([cand]);
+    return { candidates: [], allCandidates: [cand], dropped: [], ...found };
+  });
   const names = ['record_screening', 'record_source_funnel'];
   const pool = {
     listTools: () => names.map((n) => ({ namespacedName: `truthcv__${n}`, serverName: 'truthcv', toolName: n, description: '', inputSchema: {} })),
@@ -64,6 +67,57 @@ describe('discover-screen per-item errors', () => {
     expect(call[1]).toMatchObject({ run_id: 'r', totals: { postings_seen: 1, failed: 1 }, urls: [{ url: 'https://a.test/1', outcome: 'failed' }] });
     const t = setup({ errors: [], coverageComplete: true }, '{"recorded":true,"mismatches":[],"truncated":true}');
     expect(await runPipelineCli(ARGS, ENV, t.d)).toBe(ExitCode.Success);
+  });
+
+  it('screens a dork batch that arrives after the initial candidates finished, and passes dork state options', async () => {
+    const { d, out, pool } = setup({ errors: [], coverageComplete: true });
+    const c1 = { url: 'https://a.test/1', title: 'T', channel: 'feed', sources: SRC, profiles: ['P'] };
+    const c2 = { url: 'https://a.test/2', title: 'T', channel: 'dork', sources: SRC, profiles: ['P'] };
+    let opts: Record<string, unknown> = {};
+    let screenedFirst!: () => void;
+    const firstScreened = new Promise<void>((r) => { screenedFirst = r; });
+    (pool.callTool as ReturnType<typeof vi.fn>).mockImplementation(async (name: string) => {
+      if (name.endsWith('record_screening')) screenedFirst();
+      return { content: name.endsWith('record_source_funnel') ? '{"recorded":true,"mismatches":[],"truncated":false}' : LONG, isError: !name.endsWith('record_source_funnel') };
+    });
+    discoverMock.mockImplementation(async (_j: unknown, _r: unknown, _b: unknown, _m: unknown, o: { onCandidates: (b: unknown[]) => Promise<void> }) => {
+      opts = o as unknown as Record<string, unknown>;
+      await o.onCandidates([c1, c1]);
+      await firstScreened;
+      await o.onCandidates([c2, c1]);
+      return { candidates: [], allCandidates: [c1, c2], dropped: [], errors: [], coverageComplete: true };
+    });
+    out['dork-state.json'] = JSON.stringify({ lastSearchAt: 7, consecutiveBlocks: 0, cooldownUntil: 0, deferred: [] });
+    expect(await runPipelineCli([...ARGS, '--dork-state-file', 'dork-state.json'], ENV, d)).toBe(ExitCode.Success);
+    const calls = (pool.callTool as ReturnType<typeof vi.fn>).mock.calls.filter((c) => String(c[0]).endsWith('record_screening'));
+    expect(calls.map((c) => (c[1] as { url: string }).url).sort()).toEqual(['https://a.test/1', 'https://a.test/2']);
+    expect((opts.dorkState as { lastSearchAt: number }).lastSearchAt).toBe(7);
+    expect(typeof opts.saveDorkState).toBe('function');
+  });
+
+  it('a throw from discovery is logged, not fatal: screening completes and passes are written', async () => {
+    const { d: base, out, pool } = setup({ errors: [], coverageComplete: true });
+    const logs: string[] = [];
+    const d = { ...base, stderr: (l: string) => void logs.push(l) };
+    discoverMock.mockImplementation(async (_j: unknown, _r: unknown, _b: unknown, _m: unknown, o: { onCandidates: (b: unknown[]) => Promise<void> }) => {
+      await o.onCandidates([{ url: 'https://a.test/9', title: 'T', channel: 'dork', sources: SRC, profiles: ['P'] }]);
+      throw new Error('search loop exploded');
+    });
+    expect(await runPipelineCli(ARGS, ENV, d)).toBe(ExitCode.ProviderError);
+    const s = JSON.parse(out['o.json']) as { errors: string[]; itemErrors: string[] };
+    expect(s.errors[0]).toBe('discovery failed: search loop exploded');
+    expect(s.itemErrors).toHaveLength(1);
+    const fc = (pool.callTool as ReturnType<typeof vi.fn>).mock.calls.find((c) => String(c[0]).endsWith('record_source_funnel'))!;
+    expect(fc[1]).toMatchObject({ totals: { postings_seen: 1 }, urls: [{ url: 'https://a.test/9' }] });
+    expect(logs.some((l) => l.includes('discover-failed') && l.includes('search loop exploded'))).toBe(true);
+  });
+
+  it('passes no dork state when --dork-state-file is absent', async () => {
+    const { d } = setup({ errors: [], coverageComplete: true });
+    await runPipelineCli(ARGS, ENV, d);
+    const opts = discoverMock.mock.calls[discoverMock.mock.calls.length - 1][4] as Record<string, unknown>;
+    expect(opts.dorkState).toBeUndefined();
+    expect(opts.saveDorkState).toBeUndefined();
   });
 
   it('a discovery error is systemic: exit 3, ok false', async () => {

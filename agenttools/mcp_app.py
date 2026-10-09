@@ -185,9 +185,9 @@ _TOOL_REGISTRY = {
         _record_discovery_coverage,
         "Records one board or query's discovery coverage for this run: which channel (feed, "
         "direct or dork), which board, and its status (searched, empty, login_walled, blocked, "
-        "extraction_failed or skipped), plus how many postings it found. 'extraction_failed' means "
+        "extraction_failed, skipped or deferred), plus how many postings it found. 'extraction_failed' means "
         "the board was reachable and not walled, but harvest could not extract or read its "
-        "results — never report it as 'empty' or 'blocked'. Call ONE TIME per board or query you "
+        "results — never report it as 'empty' or 'blocked'. 'deferred' means not searched this run because of a deliberate pause (e.g. Google cooldown/rate-limit), queued for the next run. Call ONE TIME per board or query you "
         "searched. A board you never call this for is read by the operator as 'not reached', "
         "not as searched-and-empty — so an entry left uncalled is itself an honest coverage "
         "gap, and a board you never reached must NOT be reported as empty. 'empty' means the "

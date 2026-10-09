@@ -72,6 +72,7 @@ def _channel_coverage(record, channel: str) -> tuple[int, list[str]]:
     read straight from ``record.discovery_coverage`` — no config involved, so
     this can never fail on a config error."""
     entries = [e for e in record.discovery_coverage if e.get("channel") == channel]
+    # 'deferred' (deliberate pause, queued for next run) counts as worked.
     worked = sum(1 for e in entries if e.get("status") != "skipped")
     skipped = [e.get("board", "") for e in entries if e.get("status") == "skipped"]
     return worked, skipped
@@ -354,6 +355,8 @@ def record_discovery_coverage(
     as ``empty``. ``extraction_failed`` means the board was reachable and
     not walled, but harvest could not extract or read its results — never
     reported as ``empty`` or ``blocked``.
+    ``deferred`` means not searched this run because of a deliberate pause
+    (e.g. Google cooldown/rate-limit), queued for the next run.
     ``tier`` is optional and records which extraction tier produced the
     postings: one of api, harvest or llm, or "" when not applicable.
     """
@@ -361,7 +364,7 @@ def record_discovery_coverage(
         return {"recorded": False}
     if channel not in ("feed", "direct", "dork"):
         return {"recorded": False}
-    if status not in ("searched", "empty", "login_walled", "blocked", "extraction_failed", "skipped"):
+    if status not in ("searched", "empty", "login_walled", "blocked", "extraction_failed", "skipped", "deferred"):
         return {"recorded": False}
     if tier not in ("api", "harvest", "llm", ""):
         return {"recorded": False}

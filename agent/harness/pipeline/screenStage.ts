@@ -10,6 +10,7 @@ import type { ProviderAdapter } from '../providers/types.js';
 import { extractMeta } from './extractMeta.js';
 import type { FetchedPosting } from './fetchPosting.js';
 import type { Candidate } from './types.js';
+import { CandidateQueue } from './candidateQueue.js';
 import { classifyStored, pickOutcome, type Classified, type ProfileClassified, type UrlOutcome } from './outcomes.js';
 import { BLOCKER_COMPANY_FALLBACK, BLOCKER_ROLE_FALLBACK, companyFromUrl, roleForBlocker } from './blockerIdentity.js';
 
@@ -54,7 +55,7 @@ export interface ScreenStageResult {
 interface Meta { role: string; company: string; posted_date: string }
 
 /** Serialize async work (one shared browser tab must never interleave). */
-function createMutex(): <T>(fn: () => Promise<T>) => Promise<T> {
+export function createMutex(): <T>(fn: () => Promise<T>) => Promise<T> {
   let tail: Promise<unknown> = Promise.resolve();
   return <T>(fn: () => Promise<T>): Promise<T> => {
     const run = tail.then(fn);
@@ -172,28 +173,33 @@ async function processCandidate(d: ScreenStageDeps, fetchOne: ScreenStageDeps['f
 
 /**
  * Screen all candidates with bounded concurrency. Browser fetches are
- * serialized; extraction/screening LLM calls run concurrently.
+ * serialized; extraction/screening LLM calls run concurrently. With a
+ * {@link CandidateQueue}, workers wait while it is empty but still open and
+ * finish once it is closed and drained.
  *
+ * @param candidates A fixed list, or a queue that may still grow.
  * @returns Actionable passes (in candidate order), blocker count and errors.
  */
-export async function screenCandidates(candidates: Candidate[], d: ScreenStageDeps): Promise<ScreenStageResult> {
-  const perCandidate: ScreenStageResult[] = candidates.map(() => ({ passes: [], blockers: 0, errors: [], outcomes: [] }));
+export async function screenCandidates(candidates: Candidate[] | CandidateQueue, d: ScreenStageDeps): Promise<ScreenStageResult> {
+  const queue = Array.isArray(candidates) ? new CandidateQueue(candidates, false) : candidates;
+  const perCandidate: ScreenStageResult[] = [];
   const exclusive = createMutex();
   const fetchOne = (url: string): Promise<FetchedPosting> => exclusive(() => d.fetch(url));
-  let next = 0;
   const worker = async (): Promise<void> => {
-    while (next < candidates.length) {
-      const i = next++;
+    for (let c = await queue.take(); c; c = await queue.take()) {
+      const res: ScreenStageResult = { passes: [], blockers: 0, errors: [], outcomes: [] };
+      perCandidate.push(res);
       try {
-        await processCandidate(d, fetchOne, candidates[i], perCandidate[i]);
+        await processCandidate(d, fetchOne, c, res);
       } catch (err) {
-        const text = `${candidates[i].url}: ${err instanceof Error ? err.message : String(err)}`;
-        if (perCandidate[i].outcomes.length) perCandidate[i].errors.push(text);
-        else failOutcome(perCandidate[i], candidates[i], text);
+        const text = `${c.url}: ${err instanceof Error ? err.message : String(err)}`;
+        if (res.outcomes.length) res.errors.push(text);
+        else failOutcome(res, c, text);
       }
     }
   };
-  const width = Math.max(1, Math.min(d.concurrency ?? SCREEN_CONCURRENCY, candidates.length));
+  const cap = d.concurrency ?? SCREEN_CONCURRENCY;
+  const width = Math.max(1, queue.isOpen ? cap : Math.min(cap, queue.size));
   await Promise.all(Array.from({ length: width }, worker));
   return {
     passes: perCandidate.flatMap((r) => r.passes),
