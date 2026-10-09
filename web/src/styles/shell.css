@@ -78,6 +78,7 @@
   position: sticky;
   top: 0;
   height: 100dvh;
+  overflow-y: auto;
 }
 .rail__brand {
   font-family: var(--font-display);
@@ -96,6 +97,20 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+.rail__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+/* Qualified by .rail so it outranks MUI's overline variant (same specificity,
+   injected later), which would otherwise set its own tracking and margin. */
+.rail .rail__group-label {
+  font-size: var(--step--1);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  margin: 0 0 var(--space-1);
 }
 .rail__foot {
   color: var(--ink-soft);
@@ -214,6 +229,13 @@
     margin-left: auto;
     flex-direction: row;
     align-items: center;
+  }
+  .rail__group {
+    flex-direction: row;
+    flex-shrink: 0;
+  }
+  .rail .rail__group-label {
+    display: none;
   }
   .rail__foot {
     display: none;

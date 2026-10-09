@@ -59,6 +59,10 @@ export function Tour({ onDone }: { onDone: () => void }) {
       if (cancelled) return;
       const el = document.querySelector(`[data-tour="${step.anchor}"]`);
       if (el instanceof HTMLElement) {
+        // The rail scrolls on short viewports, so an anchor can sit below the
+        // fold; bring it into view before measuring. Optional call: jsdom
+        // has no scrollIntoView.
+        el.scrollIntoView?.({ block: "nearest" });
         setRect(el.getBoundingClientRect());
         return;
       }
