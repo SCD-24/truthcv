@@ -107,7 +107,7 @@ async function renderWithStatus(status: AgentStatus) {
   vi.mocked(listConnectionModels).mockResolvedValue([]);
   render(
     <MemoryRouter>
-      <AgentsPage onBack={vi.fn()} />
+      <AgentsPage />
     </MemoryRouter>,
   );
   await screen.findByRole("slider", { name: "Agent autonomy" });
@@ -210,7 +210,7 @@ describe("polling lifecycle", () => {
 
       const { unmount } = render(
         <MemoryRouter>
-          <AgentsPage onBack={vi.fn()} />
+          <AgentsPage />
         </MemoryRouter>,
       );
       await vi.waitFor(() =>

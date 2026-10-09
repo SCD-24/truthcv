@@ -33,7 +33,7 @@ function renderAgent() {
     authorizedNonGermanCountry: "", languages: "", highestRelevantDegree: "", otherDegree: "",
     csDegree: "", gpa: "", gender: "", yearsOfExperience: "", currentRole: "",
     howDidYouHear: "" } as ProfileAnswers);
-  return render(<MemoryRouter><AgentsPage onBack={vi.fn()} /></MemoryRouter>);
+  return render(<MemoryRouter><AgentsPage /></MemoryRouter>);
 }
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 

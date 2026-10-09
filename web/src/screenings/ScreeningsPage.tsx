@@ -2,10 +2,8 @@ import { useEffect, useState } from "react";
 import type { KeyboardEvent } from "react";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
-import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import Alert from "@mui/material/Alert";
 import Typography from "@mui/material/Typography";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -205,10 +203,9 @@ function ScreeningRow({
  * The Screenings page — the agent's rejection & cooldown ledger, on its own
  * page (mirroring AnalyticsPage). Loads `ScreeningRecord[]` via
  * `listScreenings()` with loading/error/empty states, and lets the operator
- * delete a record to un-block a target immediately. `onBack` returns to the
- * wizard step the user left.
+ * delete a record to un-block a target immediately.
  */
-export function ScreeningsPage({ onBack }: { onBack: () => void }) {
+export function ScreeningsPage() {
   const [screenings, setScreenings] = useState<ScreeningRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -281,9 +278,6 @@ export function ScreeningsPage({ onBack }: { onBack: () => void }) {
             Screenings
           </Typography>
         </Box>
-        <Button variant="text" startIcon={<ArrowBackIcon />} onClick={onBack}>
-          Back to wizard
-        </Button>
       </Stack>
 
       {error && (

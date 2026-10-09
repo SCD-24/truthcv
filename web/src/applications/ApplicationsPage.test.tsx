@@ -86,7 +86,7 @@ async function renderPage(
   vi.mocked(listApplicationsPage).mockResolvedValue(makePage(apps, total, offset, sort, direction));
   render(
     <BrowserRouter>
-      <ApplicationsPage onBack={() => {}} onEditDocument={() => {}} />
+      <ApplicationsPage onEditDocument={() => {}} />
     </BrowserRouter>,
   );
   await waitFor(() => expect(listApplicationsPage).toHaveBeenCalled());

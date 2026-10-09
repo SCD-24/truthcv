@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Button from "@mui/material/Button";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import AddIcon from "@mui/icons-material/Add";
 import Alert from "@mui/material/Alert";
 import Typography from "@mui/material/Typography";
@@ -36,9 +35,9 @@ type DialogState = null | { finding?: CompanyFinding };
  * disagree on a claim surface as an open contradiction the operator resolves
  * by accepting or rejecting a finding. Findings are immutable: adding and
  * correcting both record a new finding in a dialog; a correction supersedes
- * the old one. `onBack` returns to the previous page.
+ * the old one.
  */
-export function CompanyResearchPage({ onBack }: { onBack?: () => void }) {
+export function CompanyResearchPage() {
   const [findings, setFindings] = useState<CompanyFinding[]>([]);
   const [contested, setContested] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -170,11 +169,6 @@ export function CompanyResearchPage({ onBack }: { onBack?: () => void }) {
             Company Research
           </Typography>
         </Box>
-        {onBack ? (
-          <Button variant="text" startIcon={<ArrowBackIcon />} onClick={onBack}>
-            Back
-          </Button>
-        ) : null}
       </Stack>
 
       <Stack

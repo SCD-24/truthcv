@@ -96,7 +96,7 @@ async function renderLoaded(answers: ProfileAnswers) {
   vi.mocked(listConnectionModels).mockResolvedValue([]);
   render(
     <MemoryRouter>
-      <AgentsPage onBack={vi.fn()} />
+      <AgentsPage />
     </MemoryRouter>,
   );
   await screen.findByRole("heading", { name: "Job profiles" });

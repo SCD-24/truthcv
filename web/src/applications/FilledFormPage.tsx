@@ -2,8 +2,6 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
-import Button from "@mui/material/Button";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import Typography from "@mui/material/Typography";
 import Table from "@mui/material/Table";
 import TableHead from "@mui/material/TableHead";
@@ -25,7 +23,7 @@ import "../styles/applications.css";
  * There is no GET /api/applications/{id} route, so this loads the full ledger
  * via listApplications() and selects the matching id client-side.
  */
-export function FilledFormPage({ onBack }: { onBack: () => void }) {
+export function FilledFormPage() {
   const { id } = useParams<{ id: string }>();
   const [apps, setApps] = useState<Application[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,9 +48,6 @@ export function FilledFormPage({ onBack }: { onBack: () => void }) {
           Filled form
         </Typography>
       </Box>
-      <Button variant="text" startIcon={<ArrowBackIcon fontSize="small" />} onClick={onBack}>
-        Back to ledger
-      </Button>
     </Stack>
   );
 
