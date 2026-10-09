@@ -85,7 +85,7 @@ describe("AgentsPage run-now status polling", () => {
 
     render(
       <BrowserRouter>
-        <AgentsPage onBack={() => {}} />
+        <AgentsPage />
       </BrowserRouter>,
     );
 
@@ -111,7 +111,7 @@ describe("AgentsPage run-now status polling", () => {
 
     render(
       <BrowserRouter>
-        <AgentsPage onBack={() => {}} />
+        <AgentsPage />
       </BrowserRouter>,
     );
 

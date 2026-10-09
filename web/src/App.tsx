@@ -179,7 +179,6 @@ function TopLevelRoutes({
   onOpenSettings: () => void;
 }) {
   const navigate = useNavigate();
-  const onBack = () => navigate(ROUTES.analytics);
   const onEditDocument = (req: EditRequest) =>
     navigate(ROUTES.documentEdit, { state: { editRequest: req } });
 
@@ -190,29 +189,29 @@ function TopLevelRoutes({
         path={ROUTES.onboarding}
         element={<OnboardingPage onComplete={onOnboardingComplete} />}
       />
-      <Route path={ROUTES.analytics} element={<AnalyticsPage onBack={onBack} />} />
+      <Route path={ROUTES.analytics} element={<AnalyticsPage />} />
       <Route
         path={ROUTES.applications}
-        element={<ApplicationsPage onBack={onBack} onEditDocument={onEditDocument} />}
+        element={<ApplicationsPage onEditDocument={onEditDocument} />}
       />
       <Route
         path={ROUTES.filledForm}
-        element={<FilledFormPage onBack={() => navigate(ROUTES.applications)} />}
+        element={<FilledFormPage />}
       />
-      <Route path={ROUTES.agents} element={<AgentsPage onBack={onBack} />} />
+      <Route path={ROUTES.agents} element={<AgentsPage />} />
       <Route path={ROUTES.modelRouting} element={<ModelRoutingPage />} />
       <Route path={ROUTES.jobBoards} element={<JobBoardsPage />} />
-      <Route path={ROUTES.screenings} element={<ScreeningsPage onBack={onBack} />} />
+      <Route path={ROUTES.screenings} element={<ScreeningsPage />} />
       <Route
         path={ROUTES.companyResearch}
-        element={<CompanyResearchPage onBack={onBack} />}
+        element={<CompanyResearchPage />}
       />
-      <Route path={ROUTES.approvals} element={<ApprovalsPage onBack={onBack} />} />
+      <Route path={ROUTES.approvals} element={<ApprovalsPage />} />
       <Route
         path={ROUTES.uploadCv}
         element={<UploadCvPage onDone={() => navigate(ROUTES.analytics)} />}
       />
-      <Route path={ROUTES.truthFile} element={<TruthFilePage onBack={onBack} />} />
+      <Route path={ROUTES.truthFile} element={<TruthFilePage />} />
       <Route path={ROUTES.documentEdit} element={<DocumentEditPage />} />
       <Route path={ROUTES.manual} element={<ManualPage />} />
       <Route path={ROUTES.writingStyle} element={<WritingStylePage />} />

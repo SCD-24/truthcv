@@ -88,10 +88,10 @@ function seedTruth(): TruthDoc {
   };
 }
 
-function renderPage(onBack = vi.fn()) {
+function renderPage() {
   return render(
     <WizardProvider>
-      <TruthFilePage onBack={onBack} />
+      <TruthFilePage />
     </WizardProvider>,
   );
 }
@@ -194,15 +194,13 @@ describe("TruthFilePage", () => {
     expect(await screen.findByText("Truth file saved.")).toBeTruthy();
   });
 
-  it("clicking the Back button calls onBack", async () => {
+  it("does not render a Back button", async () => {
     vi.mocked(getTruth).mockResolvedValue(emptyTruth());
-    const onBack = vi.fn();
-    renderPage(onBack);
+    renderPage();
 
     await screen.findByText("Your truth file");
-    fireEvent.click(screen.getByRole("button", { name: /back/i }));
 
-    expect(onBack).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /^back$/i })).toBeNull();
   });
 
   it("adds a hobby and shows it under the Hobbies heading", async () => {

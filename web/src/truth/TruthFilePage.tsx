@@ -8,7 +8,7 @@ import { ReviewStep } from "../steps/ReviewStep";
  * stays on the page (does not navigate). The user can review, edit, add
  * user-sourced entries, and remove any entry (CV-sourced or user-added).
  */
-export function TruthFilePage({ onBack }: { onBack: () => void }) {
+export function TruthFilePage() {
   const [savedAlert, setSavedAlert] = useState(false);
 
   const handleNext = async () => {
@@ -34,7 +34,6 @@ export function TruthFilePage({ onBack }: { onBack: () => void }) {
         lede="Every fact a CV may contain lives here. Correct, remove, or add entries — anything you add is stamped as confirmed by you and applies to every CV you generate from now on."
         nextLabel="Save"
         onNext={handleNext}
-        onBack={onBack}
       />
     </div>
   );

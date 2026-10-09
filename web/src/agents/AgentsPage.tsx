@@ -5,7 +5,6 @@ import Paper from "@mui/material/Paper";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Button from "@mui/material/Button";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import Alert from "@mui/material/Alert";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Slider from "@mui/material/Slider";
@@ -109,13 +108,12 @@ function Section({
 /**
  * The Agents page — enable/disable the unattended application agent, edit its
  * run schedule and blocklist, and edit the ATS profile answers it submits.
- * Reached from the rail (wired in a later task); `onBack` returns to the
- * wizard step left behind.
+ * Reached from the rail (wired in a later task).
  *
  * Each section owns its own error/success state and saves independently, so a
  * failure in one (e.g. a bad schedule save) never blocks or clobbers another.
  */
-export function AgentsPage({ onBack }: { onBack: () => void }) {
+export function AgentsPage() {
   const [config, setConfig] = useState<AgentConfig | null>(null);
   const [answers, setAnswers] = useState<ProfileAnswers>(EMPTY_ANSWERS);
   const [loading, setLoading] = useState(true);
@@ -150,9 +148,6 @@ export function AgentsPage({ onBack }: { onBack: () => void }) {
         <Typography id="agents-title" variant="h4" component="h1">
           Agents
         </Typography>
-        <Button variant="text" startIcon={<ArrowBackIcon fontSize="small" />} onClick={onBack}>
-          Back to wizard
-        </Button>
       </Stack>
 
       {loadError && (

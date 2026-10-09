@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
-import Button from "@mui/material/Button";
 import Paper from "@mui/material/Paper";
 import Alert from "@mui/material/Alert";
 import Chip from "@mui/material/Chip";
@@ -14,7 +13,6 @@ import TableBody from "@mui/material/TableBody";
 import TableRow from "@mui/material/TableRow";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import { listApplications } from "../api/client";
 import type { Application } from "../api/types";
 import {
@@ -38,10 +36,9 @@ function pct(rate: number): string {
  * same `Application[]` via `listApplications()` with loading/error/empty states,
  * then renders the pure `computeInsights` snapshot. The accent carries meaning —
  * seal-green (var(--attest)) marks responded/positive figures, oxblood
- * (var(--flag)) marks stale or gap states — and never decorates. `onBack`
- * returns to the wizard step the user left.
+ * (var(--flag)) marks stale or gap states — and never decorates.
  */
-export function AnalyticsPage({ onBack }: { onBack: () => void }) {
+export function AnalyticsPage() {
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,9 +74,6 @@ export function AnalyticsPage({ onBack }: { onBack: () => void }) {
             Analytics
           </Typography>
         </Box>
-        <Button variant="text" startIcon={<ArrowBackIcon fontSize="small" />} onClick={onBack}>
-          Back to wizard
-        </Button>
       </Stack>
 
       {error && (

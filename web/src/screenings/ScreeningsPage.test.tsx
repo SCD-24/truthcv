@@ -57,7 +57,7 @@ describe("ScreeningsPage", () => {
       makeScreening({ id: "s2", company: "Globex", role: "Analyst" }),
     ]);
 
-    render(<ScreeningsPage onBack={vi.fn()} />);
+    render(<ScreeningsPage />);
 
     expect(await screen.findByText("Acme Corp")).toBeTruthy();
     expect(screen.getByText("Globex")).toBeTruthy();
@@ -73,7 +73,7 @@ describe("ScreeningsPage", () => {
       makeScreening({ id: "expired", company: "Globex", cooldownExpires: past }),
     ]);
 
-    render(<ScreeningsPage onBack={vi.fn()} />);
+    render(<ScreeningsPage />);
     await screen.findByText("Acme Corp");
 
     expect(screen.getByText(`Until ${future}`)).toBeTruthy();
@@ -86,7 +86,7 @@ describe("ScreeningsPage", () => {
     ]);
     vi.mocked(deleteScreening).mockResolvedValue(undefined);
 
-    render(<ScreeningsPage onBack={vi.fn()} />);
+    render(<ScreeningsPage />);
     await screen.findByText("Acme Corp");
 
     fireEvent.click(screen.getByRole("button", { name: "Delete screening record for Acme Corp" }));
@@ -101,7 +101,7 @@ describe("ScreeningsPage", () => {
       makeScreening({ id: "s1", company: "Acme Corp", role: "Engineer" }),
     ]);
 
-    render(<ScreeningsPage onBack={vi.fn()} />);
+    render(<ScreeningsPage />);
     await screen.findByText("Acme Corp");
 
     fireEvent.click(screen.getByText("Engineer"));
@@ -117,7 +117,7 @@ describe("ScreeningsPage", () => {
       makeScreening({ id: "s1", company: "Acme Corp", role: "Senior Backend Engineer" }),
     );
 
-    render(<ScreeningsPage onBack={vi.fn()} />);
+    render(<ScreeningsPage />);
     await screen.findByText("Acme Corp");
 
     fireEvent.click(screen.getByText("Engineer"));
@@ -137,7 +137,7 @@ describe("ScreeningsPage", () => {
       makeScreening({ id: "s1", company: "Acme Corp", role: "Engineer" }),
     ]);
 
-    render(<ScreeningsPage onBack={vi.fn()} />);
+    render(<ScreeningsPage />);
     await screen.findByText("Acme Corp");
 
     fireEvent.click(screen.getByText("Engineer"));
@@ -154,7 +154,7 @@ describe("ScreeningsPage", () => {
     ]);
     vi.mocked(setScreeningRole).mockRejectedValue(new Error("Not a valid job title."));
 
-    render(<ScreeningsPage onBack={vi.fn()} />);
+    render(<ScreeningsPage />);
     await screen.findByText("Acme Corp");
 
     fireEvent.click(screen.getByText("Engineer"));
@@ -170,11 +170,22 @@ describe("ScreeningsPage", () => {
       makeScreening({ id: "s1", company: "Acme Corp", role: "" }),
     ]);
 
-    render(<ScreeningsPage onBack={vi.fn()} />);
+    render(<ScreeningsPage />);
     await screen.findByText("Acme Corp");
 
     fireEvent.click(screen.getByText("—"));
 
     expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("");
+  });
+
+  it("does not render a back button", async () => {
+    vi.mocked(listScreenings).mockResolvedValue([
+      makeScreening({ id: "s1", company: "Acme Corp" }),
+    ]);
+
+    render(<ScreeningsPage />);
+    await screen.findByText("Acme Corp");
+
+    expect(screen.queryByRole("button", { name: /back/i })).toBeNull();
   });
 });

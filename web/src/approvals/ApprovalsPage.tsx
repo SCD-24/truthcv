@@ -20,7 +20,6 @@ import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 // MUI icons v9 names this "DeleteOutlined"; "DeleteOutline" does not exist
 // in the installed package and fails the build at import time.
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
@@ -810,7 +809,7 @@ function QueuePanel({
  * tracked applications (Applied, read-only). Counts live in the labels so
  * each queue's size is visible without switching to it; decisions move rows
  * between the in-memory lists so the counts stay right without a refetch. */
-export function ApprovalsPage({ onBack }: { onBack: () => void }) {
+export function ApprovalsPage() {
   const [pending, setPending] = useState<ScreeningRecord[]>([]);
   const [approved, setApproved] = useState<ScreeningRecord[]>([]);
   const [rejected, setRejected] = useState<ScreeningRecord[]>([]);
@@ -1078,9 +1077,6 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
   return (
     <Box>
       <Stack direction="row" spacing={1} sx={{ mb: 2, alignItems: "center" }}>
-        <Button startIcon={<ArrowBackIcon />} onClick={onBack}>
-          Back
-        </Button>
         <Typography variant="h5">Approvals</Typography>
       </Stack>
 

@@ -115,7 +115,7 @@ async function renderWithMode(mode: AgentConfig["mode"]) {
   vi.mocked(listConnectionModels).mockResolvedValue([]);
   render(
     <MemoryRouter>
-      <AgentsPage onBack={vi.fn()} />
+      <AgentsPage />
     </MemoryRouter>,
   );
   await screen.findByRole("slider", { name: "Agent autonomy" });

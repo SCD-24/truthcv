@@ -126,7 +126,7 @@ async function renderPage(
   // The style picker links to the preset editor, so it needs a router.
   render(
     <MemoryRouter>
-      <ApprovalsPage onBack={() => {}} />
+      <ApprovalsPage />
     </MemoryRouter>,
   );
   await waitFor(() => expect(listPendingApprovals).toHaveBeenCalled());

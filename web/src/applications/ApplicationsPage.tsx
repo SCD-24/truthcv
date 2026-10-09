@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Button from "@mui/material/Button";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import Alert from "@mui/material/Alert";
 import Chip from "@mui/material/Chip";
 import Typography from "@mui/material/Typography";
@@ -60,14 +59,11 @@ const EMPTY: ApplicationCreate = {
  * Download step) so this view stays a record, not a generator.
  *
  * Rendered as a full page inside the wizard stage (not a modal) so the outbound
- * record is a first-class view; `onBack` returns to the wizard step the user
- * left.
+ * record is a first-class view.
  */
 export function ApplicationsPage({
-  onBack,
   onEditDocument,
 }: {
-  onBack: () => void;
   /** Open the Download step (step 5) with a saved document loaded for editing. */
   onEditDocument: (req: {
     appId: string;
@@ -264,13 +260,6 @@ export function ApplicationsPage({
             Applications
           </Typography>
         </Box>
-        <Button
-          variant="text"
-          startIcon={<ArrowBackIcon fontSize="small" />}
-          onClick={onBack}
-        >
-          Back to wizard
-        </Button>
       </Stack>
 
       <Stack
