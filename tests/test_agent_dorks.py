@@ -73,7 +73,7 @@ def test_defaults_present_even_when_operator_configured_boards():
     entries = dorks.compose_queries([p], None, sources_in)
     sources = {e["source"] for e in entries}
     assert sources.issuperset(set(dorks.DEFAULT_BOARD_DOMAINS))
-    assert "linkedin.com/jobs" in sources
+    assert "linkedin.com" in sources
 
 
 def test_configuring_a_default_board_explicitly_does_not_duplicate_it():
@@ -576,6 +576,18 @@ def test_no_room_drops_all_negatives_and_budget_holds():
     assert all('-"' not in e["query"] for e in entries)
 
 
+def test_linkedin_qualifier_dropped_when_fixed_terms_exhaust_budget():
+    p = JobProfile(
+        name="p", enabled=True, keywords=["Backend Engineer"], locations=_edge_locations()
+    )
+    entries = dorks.compose_profile_queries(p, "w", ["linkedin"], today=TODAY)
+    assert entries
+    for e in entries:
+        assert dorks._word_count(e["query"]) <= dorks.MAX_QUERY_WORDS
+        assert e["query"].startswith("site:linkedin.com ")
+        assert "inurl:jobs/view" not in e["query"]
+
+
 def test_padded_titles_are_stripped_so_budget_holds():
     p = JobProfile(
         name="p",
@@ -613,6 +625,40 @@ def test_direct_boards_title_keywords_pass_through_raw():
     board = JobBoard(source="https://boards.acme.io/careers", mode="direct")
     entries = dorks.compose_direct_boards([p], [board])
     assert entries[0]["profiles"][0]["title_keywords"] == ['Senior "Lead" Dev']
+
+
+def test_linkedin_query_uses_inurl_qualifier_not_path_site():
+    p = JobProfile(name="p", enabled=True, keywords=["backend"])
+    entries = dorks.compose_queries([p], None, ["linkedin"])
+    (li,) = [e for e in entries if e["source"] == "linkedin.com"]
+    assert li["query"].startswith("site:linkedin.com inurl:jobs/view ")
+    assert not any("site:linkedin.com/jobs" in e["query"] for e in entries)
+
+
+def test_linkedin_many_titles_stay_within_word_budget():
+    p = JobProfile(
+        name="p",
+        enabled=True,
+        title_keywords=[f"Senior Staff Engineer {i}" for i in range(30)],
+        locations=["Berlin", "Remote"],
+        rejected_role_types=["contract", "internship"],
+    )
+    entries = dorks.compose_profile_queries(p, "w", ["linkedin", "ashby"], today=TODAY)
+    li = [e for e in entries if e["source"] == "linkedin.com"]
+    assert len(li) > 1
+    assert all(dorks._word_count(e["query"]) <= dorks.MAX_QUERY_WORDS for e in entries)
+
+
+def test_custom_linkedin_url_gets_qualifier_and_dedupes_with_catalog():
+    p = JobProfile(name="p", enabled=True, keywords=["backend"])
+    boards = [JobBoard(source="linkedin"), JobBoard(source="https://www.linkedin.com/jobs/search")]
+    entries = dorks.compose_profile_queries(p, "none", boards)
+    assert len(entries) == 1
+    assert entries[0]["query"].startswith("site:linkedin.com inurl:jobs/view ")
+
+
+def test_linkedin_catalog_key_resolves_to_bare_host():
+    assert boards_module.resolve_domain("linkedin") == "linkedin.com"
 
 
 def test_all_chunked_queries_returned_and_interleaved():

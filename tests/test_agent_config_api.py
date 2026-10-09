@@ -174,7 +174,7 @@ def test_search_queries_source_follows_resolved_boards_not_profile(client, data_
         "job-boards.greenhouse.io",
         "jobs.lever.co",
         "myworkdayjobs.com",
-        "linkedin.com/jobs",
+        "linkedin.com",
     }
 
 

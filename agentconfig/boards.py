@@ -16,11 +16,17 @@ SOURCE_DOMAINS: dict[str, str] = {
     "greenhouse": "job-boards.greenhouse.io",
     "lever": "jobs.lever.co",
     "personio": "jobs.personio.de",
-    "linkedin": "linkedin.com/jobs",
+    "linkedin": "linkedin.com",
     "workday": "myworkdayjobs.com",
     "remoterocketship": "remoterocketship.com",
     "arbeitnow": "arbeitnow.com",
 }
+
+# Extra Google operators appended after `site:<domain>`. Keyed by the RESOLVED
+# domain (what resolve_domain returns) so a custom board typed as a raw
+# LinkedIn URL (already resolves to linkedin.com) gets it too. `site:` must
+# carry only a host, so path-like narrowing lives here instead.
+DORK_QUALIFIERS: dict[str, str] = {"linkedin.com": "inurl:jobs/view"}
 
 # Boards reached through an HTTP API instead of a browser sign-in. Most need
 # a saved key (KEYED_API_SOURCES); Arbeitnow's is public and needs none. They
