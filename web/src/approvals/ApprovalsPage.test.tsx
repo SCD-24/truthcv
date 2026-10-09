@@ -662,6 +662,89 @@ describe("ApprovalsPage reviewable lists", () => {
     expect(screen.getByText("Rejected by you")).toBeTruthy();
   });
 
+  describe("rejection reason filter", () => {
+    const rows = () => ({
+      didNotPass: [
+        makeRecord({ id: "a1", company: "Alpha", verdict: "rejected", approval: "", failingCriterion: "salary_floor" }),
+        makeRecord({ id: "a2", company: "Beta", verdict: "rejected", approval: "", failingCriterion: "salary_floor" }),
+        makeRecord({ id: "a3", company: "Gamma", verdict: "rejected", approval: "", failingCriterion: "role_fit" }),
+      ],
+    });
+    async function pick(name: RegExp) {
+      fireEvent.mouseDown(await screen.findByRole("combobox", { name: /rejection reason/i }));
+      fireEvent.click(await screen.findByRole("option", { name }));
+    }
+
+    it("narrows rows, shows counts in options, and keeps the tab total", async () => {
+      await renderPage([], [], rows());
+      clickTab(/rejected \(3\)/i);
+      fireEvent.mouseDown(await screen.findByRole("combobox", { name: /rejection reason/i }));
+      expect(screen.getByRole("option", { name: "All (3)" })).toBeTruthy();
+      expect(screen.getByRole("option", { name: "Salary (2)" })).toBeTruthy();
+      fireEvent.click(screen.getByRole("option", { name: "Role fit (1)" }));
+      await waitFor(() => expect(screen.queryByText("Alpha")).toBeNull());
+      expect(screen.getByText("Gamma")).toBeTruthy();
+      expect(screen.getByRole("tab", { name: "Rejected (3)" })).toBeTruthy();
+    });
+
+    it("select all only selects visible rows", async () => {
+      vi.mocked(bulkDeleteScreenings).mockResolvedValue(undefined as never);
+      await renderPage([], [], rows());
+      clickTab(/rejected/i);
+      await pick(/Salary/);
+      fireEvent.click(await screen.findByRole("checkbox", { name: "Select all rejected" }));
+      expect((screen.getByRole("checkbox", { name: "Select Alpha" }) as HTMLInputElement).checked).toBe(true);
+      await pick(/All \(3\)/);
+      // Changing the filter clears the selection.
+      expect((screen.getByRole("checkbox", { name: "Select Alpha" }) as HTMLInputElement).checked).toBe(false);
+      expect((screen.getByRole("checkbox", { name: "Select Gamma" }) as HTMLInputElement).checked).toBe(false);
+    });
+
+    it("falls back to all rows when the active category empties", async () => {
+      vi.mocked(setScreeningApproval).mockResolvedValue(
+        makeRecord({ id: "a1", company: "Alpha", approval: "pending" }),
+      );
+      await renderPage([], [], {
+        didNotPass: [
+          makeRecord({ id: "a1", company: "Alpha", verdict: "rejected", approval: "", failingCriterion: "salary_floor" }),
+          makeRecord({ id: "a3", company: "Gamma", verdict: "rejected", approval: "", failingCriterion: "role_fit" }),
+        ],
+      });
+      clickTab(/rejected/i);
+      await pick(/Salary/);
+      expect(screen.queryByText("Gamma")).toBeNull();
+      fireEvent.click(await screen.findByRole("button", { name: "Move to approvals" }));
+      expect(await screen.findByText("Gamma")).toBeTruthy();
+      expect(screen.queryByText("Alpha")).toBeNull();
+    });
+
+    it("ignores selected rows that left the tab", async () => {
+      vi.mocked(setScreeningApproval).mockResolvedValue(
+        makeRecord({ id: "a1", company: "Alpha", approval: "pending" }),
+      );
+      vi.mocked(deleteScreening).mockResolvedValue(undefined);
+      await renderPage([], [], rows());
+      clickTab(/rejected/i);
+      fireEvent.click(await screen.findByRole("checkbox", { name: "Select Alpha" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: "Select Gamma" }));
+      fireEvent.click(screen.getAllByRole("button", { name: "Move to approvals" })[0]);
+      await waitFor(() => expect(screen.queryByText("Alpha")).toBeNull());
+      const all = screen.getByRole("checkbox", { name: "Select all rejected" }) as HTMLInputElement;
+      expect(all.checked).toBe(false);
+      fireEvent.click(screen.getByRole("button", { name: "Delete selected" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+      await waitFor(() => expect(deleteScreening).toHaveBeenCalledWith("a3"));
+      expect(bulkDeleteScreenings).not.toHaveBeenCalled();
+    });
+
+    it("chip shows the category label for known keys", async () => {
+      await renderPage([], [], rows());
+      clickTab(/rejected/i);
+      expect((await screen.findAllByText("Salary")).length).toBeGreaterThan(0);
+      expect(screen.getByText("Role fit")).toBeTruthy();
+    });
+  });
+
   it("moving one back queues it and takes it out of the Rejected tab", async () => {
     vi.mocked(setScreeningApproval).mockResolvedValue(
       makeRecord({ id: "r1", company: "Soylent", approval: "pending" }),

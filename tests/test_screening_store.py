@@ -38,6 +38,49 @@ def test_create_normalizes_remote_arrangement(data_dir):
     assert created.remote_arrangement == "on_site"
 
 
+def test_create_normalizes_failing_criterion(data_dir):
+    created = create(
+        {
+            "company": "Acme",
+            "role": "Engineer",
+            "verdict": "rejected",
+            "failing_criterion": "1. Fully remote",
+            "reason": "Office-based in Munich.",
+        }
+    )
+    assert created.failing_criterion == "remote_model"
+    assert created.reason == "Office-based in Munich."
+
+
+def test_update_normalizes_failing_criterion(data_dir):
+    from screening.store import update
+
+    created = create({"company": "Acme", "role": "Engineer", "verdict": "rejected"})
+    updated = update(created.id, {"failing_criterion": "Salary floor"})
+    assert updated.failing_criterion == "salary_floor"
+    assert load_all()[0].failing_criterion == "salary_floor"
+
+
+def test_create_deferred_keeps_raw_failing_criterion(data_dir):
+    created = create(
+        {"company": "Acme", "role": "Engineer", "verdict": "deferred",
+         "failing_criterion": "glassdoor_rating"}
+    )
+    assert created.failing_criterion == "glassdoor_rating"
+
+
+def test_update_deferred_to_rejected_normalizes(data_dir):
+    from screening.store import update
+
+    created = create(
+        {"company": "Acme", "role": "Engineer", "verdict": "deferred",
+         "failing_criterion": "1. Fully remote"}
+    )
+    assert created.failing_criterion == "1. Fully remote"
+    updated = update(created.id, {"verdict": "rejected"})
+    assert updated.failing_criterion == "remote_model"
+
+
 def test_create_rejects_unknown_remote_arrangement(data_dir):
     with pytest.raises(ValueError, match="Unknown remote arrangement"):
         create({"company": "Acme", "role": "Engineer", "remote_arrangement": "moon-base"})

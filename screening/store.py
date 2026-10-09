@@ -29,6 +29,7 @@ from .criteria import (
     validate_stated_text,
 )
 from .model import APPROVAL_VALUES, Screening, new_id, validate_blocker
+from .rejection_categories import normalize_failing_criterion
 from .url import posting_dedupe_key
 
 # screening_blocker values that stay operator-actionable: the operator can sign
@@ -281,6 +282,7 @@ def create_or_get(fields: dict) -> tuple[Screening, bool]:
     now = _now()
     screening = Screening(id=new_id(), created_at=now, updated_at=now)
     _apply_editable(screening, fields)
+    _normalize_if_rejected(screening)
     if screening.screening_blocker:
         # Strict here even though the store is otherwise lenient for the legacy
         # importer: this field is new and has no legacy data to tolerate, and an
@@ -358,6 +360,14 @@ def create_or_get(fields: dict) -> tuple[Screening, bool]:
     return screening, True
 
 
+def _normalize_if_rejected(screening: Screening) -> None:
+    """Canonicalize failing_criterion, but only for rejected records."""
+    if (screening.verdict or "").strip().casefold() == "rejected":
+        screening.failing_criterion = normalize_failing_criterion(
+            screening.failing_criterion
+        )
+
+
 def create(fields: dict) -> Screening:
     """Create a new screening record from client-supplied editable fields.
 
@@ -376,6 +386,7 @@ def update(screening_id: str, patch: dict) -> Screening | None:
         if screening is None:
             return None
         _apply_editable(screening, patch)
+        _normalize_if_rejected(screening)
         screening.updated_at = _now()
         _write_all(screenings)
     return screening

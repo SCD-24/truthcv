@@ -58,6 +58,8 @@ import type {
 import { approvalsFrom, BlockedClaimsPanel, type Decision } from "../components/BlockedClaimsPanel";
 import { ChoiceGroup, LENGTHS, StyleSelector, type Length } from "../components/LetterOptions";
 import { safeHref } from "../utils/safeUrl";
+import { RejectionFilter } from "./RejectionFilter";
+import { categoryLabel, categoryOf, filterByCategory } from "./rejectionCategories";
 
 /** The letter draft for one posting: fetches its own state on mount because
  * the list endpoint (GET /api/screenings) never carries drafts. Offers
@@ -703,7 +705,15 @@ function ReviewRow({
               <Chip size="small" label={rejectedLabel} sx={{ flexShrink: 0 }} />
             ) : null}
             {record.failingCriterion ? (
-              <Chip size="small" label={record.failingCriterion} sx={WRAPPING_CHIP} />
+              <Chip
+                size="small"
+                label={
+                  categoryOf(record) === record.failingCriterion
+                    ? categoryLabel(record.failingCriterion)
+                    : record.failingCriterion
+                }
+                sx={WRAPPING_CHIP}
+              />
             ) : null}
             {record.reason ? (
               <Typography
@@ -817,6 +827,7 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [tab, setTab] = useState(0);
+  const [rejectedCategory, setRejectedCategory] = useState("all");
   const [presets, setPresets] = useState<PromptPreset[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const [length, setLength] = useState<Length>("Standard");
@@ -881,6 +892,18 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
     rejectedRows.push(r);
   }
   const agentRejected = new Set(didNotPass.map((r) => r.id));
+  // A selected category that no longer has rows is no longer offered by the
+  // filter, so fall back to 'all' rather than showing an invalid, empty list.
+  const activeCategory =
+    rejectedCategory !== "all" && !rejectedRows.some((r) => categoryOf(r) === rejectedCategory)
+      ? "all"
+      : rejectedCategory;
+  const visibleRejected = filterByCategory(rejectedRows, activeCategory);
+  // Selection restricted to rows actually on screen.
+  const visibleRejectedIds = new Set(visibleRejected.map((r) => r.id));
+  const selectedVisibleRejected = selectedRejected.filter((id) => visibleRejectedIds.has(id));
+  const allVisibleRejectedSelected =
+    visibleRejected.length > 0 && selectedVisibleRejected.length === visibleRejected.length;
 
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
@@ -892,9 +915,12 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
     setSelectedRejected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   const toggleAllRejected = () =>
-    setSelectedRejected((s) =>
-      s.length === rejectedRows.length ? [] : rejectedRows.map((r) => r.id),
-    );
+    setSelectedRejected(allVisibleRejectedSelected ? [] : visibleRejected.map((r) => r.id));
+
+  const changeRejectedCategory = (key: string) => {
+    setRejectedCategory(key);
+    setSelectedRejected([]);
+  };
 
   async function decide(id: string, approval: "approved" | "rejected") {
     setBusy(true);
@@ -945,7 +971,7 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
   }
 
   function requestDeleteSelected() {
-    setDeleteTarget(selectedRejected);
+    setDeleteTarget(selectedVisibleRejected);
   }
 
   async function confirmDelete() {
@@ -1202,10 +1228,7 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
                   <FormControlLabel
                     control={
                       <Checkbox
-                        checked={
-                          selectedRejected.length === rejectedRows.length &&
-                          rejectedRows.length > 0
-                        }
+                        checked={allVisibleRejectedSelected}
                         onChange={toggleAllRejected}
                         disabled={busy}
                         slotProps={{ input: { "aria-label": "Select all rejected" } }}
@@ -1213,17 +1236,25 @@ export function ApprovalsPage({ onBack }: { onBack: () => void }) {
                     }
                     label="Select all"
                   />
+                  <RejectionFilter
+                    rows={rejectedRows}
+                    value={activeCategory}
+                    onChange={changeRejectedCategory}
+                  />
                   <Button
                     variant="outlined"
                     color="error"
                     size="small"
-                    disabled={busy || selectedRejected.length === 0}
+                    disabled={busy || selectedVisibleRejected.length === 0}
                     onClick={requestDeleteSelected}
                   >
                     Delete selected
                   </Button>
                 </Stack>
-                {rejectedRows.map((r) => (
+                {visibleRejected.length === 0 ? (
+                  <Typography variant="body1">No rejections in this category.</Typography>
+                ) : null}
+                {visibleRejected.map((r) => (
                   <ReviewRow
                     key={r.id}
                     record={r}

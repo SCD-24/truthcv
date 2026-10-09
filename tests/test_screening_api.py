@@ -55,7 +55,8 @@ def test_create_list_delete_screening(client):
     assert body["url"] == "https://acme.example/jobs/1"
     assert body["screenedDate"] == "2026-07-01"
     assert body["verdict"] == "rejected"
-    assert body["failingCriterion"] == "salary"
+    # Rejected criteria are normalized to a category key on write.
+    assert body["failingCriterion"] == "salary_floor"
     assert body["reason"] == "Below floor."
     assert body["cooldownExpires"] == "2026-10-01T00:00:00+00:00"
     assert body["source"] == "manual"
