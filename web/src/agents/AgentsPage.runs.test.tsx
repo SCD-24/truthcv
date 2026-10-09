@@ -123,6 +123,27 @@ describe("RecentRunsSection", () => {
     expect(detail.textContent).not.toContain("g".repeat(121));
   });
 
+  it("shows deferred dork queries as paused, not as a problem", async () => {
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([
+        makeRun({
+          id: "run-deferred",
+          discoveryCoverage: [
+            { channel: "dork", board: "q1", status: "deferred", postingsFound: 0, reason: "" },
+            { channel: "dork", board: "q2", status: "deferred", postingsFound: 0, reason: "" },
+          ],
+        }),
+      ]),
+    );
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("run-deferred")).toBeTruthy());
+    expect(screen.getByTestId("run-coverage").textContent).toContain("Dorks: 2 paused – Google cooldown");
+    const clause = screen.getByText(/Dorks:/);
+    expect(clause.querySelector("span")).toBeNull();
+  });
+
   it("shows counter tooltips, the renamed Couldn't read label, and (so far) while running", async () => {
     vi.spyOn(client, "listRuns").mockResolvedValue(
       makePage([makeRun({ id: "run-live", status: "running", finishedAt: "" })]),
@@ -136,6 +157,28 @@ describe("RecentRunsSection", () => {
     expect(screen.getByText("(so far)")).toBeTruthy();
     fireEvent.mouseOver(counter);
     expect(await screen.findByText(/no verdict was reached/)).toBeTruthy();
+  });
+
+  it("reports a Google block when the remaining dorks were deferred into a cooldown", async () => {
+    vi.spyOn(client, "listRuns").mockResolvedValue(
+      makePage([
+        makeRun({
+          id: "run-google-cooldown",
+          discoveryCoverage: [
+            { channel: "dork", board: "q1", status: "blocked", postingsFound: 0, reason: "Google CAPTCHA (/sorry)" },
+            { channel: "dork", board: "q2", status: "deferred", postingsFound: 0, reason: "Google search paused" },
+            { channel: "dork", board: "q3", status: "deferred", postingsFound: 0, reason: "Google search paused" },
+          ],
+        }),
+      ]),
+    );
+
+    render(<RecentRunsSection />);
+
+    await waitFor(() => expect(screen.getByText("run-google-cooldown")).toBeTruthy());
+    expect(screen.getByTestId("run-coverage").textContent).toContain(
+      "Dorks: Google blocked the searches (1 blocked, 0 not tried, 2 paused)",
+    );
   });
 
   it("shows no discovery coverage recorded when a run has none", async () => {

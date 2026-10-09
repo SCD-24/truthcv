@@ -614,7 +614,7 @@ export interface RunRecord {
 export interface DiscoveryCoverage {
   channel: "feed" | "direct" | "dork";
   board: string;
-  status: "searched" | "empty" | "login_walled" | "skipped" | "blocked" | "extraction_failed";
+  status: "searched" | "empty" | "login_walled" | "skipped" | "deferred" | "blocked" | "extraction_failed";
   postingsFound: number;
   reason: string;
   tier?: string;

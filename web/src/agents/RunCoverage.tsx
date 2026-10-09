@@ -16,6 +16,7 @@ const STATUS_LABELS: Record<Status, string> = {
   login_walled: "sign-in required",
   blocked: "blocked by the site",
   skipped: "not tried",
+  deferred: "paused – Google cooldown",
 };
 
 const STATUS_EXPLANATIONS: Record<Status, string> = {
@@ -25,6 +26,7 @@ const STATUS_EXPLANATIONS: Record<Status, string> = {
   login_walled: "Sign-in required: the board needs you to be signed in.",
   blocked: "Blocked by the site: the site refused the automated request.",
   skipped: "Not tried: the agent never attempted this board or query.",
+  deferred: "Paused: not searched this run to avoid Google rate-limiting; it goes first next run.",
 };
 
 /** Statuses whose counts are drawn attention to, and whose entries are listed
@@ -39,6 +41,7 @@ const STATUS_ORDER: Status[] = [
   "empty",
   "login_walled",
   "skipped",
+  "deferred",
 ];
 
 function statusLabel(status: Status): string {
@@ -105,12 +108,19 @@ function ClauseTooltip({ entries }: { entries: DiscoveryCoverage[] }) {
   );
 }
 
+/** Google blocked the dork channel: every entry is blocked, skipped or
+ * deferred (a cooldown after blocks), at least one is an actual block or
+ * skip, and some reason names Google. An all-deferred channel is a planned
+ * pause, not a block, so it falls through to the normal summary. */
 function isGoogleBlocked(entries: DiscoveryCoverage[]): boolean {
   return (
-    entries.every((entry) => entry.status === "blocked" || entry.status === "skipped") &&
+    entries.every((entry) => GOOGLE_BLOCK_STATUSES.has(entry.status)) &&
+    entries.some((entry) => entry.status !== "deferred") &&
     entries.some((entry) => /google/i.test(entry.reason))
   );
 }
+
+const GOOGLE_BLOCK_STATUSES = new Set<DiscoveryCoverage["status"]>(["blocked", "skipped", "deferred"]);
 
 /** One channel's clause: "not reached" when the run never touched it, else
  * the channel-appropriate summary. Feed reports a postings total; direct
@@ -142,7 +152,9 @@ function ChannelClause({
     body = (
       <>
         <Problem>Google blocked the searches</Problem>
-        {` (${counts.get("blocked") ?? 0} blocked, ${counts.get("skipped") ?? 0} not tried)`}
+        {` (${counts.get("blocked") ?? 0} blocked, ${counts.get("skipped") ?? 0} not tried${
+          counts.has("deferred") ? `, ${counts.get("deferred")} paused` : ""
+        })`}
       </>
     );
   } else {
