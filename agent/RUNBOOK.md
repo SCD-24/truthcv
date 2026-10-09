@@ -209,6 +209,11 @@ Two rules keep this honest:
   posting still reaches you through those channels. Apply the filter when you
   read the posting, not only when you search.
 
+`failing_criterion` must be one of these keys (or empty when not rejected):
+`remote_model`, `working_language`, `salary_floor`, `employment_country`,
+`rejected_role_types`, `eor_allowed`, `role_fit`, `posting_age`, `cooldown`,
+`other`. Put specifics in `reason`, not in `failing_criterion`.
+
 A single profile passing all its criteria drives an application
 (single-profile-passes rule); each profile waives criteria independently.
 Record which profile drove each application in the screening report.

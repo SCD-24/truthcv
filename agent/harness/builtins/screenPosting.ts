@@ -129,7 +129,9 @@ export const screenPostingTool: ToolDefinition = {
     'subagent context, backed by a separate (often cheaper) model — instead of reasoning ' +
     "through every hard filter yourself, in this conversation. Returns a compact verdict, " +
     "using record_screening's own argument names so it can be passed straight through: " +
-    "'verdict' (passed/rejected/deferred, or '' with a screening_blocker), 'failing_criterion', " +
+    "'verdict' (passed/rejected/deferred, or '' with a screening_blocker), 'failing_criterion' " +
+    "(one of remote_model, working_language, salary_floor, employment_country, rejected_role_types, " +
+    "eor_allowed, role_fit, posting_age, cooldown, other, or '' — specifics go in reason), " +
     "'reason', 'remote_arrangement', 'language_requirement', 'salary_stated', " +
     "'employment_country_stated', 'role_type_stated' and 'eor_stated' (the posting's OWN " +
     "stated values, never the profile's — eor_stated is ''/'yes'/'no'/'unstated', reflecting " +
@@ -170,8 +172,10 @@ const SCREENING_SYSTEM_PROMPT =
   'no prose, no markdown fences — with these keys: "verdict" (one of "passed", "rejected", ' +
   '"deferred", or "" if the posting could not be evaluated), "screeningBlocker" (one of "", ' +
   '"login_required", "unreadable", "not_found", "expired" — non-empty only when verdict is ' +
-  'empty), "failingCriterion" (which criterion failed, or ""), "reason" (one line explaining ' +
-  'the verdict), "remoteArrangement" (the POSTING\'S OWN stated remote arrangement: "remote", ' +
+  'empty), "failingCriterion" (when rejected, exactly one of: remote_model, working_language, ' +
+  'salary_floor, employment_country, rejected_role_types, eor_allowed, role_fit, posting_age, ' +
+  'cooldown, other — or "" when not rejected; put specifics in reason, not here), "reason" (one line explaining ' +
+  'the verdict, including any specifics), "remoteArrangement" (the POSTING\'S OWN stated remote arrangement: "remote", ' +
   '"hybrid", "on_site", "unstated" if it does not say, or "" if not applicable), and ' +
   '"languageRequirement" (a language the posting explicitly requires, or ""), "salaryStated" ' +
   '(the POSTING\'S OWN stated salary, or "" if it states none), "employmentCountryStated" ' +

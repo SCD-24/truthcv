@@ -69,7 +69,8 @@ _TOOL_REGISTRY = {
         "profile and remote_arrangement are required and the call is rejected without them; the rest are optional and '' means the posting stated nothing on that point. "
         "Evidence that contradicts ANY of the named profile's six hard requirements — remote model, working language, salary floor, employment country, rejected role types, or EOR — is stored as an automatic rejection (verdict downgraded to rejected), not an error to retry. "
         "There is one record per posting per profile: a record without a profile, or any passed/deferred record, covers the posting for every profile; created:false means the posting is already covered, so count it as a skip. "
-        "Pass your run_id (from start_run) on EVERY call, so this screening is attributed to your run and the run's coverage counters reflect the work you actually did.",
+        "Pass your run_id (from start_run) on EVERY call, so this screening is attributed to your run and the run's coverage counters reflect the work you actually did. "
+        "For a rejected verdict, pass failing_criterion as exactly one of remote_model, working_language, salary_floor, employment_country, rejected_role_types, eor_allowed, role_fit, posting_age, cooldown, other, and put the specifics in reason; other values are normalized server-side.",
     ),
     "check_cooldown": (
         _check_cooldown,
