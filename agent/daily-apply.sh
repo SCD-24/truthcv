@@ -570,7 +570,7 @@ if (( FINAL_RC == 0 )); then
   NAMES_JSON="$(jq -c '[.profiles[] | select(.enabled == true) | .name]' <<<"$JOB_CONFIG")"
   TEXTS_JSON="$(jq -c "[$PROFILE_CRITERIA_JQ]" <<<"$JOB_CONFIG")"
   jq -n --argjson n "$NAMES_JSON" --argjson t "$TEXTS_JSON" '[range(0; $n|length) | {key: $n[.], value: $t[.]}] | from_entries' >"$CRITERIA_FILE"
-  pipe_cli_model discover-screen --job-config "$JOB_FILE" --criteria "$CRITERIA_FILE" --out "$PASSES_FILE"; note_rc discover-screen $?
+  pipe_cli_model discover-screen --job-config "$JOB_FILE" --criteria "$CRITERIA_FILE" --out "$PASSES_FILE" --dork-state-file "$RUN_LOG_DIR/dork-state.json"; note_rc discover-screen $?
   node "$PIPELINE_CLI" stage-prompt apply >"$SYSTEM_FILE" 2>>"$RUN_LOG"; note_rc stage-prompt $?
 fi
 if (( FINAL_RC == 0 || FINAL_RC == 3 )) && [[ -s "$SYSTEM_FILE" ]]; then

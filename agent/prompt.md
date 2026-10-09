@@ -129,7 +129,8 @@ their application history is this tool surface. You have the following tools:
 - `record_discovery_coverage` — call this after EVERY board or query you work
   in Phase 1, across all three channels (feed, direct boards, dorks), with the
   channel, the board (or query), a status (`searched`, `empty`,
-  `login_walled`, `blocked`, `extraction_failed`, or `skipped`), and `postings_found`. This is what
+  `login_walled`, `blocked`, `extraction_failed`, `skipped`, or `deferred` — a dork not
+  searched because Google searches are paced 15–30 s apart and paused for 30 minutes after repeated blocks), and `postings_found`. This is what
   makes the §9 report's per-board coverage possible — skipping the call is
   never acceptable, even for a board that turned up nothing. `empty` means the
   search ran and genuinely matched nothing; `blocked` means the page could not

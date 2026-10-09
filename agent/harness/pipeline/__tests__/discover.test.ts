@@ -112,35 +112,35 @@ describe('discover dork pacing', () => {
 
   const sleeps = async (random?: () => number) => {
     const sleep = vi.fn(async (_ms: number) => {});
-    await discover(dorks(3), 'r', browser({}), okMcp(), { sleep, random });
+    await discover(dorks(3), 'r', browser({}), okMcp(), { sleep, random, now: () => 1_000_000 });
     return sleep.mock.calls.map((c) => c[0]);
   };
 
   it('sleeps the minimum between dorks (N-1 times) when random is 0', async () => {
-    expect(await sleeps(() => 0)).toEqual([4000, 4000]);
+    expect(await sleeps(() => 0)).toEqual([15000, 15000]);
   });
 
   it('sleeps the maximum when random is just below 1', async () => {
-    expect(await sleeps(() => 0.999999)).toEqual([7000, 7000]);
+    expect(await sleeps(() => 0.999999)).toEqual([30000, 30000]);
   });
 
   it('draws a fresh delay per gap', async () => {
     const seq = [0, 0.5];
     let i = 0;
-    expect(await sleeps(() => seq[i++])).toEqual([4000, 5500]);
+    expect(await sleeps(() => seq[i++])).toEqual([15000, 22500]);
   });
 
-  it('default random yields integer delays within [4000, 7000]', async () => {
+  it('default random yields integer delays within [15000, 30000]', async () => {
     const s = await sleeps();
     expect(s).toHaveLength(2);
     for (const ms of s) {
       expect(Number.isInteger(ms)).toBe(true);
-      expect(ms).toBeGreaterThanOrEqual(4000);
-      expect(ms).toBeLessThanOrEqual(7000);
+      expect(ms).toBeGreaterThanOrEqual(15000);
+      expect(ms).toBeLessThanOrEqual(30000);
     }
   });
 
-  it('skips remaining dorks after 2 consecutive Google blocks', async () => {
+  it('defers remaining dorks after 2 consecutive Google blocks', async () => {
     const navigated: string[] = [];
     const inner = browser({ 'https://www.google.com/search?q=q0': SORRY, 'https://www.google.com/search?q=q1': SORRY });
     const call: BrowserToolCall = async (tool, args) => {
@@ -148,12 +148,13 @@ describe('discover dork pacing', () => {
       return inner(tool, args);
     };
     const mcp = okMcp();
-    await discover(dorks(3), 'r', call, mcp, { sleep: async () => {} });
+    await discover(dorks(3), 'r', call, mcp, { sleep: async () => {}, now: () => 1_000_000 });
     expect(navigated).not.toContain('https://www.google.com/search?q=q2');
     const c = covs(mcp);
     expect(c).toHaveLength(3);
     expect(c[0].status).toBe('blocked');
-    expect(c[2]).toMatchObject({ status: 'skipped', postings_found: 0 });
+    expect(c[2]).toMatchObject({ status: 'deferred', postings_found: 0 });
+    expect(c.some((x) => x.status === 'skipped')).toBe(false);
   });
 
   it('resets the block counter after a success', async () => {

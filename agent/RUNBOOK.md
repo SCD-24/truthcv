@@ -326,7 +326,10 @@ skip direct boards or dork queries. Recording `skipped` coverage for a board
 you simply never got to, while turns remain, is not acceptable either.
 `finish_run` enforces this directly: the first `status: "completed"` call is
 refused while direct-board or dork-query coverage is short of the configured
-count or has `skipped` entries, with a message to go back and finish it; call
+count or has `skipped` entries, with a message to go back and finish it (a
+`deferred` dork query — Google searching paused for a 30-minute cooldown after
+repeated blocks, searched 15–30 s apart — is not a shortfall and is searched first
+next run); call
 it again only if you genuinely cannot continue (turn limit, browser down),
 with an honest `stopped_reason` — the second call always closes the run.
 
