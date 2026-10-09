@@ -143,8 +143,7 @@ export function GmailSection({
       >
         {error && <Alert severity="error">{error}</Alert>}
         <Typography color="text.secondary">
-          Save a Jev API key above first — Gmail response tracking auto-applies
-          Jev-confirmed transitions, so it stays locked until a key is saved.
+          Gmail response tracking needs Jev: Jev reads each employer reply and decides whether it's a rejection or an interview invite, so the application's status can update on its own. Save a Jev API key in the Jev section above to unlock this.
         </Typography>
       </SettingsSection>
     );
@@ -168,7 +167,7 @@ export function GmailSection({
           label="Enable email response tracking"
         />
         <FormHelperText>
-          Gmail sync auto-applies Jev-confirmed transitions when this is on.
+          When on, Jev checks each matched reply. Confirmed rejections and interview invites that clearly match an application update its status automatically; anything else, including uncertain matches, is left for you to review.
         </FormHelperText>
       </Box>
 

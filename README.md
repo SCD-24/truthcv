@@ -234,8 +234,10 @@ authentication, and the log carries the same personal data the records do.
 TruthCV can optionally cross-check its own screening decisions against Jev
 (TypeSafe System One), a third-party verification API, and — for
 [Gmail response tracking](#gmail-response-tracking-optional) — use it as the
-classifier itself rather than a secondary check. It's opt-in; nothing in the
-app requires it.
+classifier itself rather than a secondary check. It's opt-in: screening works
+without it, but Gmail response tracking can't be connected until a Jev key is
+available (saved in Settings → Jev, or the `JEV_API_KEY` fallback) and email
+tracking is enabled.
 
 Connect it from **Settings → Jev**, which saves the key into the same
 encrypted secret store as your other credentials. There's no `.env` variable
