@@ -59,6 +59,14 @@ describe("GmailSection", () => {
     expect(screen.queryByRole("button", { name: /connect gmail/i })).toBeNull();
   });
 
+  it("no Jev key saved: locked copy explains what Jev does", async () => {
+    vi.mocked(getJevSettings).mockResolvedValueOnce(makeJev({ keySet: false }));
+    vi.mocked(getGmailStatus).mockResolvedValueOnce(makeGmail());
+    render(<GmailSection />);
+
+    expect(await screen.findByText(/rejection or an interview invite/i)).toBeTruthy();
+  });
+
   it("key saved: toggling the checkbox calls saveJevSettings with {useForEmailTracking: true}", async () => {
     vi.mocked(getJevSettings).mockResolvedValueOnce(
       makeJev({ keySet: true, useForEmailTracking: false }),

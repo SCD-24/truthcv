@@ -19,9 +19,10 @@ type TestState =
   | { kind: "ok"; detail: string }
   | { kind: "fail"; detail: string };
 
-/** Jev cross-check settings: an optional external cross-check used during
- * screening. It only runs when a key is saved AND the checkbox is on, so the
- * checkbox stays disabled until a key exists — flipping it can never
+/** Jev settings: an optional third-party verification service used both to
+ * cross-check screening decisions and (required) for Gmail response tracking,
+ * which is enabled separately in the Gmail section. The screening check only
+ * runs when a key is saved AND the checkbox is on, so the checkbox stays disabled until a key exists — flipping it can never
  * silently do nothing. */
 export function JevSection() {
   const [status, setStatus] = useState<JevSettings | null>(null);
@@ -96,8 +97,8 @@ export function JevSection() {
     // error set by the load catch above would be computed and never rendered.
     return (
       <SettingsSection
-        title="Jev cross-check"
-        description="An optional external cross-check TruthCV can run during screening."
+        title="Jev (TypeSafe System One)"
+        description="An optional third-party verification service. TruthCV can use it to double-check screening decisions, and it's required for Gmail response tracking, where it reads employer replies to spot rejections and interview invites."
       >
         {error ? (
           <Alert severity="error">{error}</Alert>
@@ -112,8 +113,8 @@ export function JevSection() {
 
   return (
     <SettingsSection
-      title="Jev cross-check"
-      description="An optional external cross-check TruthCV can run during screening."
+      title="Jev (TypeSafe System One)"
+      description="An optional third-party verification service. TruthCV can use it to double-check screening decisions, and it's required for Gmail response tracking, where it reads employer replies to spot rejections and interview invites."
     >
       {error && <Alert severity="error">{error}</Alert>}
       <TextField
@@ -158,7 +159,7 @@ export function JevSection() {
         />
         <FormHelperText>
           {status.keySet
-            ? "Jev runs during screening as an extra cross-check when this is on."
+            ? "When on, Jev double-checks a posting's hard requirements (role type, salary floor, country, EOR, remote) once a posting has passed TruthCV's own checks, and can still reject it. Gmail response tracking is switched on separately in the Gmail section."
             : "Save a Jev API key first — Jev only runs when a key is saved and this is on."}
         </FormHelperText>
       </Box>

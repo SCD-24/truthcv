@@ -79,6 +79,13 @@ describe("JevSection", () => {
     expect(field.value).toBe("");
   });
 
+  it("explains that Jev is required for Gmail response tracking", async () => {
+    vi.mocked(getJevSettings).mockResolvedValueOnce(makeSettings({ keySet: true }));
+    render(<JevSection />);
+
+    expect(await screen.findByText(/required for Gmail response tracking/i)).toBeTruthy();
+  });
+
   it("Test button calls testJevKey and shows the ok/detail result", async () => {
     vi.mocked(getJevSettings).mockResolvedValueOnce(makeSettings({ keySet: true }));
     vi.mocked(testJevKey).mockResolvedValueOnce({ ok: true, detail: "Connected fine." });
