@@ -2,6 +2,14 @@
   "version": 2,
   "checks": [
     {
+      "id": "pytest",
+      "name": "Python tests (pytest)",
+      "kind": "test",
+      "command": "python -m pytest -q",
+      "enabled": true,
+      "scope": "repo"
+    },
+    {
       "id": "lint",
       "name": "ESLint (web)",
       "kind": "lint",
