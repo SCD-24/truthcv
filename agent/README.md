@@ -448,14 +448,16 @@ Google dorks. One `record_discovery_coverage` is recorded per composed entry.
   job titles (`title_keywords`; else keywords ending in a title noun such as
   engineer/developer/analyst; else the raw keywords), one `site:<board>` query
   per board. API-backed, direct-mode and disabled boards get no dork.
-- **Pipe-grouped, chunked.** Titles are OR-grouped as `(A | "B C")` and packed
+- **Pipe-grouped, chunked.** Titles are OR-grouped as `("A" | "B C")` and packed
   greedily into chunks that fit Google's 32-word limit after the fixed
   `site:`, location, remote and recency terms (a single title too long to fit
   still gets its own chunk, so that query can exceed the limit); one query per chunk per board,
   ordered chunk-major. No title is dropped.
-- **Negatives.** The profile's rejected role types are appended as `-term` /
-  `-"multi word"` in whatever word budget the titles leave; any that would
+- **Negatives.** The profile's rejected role types are appended as `-"term"` in whatever word budget the titles leave; any that would
   overflow are dropped. Screening still enforces role types.
+- **Quoting.** Every term is quoted for exact match; embedded double quotes are
+  stripped from titles, locations and negatives; terms empty after stripping are
+  dropped.
 - **Recency.** The `dorkRecency` setting (Agents page: `d`/`w`/`m`/`y`/`none`)
   adds a trailing `after:YYYY-MM-DD` operator counted back 1/7/30/365 days from
   today (UTC); `none` omits it, and unset or invalid values behave as `w`.

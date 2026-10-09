@@ -13,9 +13,9 @@ recognised extras added on top of whatever is enabled.
 Google's query box has a hard word-limit (~32 words); a query built from a
 large keyword list plus locations/remote can blow past it, and a
 truncated query silently drops the trailing filters. Discovery therefore
-renders TITLES (job-title terms), not free-form keywords, '|'-grouped as many
+renders TITLES (job-title terms), not free-form keywords, quoted and '|'-grouped as many
 per query as fit the word budget, one query per title chunk per board.
-Rejected role types are appended as negatives (-term) best-effort in
+Rejected role types are appended as negatives (-"term") best-effort in
 whatever room the titles leave; screening (screening/criteria.py
 role_type_compatible) still enforces role types.
 """
@@ -72,21 +72,28 @@ def recency_operator(dork_recency: str | None, today: date | None = None) -> str
     return f"after:{(today - timedelta(days=days)).isoformat()}"
 
 
+def _clean_term(term: str) -> str:
+    """Strip embedded double quotes and edge whitespace from a term."""
+    return (term or "").replace('"', "").strip()
+
+
 def _quote_term(term: str) -> str:
-    """Double-quote a term if it contains whitespace, else leave it bare."""
-    return f'"{term}"' if any(ch.isspace() for ch in term) else term
+    """Always wrap the cleaned term in double quotes for an exact-phrase match."""
+    return f'"{_clean_term(term)}"'
 
 
 def _or_group(terms: list[str]) -> str:
     """Build a parenthesized '|'-separated OR-group, or '' if terms is empty.
 
-    Shape ``(A | "B C")``; a single term is left unparenthesised.
+    Terms are cleaned and empties dropped. Shape ``("A" | "B C")``; a single
+    surviving term is quoted but left unparenthesised.
     """
-    if not terms:
+    cleaned = [c for c in (_clean_term(t) for t in terms) if c]
+    if not cleaned:
         return ""
-    if len(terms) == 1:
-        return _quote_term(terms[0])
-    return "(" + " | ".join(_quote_term(t) for t in terms) + ")"
+    if len(cleaned) == 1:
+        return _quote_term(cleaned[0])
+    return "(" + " | ".join(_quote_term(t) for t in cleaned) + ")"
 
 
 def _remote_group(remote_model: str | None) -> str:
@@ -130,10 +137,10 @@ def _word_count(s: str) -> int:
 
 
 def _negative_terms(profile: JobProfile) -> list[str]:
-    """Rejected role types as ``-term`` / ``-"multi word"`` operators, in order."""
+    """Rejected role types as ``-"term"`` operators, in order."""
     # Embedded double quotes would break out of the quoted phrase (e.g.
     # `contract" OR "intern`), so strip them before quoting.
-    cleaned = [(t or "").replace('"', "").strip() for t in profile.rejected_role_types]
+    cleaned = [_clean_term(t) for t in profile.rejected_role_types]
     return ["-" + _quote_term(t) for t in cleaned if t]
 
 
@@ -259,7 +266,7 @@ def compose_profile_queries(
     budget (MAX_QUERY_WORDS) after the fixed site/location/remote/recency
     terms, one query per chunk per source, ordered chunk-major (every source
     for chunk 1, then every source for chunk 2, ...). Rejected role types
-    render as negatives (``-term``) best-effort in the leftover room only;
+    render as negatives (``-"term"``) best-effort in the leftover room only;
     negatives that would overflow are dropped. Screening still enforces
     role types.
 
@@ -273,7 +280,7 @@ def compose_profile_queries(
     empty list means no boards at all. A board whose effective mode is
     "direct", or that is disabled, is skipped — see ``_resolve_sources``.
     """
-    titles = _dork_titles(profile)
+    titles = [c for c in (_clean_term(t) for t in _dork_titles(profile)) if c]
     domains = _resolve_sources(sources)
     if not titles or not domains:
         return []

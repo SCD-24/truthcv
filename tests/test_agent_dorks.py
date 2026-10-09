@@ -10,11 +10,10 @@ from agentconfig import dorks
 from agentconfig.store import JobBoard, JobProfile
 
 
-def test_multi_word_keyword_is_quoted_single_word_is_not():
+def test_every_keyword_is_quoted():
     p = JobProfile(name="p", enabled=True, title_keywords=["platform engineer", "SRE"])
     (q,) = [e["query"] for e in dorks.compose_queries([p], None, ["ashby"])]
-    assert '("platform engineer" | SRE)' in q
-    assert '"SRE"' not in q
+    assert '("platform engineer" | "SRE")' in q
 
 
 def test_multiple_keywords_become_one_grouped_query_and_locations_an_or_group():
@@ -25,7 +24,7 @@ def test_multiple_keywords_become_one_grouped_query_and_locations_an_or_group():
         locations=["Berlin", "Remote"],
     )
     qs = [e["query"] for e in dorks.compose_queries([p], "none", ["ashby"])]
-    assert qs == ["site:jobs.ashbyhq.com (Berlin | Remote) (backend | platform)"]
+    assert qs == ['site:jobs.ashbyhq.com ("Berlin" | "Remote") ("backend" | "platform")']
 
 
 def test_preferred_source_containing_dot_used_verbatim():
@@ -93,7 +92,7 @@ def test_rejected_role_types_render_as_negatives_before_after_operator():
     )
     qs = [e["query"] for e in dorks.compose_queries([p], "w", ["ashby"], today=TODAY)]
     assert qs == [
-        'site:jobs.ashbyhq.com (A | B) -contract -"unpaid internship" after:2026-03-03',
+        'site:jobs.ashbyhq.com ("A" | "B") -"contract" -"unpaid internship" after:2026-03-03',
     ]
 
 
@@ -102,7 +101,7 @@ def test_blank_rejected_role_types_are_ignored():
         name="p", enabled=True, keywords=["backend"], rejected_role_types=["", "  ", " contract "]
     )
     q = dorks.compose_queries([p], "none", ["ashby"])[0]["query"]
-    assert q == "site:jobs.ashbyhq.com backend -contract"
+    assert q == 'site:jobs.ashbyhq.com "backend" -"contract"'
 
 
 def test_embedded_quotes_in_rejected_role_types_are_stripped():
@@ -110,7 +109,7 @@ def test_embedded_quotes_in_rejected_role_types_are_stripped():
         name="p", enabled=True, keywords=["backend"], rejected_role_types=['contract" OR "intern']
     )
     q = dorks.compose_queries([p], "none", ["ashby"])[0]["query"]
-    assert q == 'site:jobs.ashbyhq.com backend -"contract OR intern"'
+    assert q == 'site:jobs.ashbyhq.com "backend" -"contract OR intern"'
 
 
 def test_partial_budget_keeps_leading_negatives_and_drops_trailing():
@@ -122,7 +121,7 @@ def test_partial_budget_keeps_leading_negatives_and_drops_trailing():
         rejected_role_types=["a", "b", "c", "x y", "d"],
     )
     q = dorks.compose_profile_queries(p, "w", ["ashby"], today=TODAY)[0]["query"]
-    assert q.endswith(" Backend -a -b -c after:2026-03-03")
+    assert q.endswith(' "Backend" -"a" -"b" -"c" after:2026-03-03')
     assert dorks._word_count(q) == 31
 
 
@@ -141,14 +140,14 @@ def test_six_titles_group_into_one_query_per_domain_with_leftover_negatives():
     for e in entries:
         assert all(f'"{t}"' in e["query"] for t in titles)
         assert " | " in e["query"]
-        assert "-contract" in e["query"]
+        assert '-"contract"' in e["query"]
         assert dorks._word_count(e["query"]) <= dorks.MAX_QUERY_WORDS
 
 
 def test_remote_model_remote_adds_or_group_to_query_and_url():
     p = JobProfile(name="p", enabled=True, keywords=["backend"], remote_model="remote")
     entry = dorks.compose_queries([p], "none", ["ashby"])[0]
-    expected_query = 'site:jobs.ashbyhq.com (remote | "fully remote" | "work from home") backend'
+    expected_query = 'site:jobs.ashbyhq.com ("remote" | "fully remote" | "work from home") "backend"'
     assert entry["query"] == expected_query
     assert unquote_plus(entry["url"].split("q=")[1]) == expected_query
 
@@ -156,19 +155,19 @@ def test_remote_model_remote_adds_or_group_to_query_and_url():
 def test_remote_model_hybrid_adds_remote_or_hybrid_group():
     p = JobProfile(name="p", enabled=True, keywords=["backend"], remote_model="hybrid")
     q = dorks.compose_queries([p], "none", ["ashby"])[0]["query"]
-    assert q == "site:jobs.ashbyhq.com (remote | hybrid) backend"
+    assert q == 'site:jobs.ashbyhq.com ("remote" | "hybrid") "backend"'
 
 
 def test_remote_model_on_site_leaves_query_unchanged():
     p = JobProfile(name="p", enabled=True, keywords=["backend"], remote_model="on_site")
     q = dorks.compose_queries([p], "none", ["ashby"])[0]["query"]
-    assert q == "site:jobs.ashbyhq.com backend"
+    assert q == 'site:jobs.ashbyhq.com "backend"'
 
 
 def test_remote_model_none_leaves_query_unchanged():
     p = JobProfile(name="p", enabled=True, keywords=["backend"], remote_model=None)
     q = dorks.compose_queries([p], "none", ["ashby"])[0]["query"]
-    assert q == "site:jobs.ashbyhq.com backend"
+    assert q == 'site:jobs.ashbyhq.com "backend"'
 
 
 def test_disabled_profile_produces_nothing():
@@ -306,8 +305,8 @@ def test_duplicate_urls_merge_profiles_into_a_profiles_list():
 
 def test_window_is_carried_in_the_query_text():
     """Recency is an after: operator in the query text, so WebSearch honours it."""
-    assert _entry("w")["query"] == "site:jobs.ashbyhq.com backend after:2026-03-03"
-    assert _entry("none")["query"] == "site:jobs.ashbyhq.com backend"
+    assert _entry("w")["query"] == 'site:jobs.ashbyhq.com "backend" after:2026-03-03'
+    assert _entry("none")["query"] == 'site:jobs.ashbyhq.com "backend"'
 
 
 # ---------------------------------------------------------------------------
@@ -462,7 +461,7 @@ def test_every_composed_query_fits_googles_word_limit():
 def test_location_and_remote_groups_present_in_every_query():
     p = _big_profile()
     entries = dorks.compose_profile_queries(p, None, ["ashby"])
-    assert all("(Berlin | Remote)" in e["query"] for e in entries)
+    assert all('("Berlin" | "Remote")' in e["query"] for e in entries)
     assert all('"fully remote"' in e["query"] for e in entries)
 
 
@@ -483,7 +482,7 @@ def test_fallback_detects_titles_among_keywords_not_bare_skills():
 def test_fallback_to_raw_keywords_when_nothing_matches_title_nouns():
     p = JobProfile(name="p", enabled=True, keywords=["Python", "SQL"])
     qs = [e["query"] for e in dorks.compose_queries([p], "none", ["ashby"])]
-    assert qs == ["site:jobs.ashbyhq.com (Python | SQL)"]
+    assert qs == ['site:jobs.ashbyhq.com ("Python" | "SQL")']
 
 
 def _long_title(prefix):
@@ -523,14 +522,14 @@ def test_negatives_added_when_room_remains_and_dropped_when_chunk_fills_budget()
         name="p", enabled=True, title_keywords=["A", "B"], rejected_role_types=["contract"]
     )
     q = dorks.compose_profile_queries(roomy, "none", ["ashby"])[0]["query"]
-    assert q == "site:jobs.ashbyhq.com (A | B) -contract"
+    assert q == 'site:jobs.ashbyhq.com ("A" | "B") -"contract"'
     full_title = " ".join(f"w{i}" for i in range(dorks.MAX_QUERY_WORDS - 1))
     full = JobProfile(
         name="p", enabled=True, title_keywords=[full_title], rejected_role_types=["contract"]
     )
     q = dorks.compose_profile_queries(full, "none", ["ashby"])[0]["query"]
     assert dorks._word_count(q) == dorks.MAX_QUERY_WORDS
-    assert "-contract" not in q
+    assert '-"contract"' not in q
 
 
 def test_oversized_single_title_gets_own_chunk_and_none_dropped():
@@ -589,6 +588,31 @@ def test_padded_titles_are_stripped_so_budget_holds():
     assert entries
     assert all(dorks._word_count(e["query"]) <= dorks.MAX_QUERY_WORDS for e in entries)
     assert all('"Backend Engineer"' in e["query"] for e in entries)
+
+
+def test_embedded_quotes_in_titles_and_locations_are_stripped_and_wrapped_once():
+    p = JobProfile(
+        name="p", enabled=True, title_keywords=['Senior "Lead" Dev'], locations=['"Ber"lin"']
+    )
+    q = dorks.compose_profile_queries(p, "none", ["ashby"])[0]["query"]
+    assert q == 'site:jobs.ashbyhq.com "Berlin" "Senior Lead Dev"'
+
+
+def test_quote_only_titles_and_locations_are_dropped():
+    p = JobProfile(
+        name="p", enabled=True, title_keywords=['"', "Dev"], locations=['"', ' " ']
+    )
+    q = dorks.compose_profile_queries(p, "none", ["ashby"])[0]["query"]
+    assert q == 'site:jobs.ashbyhq.com "Dev"'
+    only = JobProfile(name="p", enabled=True, title_keywords=[' " '])
+    assert dorks.compose_profile_queries(only, "none", ["ashby"]) == []
+
+
+def test_direct_boards_title_keywords_pass_through_raw():
+    p = JobProfile(name="p", enabled=True, title_keywords=['Senior "Lead" Dev'])
+    board = JobBoard(source="https://boards.acme.io/careers", mode="direct")
+    entries = dorks.compose_direct_boards([p], [board])
+    assert entries[0]["profiles"][0]["title_keywords"] == ['Senior "Lead" Dev']
 
 
 def test_all_chunked_queries_returned_and_interleaved():
