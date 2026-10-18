@@ -17,6 +17,12 @@ function keyedAdapter(replies: Record<string, unknown>, fallback: unknown): Prov
   };
 }
 
+const erroring: ProviderAdapter = {
+  async *sendMessage(): AsyncGenerator<HarnessEvent, void, unknown> {
+    yield { type: 'error', message: 'down', retryable: true };
+  },
+};
+
 const TEXT = 'Senior engineer role. '.repeat(30);
 const extract = keyedAdapter({}, { role: 'Engineer', company: 'Acme' });
 const cand = (n: number, profiles: string[]): Candidate => ({ url: `https://a.test/${n}`, title: 't', channel: 'dork', profiles, sources: [] });
@@ -60,6 +66,40 @@ describe('screenCandidates outcomes', () => {
     const bad = await screenCandidates([cand(1, ['P'])], deps({ ...unreadable, record: vi.fn(async () => ({ content: 'no', isError: true })) }));
     expect(bad.outcomes.map((o) => o.outcome)).toEqual(['failed']);
     expect(bad.outcomes[0].detail).toBe(bad.errors[0]);
+  });
+
+  it('maps an extract provider error to failed without recording', async () => {
+    const record = recordEcho();
+    const res = await screenCandidates([cand(1, ['P'])], deps({ extractAdapter: erroring, record }));
+    expect(res.outcomes).toHaveLength(1);
+    expect(res.outcomes[0].outcome).toBe('failed');
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors[0]).toContain('extract provider failed: down');
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  it('records a thin page as unreadable with its reason', async () => {
+    const record = recordEcho();
+    const fetch = async () => ({ unreadable: true as const, blocker: 'unreadable' as const, reason: 'page had no readable posting text' });
+    await screenCandidates([cand(1, ['P'])], deps({ fetch, record }));
+    expect(record.mock.calls[0][0]).toMatchObject({ screening_blocker: 'unreadable', reason: 'page had no readable posting text' });
+  });
+
+  it('adds one systemic error after 5 consecutive provider failures', async () => {
+    const res = await screenCandidates([1, 2, 3, 4, 5].map((n) => cand(n, ['P'])), deps({ extractAdapter: erroring, concurrency: 1 }));
+    expect(res.systemicErrors).toHaveLength(1);
+    expect(res.systemicErrors[0]).toContain('screening provider unavailable: 5 consecutive');
+    expect(res.systemicErrors[0]).toContain('down');
+  });
+
+  it('resets the failure count on a success', async () => {
+    let n = 0;
+    const flaky: ProviderAdapter = { sendMessage: (req) => (++n === 9 ? extract : erroring).sendMessage(req) };
+    const cands = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => cand(i, ['P']));
+    // 4 failing candidates (2 attempts each), one success, then 4 more failures
+    const res = await screenCandidates(cands, deps({ extractAdapter: flaky, concurrency: 1 }));
+    expect(res.errors).toHaveLength(8);
+    expect(res.systemicErrors).toEqual([]);
   });
 
   it('maps created:false covered to previously_screened', async () => {

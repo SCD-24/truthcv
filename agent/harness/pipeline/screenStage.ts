@@ -19,6 +19,9 @@ export { BLOCKER_COMPANY_FALLBACK, BLOCKER_ROLE_FALLBACK, companyFromUrl };
 /** How many candidates are screened at once. */
 export const SCREEN_CONCURRENCY = 3;
 
+/** Consecutive extract/screening provider failures that mark the provider as unavailable. */
+export const PROVIDER_OUTAGE_THRESHOLD = 5;
+
 /** A posting that passed screening and awaits an apply session. */
 export interface ActionablePass {
   url: string;
@@ -50,6 +53,24 @@ export interface ScreenStageResult {
   errors: string[];
   /** Exactly one outcome per candidate screened. */
   outcomes: UrlOutcome[];
+  /** Run-level failures (e.g. a provider outage); non-empty means the run should fail. */
+  systemicErrors: string[];
+}
+
+/** Consecutive provider failures shared by all workers. */
+interface ProviderHealth {
+  consecutive: number;
+  systemicErrors: string[];
+}
+
+/** Count a provider failure; the first time the threshold is reached, record one systemic error. */
+function noteProviderFailure(h: ProviderHealth, reason: string): void {
+  h.consecutive += 1;
+  if (h.consecutive === PROVIDER_OUTAGE_THRESHOLD) {
+    h.systemicErrors.push(
+      `screening provider unavailable: ${h.consecutive} consecutive extract/screening provider failures (last: ${reason})`,
+    );
+  }
 }
 
 interface Meta { role: string; company: string; posted_date: string }
@@ -65,12 +86,12 @@ export function createMutex(): <T>(fn: () => Promise<T>) => Promise<T> {
 }
 
 /** Record a screening_blocker for a posting we could not use. */
-async function recordBlocker(d: ScreenStageDeps, c: Candidate, blocker: string, res: ScreenStageResult): Promise<void> {
+async function recordBlocker(d: ScreenStageDeps, c: Candidate, blocker: string, reason: string, res: ScreenStageResult): Promise<void> {
   try {
     const profile = c.profiles.find((p) => d.criteria[p]) ?? c.profiles[0] ?? '';
     const out = await d.record({
       run_id: d.runId, url: c.url, role: roleForBlocker(c.title), company: companyFromUrl(c.url),
-      profile, verdict: '', screening_blocker: blocker,
+      profile, verdict: '', screening_blocker: blocker, reason,
     });
     if (out.isError) failOutcome(res, c, `record_screening failed for ${c.url}`);
     else {
@@ -123,13 +144,15 @@ function parseEvidence(screened: { content: string; isError: boolean }): Record<
 }
 
 /** Screen one profile and persist its evidence; `stop` is true when no further profiles are needed. */
-async function screenProfile(d: ScreenStageDeps, c: Candidate, text: string, meta: Meta, profile: string, res: ScreenStageResult): Promise<ProfileResult> {
+async function screenProfile(d: ScreenStageDeps, c: Candidate, text: string, meta: Meta, profile: string, res: ScreenStageResult, h: ProviderHealth): Promise<ProfileResult> {
   const args: Record<string, unknown> = {
     url: c.url, role: meta.role, company: meta.company, postingText: text, profile, criteria: d.criteria[profile],
     run_id: d.runId, source: c.channel,
   };
   if (meta.posted_date) args.posted_date = meta.posted_date;
   const screened = await screenPosting(args, d.screeningAdapter);
+  if (screened.isError) noteProviderFailure(h, screened.content);
+  else h.consecutive = 0;
   const evidence = parseEvidence(screened);
   if (typeof evidence === 'string') return failedProfile(res, `${c.url} [${profile}]: ${evidence}`);
   const out = await persistEvidence(args, evidence, d.record);
@@ -140,14 +163,14 @@ async function screenProfile(d: ScreenStageDeps, c: Candidate, text: string, met
 }
 
 /** Screen and record each profile with criteria in order, until a pass or existing coverage. */
-async function screenProfiles(d: ScreenStageDeps, c: Candidate, text: string, meta: Meta, res: ScreenStageResult): Promise<void> {
+async function screenProfiles(d: ScreenStageDeps, c: Candidate, text: string, meta: Meta, res: ScreenStageResult, h: ProviderHealth): Promise<void> {
   const results: ProfileClassified[] = [];
   let current = '';
   try {
     for (const profile of c.profiles) {
       if (!d.criteria[profile]) continue;
       current = profile;
-      const r = await screenProfile(d, c, text, meta, profile, res);
+      const r = await screenProfile(d, c, text, meta, profile, res, h);
       results.push({ ...r.verdict, profile });
       if (r.stop) break;
     }
@@ -159,16 +182,21 @@ async function screenProfiles(d: ScreenStageDeps, c: Candidate, text: string, me
 }
 
 /** Process one candidate end to end. */
-async function processCandidate(d: ScreenStageDeps, fetchOne: ScreenStageDeps['fetch'], c: Candidate, res: ScreenStageResult): Promise<void> {
+async function processCandidate(d: ScreenStageDeps, fetchOne: ScreenStageDeps['fetch'], c: Candidate, res: ScreenStageResult, h: ProviderHealth): Promise<void> {
   const fetched = await fetchOne(c.url);
   if ('failed' in fetched) {
     failOutcome(res, c, `${c.url}: posting could not be loaded: ${fetched.reason}`);
     return;
   }
-  if (fetched.unreadable) return recordBlocker(d, c, fetched.blocker, res);
+  if (fetched.unreadable) return recordBlocker(d, c, fetched.blocker, fetched.reason, res);
   const meta = await extractMeta(d.extractAdapter, fetched.text, c.title);
-  if (!meta.ok) return recordBlocker(d, c, meta.screening_blocker, res);
-  await screenProfiles(d, c, fetched.text, meta.meta, res);
+  if (!meta.ok && 'failed' in meta) {
+    noteProviderFailure(h, meta.reason);
+    failOutcome(res, c, `${c.url}: ${meta.reason}`);
+    return;
+  }
+  if (!meta.ok) return recordBlocker(d, c, meta.screening_blocker, meta.reason, res);
+  await screenProfiles(d, c, fetched.text, meta.meta, res, h);
 }
 
 /**
@@ -183,14 +211,15 @@ async function processCandidate(d: ScreenStageDeps, fetchOne: ScreenStageDeps['f
 export async function screenCandidates(candidates: Candidate[] | CandidateQueue, d: ScreenStageDeps): Promise<ScreenStageResult> {
   const queue = Array.isArray(candidates) ? new CandidateQueue(candidates, false) : candidates;
   const perCandidate: ScreenStageResult[] = [];
+  const health: ProviderHealth = { consecutive: 0, systemicErrors: [] };
   const exclusive = createMutex();
   const fetchOne = (url: string): Promise<FetchedPosting> => exclusive(() => d.fetch(url));
   const worker = async (): Promise<void> => {
     for (let c = await queue.take(); c; c = await queue.take()) {
-      const res: ScreenStageResult = { passes: [], blockers: 0, errors: [], outcomes: [] };
+      const res: ScreenStageResult = { passes: [], blockers: 0, errors: [], outcomes: [], systemicErrors: [] };
       perCandidate.push(res);
       try {
-        await processCandidate(d, fetchOne, c, res);
+        await processCandidate(d, fetchOne, c, res, health);
       } catch (err) {
         const text = `${c.url}: ${err instanceof Error ? err.message : String(err)}`;
         if (res.outcomes.length) res.errors.push(text);
@@ -206,5 +235,6 @@ export async function screenCandidates(candidates: Candidate[] | CandidateQueue,
     blockers: perCandidate.reduce((n, r) => n + r.blockers, 0),
     errors: perCandidate.flatMap((r) => r.errors),
     outcomes: perCandidate.flatMap((r) => r.outcomes),
+    systemicErrors: health.systemicErrors,
   };
 }

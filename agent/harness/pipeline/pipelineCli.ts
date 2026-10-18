@@ -196,6 +196,8 @@ async function cmdDiscoverScreen(a: PipelineArgs, env: NodeJS.ProcessEnv, pool: 
   });
   const [found, screened] = await Promise.all([discovering, screening]);
   found.errors.push(...(await recordFunnel(mcp, runId, buildFunnel(found.allCandidates, intake.dropped, screened.outcomes))));
+  // Systemic errors go first so a truncated stopped_reason still names the outage.
+  found.errors.unshift(...screened.systemicErrors.map((e) => redactAll(e, tokensOf(config))));
   const ok = found.coverageComplete && found.errors.length === 0;
   await d.writeOutput(out, JSON.stringify({
     ok, coverageComplete: found.coverageComplete, errors: found.errors, itemErrors: screened.errors.map((e) => redactAll(e, tokensOf(config))),

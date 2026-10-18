@@ -120,6 +120,25 @@ describe('discover-screen per-item errors', () => {
     expect(opts.saveDorkState).toBeUndefined();
   });
 
+  it('a provider outage is systemic: exit 3, ok false, message in errors', async () => {
+    const { d: base, out } = setup({ errors: [], coverageComplete: true });
+    const failing: ProviderAdapter = {
+      async *sendMessage(): AsyncGenerator<HarnessEvent, void, unknown> {
+        yield { type: 'error', message: 'model down', retryable: true };
+      },
+    };
+    const d = { ...base, createAdapter: () => failing };
+    const cands = [1, 2, 3, 4, 5].map((n) => ({ url: `https://a.test/${n}`, title: 'T', channel: 'dork', sources: SRC, profiles: ['P'] }));
+    discoverMock.mockImplementation(async (_j: unknown, _r: unknown, _b: unknown, _m: unknown, o: { onCandidates: (b: unknown[]) => Promise<void> }) => {
+      await o.onCandidates(cands);
+      return { candidates: [], allCandidates: cands, dropped: [], errors: [], coverageComplete: true };
+    });
+    expect(await runPipelineCli(ARGS, ENV, d)).toBe(ExitCode.ProviderError);
+    const s = JSON.parse(out['o.json']) as { ok: boolean; errors: string[] };
+    expect(s.ok).toBe(false);
+    expect(s.errors.some((e) => e.startsWith('screening provider unavailable: 5 consecutive'))).toBe(true);
+  });
+
   it('a discovery error is systemic: exit 3, ok false', async () => {
     const { d, out } = setup({ errors: ['discovery boom'], coverageComplete: true });
     expect(await runPipelineCli(ARGS, ENV, d)).toBe(ExitCode.ProviderError);

@@ -22,15 +22,24 @@ export interface PostingMeta {
   posted_date: string;
 }
 
-/** Outcome: metadata, or a blocker when no company could be determined. */
-export type ExtractResult = { ok: true; meta: PostingMeta } | { ok: false; screening_blocker: 'unreadable'; reason: string };
+/** Provider attempts per extraction (mirrors SCREENING_ATTEMPTS). */
+const EXTRACT_ATTEMPTS = 2;
+
+/**
+ * Outcome: metadata, a blocker when a successful reply named no company, or a
+ * provider failure (both attempts errored; not a screening blocker).
+ */
+export type ExtractResult =
+  | { ok: true; meta: PostingMeta }
+  | { ok: false; screening_blocker: 'unreadable'; reason: string }
+  | { ok: false; failed: true; reason: string };
 
 function field(v: unknown): string {
   return typeof v === 'string' ? v.trim() : '';
 }
 
-/** Collect the model's text reply; empty string on error. */
-async function complete(adapter: ProviderAdapter, text: string): Promise<string> {
+/** Collect the model's text reply, or the provider error. */
+async function complete(adapter: ProviderAdapter, text: string): Promise<{ text: string } | { error: string }> {
   let out = '';
   for await (const ev of adapter.sendMessage({
     systemPrompt: EXTRACT_SYSTEM_PROMPT,
@@ -40,9 +49,18 @@ async function complete(adapter: ProviderAdapter, text: string): Promise<string>
   })) {
     if (ev.type === 'text') out += ev.delta;
     if (ev.type === 'done' && !out) out = ev.message.content;
-    if (ev.type === 'error') return '';
+    if (ev.type === 'error') return { error: ev.message || 'provider error' };
   }
-  return out;
+  return { text: out };
+}
+
+/** One attempt, turning a thrown exception into an error result. */
+async function attempt(adapter: ProviderAdapter, text: string): Promise<{ text: string } | { error: string }> {
+  try {
+    return await complete(adapter, text);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /** Parse the first JSON object in `raw`. */
@@ -64,12 +82,13 @@ function parseObject(raw: string): Record<string, unknown> {
  * @param harvestTitle The discovery title, used when the model finds no role.
  */
 export async function extractMeta(adapter: ProviderAdapter, text: string, harvestTitle: string): Promise<ExtractResult> {
-  let obj: Record<string, unknown> = {};
-  try {
-    obj = parseObject(await complete(adapter, text));
-  } catch {
-    obj = {};
+  let reply: { text: string } | { error: string } = { error: 'no attempt made' };
+  for (let i = 0; i < EXTRACT_ATTEMPTS; i++) {
+    reply = await attempt(adapter, text);
+    if ('text' in reply) break;
   }
+  if ('error' in reply) return { ok: false, failed: true, reason: `extract provider failed: ${reply.error}` };
+  const obj = parseObject(reply.text);
   const company = field(obj.company);
   if (!company) return { ok: false, screening_blocker: 'unreadable', reason: 'could not determine the employing company' };
   return { ok: true, meta: { role: field(obj.role) || harvestTitle.trim(), company, posted_date: field(obj.posted_date) } };

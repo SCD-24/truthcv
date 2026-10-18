@@ -880,7 +880,12 @@ an approved posting you already screened but could not submit the form for;
 `screening_blocker` is for a posting you never got to screen at all.
 Only `login_required` reaches the operator's approval queue — they can sign
 in themselves. An `unreadable` posting is not put to the operator and is
-re-screened on a later run. `not_found` and `expired` do not queue either:
+re-screened on a later run. `unreadable` means the page loaded but had no
+usable posting text or no identifiable employer; a model provider failure
+during extract/screening is never recorded as `unreadable` — it is an item
+error (no screening recorded, retried next run), and repeated consecutive
+provider failures fail the run with a `screening provider unavailable`
+stopped_reason. `not_found` and `expired` do not queue either:
 there is nothing the operator can decide about, or draft from, a posting that
 no longer exists.
 

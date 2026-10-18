@@ -42,6 +42,38 @@ describe('extractMeta', () => {
     const r = await extractMeta(textAdapter('{"role":"X","company":""}'), 'text', 't');
     expect(r).toMatchObject({ ok: false, screening_blocker: 'unreadable' });
   });
+
+  it('blocks as unreadable when the reply is not JSON', async () => {
+    const r = await extractMeta(textAdapter('no idea'), 'text', 't');
+    expect(r).toMatchObject({ ok: false, screening_blocker: 'unreadable' });
+  });
+
+  it('returns failed (not a blocker) when the provider errors on both attempts', async () => {
+    const sendMessage = vi.fn(async function* (): AsyncGenerator<HarnessEvent, void, unknown> {
+      yield { type: 'error', message: 'overloaded', retryable: true };
+    });
+    const r = await extractMeta({ sendMessage } as ProviderAdapter, 'text', 't');
+    expect(r).toEqual({ ok: false, failed: true, reason: 'extract provider failed: overloaded' });
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries once: error then a good reply is ok', async () => {
+    let n = 0;
+    const adapter: ProviderAdapter = {
+      async *sendMessage(): AsyncGenerator<HarnessEvent, void, unknown> {
+        if (n++ === 0) { yield { type: 'error', message: 'blip', retryable: true }; return; }
+        const text = '{"role":"R","company":"Acme"}';
+        yield { type: 'text', delta: text };
+        yield { type: 'done', stopReason: 'end', message: { role: 'assistant', content: text } };
+      },
+    };
+    expect(await extractMeta(adapter, 'text', 't')).toMatchObject({ ok: true, meta: { company: 'Acme' } });
+  });
+
+  it('returns failed when the adapter throws', async () => {
+    const adapter = { sendMessage: () => { throw new Error('socket'); } } as unknown as ProviderAdapter;
+    expect(await extractMeta(adapter, 'text', 't')).toEqual({ ok: false, failed: true, reason: 'extract provider failed: socket' });
+  });
 });
 
 describe('screenCandidates', () => {
