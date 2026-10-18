@@ -484,7 +484,12 @@ fetch: it is reported as a run error and a `failed` funnel outcome, and no
 screening blocker is recorded for it. A page that loads but is thin is
 re-snapshotted up to 4 times (2 s apart); if still unreadable it is recorded as
 an `unreadable` blocker (after following one onward link, if there is one) or
-`login_required` for a sign-in wall.
+`login_required` for a sign-in wall. `unreadable` means the page loaded but had
+no usable posting text or no identifiable employer; its record carries the
+reason. An extract/screening model provider failure is not unreadable: it is an
+item error (no screening recorded, so the posting is retried next run), and
+repeated consecutive provider failures fail the run with a `screening provider
+unavailable` stopped_reason.
 
 **LinkedIn capture.** LinkedIn postings rely on the persisted signed-in browser
 profile (Job boards → Needs attention → Sign in). The fetch waits until the `Primary content`
