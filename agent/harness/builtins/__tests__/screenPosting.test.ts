@@ -40,6 +40,9 @@ function doneWith(text: string): HarnessEvent {
   return { type: 'done', stopReason: 'end', message: { role: 'assistant', content: text } };
 }
 
+/** A sleep that returns immediately. */
+const noSleep = async (): Promise<void> => undefined;
+
 const VALID_ARGS = {
   url: 'https://example.com/jobs/1',
   role: 'Senior Engineer',
@@ -132,7 +135,7 @@ describe('screenPosting', () => {
   it('never throws on a provider error event, and returns isError', async () => {
     const adapter = stubAdapter([{ type: 'error', message: 'upstream 500', retryable: true }]);
 
-    const result = await screenPosting(VALID_ARGS, adapter);
+    const result = await screenPosting(VALID_ARGS, adapter, { sleep: noSleep });
 
     expect(result.isError).toBe(true);
     expect(result.content).toContain('upstream 500');
@@ -141,7 +144,7 @@ describe('screenPosting', () => {
   it('never throws when sendMessage itself throws', async () => {
     const adapter = throwingAdapter('socket hang up');
 
-    const result = await screenPosting(VALID_ARGS, adapter);
+    const result = await screenPosting(VALID_ARGS, adapter, { sleep: noSleep });
 
     expect(result.isError).toBe(true);
     expect(result.content).toContain('socket hang up');
@@ -329,26 +332,82 @@ describe('screenPosting', () => {
       [doneWith(VALID_VERDICT_JSON)],
     ]);
 
-    const result = await screenPosting(VALID_ARGS, adapter);
+    const result = await screenPosting(VALID_ARGS, adapter, { sleep: noSleep });
 
     expect(result.isError).toBe(false);
     expect(JSON.parse(result.content).verdict).toBe('passed');
   });
 
-  it('returns isError after two consecutive provider errors', async () => {
+  it('returns isError after four consecutive retryable provider errors, sleeping between', async () => {
     let calls = 0;
     const adapter: ProviderAdapter = {
       async *sendMessage() {
         calls += 1;
-        yield { type: 'error', message: 'upstream 500', retryable: true };
+        yield { type: 'error', message: 'upstream 500', retryable: true, retryAfterMs: 1234 };
       },
     };
+    const sleeps: number[] = [];
 
-    const result = await screenPosting(VALID_ARGS, adapter);
+    const result = await screenPosting(VALID_ARGS, adapter, { sleep: async (ms) => { sleeps.push(ms); } });
 
     expect(result.isError).toBe(true);
+    expect(result.providerFailure).toBe(true);
     expect(result.content).toContain('upstream 500');
+    expect(calls).toBe(4);
+    expect(sleeps).toEqual([1234, 1234, 1234]);
+  });
+
+  it('retries a non-retryable provider error once without sleeping', async () => {
+    let calls = 0;
+    const adapter: ProviderAdapter = {
+      async *sendMessage() {
+        calls += 1;
+        yield { type: 'error', message: 'bad request', retryable: false };
+      },
+    };
+    const sleeps: number[] = [];
+
+    const result = await screenPosting(VALID_ARGS, adapter, { sleep: async (ms) => { sleeps.push(ms); } });
+
+    expect(result.providerFailure).toBe(true);
     expect(calls).toBe(2);
+    expect(sleeps).toEqual([]);
+  });
+
+  it('retries a thrown adapter error with backoff and flags providerFailure', async () => {
+    const sleeps: number[] = [];
+    const result = await screenPosting(VALID_ARGS, throwingAdapter('socket hang up'), {
+      sleep: async (ms) => { sleeps.push(ms); },
+    });
+
+    expect(result.providerFailure).toBe(true);
+    expect(sleeps).toHaveLength(3);
+  });
+
+  it('reports a length stop as a token-limit cut-off, not a provider failure', async () => {
+    const cut: HarnessEvent = { type: 'done', stopReason: 'length', message: { role: 'assistant', content: '{"verd' } };
+
+    const result = await screenPosting(VALID_ARGS, stubAdapter([cut]), { sleep: noSleep });
+
+    expect(result.isError).toBe(true);
+    expect(result.providerFailure).toBe(false);
+    expect(result.content).toBe('screen_posting: the screening reply was cut off at the 2000-token limit');
+  });
+
+  it('quotes a whitespace-collapsed, truncated sample of an unparseable reply', async () => {
+    const long = 'oops\n\n   ' + 'x'.repeat(500);
+
+    const result = await screenPosting(VALID_ARGS, stubAdapter([doneWith(long)]), { sleep: noSleep });
+
+    expect(result.providerFailure).toBe(false);
+    expect(result.content.startsWith('screen_posting: the screening model did not return a valid verdict (reply: "oops x')).toBe(true);
+    expect(result.content.length).toBeLessThan(330);
+  });
+
+  it('says (empty reply) when the model returned nothing', async () => {
+    const result = await screenPosting(VALID_ARGS, stubAdapter([doneWith('')]), { sleep: noSleep });
+
+    expect(result.content).toBe('screen_posting: the screening model did not return a valid verdict (empty reply)');
   });
 
   it('never calls the provider when a required argument is missing', async () => {

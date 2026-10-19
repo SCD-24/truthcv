@@ -124,7 +124,7 @@ describe('discover-screen per-item errors', () => {
     const { d: base, out } = setup({ errors: [], coverageComplete: true });
     const failing: ProviderAdapter = {
       async *sendMessage(): AsyncGenerator<HarnessEvent, void, unknown> {
-        yield { type: 'error', message: 'model down', retryable: true };
+        yield { type: 'error', message: 'model down', retryable: false };
       },
     };
     const d = { ...base, createAdapter: () => failing };

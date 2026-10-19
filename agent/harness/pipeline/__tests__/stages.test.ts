@@ -52,9 +52,48 @@ describe('extractMeta', () => {
     const sendMessage = vi.fn(async function* (): AsyncGenerator<HarnessEvent, void, unknown> {
       yield { type: 'error', message: 'overloaded', retryable: true };
     });
-    const r = await extractMeta({ sendMessage } as ProviderAdapter, 'text', 't');
-    expect(r).toEqual({ ok: false, failed: true, reason: 'extract provider failed: overloaded' });
+    const sleeps: number[] = [];
+    const r = await extractMeta({ sendMessage } as ProviderAdapter, 'text', 't', { sleep: async (ms) => { sleeps.push(ms); } });
+    expect(r).toEqual({ ok: false, failed: true, provider: true, reason: 'extract provider failed: overloaded' });
+    expect(sendMessage).toHaveBeenCalledTimes(4);
+    expect(sleeps).toHaveLength(3);
+  });
+
+  it('retries a non-retryable provider error once without sleeping', async () => {
+    const sendMessage = vi.fn(async function* (): AsyncGenerator<HarnessEvent, void, unknown> {
+      yield { type: 'error', message: 'bad', retryable: false };
+    });
+    const sleep = vi.fn(async () => undefined);
+    const r = await extractMeta({ sendMessage } as ProviderAdapter, 'text', 't', { sleep });
+    expect(r).toMatchObject({ ok: false, failed: true, provider: true });
     expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('honours Retry-After when sleeping between attempts', async () => {
+    let n = 0;
+    const adapter: ProviderAdapter = {
+      async *sendMessage(): AsyncGenerator<HarnessEvent, void, unknown> {
+        if (n++ === 0) { yield { type: 'error', message: '429', retryable: true, retryAfterMs: 777 }; return; }
+        yield { type: 'text', delta: '{"company":"Acme"}' };
+        yield { type: 'done', stopReason: 'end', message: { role: 'assistant', content: '' } };
+      },
+    };
+    const sleeps: number[] = [];
+    const r = await extractMeta(adapter, 'text', 't', { sleep: async (ms) => { sleeps.push(ms); } });
+    expect(r).toMatchObject({ ok: true });
+    expect(sleeps).toEqual([777]);
+  });
+
+  it('fails (not unreadable) when the reply is cut off at the token limit', async () => {
+    const adapter: ProviderAdapter = {
+      async *sendMessage(): AsyncGenerator<HarnessEvent, void, unknown> {
+        yield { type: 'text', delta: '{"role":"R","comp' };
+        yield { type: 'done', stopReason: 'length', message: { role: 'assistant', content: '' } };
+      },
+    };
+    const r = await extractMeta(adapter, 'text', 't', { sleep: async () => undefined });
+    expect(r).toEqual({ ok: false, failed: true, provider: false, reason: 'extract reply was cut off at the 1024-token limit' });
   });
 
   it('retries once: error then a good reply is ok', async () => {
@@ -67,12 +106,12 @@ describe('extractMeta', () => {
         yield { type: 'done', stopReason: 'end', message: { role: 'assistant', content: text } };
       },
     };
-    expect(await extractMeta(adapter, 'text', 't')).toMatchObject({ ok: true, meta: { company: 'Acme' } });
+    expect(await extractMeta(adapter, 'text', 't', { sleep: async () => undefined })).toMatchObject({ ok: true, meta: { company: 'Acme' } });
   });
 
   it('returns failed when the adapter throws', async () => {
     const adapter = { sendMessage: () => { throw new Error('socket'); } } as unknown as ProviderAdapter;
-    expect(await extractMeta(adapter, 'text', 't')).toEqual({ ok: false, failed: true, reason: 'extract provider failed: socket' });
+    expect(await extractMeta(adapter, 'text', 't', { sleep: async () => undefined })).toEqual({ ok: false, failed: true, provider: true, reason: 'extract provider failed: socket' });
   });
 });
 

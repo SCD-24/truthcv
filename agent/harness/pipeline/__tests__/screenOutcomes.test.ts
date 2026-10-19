@@ -19,7 +19,7 @@ function keyedAdapter(replies: Record<string, unknown>, fallback: unknown): Prov
 
 const erroring: ProviderAdapter = {
   async *sendMessage(): AsyncGenerator<HarnessEvent, void, unknown> {
-    yield { type: 'error', message: 'down', retryable: true };
+    yield { type: 'error', message: 'down', retryable: false };
   },
 };
 
@@ -34,6 +34,7 @@ const recordEcho = () => vi.fn(async (args: Record<string, unknown>) => ({
 
 function deps(over: Partial<ScreenStageDeps>): ScreenStageDeps {
   return {
+    sleep: async () => undefined,
     runId: 'r', criteria: { P: 'CRIT-P', Q: 'CRIT-Q' }, fetch: async () => ({ text: TEXT }),
     extractAdapter: extract, screeningAdapter: keyedAdapter({}, { verdict: 'passed' }), record: recordEcho(), ...over,
   };
@@ -90,6 +91,15 @@ describe('screenCandidates outcomes', () => {
     expect(res.systemicErrors).toHaveLength(1);
     expect(res.systemicErrors[0]).toContain('screening provider unavailable: 5 consecutive');
     expect(res.systemicErrors[0]).toContain('down');
+  });
+
+  it('does not count unparseable screening replies toward the outage threshold', async () => {
+    const garbage = keyedAdapter({}, 'not a verdict');
+    const cands = [1, 2, 3, 4, 5, 6, 7].map((n) => cand(n, ['P']));
+    const res = await screenCandidates(cands, deps({ screeningAdapter: garbage, concurrency: 1 }));
+    expect(res.systemicErrors).toEqual([]);
+    expect(res.outcomes).toHaveLength(7);
+    expect(res.outcomes.every((o) => o.outcome === 'failed')).toBe(true);
   });
 
   it('resets the failure count on a success', async () => {

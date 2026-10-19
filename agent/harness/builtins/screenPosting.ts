@@ -29,8 +29,16 @@ import type {
   ConversationMessage,
   ModelRequest,
   ProviderAdapter,
+  StopReason,
   ToolDefinition,
 } from '../providers/types.js';
+import {
+  PIPELINE_MAX_RETRY_DELAY_MS,
+  PROVIDER_RETRY_ATTEMPTS,
+  realSleep,
+  retryDelayMs,
+  type Sleep,
+} from '../providers/retry.js';
 
 /** Raw arguments as the model supplies them via the tool call. */
 export interface ScreenPostingArgs {
@@ -102,6 +110,9 @@ export interface ScreenPostingResult {
   content: string;
   /** True when the posting could not be screened at all. */
   isError: boolean;
+  /** True only when the final failure was a provider error or thrown adapter
+   * error — not a cut-off or unparseable reply. */
+  providerFailure?: boolean;
 }
 
 /**
@@ -161,8 +172,12 @@ export const screenPostingTool: ToolDefinition = {
   },
 };
 
-/** Cap on the screening subagent's reply — a compact verdict, never prose. */
-const SCREENING_MAX_TOKENS = 700;
+/** Cap on the screening subagent's reply. Generous: a reasoning model spends
+ * part of it before emitting the verdict JSON. */
+const SCREENING_MAX_TOKENS = 2000;
+
+/** Characters of an unparseable reply quoted in the failure message. */
+const REPLY_SAMPLE_CHARS = 200;
 
 /** The system prompt for the isolated screening conversation. Carries no
  * tool definitions and no history: this call answers ONE question, once. */
@@ -252,12 +267,23 @@ function missingFields(args: ScreenPostingArgs): string[] {
 async function collectScreeningReply(
   adapter: ProviderAdapter,
   request: ModelRequest,
-): Promise<{ text: string; error?: string }> {
+): Promise<ScreeningReply> {
   for await (const event of adapter.sendMessage(request)) {
-    if (event.type === 'error') return { text: '', error: event.message };
-    if (event.type === 'done') return { text: event.message.content };
+    if (event.type === 'error') {
+      return { text: '', error: event.message, retryable: event.retryable, retryAfterMs: event.retryAfterMs };
+    }
+    if (event.type === 'done') return { text: event.message.content, stopReason: event.stopReason };
   }
   return { text: '' };
+}
+
+/** One drained screening reply. */
+interface ScreeningReply {
+  text: string;
+  error?: string;
+  retryable?: boolean;
+  retryAfterMs?: number;
+  stopReason?: StopReason;
 }
 
 /** Whether `value` is one of the given known values. */
@@ -355,43 +381,95 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** The provider call is attempted this many times before giving up — one
- * original attempt plus one retry — when it errors or returns an
- * unparseable verdict; a transient provider hiccup or a malformed reply
- * shouldn't cost the whole screening on its own. */
+/** Immediate attempts for a non-retryable error, a cut-off reply or an
+ * unparseable reply: one original attempt plus one retry. */
 const SCREENING_ATTEMPTS = 2;
+
+/** Options for {@link screenPosting}. */
+export interface ScreenPostingOptions {
+  /** Injectable sleep between retryable provider attempts. */
+  sleep?: Sleep;
+}
+
+/** One screening attempt's outcome. */
+interface ScreeningAttempt {
+  verdict?: ScreeningVerdict;
+  errorContent?: string;
+  /** The failure was a provider error or throw (not a bad reply). */
+  provider?: boolean;
+  /** The failure is worth retrying after a delay. */
+  retryable?: boolean;
+  retryAfterMs?: number;
+}
+
+/** The failure for a reply that parsed to nothing usable, with a sample of it. */
+function unparseableMessage(text: string): string {
+  const sample = text.replace(/\s+/g, ' ').trim().slice(0, REPLY_SAMPLE_CHARS);
+  const prefix = 'screen_posting: the screening model did not return a valid verdict';
+  return sample ? `${prefix} (reply: "${sample}")` : `${prefix} (empty reply)`;
+}
+
+/** Judge a drained reply: a verdict, a provider error, a truncation or a parse failure. */
+function judgeReply(reply: ScreeningReply): ScreeningAttempt {
+  if (reply.error) {
+    return {
+      errorContent: `screen_posting provider error: ${reply.error}`,
+      provider: true,
+      retryable: reply.retryable === true,
+      retryAfterMs: reply.retryAfterMs,
+    };
+  }
+  if (reply.stopReason === 'length') {
+    return { errorContent: `screen_posting: the screening reply was cut off at the ${SCREENING_MAX_TOKENS}-token limit` };
+  }
+  const verdict = parseVerdict(reply.text);
+  return verdict ? { verdict } : { errorContent: unparseableMessage(reply.text) };
+}
+
+/** One provider call, turning a thrown adapter error into a retryable failure. */
+async function attemptScreening(adapter: ProviderAdapter, request: ModelRequest): Promise<ScreeningAttempt> {
+  try {
+    return judgeReply(await collectScreeningReply(adapter, request));
+  } catch (err) {
+    return { errorContent: `screen_posting provider call failed: ${errorMessage(err)}`, provider: true, retryable: true };
+  }
+}
+
+/** The isolated, tool-less screening request for one posting. */
+function buildScreeningRequest(args: ScreenPostingArgs): ModelRequest {
+  return {
+    systemPrompt: SCREENING_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: buildScreeningPrompt(args) } as ConversationMessage],
+    tools: [],
+    maxTokens: SCREENING_MAX_TOKENS,
+  };
+}
 
 /**
  * Run the isolated screening request, returning a verdict or an error
- * message. Retries the provider call ONCE — on a thrown error, an `error`
- * event, or a reply that fails to parse as a valid verdict — before giving
- * up; only the SECOND failure's message is returned.
+ * message. Retryable provider failures are retried up to
+ * PROVIDER_RETRY_ATTEMPTS times with backoff (or the provider's Retry-After);
+ * every other failure is retried once, immediately.
  */
 async function runScreening(
   adapter: ProviderAdapter,
   request: ModelRequest,
-): Promise<{ verdict?: ScreeningVerdict; errorContent?: string }> {
-  let last: { verdict?: ScreeningVerdict; errorContent?: string } = {};
-  for (let attempt = 0; attempt < SCREENING_ATTEMPTS; attempt++) {
-    let reply: { text: string; error?: string };
-    try {
-      reply = await collectScreeningReply(adapter, request);
-    } catch (err) {
-      last = { errorContent: `screen_posting provider call failed: ${errorMessage(err)}` };
+  sleep: Sleep,
+): Promise<ScreeningAttempt> {
+  let immediate = 0;
+  let delayed = 0;
+  for (;;) {
+    const result = await attemptScreening(adapter, request);
+    if (result.verdict) return result;
+    if (!result.retryable) {
+      immediate += 1;
+      if (immediate >= SCREENING_ATTEMPTS) return result;
       continue;
     }
-    if (reply.error) {
-      last = { errorContent: `screen_posting provider error: ${reply.error}` };
-      continue;
-    }
-    const verdict = parseVerdict(reply.text);
-    if (!verdict) {
-      last = { errorContent: 'screen_posting: the screening model did not return a valid verdict' };
-      continue;
-    }
-    return { verdict };
+    delayed += 1;
+    if (delayed >= PROVIDER_RETRY_ATTEMPTS) return result;
+    await sleep(retryDelayMs(delayed - 1, result.retryAfterMs, PIPELINE_MAX_RETRY_DELAY_MS));
   }
-  return last;
 }
 
 /**
@@ -437,21 +515,21 @@ function toRecordScreeningFields(verdict: ScreeningVerdict): Record<string, stri
 export async function screenPosting(
   rawArgs: Record<string, unknown>,
   adapter: ProviderAdapter,
+  opts: ScreenPostingOptions = {},
 ): Promise<ScreenPostingResult> {
   const args = coerceArgs(rawArgs);
   const missing = missingFields(args);
   if (missing.length > 0) {
     return { content: `screen_posting requires: ${missing.join(', ')}`, isError: true };
   }
-  const request: ModelRequest = {
-    systemPrompt: SCREENING_SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: buildScreeningPrompt(args) } as ConversationMessage],
-    tools: [],
-    maxTokens: SCREENING_MAX_TOKENS,
-  };
-  const { verdict, errorContent } = await runScreening(adapter, request);
+  const request = buildScreeningRequest(args);
+  const { verdict, errorContent, provider } = await runScreening(adapter, request, opts.sleep ?? realSleep);
   if (errorContent || !verdict) {
-    return { content: errorContent ?? 'screen_posting: the screening model did not return a valid verdict', isError: true };
+    return {
+      content: errorContent ?? unparseableMessage(''),
+      isError: true,
+      providerFailure: provider === true,
+    };
   }
   return { content: JSON.stringify(toRecordScreeningFields(verdict)), isError: false };
 }
