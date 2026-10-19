@@ -15,7 +15,8 @@ import { readFile, rename, writeFile } from 'node:fs/promises';
 import { ExitCode, parseArgs, redactAll, resolveConfig, validateConfig, type CliConfig } from '../cli.js';
 import { loadMcpConfig, type McpServerConfig } from '../mcp/config.js';
 import { createMcpClientPool, type McpClientPool } from '../mcp/client.js';
-import { createProviderAdapter, type ProviderAdapterOptions } from '../providers/registry.js';
+import type { ProviderAdapterOptions } from '../providers/registry.js';
+import { createRefreshingAdapterFactory } from '../providers/authRefresh.js';
 import type { ProviderAdapter } from '../providers/types.js';
 import type { BrowserToolCall } from '../builtins/harvestTypes.js';
 import { STAGE_REGISTRY, type StageName } from '../stages.js';
@@ -63,11 +64,11 @@ export function parsePipelineArgs(argv: string[]): PipelineArgs {
   return { command, flags: parsed.flags, positional: parsed.positional };
 }
 
-function withDefaults(d: PipelineDeps): Resolved {
+function withDefaults(d: PipelineDeps, env: NodeJS.ProcessEnv, onNewToken?: (token: string) => void): Resolved {
   return {
     createPool: d.createPool ?? ((servers) => createMcpClientPool(servers)),
     loadConfig: d.loadConfig ?? loadMcpConfig,
-    createAdapter: d.createAdapter ?? createProviderAdapter,
+    createAdapter: d.createAdapter ?? createRefreshingAdapterFactory(env, onNewToken),
     readFileText: d.readFileText ?? ((p) => readFile(p, 'utf8')),
     writeOutput: d.writeOutput ?? ((p, t) => writeFile(p, t, 'utf8')),
     renameFile: d.renameFile ?? ((a, b) => rename(a, b)),
@@ -161,15 +162,21 @@ function tokensOf(config: CliConfig): string[] {
   return [...new Set([config.token, config.screeningToken, ...t])].filter(Boolean);
 }
 
+/** Redactor over every secret known so far: configured stage tokens plus tokens issued by a refresh (read live). */
+export function makeRedactor(config: CliConfig, refreshed: readonly string[]): (text: string) => string {
+  return (text) => redactAll(text, [...tokensOf(config), ...refreshed]);
+}
+
 /** Log a discovery crash (redacted) and stand in an incomplete outcome so screening still finishes. */
-function discoveryFailed(err: unknown, d: Resolved, config: CliConfig, accepted: Candidate[]): DiscoveryOutcome {
-  const message = redactAll(err instanceof Error ? err.message : String(err), tokensOf(config));
+function discoveryFailed(err: unknown, d: Resolved, redact: (t: string) => string, accepted: Candidate[]): DiscoveryOutcome {
+  const message = redact(err instanceof Error ? err.message : String(err));
   d.stderr(JSON.stringify({ event: 'discover-failed', error: message }));
   return { candidates: accepted, allCandidates: accepted, dropped: [], coverageComplete: false, errors: [`discovery failed: ${message}`] };
 }
 
 /** `discover-screen`: discovery, fetch, extract and screening. */
-async function cmdDiscoverScreen(a: PipelineArgs, env: NodeJS.ProcessEnv, pool: McpClientPool, d: Resolved, config: CliConfig): Promise<number> {
+async function cmdDiscoverScreen(a: PipelineArgs, env: NodeJS.ProcessEnv, pool: McpClientPool, d: Resolved, config: CliConfig, refreshed: readonly string[]): Promise<number> {
+  const redact = makeRedactor(config, refreshed);
   const { 'run-id': runId, 'job-config': jobPath, criteria: critPath, out } = a.flags;
   if (!runId || !jobPath || !critPath || !out) {
     return fail(d, 'discover-screen requires --run-id, --job-config, --criteria and --out', ExitCode.BadConfig);
@@ -187,7 +194,7 @@ async function cmdDiscoverScreen(a: PipelineArgs, env: NodeJS.ProcessEnv, pool: 
   const discovering = discover(jobConfig, runId, browser, mcp, {
     browserLock: lock, onCandidates: intake.push, dorkState,
     saveDorkState: stateFile ? (s) => saveDorkState(stateFile, s, fs) : undefined,
-  }).catch((err) => discoveryFailed(err, d, config, intake.accepted)).finally(() => queue.close());
+  }).catch((err) => discoveryFailed(err, d, redact, intake.accepted)).finally(() => queue.close());
   const screening = screenCandidates(queue, {
     runId, criteria, fetch: (url) => lock(() => fetchPosting(browser, url)),
     extractAdapter: stageAdapter(config, 'extract', d),
@@ -197,10 +204,10 @@ async function cmdDiscoverScreen(a: PipelineArgs, env: NodeJS.ProcessEnv, pool: 
   const [found, screened] = await Promise.all([discovering, screening]);
   found.errors.push(...(await recordFunnel(mcp, runId, buildFunnel(found.allCandidates, intake.dropped, screened.outcomes))));
   // Systemic errors go first so a truncated stopped_reason still names the outage.
-  found.errors.unshift(...screened.systemicErrors.map((e) => redactAll(e, tokensOf(config))));
+  found.errors.unshift(...screened.systemicErrors.map(redact));
   const ok = found.coverageComplete && found.errors.length === 0;
   await d.writeOutput(out, JSON.stringify({
-    ok, coverageComplete: found.coverageComplete, errors: found.errors, itemErrors: screened.errors.map((e) => redactAll(e, tokensOf(config))),
+    ok, coverageComplete: found.coverageComplete, errors: found.errors, itemErrors: screened.errors.map(redact),
     blockers: screened.blockers, passes: screened.passes,
   }));
   d.stderr(JSON.stringify({ event: 'discover-screen', ok, itemErrors: screened.errors.length, errors: found.errors.length }));
@@ -287,7 +294,8 @@ function fail(d: Resolved, message: string, code: number): number {
  * @param deps Injectable dependencies for tests.
  */
 export async function runPipelineCli(argv: string[], env: NodeJS.ProcessEnv, deps: PipelineDeps = {}): Promise<number> {
-  const d = withDefaults(deps);
+  const refreshed: string[] = [];
+  const d = withDefaults(deps, env, (fresh) => void refreshed.push(fresh));
   const a = parsePipelineArgs(argv);
   if (a.command === 'stage-prompt') return cmdStagePrompt(a, d);
   if (!['start', 'discover-screen', 'finish'].includes(a.command)) {
@@ -298,16 +306,16 @@ export async function runPipelineCli(argv: string[], env: NodeJS.ProcessEnv, dep
     const loaded = await loadConfig(a, env, d).catch((e: unknown) => String(e));
     if (typeof loaded === 'string') return fail(d, `configuration error: ${loaded}`, ExitCode.BadConfig);
     config = loaded;
-    const tokens = tokensOf(config);
+    const redact = makeRedactor(config, refreshed);
     const raw = d.stderr;
-    d.stderr = (line) => raw(redactAll(line, tokens));
+    d.stderr = (line) => raw(redact(line));
   }
   const pool = await connect(a, env, d);
   if (!pool) return fail(d, 'mcp connection failure: no tools available from any configured MCP server', ExitCode.McpFailure);
   try {
     if (a.command === 'start') return await cmdStart(a, mcpCaller(pool), d);
     if (a.command === 'finish') return await cmdFinish(a, mcpCaller(pool), d, env);
-    return await cmdDiscoverScreen(a, env, pool, d, config!);
+    return await cmdDiscoverScreen(a, env, pool, d, config!, refreshed);
   } catch (err) {
     return fail(d, `${a.command} failed: ${err instanceof Error ? err.message : String(err)}`, ExitCode.ProviderError);
   }

@@ -148,6 +148,13 @@ connection can be either `oauth` or `api_key`, so the two are kept apart: an
 OAuth Claude credential sent as an api key is **rejected** by the provider, so
 the auth type must match the credential's kind.
 
+**401 refresh.** For `oauth` claude/codex credentials, if a request's first event
+is a 401 the harness asks the app (`POST /api/agent/llm-token/refresh`, using
+`AGENT_API_TOKEN` and `TRUTHCV_MCP_URL`) for a fresh token, rebuilds the adapter
+and retries that request once. If the refresh fails, or the retry is again a
+401, the run reports a non-retryable "reconnect the subscription in Settings
+(Model routing → Accounts)" error. The new token is redacted from all output.
+
 **Environment variables.** The harness reads these (each has an equivalent CLI
 flag that takes precedence; `daily-apply.sh` passes the flags explicitly).
 `daily-apply.sh` sets the `AGENT_LLM_*` variables from the app's credentials; set them by hand only when running the harness CLI directly.

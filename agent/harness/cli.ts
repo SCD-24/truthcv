@@ -61,8 +61,8 @@ import { createDiagnostics, createDiagnosticsHealth, SAFE_RUN_ID, type Diagnosti
 
 import { createMcpClientPool, type McpClientPool } from './mcp/client.js';
 import { loadMcpConfig, type McpServerConfig } from './mcp/config.js';
+import { createRefreshingAdapterFactory } from './providers/authRefresh.js';
 import {
-  createProviderAdapter,
   type Provider,
   type ProviderAdapterOptions,
   type Wire,
@@ -228,7 +228,7 @@ export interface CliConfig {
  * touched.
  */
 export interface CliDeps {
-  /** Build the provider adapter. Defaults to {@link createProviderAdapter}. */
+  /** Build the provider adapter. Defaults to a 401-refreshing wrapper around the registry factory. */
   createAdapter?: (opts: ProviderAdapterOptions) => ProviderAdapter;
   /** Build and connect the MCP pool. Defaults to {@link createMcpClientPool}. */
   createPool?: (servers: McpServerConfig[]) => Promise<McpClientPool>;
@@ -684,7 +684,10 @@ export function finalAssistantText(messages: ConversationMessage[]): string {
  * @returns The process exit code (see {@link ExitCode}).
  */
 export async function runCli(argv: string[], env: NodeJS.ProcessEnv, deps: CliDeps = {}): Promise<number> {
-  const d = withDefaults(deps);
+  // Shared with buildEmitter/redactAll: refreshed tokens are pushed in mid-run
+  // so they are redacted from all output like the configured ones.
+  const tokens: string[] = [];
+  const d = withDefaults(deps, env, (fresh) => void tokens.push(fresh));
   const parsed = parseArgs(argv);
   const token = tokenFrom(parsed.flags, env);
   // Only the main token is known this early — config (and its screeningToken)
@@ -705,7 +708,7 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv, deps: CliDe
   // From here on both credentials are known, so every write is redacted
   // against the main AND the screening token — see {@link redactAll}.
   const routeTokens = Object.values(config.stageRoutes ?? {}).map((r) => r.token);
-  const tokens = [...new Set([token, config.token, config.screeningToken, ...routeTokens])].filter(Boolean);
+  tokens.push(...[...new Set([token, config.token, config.screeningToken, ...routeTokens])].filter(Boolean));
   return runOnce(config, env, d, buildEmitter(d, tokens), tokens);
 }
 
@@ -1225,10 +1228,14 @@ function tokenFrom(flags: Record<string, string>, env: NodeJS.ProcessEnv): strin
 }
 
 /** Fill in every unset dependency with its real default implementation. */
-function withDefaults(deps: CliDeps): ResolvedDeps {
+function withDefaults(
+  deps: CliDeps,
+  env: NodeJS.ProcessEnv = process.env,
+  onNewToken?: (token: string) => void,
+): ResolvedDeps {
   return {
     healthWriter: deps.healthWriter,
-    createAdapter: deps.createAdapter ?? createProviderAdapter,
+    createAdapter: deps.createAdapter ?? createRefreshingAdapterFactory(env, onNewToken),
     createPool: deps.createPool ?? ((servers) => createMcpClientPool(servers)),
     loadConfig: deps.loadConfig ?? loadMcpConfig,
     stdout: deps.stdout ?? ((line) => void process.stdout.write(`${line}\n`)),

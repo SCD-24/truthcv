@@ -105,14 +105,26 @@ def complete_login(code_state: str) -> dict:
     return {"connectedAt": record["connectedAt"], "expiresAt": record["expiresAt"], "scope": record["scope"]}
 
 
-def get_valid_access_token() -> str:
+def get_valid_access_token(rejected_sha256: str | None = None) -> str:
+    """Return a valid claude access token, refreshing if near expiry.
+
+    rejected_sha256: sha256 hexdigest of an access token the upstream rejected.
+    If the stored token differs, it is returned without refreshing; if it
+    matches, a refresh is forced even when the token looks fresh.
+    """
     from secretstore import get_connection
 
     with _refresh_lock:
         record = get_connection("claude").get("oauth")
         if not record or not record.get("accessToken"):
             raise AuthError("Claude subscription is not connected.")
-        if record.get("expiresAt", 0) - time.time() > _EXPIRY_SKEW_S:
+        force = False
+        if rejected_sha256 is not None:
+            current = hashlib.sha256(record["accessToken"].encode()).hexdigest()
+            if rejected_sha256 != current:
+                return record["accessToken"]
+            force = True
+        if not force and record.get("expiresAt", 0) - time.time() > _EXPIRY_SKEW_S:
             return record["accessToken"]
         try:
             resp = httpx.post(TOKEN_URL, json={

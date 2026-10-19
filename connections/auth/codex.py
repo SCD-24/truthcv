@@ -8,6 +8,7 @@ persisted, never sent to the client.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json as _json
 import threading
 import time
@@ -195,8 +196,14 @@ def poll_login() -> dict:
     raise AuthError(f"Device auth error: {error_code}")
 
 
-def get_valid_access_token() -> str:
-    """Return a valid codex access token, refreshing if within 300 s of expiry."""
+def get_valid_access_token(rejected_sha256: str | None = None) -> str:
+    """Return a valid codex access token, refreshing if within 300 s of expiry.
+
+    rejected_sha256: sha256 hexdigest of an access token the upstream rejected.
+    If the stored token differs, another caller already rotated it and the
+    stored token is returned without refreshing. If it matches, a refresh is
+    forced even when the token looks fresh.
+    """
     from secretstore import get_connection
 
     with _refresh_lock:
@@ -204,7 +211,14 @@ def get_valid_access_token() -> str:
         if not record or not record.get("accessToken"):
             raise AuthError("ChatGPT subscription is not connected.")
 
-        if record.get("expiresAt", 0) - time.time() > _EXPIRY_SKEW_S:
+        force = False
+        if rejected_sha256 is not None:
+            current = hashlib.sha256(record["accessToken"].encode()).hexdigest()
+            if rejected_sha256 != current:
+                return record["accessToken"]
+            force = True
+
+        if not force and record.get("expiresAt", 0) - time.time() > _EXPIRY_SKEW_S:
             return record["accessToken"]
 
         try:

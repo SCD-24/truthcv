@@ -86,6 +86,46 @@ def test_get_valid_token_fresh_skips_refresh(enc):
     assert claude.get_valid_access_token() == "still-good"
 
 
+def _sha(t):
+    import hashlib
+    return hashlib.sha256(t.encode()).hexdigest()
+
+
+def _fresh():
+    return {"oauth": {
+        "accessToken": "cur", "refreshToken": "rt",
+        "expiresAt": time.time() + 3600, "scope": "", "connectedAt": 0,
+    }, "authMode": "subscription"}
+
+
+@respx.mock
+def test_rejected_sha_match_forces_refresh(enc):
+    secretstore.set_connection("claude", _fresh())
+    route = respx.post(claude.TOKEN_URL).mock(
+        return_value=Response(200, json={"access_token": "at-new", "expires_in": 3600})
+    )
+    assert claude.get_valid_access_token(_sha("cur")) == "at-new"
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_rejected_sha_mismatch_returns_stored_without_http(enc):
+    secretstore.set_connection("claude", _fresh())
+    route = respx.post(claude.TOKEN_URL).mock(return_value=Response(500))
+    assert claude.get_valid_access_token(_sha("other")) == "cur"
+    assert route.call_count == 0
+
+
+@respx.mock
+def test_rejected_sha_match_refresh_failure_keeps_credentials(enc):
+    existing = _fresh()
+    secretstore.set_connection("claude", existing)
+    respx.post(claude.TOKEN_URL).mock(return_value=Response(400))
+    with pytest.raises(claude.AuthError):
+        claude.get_valid_access_token(_sha("cur"))
+    assert secretstore.get_connection("claude") == existing
+
+
 def test_get_valid_token_disconnected_raises(enc):
     with pytest.raises(claude.AuthError):
         claude.get_valid_access_token()

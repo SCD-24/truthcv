@@ -1356,6 +1356,27 @@ class AgentLlmCredentials(_Camel):
     wire: str = ""
 
 
+class AgentLlmTokenRefresh(_Camel):
+    """POST /api/agent/llm-token/refresh body: the token the caller saw rejected."""
+
+    provider: Literal["claude", "codex"]
+    rejected_token_sha256: str
+
+    @field_validator("rejected_token_sha256")
+    @classmethod
+    def _sha_hex(cls, v: str) -> str:
+        v = v.lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", v):
+            raise ValueError("must be 64 hex characters")
+        return v
+
+
+class AgentLlmTokenResult(_Camel):
+    """POST /api/agent/llm-token/refresh response. Never logged."""
+
+    token: str
+
+
 class AgentStatus(_Camel):
     """GET /api/agent/status — forwarded from the supervisor.js control server."""
 
