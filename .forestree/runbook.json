@@ -6,6 +6,18 @@
       "name": "Pull images",
       "command": "docker compose pull",
       "enabled": true
+    },
+    {
+      "id": "agent-install",
+      "name": "Agent install",
+      "command": "cd agent && npm ci",
+      "enabled": true
+    },
+    {
+      "id": "web-install",
+      "name": "Web install",
+      "command": "cd web && npm ci",
+      "enabled": true
     }
   ],
   "run": [
