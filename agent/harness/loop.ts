@@ -20,6 +20,7 @@ import type {
   ToolCall,
   ToolResult,
 } from './providers/types.js';
+import { backoffDelay } from './providers/retry.js';
 import type { McpClientPool } from './mcp/client.js';
 import type { DiagnosticBoundary, DiagnosticPhase } from './diagnostics.js';
 import {
@@ -86,9 +87,6 @@ const DEFAULT_MAX_EMPTY_TURNS = 3;
  * shared, so this is concurrency headroom, not a target to max out.
  */
 export const DEFAULT_TOOL_CONCURRENCY = 4;
-
-/** Base unit for exponential backoff and its jitter, in milliseconds. */
-const BASE_RETRY_DELAY_MS = 1_000;
 
 /** Cap on generated tokens for the proactive-compaction summarizer request. */
 const SUMMARY_MAX_TOKENS = 500;
@@ -464,17 +462,7 @@ export function isRetryable(cls: ErrorClass): boolean {
   return cls === 'rate-limit' || cls === 'timeout' || cls === 'service-unavailable';
 }
 
-/**
- * Exponential backoff with jitter, capped at `maxRetryDelayMs`.
- *
- * The cap matters: a provider effectively saying "retry in four hours" must
- * fail fast against the cap instead of parking the run for hours.
- */
-export function backoffDelay(attempt: number, maxRetryDelayMs: number): number {
-  const base = BASE_RETRY_DELAY_MS * 2 ** attempt;
-  const jitter = Math.random() * BASE_RETRY_DELAY_MS;
-  return Math.min(base + jitter, maxRetryDelayMs);
-}
+export { backoffDelay };
 
 /** Own operation IDs locally; never pass provider strings through telemetry. */
 class DiagnosticTimer {

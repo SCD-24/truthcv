@@ -7,6 +7,7 @@
 import { persistEvidence, type RecordScreeningCall } from '../builtins/screenAndRecordPosting.js';
 import { screenPosting } from '../builtins/screenPosting.js';
 import type { ProviderAdapter } from '../providers/types.js';
+import type { Sleep } from '../providers/retry.js';
 import { extractMeta } from './extractMeta.js';
 import type { FetchedPosting } from './fetchPosting.js';
 import type { Candidate } from './types.js';
@@ -43,6 +44,8 @@ export interface ScreenStageDeps {
   screeningAdapter: ProviderAdapter;
   record: RecordScreeningCall;
   concurrency?: number;
+  /** Retry-backoff sleep for the extract and screening calls; defaults to a real timer. */
+  sleep?: Sleep;
 }
 
 /** Stage outcome. */
@@ -150,8 +153,8 @@ async function screenProfile(d: ScreenStageDeps, c: Candidate, text: string, met
     run_id: d.runId, source: c.channel,
   };
   if (meta.posted_date) args.posted_date = meta.posted_date;
-  const screened = await screenPosting(args, d.screeningAdapter);
-  if (screened.isError) noteProviderFailure(h, screened.content);
+  const screened = await screenPosting(args, d.screeningAdapter, { sleep: d.sleep });
+  if (screened.isError && screened.providerFailure) noteProviderFailure(h, screened.content);
   else h.consecutive = 0;
   const evidence = parseEvidence(screened);
   if (typeof evidence === 'string') return failedProfile(res, `${c.url} [${profile}]: ${evidence}`);
@@ -189,9 +192,10 @@ async function processCandidate(d: ScreenStageDeps, fetchOne: ScreenStageDeps['f
     return;
   }
   if (fetched.unreadable) return recordBlocker(d, c, fetched.blocker, fetched.reason, res);
-  const meta = await extractMeta(d.extractAdapter, fetched.text, c.title);
+  const meta = await extractMeta(d.extractAdapter, fetched.text, c.title, { sleep: d.sleep });
   if (!meta.ok && 'failed' in meta) {
-    noteProviderFailure(h, meta.reason);
+    if (meta.provider) noteProviderFailure(h, meta.reason);
+    else h.consecutive = 0;
     failOutcome(res, c, `${c.url}: ${meta.reason}`);
     return;
   }

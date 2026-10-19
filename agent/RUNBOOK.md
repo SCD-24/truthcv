@@ -883,9 +883,11 @@ in themselves. An `unreadable` posting is not put to the operator and is
 re-screened on a later run. `unreadable` means the page loaded but had no
 usable posting text or no identifiable employer; a model provider failure
 during extract/screening is never recorded as `unreadable` — it is an item
-error (no screening recorded, retried next run), and repeated consecutive
-provider failures fail the run with a `screening provider unavailable`
-stopped_reason. `not_found` and `expired` do not queue either:
+error (no screening recorded, retried next run). Rate-limited and other
+retryable calls are retried with backoff first; only provider errors count
+toward the outage threshold (not unparseable or cut-off replies, which are
+item errors), and repeated consecutive provider failures fail the run with a
+`screening provider unavailable` stopped_reason. `not_found` and `expired` do not queue either:
 there is nothing the operator can decide about, or draft from, a posting that
 no longer exists.
 
