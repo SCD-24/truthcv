@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ExitCode, resolveConfig, parseArgs } from '../../cli.js';
-import { parsePipelineArgs, runPipelineCli } from '../pipelineCli.js';
+import { makeRedactor, parsePipelineArgs, runPipelineCli } from '../pipelineCli.js';
 import type { McpClientPool } from '../../mcp/client.js';
 
 /** A fake pool exposing truthcv tools; records calls. */
@@ -128,6 +128,18 @@ describe('pipelineCli', () => {
     const empty = { listTools: () => [] } as unknown as McpClientPool;
     expect(await runPipelineCli(['finish', '--run-id', 'r'], {}, deps(empty).d)).toBe(ExitCode.McpFailure);
     expect(await runPipelineCli(['bogus'], {}, deps(empty).d)).toBe(ExitCode.BadConfig);
+  });
+});
+
+describe('makeRedactor', () => {
+  it('redacts configured and later-refreshed tokens', () => {
+    const refreshed: string[] = [];
+    const config = { token: 'cfg-token', screeningToken: '', stageRoutes: {} } as unknown as Parameters<typeof makeRedactor>[0];
+    const redact = makeRedactor(config, refreshed);
+    refreshed.push('fresh-token');
+    const out = redact('a cfg-token b fresh-token c');
+    expect(out).not.toContain('cfg-token');
+    expect(out).not.toContain('fresh-token');
   });
 });
 

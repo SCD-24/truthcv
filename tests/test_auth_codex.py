@@ -283,6 +283,50 @@ def test_failed_refresh_preserves_stored_credentials(enc, monkeypatch):
     assert (enc / "secrets.enc").read_bytes() == encrypted
 
 
+def _sha(t):
+    import hashlib
+    return hashlib.sha256(t.encode()).hexdigest()
+
+
+def _fresh(token="cur"):
+    return {"oauth": {
+        "accessToken": token, "refreshToken": "rt",
+        "expiresAt": time.time() + 3600, "scope": "", "connectedAt": 0,
+    }, "authMode": "subscription"}
+
+
+def test_rejected_sha_match_forces_refresh(enc, monkeypatch):
+    secretstore.set_connection("codex", _fresh())
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return Response(200, json={"access_token": "new-at", "expires_in": 3600})
+
+    _use_transport(monkeypatch, handler)
+    assert codex.get_valid_access_token(_sha("cur")) == "new-at"
+    assert len(calls) == 1
+
+
+def test_rejected_sha_mismatch_returns_stored_without_http(enc, monkeypatch):
+    secretstore.set_connection("codex", _fresh())
+
+    def handler(request):
+        raise AssertionError("no HTTP expected")
+
+    _use_transport(monkeypatch, handler)
+    assert codex.get_valid_access_token(_sha("other")) == "cur"
+
+
+def test_rejected_sha_match_refresh_failure_keeps_credentials(enc, monkeypatch):
+    existing = _fresh()
+    secretstore.set_connection("codex", existing)
+    _use_transport(monkeypatch, lambda r: Response(400, json={"error": "invalid_grant"}))
+    with pytest.raises(codex.AuthError, match="ChatGPT token refresh failed"):
+        codex.get_valid_access_token(_sha("cur"))
+    assert secretstore.get_connection("codex") == existing
+
+
 def test_account_id_decodes_jwt_payload():
     token = _jwt("acct-test-1")
     assert codex.account_id(token) == "acct-test-1"

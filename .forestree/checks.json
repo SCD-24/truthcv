@@ -2,6 +2,14 @@
   "version": 2,
   "checks": [
     {
+      "id": "agent-vitest",
+      "name": "Agent tests (vitest)",
+      "kind": "test",
+      "command": "agent/node_modules/.bin/vitest run --root agent",
+      "enabled": true,
+      "scope": "repo"
+    },
+    {
       "id": "pytest",
       "name": "Python tests (pytest)",
       "kind": "test",

@@ -96,6 +96,8 @@ from .schemas import (
     AgentCancelResult,
     AgentConfigUpdate,
     AgentLlmCredentials,
+    AgentLlmTokenRefresh,
+    AgentLlmTokenResult,
     AgentRunAccountingResult,
     AgentRunFinish,
     AgentRunResult,
@@ -1773,6 +1775,38 @@ def _credentials_for_route(route: modelrouting.Route | None) -> AgentLlmCredenti
     if resolve is None:
         raise HTTPException(status_code=404)
     return resolve(model)
+
+
+_REFRESH_PROVIDERS = {
+    "claude": (
+        lambda **kw: get_valid_access_token(**kw), AuthError, "Claude subscription needs reconnecting."),
+    "codex": (
+        lambda **kw: codex_auth.get_valid_access_token(**kw),
+        codex_auth.AuthError,
+        "ChatGPT subscription needs reconnecting.",
+    ),
+}
+
+
+@router.post("/agent/llm-token/refresh", response_model=AgentLlmTokenResult)
+def post_agent_llm_token_refresh(
+    body: AgentLlmTokenRefresh, x_agent_token: str = Header(default="")
+) -> AgentLlmTokenResult:
+    """Guarded (404 without AGENT_API_TOKEN): force a fresh subscription token
+    after the caller saw `rejectedTokenSha256` rejected. 404 when the card has
+    no oauth token or is in apikey mode; 503 when reconnecting is needed.
+    The token is response-only and never logged."""
+    if not _agent_token_ok(x_agent_token):
+        raise HTTPException(status_code=404)
+    conn = secretstore.get_connection(body.provider)
+    if not (conn.get("oauth") or {}).get("accessToken") or conn.get("authMode") == "apikey":
+        raise HTTPException(status_code=404)
+    fetch, auth_error, detail = _REFRESH_PROVIDERS[body.provider]
+    try:
+        token = fetch(rejected_sha256=body.rejected_token_sha256)
+    except auth_error:
+        raise HTTPException(status_code=503, detail=detail) from None
+    return AgentLlmTokenResult(token=token)
 
 
 @router.get("/agent/llm-routes")
