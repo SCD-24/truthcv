@@ -84,6 +84,7 @@ services:
       context: .
       dockerfile: browser/Dockerfile
     restart: unless-stopped
+    init: true
     # Docker's 64MB default /dev/shm is what kills Chromium's renderer mid-page
     # (silently, leaving the last painted frame on screen). Companion to
     # --disable-dev-shm-usage in browser/session-server.js — belt and braces,
