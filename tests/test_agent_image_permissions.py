@@ -43,3 +43,22 @@ def test_build_outputs_are_chowned_to_node_after_the_npm_build():
         "'other' permissions"
     )
     assert chown < line_of(r"^USER node")
+
+
+def test_node_base_image_is_pinned_to_a_patched_22_release():
+    """Every node base must be an exact 22.x.y at or above 22.23.4.
+
+    A floating tag such as node:22-bookworm-slim does not name a patch
+    release, so it cannot prove the bundled Brotli/zlib fix (CVE-2026-111497)
+    is present.
+    """
+    minimum = (22, 23, 4)
+    tags = re.findall(r"^FROM node:(\S+)", DOCKERFILE, re.MULTILINE)
+    assert tags, "agent/Dockerfile has no FROM node:<tag> line"
+    for tag in tags:
+        m = re.match(r"(\d+)\.(\d+)\.(\d+)-", tag)
+        assert m, f"node base {tag!r} does not pin an exact major.minor.patch"
+        version = (int(m[1]), int(m[2]), int(m[3]))
+        assert version[0] == 22 and version >= minimum, (
+            f"node base {tag!r} is older than 22.23.4 or not a 22.x.y release"
+        )
