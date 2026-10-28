@@ -16,6 +16,8 @@ FLOORS = {
     "mcp": (2, 3, 0),
     "certifi": (2026, 10, 23),
     "opentelemetry-api": (1, 45, 1),
+    "pillow": (13, 0, 0),
+    "weasyprint": (70, 0),
 }
 
 
