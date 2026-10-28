@@ -1,5 +1,5 @@
 # --- Stage 1: build the React/Vite frontend ---
-FROM node:20-slim AS web
+FROM node:22.23.4-slim AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json* ./
 RUN npm install
