@@ -17,6 +17,7 @@ DOCKERFILE = REPO_ROOT / "Dockerfile"
 REQUIREMENTS = REPO_ROOT / "requirements.txt"
 BROTLI_MIN_VERSION = (1, 2, 1)
 NODE_MIN_VERSION = (22, 23, 4)
+PIP_TOOLING_PINS = {"setuptools": "84.2.1", "wheel": "0.48.0"}
 
 EXTRA_LOCAL_MODULES: set[str] = set()
 
@@ -38,6 +39,16 @@ def _app_stage_text() -> str:
         if stage.lstrip().startswith("python") and " AS app" in stage.splitlines()[0]:
             return stage
     raise AssertionError("Could not find 'FROM python:... AS app' stage in Dockerfile")
+
+
+def _web_stage_text() -> str:
+    """The Dockerfile text for the frontend build ('web') stage only."""
+    text = DOCKERFILE.read_text()
+    stages = re.split(r"(?m)^FROM ", text)
+    for stage in stages:
+        if stage.lstrip().startswith("node") and " AS web" in stage.splitlines()[0]:
+            return stage
+    raise AssertionError("Could not find 'FROM node:... AS web' stage in Dockerfile")
 
 
 def _shipped_packages() -> set[str]:
@@ -128,3 +139,33 @@ def test_app_stage_installs_libbrotli1_explicitly():
     assert any(re.search(r"\blibbrotli1\b", block) for block in installs), (
         "app stage apt-get install does not name libbrotli1 (CVE-2026-111497)"
     )
+
+
+def test_app_stage_pins_pip_tooling_before_requirements():
+    """setuptools and wheel must be exact pins, installed before requirements.txt (setuptools vendors jaraco.context; wheel is flagged by Trivy)."""
+    stage = _app_stage_text()
+    tooling = re.search(
+        r"^RUN pip install --no-cache-dir (setuptools==\S+ wheel==\S+)\s*$",
+        stage,
+        flags=re.MULTILINE,
+    )
+    assert tooling, "app stage has no 'RUN pip install --no-cache-dir setuptools==<v> wheel==<v>' line"
+    pins = dict(pin.split("==", 1) for pin in tooling.group(1).split())
+    assert pins == PIP_TOOLING_PINS, f"app stage pip tooling pins are {pins}; expected {PIP_TOOLING_PINS}"
+    requirements_install = stage.index("pip install --no-cache-dir -r requirements.txt")
+    assert tooling.start() < requirements_install, (
+        "pip tooling pins must be installed before 'pip install -r requirements.txt'"
+    )
+
+
+def test_web_stage_pins_exact_npm_before_install():
+    """The web build stage must upgrade npm to an exact 11.x.y pin before its npm install."""
+    stage = _web_stage_text()
+    match = re.search(r"^RUN npm install -g npm@(\S+)\s*$", stage, flags=re.MULTILINE)
+    assert match, "web stage has no 'RUN npm install -g npm@<version>' line"
+    assert re.fullmatch(r"11\.\d+\.\d+", match.group(1)), (
+        f"web stage npm pin {match.group(1)!r} is not an exact 11.x.y version"
+    )
+    npm_install = re.search(r"^RUN npm install\s*$", stage, flags=re.MULTILINE)
+    assert npm_install, "web stage has no 'RUN npm install' line"
+    assert match.start() < npm_install.start(), "npm pin must run before 'RUN npm install'"

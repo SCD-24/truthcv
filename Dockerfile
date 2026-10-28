@@ -2,6 +2,7 @@
 FROM node:22.23.4-slim AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json* ./
+RUN npm install -g npm@11.21.1
 RUN npm install
 # Copy only the build inputs. Copying the whole web/ directory would drag in
 # node_modules — which in a git worktree is a symlink to another checkout — on
@@ -25,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
+RUN pip install --no-cache-dir setuptools==84.2.1 wheel==0.48.0
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY storage/ ./storage/
