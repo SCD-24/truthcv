@@ -36,4 +36,22 @@ export default tseslint.config(
       "jsx-a11y/no-autofocus": ["error", { ignoreNonDOM: true }],
     },
   },
+  {
+    // react-router's Link renders backslash/absolute targets as off-site hrefs;
+    // AppLink is the one place that guards that, so only it may import them.
+    files: ["**/*.{ts,tsx}"],
+    ignores: ["**/src/components/AppLink.tsx"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: ["react-router", "react-router-dom"].map((name) => ({
+            name,
+            importNames: ["Link", "NavLink"],
+            message: "Import AppLink from components/AppLink instead.",
+          })),
+        },
+      ],
+    },
+  },
 );

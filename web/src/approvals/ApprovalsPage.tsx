@@ -23,7 +23,7 @@ import Typography from "@mui/material/Typography";
 // MUI icons v9 names this "DeleteOutlined"; "DeleteOutline" does not exist
 // in the installed package and fails the build at import time.
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
-import { Link as RouterLink } from "react-router-dom";
+import { AppLink } from "../components/AppLink";
 import { isCooldownActive } from "../settings/cooldown";
 import { cooldownBlockLabel } from "../screenings/ScreeningsPage";
 import { ROUTES } from "../routes";
@@ -474,7 +474,7 @@ function PendingCard({
             <Alert severity="warning" sx={{ mt: 1 }}>
               This company has an open research contradiction — the agent will not
               apply until it is resolved.{" "}
-              <Link component={RouterLink} to={ROUTES.companyResearch}>
+              <Link component={AppLink} to={ROUTES.companyResearch}>
                 Resolve it on Company Research
               </Link>
               .
