@@ -81,6 +81,13 @@ COPY --chown=node:node agent/harness ./harness
 RUN npm run build && npm prune --omit=dev \
  && chown -R node:node /app/agent
 
+# npm, npx and corepack are build tooling. Nothing at runtime calls them: the
+# entrypoint, daily-apply.sh and supervisor run `node` directly. Their bundled
+# packages carry fixable HIGH/CRITICAL CVEs, so they go once the prune above
+# has finished with npm.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+ && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+
 # The agent's own files — its operating spec, its prompt, its MCP config, the
 # per-run script and the scheduling loop that invokes it (task t-3 of plan
 # agent-container-and-schedule).
