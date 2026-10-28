@@ -34,8 +34,8 @@ or instruction pointing into the old tree — there are currently none.
 Three services start on a bare `docker compose up` — `app`, `browser` and
 `agent`; only `ollama` still sits behind a compose profile. They do not share
 an image: each builds its own from a different base (root `Dockerfile` →
-python:3.11-slim with a node:20-slim web build stage; `agent/Dockerfile` →
-node:22-bookworm-slim; `browser/Dockerfile` →
+python:3.11-slim with a node:22.23.4-slim web build stage; `agent/Dockerfile` →
+node:22.23.4-bookworm-slim; `browser/Dockerfile` →
 mcr.microsoft.com/playwright:v1.64.1-noble). What they share is the compose
 build context (`context: .`).
 
