@@ -21,7 +21,7 @@
 #     are shipped by the official Playwright image, not built here — we inherit
 #     exactly the tested environment the Playwright team publishes.
 
-FROM mcr.microsoft.com/playwright:v1.49.0-noble
+FROM mcr.microsoft.com/playwright:v1.64.1-noble
 
 ENV DEBIAN_FRONTEND=noninteractive \
     NODE_ENV=production
@@ -60,8 +60,8 @@ RUN npm install -g @playwright/mcp@0.0.79
 
 # Then install the Chromium build that THIS @playwright/mcp expects.
 #
-# The base image ships the browsers matching its own tag (v1.49.0 ->
-# chromium-1148), but @playwright/mcp@latest bundles its own, newer
+# The base image ships the browsers matching its own tag (v1.64.1 ->
+# its own pinned chromium build), but @playwright/mcp@latest bundles its own, newer
 # playwright-core and looks for that version's build (chromium-1237 at the time
 # of writing). The two drift apart silently: the MCP server starts and answers
 # its healthcheck, so the container reports healthy, and only an actual
