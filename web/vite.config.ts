@@ -1,11 +1,37 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import type { Plugin } from "vite";
+
+// @novnc/novnc 1.6.0 ships CommonJS (lib/) in which util/browser.js has a
+// top-level await. Vite 8's Rolldown bundler rejects require() of a module
+// with top-level await (REQUIRE_TLA); esbuild-based Vite 5 let it through.
+// Resolve the check without blocking module evaluation: the exported flag
+// starts false and is updated once the WebCodecs probe settles, which is long
+// before rfb.js reads it while negotiating a connection.
+function novncNoRequireTla(): Plugin {
+  const tla =
+    "exports.supportsWebCodecsH264Decode = supportsWebCodecsH264Decode = await _checkWebCodecsH264DecodeSupport();";
+  return {
+    name: "novnc-no-require-tla",
+    enforce: "pre",
+    transform(code, id) {
+      if (!id.replaceAll("\\", "/").endsWith("/@novnc/novnc/lib/util/browser.js")) return null;
+      if (!code.includes(tla)) {
+        this.error("novnc-no-require-tla: top-level await line not found; novnc changed, revisit this plugin");
+      }
+      return code.replace(
+        tla,
+        "_checkWebCodecsH264DecodeSupport().then(function (v) { exports.supportsWebCodecsH264Decode = supportsWebCodecsH264Decode = v; });",
+      );
+    },
+  };
+}
 
 // Build into ../api/static so the FastAPI `api` component serves the bundle
 // directly. In dev, proxy /api to the backend so the wizard talks to real routes.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [novncNoRequireTla(), react()],
   build: {
     outDir: "../api/static",
     emptyOutDir: true,

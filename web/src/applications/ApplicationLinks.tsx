@@ -1,7 +1,7 @@
 import Link from "@mui/material/Link";
 import Typography from "@mui/material/Typography";
 import Stack from "@mui/material/Stack";
-import { Link as RouterLink } from "react-router-dom";
+import { AppLink } from "../components/AppLink";
 import type {
   Application,
   ApplicationDocument,
@@ -57,7 +57,7 @@ export function ApplicationLinks({
       {fieldCount > 0 && (
         <div className="apps__docline">
           <Link
-            component={RouterLink}
+            component={AppLink}
             to={filledFormPath(app.id)}
             className="apps__doclink"
             title="View the fields the agent recorded for this application"

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { BrowserRouter, MemoryRouter, useNavigate } from "react-router-dom";
 import { App } from "./App";
 import { WizardProvider } from "./wizard/store";
 import { ROUTES } from "./routes";
@@ -144,5 +144,39 @@ describe("App routing", () => {
     });
     renderAt(ROUTES.analytics);
     expect(await screen.findByText("Start with Manual")).toBeTruthy();
+  });
+});
+
+describe("backslash paths stay on the app origin", () => {
+  function NavigateButton({ to }: { to: string }) {
+    const navigate = useNavigate();
+    return (
+      <button
+        onClick={() => {
+          try {
+            void navigate(to);
+          } catch {
+            // react-router rejects external targets by throwing; the origin check below is what matters.
+          }
+        }}
+      >
+        go
+      </button>
+    );
+  }
+
+  it.each(["/\\evil.com", "\\\\evil.com"])("navigate(%j) keeps the app origin", (to) => {
+    const start = window.location.href;
+    const pushState = vi.spyOn(window.history, "pushState");
+    render(
+      <BrowserRouter>
+        <NavigateButton to={to} />
+      </BrowserRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "go" }));
+    const pushed = pushState.mock.calls.map(([, , url]) => new URL(String(url), start).origin);
+    pushState.mockRestore();
+    expect(pushed.filter((origin) => origin !== window.location.origin)).toEqual([]);
+    expect(window.location.href).toBe(start);
   });
 });

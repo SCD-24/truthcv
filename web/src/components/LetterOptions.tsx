@@ -2,7 +2,7 @@ import FormControl from "@mui/material/FormControl";
 import Select, { type SelectChangeEvent } from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
-import { Link as RouterLink } from "react-router-dom";
+import { AppLink } from "./AppLink";
 import type { PromptPreset } from "../api/client";
 import { ROUTES } from "../routes";
 import "../styles/step.css";
@@ -53,14 +53,14 @@ function StyleLabel() {
       style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
     >
       Style
-      <RouterLink
+      <AppLink
         to={ROUTES.writingStyle}
         aria-label="Manage writing styles"
         title="Manage writing styles"
         style={{ display: "inline-flex", color: "inherit" }}
       >
         <EditOutlinedIcon fontSize="inherit" />
-      </RouterLink>
+      </AppLink>
     </span>
   );
 }

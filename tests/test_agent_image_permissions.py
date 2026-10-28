@@ -45,6 +45,27 @@ def test_build_outputs_are_chowned_to_node_after_the_npm_build():
     assert chown < line_of(r"^USER node")
 
 
+def test_npm_npx_and_corepack_are_removed_after_the_prune():
+    """npm's bundled packages carry fixable CVEs and nothing at runtime needs
+    them, so the image removes them — but only after the prune that still
+    calls npm.
+    """
+    prune = line_of(r"npm prune --omit=dev")
+    removal = line_of(r"^RUN rm -rf /usr/local/lib/node_modules/npm\b")
+    assert removal > prune, (
+        "npm/npx/corepack are removed before the npm prune still needs them"
+    )
+    removed = "\n".join(DOCKERFILE.splitlines()[removal - 1 : line_of(r"^USER node") - 1])
+    for name in ("npm", "npx", "corepack"):
+        assert f"/usr/local/bin/{name}" in removed, (
+            f"agent/Dockerfile does not remove /usr/local/bin/{name}"
+        )
+    for name in ("npm", "corepack"):
+        assert f"/usr/local/lib/node_modules/{name}" in removed, (
+            f"agent/Dockerfile does not remove /usr/local/lib/node_modules/{name}"
+        )
+
+
 def test_node_base_image_is_pinned_to_a_patched_22_release():
     """Every node base must be an exact 22.x.y at or above 22.23.4.
 
