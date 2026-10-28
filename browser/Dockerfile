@@ -41,8 +41,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #               manual sign-in through the viewport is unusable without this.
 #   procps:     ps, used by session-server.js (`ps -eo stat=,comm=`) to check
 #               whether a live Chromium already holds the profile.
+#   libbrotli1: already in the base; named so apt upgrades it to the security
+#               build (CVE-2026-111497, Brotli decoder OOB write; USN-8956-1).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      xvfb x11vnc novnc websockify openbox procps \
+      xvfb x11vnc novnc websockify openbox procps libbrotli1 \
  && rm -rf /var/lib/apt/lists/*
 
 # Install @playwright/mcp globally — the Playwright image ships node,
@@ -61,9 +63,9 @@ RUN npm install -g @playwright/mcp@0.0.79
 # Then install the Chromium build that THIS @playwright/mcp expects.
 #
 # The base image ships the browsers matching its own tag (v1.64.1 ->
-# its own pinned chromium build), but @playwright/mcp@latest bundles its own, newer
-# playwright-core and looks for that version's build (chromium-1237 at the time
-# of writing). The two drift apart silently: the MCP server starts and answers
+# its own pinned chromium build), but the pinned @playwright/mcp bundles its own
+# playwright-core, independent of the base image's version, and looks for the
+# Chromium build that copy expects (chromium-1237 at the time of writing). The two drift apart silently: the MCP server starts and answers
 # its healthcheck, so the container reports healthy, and only an actual
 # browser_navigate fails — "expected executable at
 # /ms-playwright/chromium-1237/chrome-linux64/chrome". A whole unattended run

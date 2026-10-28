@@ -37,3 +37,12 @@ def test_playwright_mcp_is_pinned_to_an_exact_version():
     assert re.fullmatch(r"@\d+\.\d+\.\d+", match.group(1)), (
         f"@playwright/mcp must be pinned exactly, got {match.group(1)!r}"
     )
+
+
+def test_apt_install_names_libbrotli1():
+    """libbrotli1 is named so apt upgrades the base's vulnerable copy."""
+    match = re.search(r"apt-get install\b(?:[^\n]*\\\n)*[^\n]*", DOCKERFILE)
+    assert match, "browser/Dockerfile has no apt-get install step"
+    assert re.search(r"\blibbrotli1\b", match.group(0)), (
+        "apt-get install must name libbrotli1 (CVE-2026-111497)"
+    )
