@@ -14,6 +14,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DOCKERFILE = REPO_ROOT / "Dockerfile"
+REQUIREMENTS = REPO_ROOT / "requirements.txt"
+BROTLI_MIN_VERSION = (1, 2, 1)
+NODE_MIN_VERSION = (22, 23, 4)
 
 EXTRA_LOCAL_MODULES: set[str] = set()
 
@@ -92,4 +95,36 @@ def test_dockerfile_ships_every_locally_imported_package():
     assert not missing, (
         "Shipped package(s) import local package(s) that the Dockerfile app "
         f"stage does not COPY: {missing}"
+    )
+
+
+def test_brotli_pin_is_at_least_cve_fixed_version():
+    """brotli below 1.2.1 carries the CVE-2026-111497 decoder out-of-bounds write."""
+    match = re.search(r"^brotli==([\d.]+)\s*$", REQUIREMENTS.read_text(), flags=re.MULTILINE)
+    assert match, "requirements.txt has no exact brotli==<version> pin"
+    version = tuple(int(part) for part in match.group(1).split("."))
+    assert version >= BROTLI_MIN_VERSION, (
+        f"brotli pinned to {match.group(1)}; CVE-2026-111497 fix requires "
+        f">= {'.'.join(map(str, BROTLI_MIN_VERSION))}"
+    )
+
+
+def test_web_stage_node_is_exact_patched_22_tag():
+    """Node bundles brotli; the web build stage must pin an exact Node 22.x.y at or above the CVE fix."""
+    match = re.search(r"^FROM node:(\S+) AS web\s*$", DOCKERFILE.read_text(), flags=re.MULTILINE)
+    assert match, "Dockerfile has no 'FROM node:<tag> AS web' stage"
+    version = re.fullmatch(r"22\.(\d+)\.(\d+)(?:-slim)?", match.group(1))
+    assert version, f"web stage tag {match.group(1)!r} is not an exact 22.x.y tag"
+    found = (22, int(version.group(1)), int(version.group(2)))
+    assert found >= NODE_MIN_VERSION, (
+        f"web stage uses node {match.group(1)}; CVE-2026-111497 fix requires "
+        f">= {'.'.join(map(str, NODE_MIN_VERSION))}"
+    )
+
+
+def test_app_stage_installs_libbrotli1_explicitly():
+    """The app stage's apt-get install must name libbrotli1 so the CVE-2026-111497 fix build is pulled."""
+    installs = re.findall(r"apt-get install\b(?:\\\n|[^\n])*", _app_stage_text())
+    assert any(re.search(r"\blibbrotli1\b", block) for block in installs), (
+        "app stage apt-get install does not name libbrotli1 (CVE-2026-111497)"
     )

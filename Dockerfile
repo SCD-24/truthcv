@@ -1,5 +1,5 @@
 # --- Stage 1: build the React/Vite frontend ---
-FROM node:20-slim AS web
+FROM node:22.23.4-slim AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json* ./
 RUN npm install
@@ -17,8 +17,9 @@ FROM python:3.11-slim AS app
 WORKDIR /app
 
 # System deps: WeasyPrint (cairo/pango/gdk-pixbuf) + pandoc for DOCX.
+# libbrotli1 is listed explicitly so the CVE-2026-111497 security build (>= 1.1.0-2+deb13u1) is installed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      pandoc \
+      pandoc libbrotli1 \
       libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 \
       libffi-dev fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*

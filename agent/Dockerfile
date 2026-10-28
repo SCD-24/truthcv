@@ -32,7 +32,7 @@
 # NOTHING that renders a page is installed below — do not "fix" the absence of
 # a browser in this image by adding one back.
 
-FROM node:22-bookworm-slim
+FROM node:22.23.4-bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
     NODE_ENV=production
