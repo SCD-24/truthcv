@@ -14,6 +14,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DOCKERFILE = REPO_ROOT / "Dockerfile"
+REQUIREMENTS = REPO_ROOT / "requirements.txt"
+BROTLI_MIN_VERSION = (1, 2, 1)
 
 EXTRA_LOCAL_MODULES: set[str] = set()
 
@@ -92,4 +94,15 @@ def test_dockerfile_ships_every_locally_imported_package():
     assert not missing, (
         "Shipped package(s) import local package(s) that the Dockerfile app "
         f"stage does not COPY: {missing}"
+    )
+
+
+def test_brotli_pin_is_at_least_cve_fixed_version():
+    """brotli below 1.2.1 carries the CVE-2026-111497 decoder out-of-bounds write."""
+    match = re.search(r"^brotli==([\d.]+)\s*$", REQUIREMENTS.read_text(), flags=re.MULTILINE)
+    assert match, "requirements.txt has no exact brotli==<version> pin"
+    version = tuple(int(part) for part in match.group(1).split("."))
+    assert version >= BROTLI_MIN_VERSION, (
+        f"brotli pinned to {match.group(1)}; CVE-2026-111497 fix requires "
+        f">= {'.'.join(map(str, BROTLI_MIN_VERSION))}"
     )
