@@ -286,3 +286,63 @@ def test_ats_does_not_read_an_unclosed_style_body_as_document_text():
     )
     codes = {w["code"] for w in lint(html, keywords=["Python"])}
     assert "missing-keyword" in codes
+
+
+def test_render_cv_surfaces_style_dash_for_em_dash_in_bullet(monkeypatch, data_dir):
+    """An em dash in a draft bullet reaches the caller as an advisory style-dash."""
+    from services import render_cv as render_cv_service
+    from render.pdf import RenderUnavailable
+    from truth import save
+    from truth.model import Experience, Skill, Truth
+    import tailor as te
+    from tailor.model import Draft, DraftExperience
+
+    save(
+        Truth(
+            experiences=[
+                Experience(
+                    id="exp-1",
+                    role="Engineer",
+                    company="Acme",
+                    start="2020",
+                    end="2023",
+                    source="linkedin-pdf",
+                    bullets=[],
+                )
+            ],
+            skills=[Skill(id="sk-python", value="Python", source="linkedin-pdf")],
+        )
+    )
+    te.save_draft(
+        Draft(
+            experiences=[
+                DraftExperience(
+                    source_id="exp-1",
+                    role="Engineer",
+                    company="Acme",
+                    dates="2020 – 2023",
+                    bullets=["Engineer — Python"],
+                )
+            ],
+            skills=["Python"],
+            keywords=["Python"],
+        )
+    )
+
+    def _unavailable(*_args):
+        raise RenderUnavailable("no backend in tests")
+
+    monkeypatch.setattr(render_cv_service, "render_pdf", _unavailable)
+    monkeypatch.setattr(render_cv_service, "render_docx", _unavailable)
+
+    outcome = render_cv_service.render_cv(application_id=None, approved=set(), denied=set())
+
+    assert not outcome.blocked
+    assert "style-dash" in {w["code"] for w in outcome.ats_warnings}
+
+
+def test_rendered_cv_trips_no_style_warnings():
+    """The template's own text, including a role line with a date range, carries no AI style tells."""
+    html = render_html(DRAFT, name="Ada Lovelace", contact="ada@example.com", summary="Engineer.")
+    style_codes = [w["code"] for w in lint(html) if w["code"].startswith("style-")]
+    assert style_codes == []

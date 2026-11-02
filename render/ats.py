@@ -18,6 +18,7 @@ import re
 
 from storage import data_dir
 from vocabulary.match import ABSENT, ALIAS_ONLY, EXACT, INTERLEAVED, match_keyword
+from render.style_tells import check_style
 
 # Headings no ATS reviewer should warn about. The built-in set covers the
 # common sections across academic, medical, legal and trade CVs too — not just
@@ -170,4 +171,5 @@ def lint(
         if warning is not None:
             warnings.append(warning)
 
+    warnings.extend(check_style(text))
     return warnings
