@@ -86,6 +86,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) - not ex
 | **POST** | `/mcp` | Streamable-HTTP JSON-RPC MCP tool surface (agenttools/mcp_app.py) used by the Application Agent container; in-network only. |
 | **DELETE** | `/api/prompt-fragments/{id}` | Delete a user prompt fragment by id; 204 on success, 404 if unknown, 400 if seeded/undeletable |
 | **GET** | `/api/screenings` | Every screening record, most recent first; optional ?approval= narrows to the queue. |
+| **GET** | `/api/screenings/rejected` | One page of rejected screenings (each with `rejectedBy`: agent or operator), newest first; ?limit= (default 50, clamped 1..200), ?offset=, ?category= (`all` by default). Returns {items, total, limit, offset, categories}. |
 | **POST** | `/api/screenings` | Create a screening record from client-supplied fields. |
 | **PATCH** | `/api/screenings/approvals` | Apply one approval decision to many screenings; reports per-id outcomes. |
 | **PATCH** | `/api/screenings/{screening_id}` | Set one screening's approval decision and/or posting URL (approval requires a drafted letter). |

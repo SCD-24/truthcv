@@ -139,6 +139,9 @@ from .schemas import (
     ProfileStatus,
     RenderRequest,
     RenderResult,
+    CategoryCountModel,
+    RejectedScreeningModel,
+    RejectedScreeningsResponse,
     RouteModel,
     RunListResponse,
     UrlLedgerResponse,
@@ -200,6 +203,44 @@ def list_screenings(approval: str | None = None) -> list[ScreeningModel]:
     if approval is not None:
         screenings = [s for s in screenings if s.approval == approval]
     return [_screening_model(s) for s in screenings]
+
+
+# Default page size for GET /screenings/rejected; the store clamps the bounds.
+REJECTED_DEFAULT_LIMIT = 50
+
+
+def _rejected_model(row: screening_store.RejectedRow) -> RejectedScreeningModel:
+    """Wire model for one rejected row: the screening plus who rejected it."""
+    return RejectedScreeningModel(
+        **_screening_model(row.screening).model_dump(), rejected_by=row.rejected_by
+    )
+
+
+@router.get("/screenings/rejected", response_model=RejectedScreeningsResponse)
+def list_rejected_screenings(
+    limit: int = REJECTED_DEFAULT_LIMIT,
+    offset: int = 0,
+    category: str = screening_store.REJECTED_ALL,
+) -> RejectedScreeningsResponse:
+    """One page of rejected screenings, newest first, with category counts.
+
+    Declared before the `/screenings/{screening_id}` routes so `rejected` is
+    never read as an id. limit is clamped into the store's bounds and a
+    negative offset to 0; the effective values are echoed back.
+    """
+    limit = min(
+        max(limit, screening_store.REJECTED_PAGE_MIN_LIMIT),
+        screening_store.REJECTED_PAGE_MAX_LIMIT,
+    )
+    offset = max(0, offset)
+    rows, total, counts = screening_store.rejected_page(limit, offset, category)
+    return RejectedScreeningsResponse(
+        items=[_rejected_model(r) for r in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+        categories=[CategoryCountModel(key=k, count=c) for k, c in counts],
+    )
 
 
 def _run_models(records: list) -> list[RunModel]:
