@@ -17,7 +17,8 @@
     "138ebfd1",
     "8991fdff",
     "9b763f27",
-    "138d3d40"
+    "138d3d40",
+    "067f081d"
   ],
   "dismissals": [],
   "acceptances": [
@@ -32,6 +33,22 @@
         "action": "none",
         "args": {}
       }
+    },
+    {
+      "id": "067f081d",
+      "title": "New route GET /api/screenings/rejected is not declared on the API component",
+      "target": {
+        "type": "component",
+        "id": "api"
+      },
+      "suggestion": {
+        "action": "add_endpoint",
+        "args": {
+          "componentId": "api",
+          "method": "GET",
+          "path": "/api/screenings/rejected"
+        }
+      }
     }
   ],
   "decisions": [
@@ -43,6 +60,17 @@
         "actor": "external-agent",
         "via": "chat",
         "at": "2026-11-02T11:51:25.868Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "067f081d",
+      "title": "New route GET /api/screenings/rejected is not declared on the API component",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-02T12:46:24.966Z",
         "verified": false
       }
     }

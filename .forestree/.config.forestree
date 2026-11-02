@@ -243,6 +243,11 @@
                   "desc": "Accept a pending Gmail suggestion: apply its suggested status to the matched application (404 unknown, 409 not pending or no suggested status)",
                   "method": "POST",
                   "path": "/api/gmail/suggestions/{id}/accept"
+                },
+                {
+                  "desc": "",
+                  "method": "GET",
+                  "path": "/api/screenings/rejected"
                 }
               ]
             },
