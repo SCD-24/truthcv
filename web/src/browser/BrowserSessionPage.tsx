@@ -267,6 +267,7 @@ export function BrowserSessionPage() {
           if (cancelled) return;
           consecutiveFails += 1;
           if (consecutiveFails >= MAX_CONSECUTIVE_POLL_FAILURES) {
+            failedRef.current = true;
             setMessage("Lost contact with the browser session.");
             setState("unavailable");
           }

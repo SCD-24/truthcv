@@ -375,6 +375,40 @@ describe("BrowserSessionPage", () => {
     vi.useRealTimers();
   });
 
+  it("stays unavailable, not closed, when the viewer disconnects after poll failures", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let firstFetchDone = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === undefined && firstFetchDone) {
+          throw new TypeError("network down");
+        }
+        firstFetchDone = true;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ open: true, url: "https://example.com/login", startedAt: "x", evictDeadline: null }),
+        };
+      }),
+    );
+    renderPage();
+    await vi.waitFor(() => expect(screen.getByText("example.com")).toBeTruthy());
+    const rfb = rfbHolder.current;
+
+    await vi.advanceTimersByTimeAsync(15000);
+    await vi.waitFor(() =>
+      expect(screen.getByText(/lost contact with the browser session/i)).toBeTruthy(),
+    );
+
+    // The viewer being torn down (or the socket closing) disconnects after the failure.
+    rfb?.dispatch("disconnect");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.getByText(/lost contact with the browser session/i)).toBeTruthy();
+    expect(screen.queryByText(/^closed\./i)).toBeNull();
+    vi.useRealTimers();
+  });
+
   it("distinguishes a launch failure from the agent being busy", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: false,
