@@ -16,6 +16,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from collections.abc import Iterable
 from pathlib import Path
+from typing import NamedTuple
 
 from agentconfig.store import load as _agent_config_load
 from companyresearch.store import open_contradictions as _open_contradictions
@@ -29,7 +30,7 @@ from .criteria import (
     validate_stated_text,
 )
 from .model import APPROVAL_VALUES, Screening, new_id, validate_blocker
-from .rejection_categories import normalize_failing_criterion
+from .rejection_categories import REJECTION_CATEGORIES, normalize_failing_criterion
 from .url import posting_dedupe_key
 
 # screening_blocker values that stay operator-actionable: the operator can sign
@@ -49,6 +50,19 @@ QUEUEING_BLOCKERS = ("login_required",)
 # would otherwise blacklist a live posting that nobody ever sees again. See
 # `_is_unread_placeholder`.
 UNREAD_BLOCKERS = ("not_found", "expired", "unreadable")
+
+# Bounds for `rejected_page`: the page size is clamped into this range.
+REJECTED_PAGE_MIN_LIMIT = 1
+REJECTED_PAGE_MAX_LIMIT = 200
+REJECTED_ALL = "all"
+NO_REJECTION_CATEGORY = "none"
+
+
+class RejectedRow(NamedTuple):
+    """A rejected screening and who rejected it: 'agent' or 'operator'."""
+
+    screening: Screening
+    rejected_by: str
 
 
 def screenings_path() -> Path:
@@ -76,6 +90,61 @@ def load_all() -> list[Screening]:
     if not isinstance(raw, list):
         return []
     return [Screening.from_dict(item) for item in raw if isinstance(item, dict)]
+
+
+def _rejection_category(screening: Screening) -> str:
+    """Category key for a rejection: 'none' if blank, itself if known, else 'other'."""
+    value = screening.failing_criterion
+    if not value:
+        return NO_REJECTION_CATEGORY
+    return value if value in REJECTION_CATEGORIES else "other"
+
+
+def _rejected_rows(screenings: list[Screening]) -> list[RejectedRow]:
+    """Agent and operator rejections, de-duplicated by id, newest first.
+
+    Agent rejections (rejected verdict, no operator decision, not blocked at
+    screening time) come first so the agent wins a tie on id.
+    """
+    agent = [
+        RejectedRow(s, "agent")
+        for s in screenings
+        if s.verdict == "rejected" and not s.approval and not s.screening_blocker
+    ]
+    operator = [RejectedRow(s, "operator") for s in screenings if s.approval == "rejected"]
+    rows: dict[str, RejectedRow] = {}
+    for row in agent + operator:
+        rows.setdefault(row.screening.id, row)
+    return sorted(rows.values(), key=lambda r: r.screening.created_at, reverse=True)
+
+
+def _category_counts(rows: list[RejectedRow]) -> list[tuple[str, int]]:
+    """Present categories with their counts, in canonical order then 'none'."""
+    counts: dict[str, int] = {}
+    for row in rows:
+        key = _rejection_category(row.screening)
+        counts[key] = counts.get(key, 0) + 1
+    order = (*REJECTION_CATEGORIES, NO_REJECTION_CATEGORY)
+    return [(k, counts[k]) for k in order if k in counts]
+
+
+def rejected_page(
+    limit: int, offset: int, category: str = REJECTED_ALL
+) -> tuple[list[RejectedRow], int, list[tuple[str, int]]]:
+    """One page of rejected screenings, the matching total and category counts.
+
+    Returns ``(page, total, counts)`` from ONE ``load_all`` read, so all three
+    describe the same file (see ``runs.store.list_page``). ``total`` and the
+    page are after the ``category`` filter; ``counts`` cover the whole
+    rejected population before it. An unknown category matches nothing.
+    """
+    rows = _rejected_rows(load_all())
+    counts = _category_counts(rows)
+    if category != REJECTED_ALL:
+        rows = [r for r in rows if _rejection_category(r.screening) == category]
+    start = max(offset, 0)
+    size = min(max(limit, REJECTED_PAGE_MIN_LIMIT), REJECTED_PAGE_MAX_LIMIT)
+    return rows[start : start + size], len(rows), counts
 
 
 def _write_all(screenings: list[Screening]) -> None:
