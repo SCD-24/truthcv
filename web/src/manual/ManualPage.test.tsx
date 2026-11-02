@@ -233,4 +233,75 @@ describe("ManualPage", () => {
     );
     expect(tailor).not.toHaveBeenCalled();
   });
+
+  it("lists the cover letter's style warnings", async () => {
+    vi.mocked(generateCoverLetter).mockResolvedValueOnce({
+      blocked: false,
+      unverifiable: [],
+      blockedClaims: [],
+      pdfUrl: null,
+      docxUrl: null,
+      text: "Dear hiring manager…",
+      styleWarnings: [{ code: "style-em-dash", message: "Too many em dashes." }],
+    });
+    renderPage();
+    fillForm();
+    fireEvent.click(checkbox("Tailor my CV")); // uncheck CV
+    fireEvent.click(checkbox("Write a cover letter")); // check letter
+    fireEvent.click(submitButton());
+
+    await screen.findByRole("button", { name: "Generate cover letter" });
+    fireEvent.click(screen.getByRole("button", { name: "Generate cover letter" }));
+
+    const item = await screen.findByText("Too many em dashes.");
+    expect(item.tagName).toBe("LI");
+    expect(item.closest("ul")).not.toBeNull();
+    expect(screen.getByText("Style warnings")).toBeTruthy();
+  });
+
+  it.each([
+    ["absent", {}],
+    ["empty", { styleWarnings: [] }],
+  ])("renders no style warnings when styleWarnings is %s", async (_label, extra) => {
+    vi.mocked(generateCoverLetter).mockResolvedValueOnce({
+      blocked: false,
+      unverifiable: [],
+      blockedClaims: [],
+      pdfUrl: null,
+      docxUrl: null,
+      text: "Dear hiring manager…",
+      ...extra,
+    });
+    renderPage();
+    fillForm();
+    fireEvent.click(checkbox("Tailor my CV")); // uncheck CV
+    fireEvent.click(checkbox("Write a cover letter")); // check letter
+    fireEvent.click(submitButton());
+
+    await screen.findByRole("button", { name: "Generate cover letter" });
+    fireEvent.click(screen.getByRole("button", { name: "Generate cover letter" }));
+
+    await screen.findByRole("button", { name: "Regenerate letter" });
+    expect(screen.queryByText("Style warnings")).toBeNull();
+  });
+
+  it("lists CV ATS warnings that carry a style code", async () => {
+    vi.mocked(apiRender).mockResolvedValueOnce({
+      blocked: false,
+      unverifiable: [],
+      blockedClaims: [],
+      atsWarnings: [{ code: "style-em-dash", message: "Too many em dashes." }],
+      pdfUrl: null,
+      docxUrl: null,
+      html: "<p>cv</p>",
+    });
+    renderPage();
+    fillForm();
+    fireEvent.click(submitButton());
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm & continue" }));
+
+    const item = await screen.findByText("Too many em dashes.");
+    expect(item.tagName).toBe("LI");
+    expect(screen.getByText("ATS review")).toBeTruthy();
+  });
 });

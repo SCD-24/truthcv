@@ -326,6 +326,9 @@ export interface CoverLetterResult {
   /** Whole flagged claims (same shape as RenderResult), each approvable/deniable
    * on the download step instead of a loose token blob. */
   blockedClaims: BlockedClaim[];
+  /** Advisory AI-writing-tell warnings; empty when clean or blocked. Optional so
+   * older responses still type-check. */
+  styleWarnings?: AtsWarning[];
   pdfUrl: string | null;
   docxUrl: string | null;
   /** The generated letter text, so the download step can offer an editor. */
