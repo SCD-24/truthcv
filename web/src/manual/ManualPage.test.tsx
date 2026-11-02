@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 import {
   confirmInferences,
   createApplication,
@@ -102,6 +102,7 @@ function checkbox(name: string) {
 async function runCvThenLetter() {
   fireEvent.click(submitButton());
   fireEvent.click(await screen.findByRole("button", { name: "Confirm & continue" }));
+  await screen.findByText("Professional");
   fireEvent.click(await screen.findByRole("button", { name: "Generate cover letter" }));
 }
 

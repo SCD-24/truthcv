@@ -3,7 +3,7 @@
  * ApprovalsPage.test.tsx — mock the API client directly. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter } from "react-router";
 import { listApplicationsPage } from "../api/client";
 import type { Application, ApplicationPage } from "../api/types";
 import { ApplicationsPage } from "./ApplicationsPage";

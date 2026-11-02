@@ -3,7 +3,7 @@
  * instead of silently redirecting there. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 import { App } from "./App";
 import { WizardProvider } from "./wizard/store";
 import {

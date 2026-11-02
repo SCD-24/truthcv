@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router";
 import { getRouting, listConnections, listConnectionModels, saveConnectionKey, updateRouting } from "../api/client";
 import type { ConnectionList, ConnectionStatus, Routing } from "../api/types";
 import { TASKS } from "../settings/TaskModelsSection";
@@ -137,7 +137,7 @@ describe("Model routing page", () => {
     fireEvent.click(screen.getByText("Navigate"));
     fireEvent.click(screen.getByText("Navigate"));
     await screen.findByText("Application agent");
-    expect((screen.getAllByLabelText(/^model$/i)[0] as HTMLInputElement).value).toBe("Model M");
+    await vi.waitFor(() => expect((screen.getAllByLabelText(/^model$/i)[0] as HTMLInputElement).value).toBe("Model M"));
     await act(async () => { write.resolve({ ...routing, default: { connection: "claude", model: "m" } }); });
     const serverRoute: Routing = { ...routing, default: { connection: "claude", model: "remote-id" } };
     vi.mocked(getRouting).mockResolvedValueOnce(serverRoute);

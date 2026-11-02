@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { BrowserRouter, MemoryRouter, useNavigate } from "react-router-dom";
+import { BrowserRouter, MemoryRouter, useNavigate } from "react-router";
 import { App } from "./App";
 import { WizardProvider } from "./wizard/store";
 import { ROUTES } from "./routes";

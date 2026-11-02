@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router";
 import { Alert, AppBar, Box, Button, Stack, Toolbar, Typography } from "@mui/material";
 // `@novnc/novnc` is pinned to an EXACT 1.6.0 in package.json (no caret) —
 // 1.7.0's package.json restricts `exports` to `./core/rfb.js` only, which
@@ -267,6 +267,7 @@ export function BrowserSessionPage() {
           if (cancelled) return;
           consecutiveFails += 1;
           if (consecutiveFails >= MAX_CONSECUTIVE_POLL_FAILURES) {
+            failedRef.current = true;
             setMessage("Lost contact with the browser session.");
             setState("unavailable");
           }
