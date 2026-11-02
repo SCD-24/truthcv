@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 import applications as app_store
 import coverletter
 from coverletter import LETTER_SCOPE_ID, load_letter_draft
-from render import render_docx, render_pdf
+from render import check_style, render_docx, render_pdf
 from render.cover_letter import render_letter_html
 from render.pdf import RenderUnavailable
 from services.render_cv import (
@@ -51,6 +51,7 @@ class CoverLetterOutcome:
     docx_url: str | None = None
     text: str | None = None
     render_unavailable: bool = False
+    style_warnings: list[dict[str, str]] = field(default_factory=list)
 
 
 def _letter_approvals(
@@ -231,4 +232,5 @@ def generate_cover_letter(
         # Attached save that produced no file: the letter source is recorded but
         # its links are null, so tell the UI rather than silently show none.
         render_unavailable=bool(app_id) and pdf_url is None and docx_url is None,
+        style_warnings=check_style(letter["text"]),
     )

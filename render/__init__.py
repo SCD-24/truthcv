@@ -6,8 +6,9 @@ persisted draft and truth store; it adds no facts of its own.
 
 from .html import render_html
 from .ats import lint
+from .style_tells import check_style
 from .pdf import render_pdf
 from .docx import render_docx
 from .verify import verify_pdf
 
-__all__ = ["render_html", "lint", "render_pdf", "render_docx", "verify_pdf"]
+__all__ = ["render_html", "lint", "check_style", "render_pdf", "render_docx", "verify_pdf"]

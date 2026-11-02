@@ -61,6 +61,7 @@ def test_cover_letter_route(client):
         b = r.json()
         assert b["blocked"] is False
         assert "pdfUrl" in b and "docxUrl" in b
+        assert b["styleWarnings"] == []
 
 
 def test_cover_letter_blocks_fabrication(data_dir, monkeypatch):
@@ -103,6 +104,23 @@ def test_cover_letter_blocked_returns_grouped_claims(data_dir, monkeypatch):
     assert claims[0]["text"] == "Led 500 people at NASA"
     assert claims[0]["claimId"]
     assert any(t in claims[0]["tokens"] for t in ("500", "nasa"))
+    assert b["styleWarnings"] == []
+
+
+def test_cover_letter_style_warnings_flag_chatbot_residue(data_dir, monkeypatch):
+    """A passing letter with chatbot residue is returned with an advisory
+    style warning and is not blocked."""
+    def router(system, messages, schema):
+        return {"paragraphs": [{"text": "I use Python daily. I hope this helps!", "claims": ["Python"]}]}
+
+    monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
+    save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
+    c = TestClient(app)
+    r = c.post("/api/cover-letter", json={"length": "Short", "posting": "A fresh role"})
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["blocked"] is False
+    assert "style-chatbot-residue" in {w["code"] for w in b["styleWarnings"]}
 
 
 def test_cover_letter_approve_claim_unblocks(data_dir, monkeypatch):

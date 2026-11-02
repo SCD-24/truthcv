@@ -1,6 +1,6 @@
 """Assemble the structured draft into ATS-safe HTML via Jinja2.
 
-Each experience renders as its own block — a heading (role, company — dates) with
+Each experience renders as its own block — a heading (role, company, dates) with
 that job's bullets beneath it — so a date or bullet stays with the job it belongs
 to. Education and skills render into their own sections. This module NEVER
 introduces new facts; it only arranges the approved draft.
@@ -25,7 +25,7 @@ _env = Environment(
 
 def _heading(title_parts: list[str], dates: str) -> str:
     title = ", ".join(p for p in title_parts if p)
-    return f"{title} — {dates}" if title and dates else (title or dates)
+    return f"{title}, {dates}" if title and dates else (title or dates)
 
 
 def _context(draft: Draft) -> dict[str, Any]:

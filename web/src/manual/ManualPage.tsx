@@ -22,6 +22,7 @@ import {
   type PromptPreset,
 } from "../api/client";
 import type {
+  AtsWarning,
   CoverLetterResult,
   Inference,
   RenderResult,
@@ -356,6 +357,21 @@ function DownloadLinks({
   );
 }
 
+/** Advisory warnings in a warning alert; renders nothing when there are none. */
+function WarningsAlert({ title, warnings }: { title: string; warnings: AtsWarning[] }) {
+  if (warnings.length === 0) return null;
+  return (
+    <Alert severity="warning" sx={{ mb: 3 }}>
+      <AlertTitle>{title}</AlertTitle>
+      <ul className="notice__list">
+        {warnings.map((w, i) => (
+          <li key={`${w.code}-${i}`}>{w.message}</li>
+        ))}
+      </ul>
+    </Alert>
+  );
+}
+
 /**
  * The CV half: tailor → confirm inferences → render, with the blocked-claims
  * re-check flow and an application-locked editor for the rendered CV. Calls
@@ -478,16 +494,7 @@ function CvSection({
 
       {result && !result.blocked && (
         <>
-          {result.atsWarnings.length > 0 && (
-            <Alert severity="warning" sx={{ mb: 3 }}>
-              <AlertTitle>ATS review</AlertTitle>
-              <ul className="notice__list">
-                {result.atsWarnings.map((w, i) => (
-                  <li key={`${w.code}-${i}`}>{w.message}</li>
-                ))}
-              </ul>
-            </Alert>
-          )}
+          <WarningsAlert title="ATS review" warnings={result.atsWarnings} />
           <DownloadLinks pdfUrl={result.pdfUrl} docxUrl={result.docxUrl} label="CV" />
           <DocumentEditor
             kind="cv"
@@ -600,6 +607,7 @@ function LetterSection({
 
       {coverLetter && !coverLetter.blocked && (
         <>
+          <WarningsAlert title="Style warnings" warnings={coverLetter.styleWarnings ?? []} />
           <DownloadLinks
             pdfUrl={coverLetter.pdfUrl}
             docxUrl={coverLetter.docxUrl}

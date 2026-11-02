@@ -6,18 +6,22 @@ date range is the one deliberate exemption), or the model will happily echo
 them. Guards against a future edit reintroducing a banned character.
 """
 
+import re
+
 from truth.model import Bullet, Experience, Skill, Truth
 from prompts.tailor import select_system, select_truth_block
 from prompts.coverletter import cover_letter_system_for_preset, cover_letter_facts_block
 from prompts.style import (
     CV_STYLE,
     LETTER_STYLE,
+    STRICT_TELL_WORDS,
     cv_style,
     letter_style,
     cv_anti_slop,
     letter_anti_slop,
 )
 from prompts.conventions import DEFAULT_CONVENTIONS, DomainVocabulary
+from prompts.fragments import SEEDED_PRESETS
 
 EM_DASH = "\u2014"
 EN_DASH = "\u2013"
@@ -76,11 +80,33 @@ def test_cv_system_prompt_has_anti_slop_bans():
 
 
 def test_cover_letter_system_prompt_has_anti_slop_bans_for_every_seeded_preset():
-    for preset_id in ("professional", "warm", "concise"):
-        prompt = cover_letter_system_for_preset(preset_id, "one page")
+    for preset in SEEDED_PRESETS:
+        prompt = cover_letter_system_for_preset(preset.id, "one page")
         assert "portability test" in prompt
         assert "summary-recap paragraph" in prompt
         assert "Avoid hollow adverbs in the letter" in prompt
+        assert "-ing riders" in prompt
+        assert "contributing to" in prompt
+        assert "vague association" in prompt
+        assert "inflated significance" in prompt
+        assert "played a key role" in prompt
+        assert "setting the stage" in prompt
+        for word in STRICT_TELL_WORDS:
+            assert word in prompt
+        for word in ("crucial", "valuable", "enhance", "highlight (as a verb)"):
+            assert word in prompt
+        for phrase in (
+            "\"Here's the thing\"",
+            "\"Let's dive in\"",
+            "\"Honestly?\"",
+            "\"To be clear\"",
+            "\"Let me be clear\"",
+            "\"Here is your cover letter\"",
+            "\"I hope this helps\"",
+            "\"Certainly\"",
+            "\"Let me know if you'd like\"",
+        ):
+            assert phrase in prompt
 
 
 def test_cover_letter_system_prompt_ends_with_guardrail_contract():
@@ -111,3 +137,58 @@ def test_cv_system_prompt_plain_action_verbs_are_vocabulary_driven():
     )
     assert "shipped, delivered" in custom_prompt
     assert "built, led, shipped, owned, cut, raised, fixed" not in custom_prompt
+
+
+_EXPECTED_STRICT_WORDS = (
+    "delve", "tapestry", "synergy", "paradigm", "leverage", "spearhead",
+    "orchestrate", "seamless", "transformative", "holistic", "unlock", "foster",
+    "vibrant", "intricate", "meticulous", "meticulously", "pivotal", "showcase",
+    "showcasing", "underscore", "underscores", "garner", "bolstered", "testament",
+)  # fmt: skip
+_FIGURATIVE_WORDS = (
+    "robust", "key", "landscape", "highlight", "harness", "ecosystem", "navigate",
+    "comprehensive", "innovative", "enhance", "crucial", "valuable", "dynamic",
+    "passionate",
+)  # fmt: skip
+
+
+def test_strict_tell_words_contract():
+    assert isinstance(STRICT_TELL_WORDS, tuple)
+    assert STRICT_TELL_WORDS == _EXPECTED_STRICT_WORDS
+    assert all(w == w.lower() and isinstance(w, str) for w in STRICT_TELL_WORDS)
+    assert not set(_FIGURATIVE_WORDS) & set(STRICT_TELL_WORDS)
+
+
+def test_cv_system_prompt_bans_every_strict_word():
+    prompt = select_system()
+    for word in STRICT_TELL_WORDS:
+        assert word in prompt
+    for word in ("crucial", "valuable", "enhance", "highlight (as a verb)"):
+        assert word in prompt
+
+
+def test_cv_system_prompt_has_humanizer_cv_rules():
+    prompt = select_system()
+    assert "-ing riders" in prompt
+    assert "contributing to" in prompt
+    assert "vague association" in prompt
+    assert "never invent a role" in prompt
+    assert "inflated significance" in prompt
+    assert "played a key role" in prompt
+    assert "never open three bullets in a row with the same verb" in prompt
+    assert prompt.count("changes style only and adds no facts") >= 5
+
+
+_BANNED_SENTENCE = re.compile(
+    r"Also never use these banned words: .*? This changes style only and adds no facts\."
+)
+
+
+def test_cv_and_letter_prompts_share_identical_banned_word_sentence():
+    cv_match = _BANNED_SENTENCE.search(select_system())
+    assert cv_match
+    for preset in SEEDED_PRESETS:
+        letter = cover_letter_system_for_preset(preset.id, "one page")
+        letter_match = _BANNED_SENTENCE.search(letter)
+        assert letter_match
+        assert letter_match.group(0) == cv_match.group(0)

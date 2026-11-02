@@ -96,7 +96,12 @@ invent a section the user has no facts for.
 
 Distilled from the no-ai-slop skill; `prompts/style.py` (`cv_anti_slop()` /
 `letter_anti_slop()`) is the executable copy of these bans, so change both
-together.
+together. Patterns marked "humanizer" are adapted from humanizer SKILL.md v3.1.0
+(MIT, github.com/blader/humanizer). The CV humanizer rules are rendered by
+`prompts/tailor.py` (`_cv_humanizer_rules()`); the letter humanizer rules are
+rendered by `prompts/style.py` (`_letter_humanizer_rules()`). The banned-word
+list in both comes from `STRICT_TELL_WORDS` in `prompts/style.py`. Every rule
+below adds no facts; it changes style only.
 
 **Both surfaces**
 
@@ -118,6 +123,17 @@ together.
 **CV bullets**
 
 - Keep each bullet a single complete statement; no dramatic fragmentation.
+- No -ing riders (humanizer): no trailing clause bolted onto a bullet, such as
+  ", ensuring X", ", driving Y", ", highlighting", ", showcasing", ", fostering",
+  ", reflecting", or ", contributing to". A result is its own clause only if
+  the fact states it.
+- No vague association (humanizer): no "involved in", "associated with", or
+  "contributed to" when the fact names the actual role or action. A vague fact
+  stays vague; a role is never invented.
+- No inflated significance (humanizer): no "played a key role", "pivotal",
+  "instrumental in", "marking a", or "setting the stage".
+- No banned words (humanizer): every `STRICT_TELL_WORDS` entry, plus crucial,
+  valuable, enhance, and highlight (as a verb).
 
 **Cover letters**
 
@@ -127,6 +143,13 @@ together.
 - No fake-profound closing metaphor or aphorism.
 - No hollow adverbs: successfully, effectively, efficiently, strategically,
   proactively.
+- No -ing riders, vague association, inflated significance, or banned words
+  (humanizer): the same rules as the CV bullets above, applied to every
+  sentence of the letter.
+- No staged run-ups (humanizer): "Here's the thing", "Let's dive in",
+  "Honestly?", "To be clear", or "Let me be clear".
+- No chatbot residue in the letter body (humanizer): "Here is your cover
+  letter", "I hope this helps", "Certainly", or "Let me know if you'd like".
 
 ## Hard rule (truthfulness)
 

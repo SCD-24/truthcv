@@ -59,6 +59,38 @@ LETTER_STYLE = (
     "brief, forward-looking close."
 )
 
+# Words that are AI-prose tells in nearly any use, so the CV prompt bans them
+# outright. Figurative-only words (robust, key, landscape, ...) are deliberately
+# excluded: they have legitimate literal uses. Word list adapted from the
+# humanizer SKILL.md v3.1.0 (MIT, github.com/blader/humanizer). Style only;
+# adds no facts.
+STRICT_TELL_WORDS = (
+    "delve",
+    "tapestry",
+    "synergy",
+    "paradigm",
+    "leverage",
+    "spearhead",
+    "orchestrate",
+    "seamless",
+    "transformative",
+    "holistic",
+    "unlock",
+    "foster",
+    "vibrant",
+    "intricate",
+    "meticulous",
+    "meticulously",
+    "pivotal",
+    "showcase",
+    "showcasing",
+    "underscore",
+    "underscores",
+    "garner",
+    "bolstered",
+    "testament",
+)
+
 
 _ANTI_SLOP_BANS = (
     " Additional AI-slop guardrails (style only, add no facts), distilled from "
@@ -95,6 +127,60 @@ def cv_anti_slop() -> str:
     )
 
 
+STYLE_ONLY = " This changes style only and adds no facts."
+
+# Extra banned words appended after the generated STRICT_TELL_WORDS list.
+_EXTRA_BANNED_WORDS = ("crucial", "valuable", "enhance", "highlight (as a verb)")
+
+
+def banned_words_rule() -> str:
+    """Render the shared banned-word sentence from ``STRICT_TELL_WORDS``.
+
+    One source for CV and letter prompts, so the prompt and any checker share
+    one list and the two prompts cannot drift.
+    """
+    banned = ", ".join(STRICT_TELL_WORDS + _EXTRA_BANNED_WORDS)
+    return " Also never use these banned words: " + banned + "." + STYLE_ONLY
+
+
+def shared_humanizer_rules(unit: str) -> str:
+    """Render the humanizer-derived rules common to CV and letter prompts.
+
+    ``unit`` names the text unit the rules govern ("bullet" or "sentence").
+    Humanizer v3.1.0, MIT. Every rule is style only.
+    """
+    return (
+        f" No -ing riders: do not bolt a trailing clause onto a {unit}, such as "
+        "', ensuring X', ', driving Y', ', highlighting', ', showcasing', "
+        "', fostering', ', reflecting', or ', contributing to'; state a result as "
+        "its own clause only if it is in the referenced fact." + STYLE_ONLY
+        + " Avoid vague association: do not write 'involved in', 'associated "
+        "with', or 'contributed to' when the fact names the actual role or "
+        "action; if the fact itself is vague keep it vague, never invent a role."
+        + STYLE_ONLY
+        + " Avoid inflated significance: no 'played a key role', 'pivotal', "
+        "'instrumental in', 'marking a', or 'setting the stage'." + STYLE_ONLY
+        + banned_words_rule()
+    )
+
+
+def _letter_humanizer_rules() -> str:
+    """Render the humanizer-derived cover-letter rules (humanizer v3.1.0, MIT).
+
+    Shared rules come from ``shared_humanizer_rules``; the staged run-up and
+    chatbot-residue bans are letter-only. Every rule is style only.
+    """
+    return (
+        shared_humanizer_rules("sentence")
+        + " No staged run-ups: do not open with or insert \"Here's the thing\", "
+        "\"Let's dive in\", \"Honestly?\", \"To be clear\", or \"Let me be clear\"."
+        + STYLE_ONLY
+        + " No chatbot residue in the letter body: never write \"Here is your "
+        "cover letter\", \"I hope this helps\", \"Certainly\", or \"Let me know if "
+        "you'd like\"." + STYLE_ONLY
+    )
+
+
 def letter_anti_slop() -> str:
     """Render the cover-letter-specific AI-slop bans, distilled from the
     no-ai-slop skill.
@@ -104,7 +190,9 @@ def letter_anti_slop() -> str:
     show-don't-tell, weasel attribution, fake-strong verbs, synonym
     cycling, vague-scale words, negative listing, rhetorical setups), plus
     letter-only bans on summary-recap endings, fake-profound closers, and
-    hollow adverbs. Style only; adds no facts.
+    hollow adverbs, plus the humanizer-derived bans on -ing riders, vague
+    association, inflated significance, banned words, staged run-ups and
+    chatbot residue. Style only; adds no facts.
     """
     return (
         _ANTI_SLOP_BANS
@@ -114,6 +202,7 @@ def letter_anti_slop() -> str:
         "not close with a fake-profound metaphor or aphorism. Avoid hollow "
         "adverbs in the letter: successfully, effectively, efficiently, "
         "strategically, proactively."
+        + _letter_humanizer_rules()
     )
 
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 from truth.model import Truth
 
 from .conventions import CvConventions, DomainVocabulary, DEFAULT_CONVENTIONS, DEFAULT_VOCABULARY
-from .style import cv_style, cv_anti_slop
+from .style import STYLE_ONLY, cv_style, cv_anti_slop, shared_humanizer_rules
 
 
 # --- Keyword extraction -----------------------------------------------------
@@ -147,6 +147,20 @@ def cv_standard(
 _CV_STANDARD = cv_standard()
 
 
+def _cv_humanizer_rules() -> str:
+    """Render the humanizer-derived CV bullet rules (humanizer v3.1.0, MIT).
+
+    Shared rules come from ``shared_humanizer_rules``; verb variation is
+    CV-only. Every rule is style only.
+    """
+    return (
+        shared_humanizer_rules("bullet")
+        + " Vary the opening action verb across consecutive bullets of one "
+        "role; never open three bullets in a row with the same verb."
+        + STYLE_ONLY
+    )
+
+
 # Constraints that remove the common markers of AI-written prose. Purely
 # mechanical style rules; no facts.
 def cv_anti_tell_rules(vocabulary: DomainVocabulary = DEFAULT_VOCABULARY) -> str:
@@ -169,6 +183,7 @@ def cv_anti_tell_rules(vocabulary: DomainVocabulary = DEFAULT_VOCABULARY) -> str
         + "). Avoid hollow adverbs in bullets: successfully, effectively, efficiently, "
         "strategically, proactively. Avoid contrastive cliches such as 'not just X, but "
         "Y'. Prefer concrete numbers and outcomes over abstract praise."
+        + _cv_humanizer_rules()
     )
 
 

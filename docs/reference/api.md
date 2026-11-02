@@ -96,6 +96,20 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) - not ex
 | **GET** | `/api/cooldown` | Whether a company (optionally narrowed by role) is currently in cooldown. |
 <!-- generated:end comp:api -->
 
+## Advisory style warnings (`atsWarnings`)
+
+`POST /api/render` returns `atsWarnings` as `{code, message}` items. The `style-*` codes below flag AI-sounding prose in the CV text. They are advisory: they warn and never block a render.
+
+`POST /api/cover-letter` returns the same `{code, message}` items as `styleWarnings`, checked against the letter text. A blocked response returns `styleWarnings: []`.
+
+| Code | Meaning |
+|---|---|
+| `style-dash` | An em dash, en dash or ` -- ` appears in the text. En dashes inside date ranges are exempt. |
+| `style-curly-quote` | A curly quote appears in the text. |
+| `style-tell-word` | A word from the AI-writing tell list appears in the text. |
+| `style-chatbot-residue` | Chatbot residue such as "let me know if" appears in the text. |
+| `style-weak-tells` | Two or more filler phrasings, such as "pivotal role", appear in the text. |
+
 ## Provider connections API
 
 | Method | Path | Description |

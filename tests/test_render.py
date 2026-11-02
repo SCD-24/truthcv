@@ -13,7 +13,7 @@ from render.cover_letter import render_letter_html
 from render.ats import lint
 from render import pdf as pdf_mod
 from render import docx as docx_mod
-from tailor.model import Draft, DraftExperience
+from tailor.model import Draft, DraftEducation, DraftExperience
 import vocabulary.synonyms as vocab_synonyms
 
 
@@ -286,3 +286,91 @@ def test_ats_does_not_read_an_unclosed_style_body_as_document_text():
     )
     codes = {w["code"] for w in lint(html, keywords=["Python"])}
     assert "missing-keyword" in codes
+
+
+def test_render_cv_surfaces_style_dash_for_em_dash_in_bullet(monkeypatch, data_dir):
+    """An em dash in a draft bullet reaches the caller as an advisory style-dash."""
+    from services import render_cv as render_cv_service
+    from render.pdf import RenderUnavailable
+    from truth import save
+    from truth.model import Experience, Skill, Truth
+    import tailor as te
+    from tailor.model import Draft, DraftExperience
+
+    save(
+        Truth(
+            experiences=[
+                Experience(
+                    id="exp-1",
+                    role="Engineer",
+                    company="Acme",
+                    start="2020",
+                    end="2023",
+                    source="linkedin-pdf",
+                    bullets=[],
+                )
+            ],
+            skills=[Skill(id="sk-python", value="Python", source="linkedin-pdf")],
+        )
+    )
+    te.save_draft(
+        Draft(
+            experiences=[
+                DraftExperience(
+                    source_id="exp-1",
+                    role="Engineer",
+                    company="Acme",
+                    dates="2020 – 2023",
+                    bullets=["Engineer — Python"],
+                )
+            ],
+            skills=["Python"],
+            keywords=["Python"],
+        )
+    )
+
+    def _unavailable(*_args):
+        raise RenderUnavailable("no backend in tests")
+
+    monkeypatch.setattr(render_cv_service, "render_pdf", _unavailable)
+    monkeypatch.setattr(render_cv_service, "render_docx", _unavailable)
+
+    outcome = render_cv_service.render_cv(application_id=None, approved=set(), denied=set())
+
+    assert not outcome.blocked
+    assert "style-dash" in {w["code"] for w in outcome.ats_warnings}
+
+
+def test_rendered_cv_trips_no_style_warnings():
+    """The template's own text, including a role line with a date range, carries no AI style tells."""
+    html = render_html(DRAFT, name="Ada Lovelace", contact="ada@example.com", summary="Engineer.")
+    style_codes = [w["code"] for w in lint(html) if w["code"].startswith("style-")]
+    assert style_codes == []
+
+
+def test_rendered_cv_with_numeric_and_open_ended_dates_trips_no_style_warnings():
+    draft = Draft(
+        experiences=[
+            DraftExperience(
+                source_id="exp-1", role="Engineer", company="Acme",
+                dates="03/2020 – 05/2022", bullets=["Built a payments API"],
+            ),
+            DraftExperience(
+                source_id="exp-2", role="Analyst", company="Beta",
+                dates="Jan 2019 – Current", bullets=["Wrote reports"],
+            ),
+        ],
+        education=[
+            DraftEducation(source_id="ed-1", degree="BSc", school="Uni", dates="03/2020 – 05/2022"),
+            DraftEducation(source_id="ed-2", degree="MSc", school="Tech", dates="Jan 2019 – Current"),
+        ],
+        skills=["Python"],
+    )
+    html = render_html(draft, name="Ada Lovelace", contact="ada@example.com", summary="Engineer.")
+    assert [w["code"] for w in lint(html) if w["code"].startswith("style-")] == []
+
+
+def test_lint_style_snippet_keeps_original_casing():
+    html = "<html><body><p>Leverage Python</p></body></html>"
+    (msg,) = [w["message"] for w in lint(html) if w["code"] == "style-tell-word"]
+    assert "'Leverage'" in msg
