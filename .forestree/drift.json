@@ -16,7 +16,35 @@
     "822edf8a",
     "138ebfd1",
     "8991fdff",
-    "9b763f27"
+    "9b763f27",
+    "138d3d40"
   ],
-  "dismissals": []
+  "dismissals": [],
+  "acceptances": [
+    {
+      "id": "138d3d40",
+      "title": "web-ui tech list names react-router-dom v6; code now uses react-router 8",
+      "target": {
+        "type": "component",
+        "id": "web-ui"
+      },
+      "suggestion": {
+        "action": "none",
+        "args": {}
+      }
+    }
+  ],
+  "decisions": [
+    {
+      "id": "138d3d40",
+      "title": "web-ui tech list names react-router-dom v6; code now uses react-router 8",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-02T11:51:25.868Z",
+        "verified": false
+      }
+    }
+  ]
 }

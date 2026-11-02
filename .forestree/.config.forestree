@@ -24,7 +24,7 @@
                 "TypeScript",
                 "MUI (@mui/material)",
                 "Emotion (@emotion/react)",
-                "react-router-dom v6"
+                "react-router v8"
               ]
             },
             "h": 200,
