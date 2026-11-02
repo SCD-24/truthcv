@@ -155,6 +155,30 @@ _RULES_ANTI_SLOP = (
     "strategically, proactively."
 )
 
+_RULES_HUMANIZER_LETTER = (
+    " No -ing riders: do not bolt a trailing clause onto a sentence, such as "
+    "', ensuring X', ', driving Y', ', highlighting', ', showcasing', "
+    "', fostering', ', reflecting', or ', contributing to'; state a result as "
+    "its own clause only if it is in the referenced fact. This changes style "
+    "only and adds no facts. Avoid vague association: do not write 'involved "
+    "in', 'associated with', or 'contributed to' when the fact names the actual "
+    "role or action; if the fact itself is vague keep it vague, never invent a "
+    "role. This changes style only and adds no facts. Avoid inflated "
+    "significance: no 'played a key role', 'pivotal', 'instrumental in', "
+    "'marking a', or 'setting the stage'. This changes style only and adds no "
+    "facts. Also never use these banned words: delve, tapestry, synergy, "
+    "paradigm, leverage, spearhead, orchestrate, seamless, transformative, "
+    "holistic, unlock, foster, vibrant, intricate, meticulous, meticulously, "
+    "pivotal, showcase, showcasing, underscore, underscores, garner, bolstered, "
+    "testament, crucial, valuable, enhance, highlight (as a verb). This changes "
+    "style only and adds no facts. No staged run-ups: do not open with or insert "
+    "\"Here's the thing\", \"Let's dive in\", \"Honestly?\", \"To be clear\", or "
+    "\"Let me be clear\". This changes style only and adds no facts. No chatbot "
+    "residue in the letter body: never write \"Here is your cover letter\", \"I "
+    "hope this helps\", \"Certainly\", or \"Let me know if you'd like\". This "
+    "changes style only and adds no facts."
+)
+
 _RULES_LETTER_STYLE = (
     " STYLE (phrasing only, add no facts): keep the letter to one page. "
     "Address a specific named recipient when one is known, otherwise use "
@@ -182,6 +206,7 @@ _LEGACY_TAIL = (
     + _RULES_CAREER_SERVICES
     + _RULES_TAILORING
     + _RULES_ANTI_SLOP
+    + _RULES_HUMANIZER_LETTER
     + _RULES_LETTER_STYLE
     + GUARDRAIL_CONTRACT
 )

@@ -19,6 +19,7 @@ from prompts.style import (
     letter_anti_slop,
 )
 from prompts.conventions import DEFAULT_CONVENTIONS, DomainVocabulary
+from prompts.fragments import SEEDED_PRESETS
 
 EM_DASH = "\u2014"
 EN_DASH = "\u2013"
@@ -77,11 +78,33 @@ def test_cv_system_prompt_has_anti_slop_bans():
 
 
 def test_cover_letter_system_prompt_has_anti_slop_bans_for_every_seeded_preset():
-    for preset_id in ("professional", "warm", "concise"):
-        prompt = cover_letter_system_for_preset(preset_id, "one page")
+    for preset in SEEDED_PRESETS:
+        prompt = cover_letter_system_for_preset(preset.id, "one page")
         assert "portability test" in prompt
         assert "summary-recap paragraph" in prompt
         assert "Avoid hollow adverbs in the letter" in prompt
+        assert "-ing riders" in prompt
+        assert "contributing to" in prompt
+        assert "vague association" in prompt
+        assert "inflated significance" in prompt
+        assert "played a key role" in prompt
+        assert "setting the stage" in prompt
+        for word in STRICT_TELL_WORDS:
+            assert word in prompt
+        for word in ("crucial", "valuable", "enhance", "highlight (as a verb)"):
+            assert word in prompt
+        for phrase in (
+            "\"Here's the thing\"",
+            "\"Let's dive in\"",
+            "\"Honestly?\"",
+            "\"To be clear\"",
+            "\"Let me be clear\"",
+            "\"Here is your cover letter\"",
+            "\"I hope this helps\"",
+            "\"Certainly\"",
+            "\"Let me know if you'd like\"",
+        ):
+            assert phrase in prompt
 
 
 def test_cover_letter_system_prompt_ends_with_guardrail_contract():
