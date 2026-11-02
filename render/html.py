@@ -1,6 +1,6 @@
 """Assemble the structured draft into ATS-safe HTML via Jinja2.
 
-Each experience renders as its own block — a heading (role, company — dates) with
+Each experience renders as its own block — a heading (role, company, dates) with
 that job's bullets beneath it — so a date or bullet stays with the job it belongs
 to. Education and skills render into their own sections. This module NEVER
 introduces new facts; it only arranges the approved draft.

@@ -88,7 +88,7 @@ _NON_TEXT = re.compile(
 
 
 def _visible_text(html: str) -> str:
-    return re.sub(r"<[^>]+>", " ", _NON_TEXT.sub(" ", html)).lower()
+    return re.sub(r"<[^>]+>", " ", _NON_TEXT.sub(" ", html))
 
 
 def _keyword_warning(kw: str, verdict: str) -> dict[str, str] | None:
@@ -157,7 +157,8 @@ def lint(
             }
         )
 
-    text = _visible_text(html)
+    raw_text = _visible_text(html)
+    text = raw_text.lower()
     if not re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", text) and not re.search(r"\+?\d[\d\s().-]{7,}", text):
         warnings.append(
             {"code": "missing-contact", "message": "No contact block (email or phone) detected."}
@@ -171,5 +172,5 @@ def lint(
         if warning is not None:
             warnings.append(warning)
 
-    warnings.extend(check_style(text))
+    warnings.extend(check_style(raw_text))
     return warnings

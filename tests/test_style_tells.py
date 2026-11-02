@@ -1,5 +1,7 @@
 """check_style: deterministic AI-writing tell warnings."""
 
+import pytest
+
 from render.style_tells import MAX_SNIPPETS, check_style
 
 EM = "—"
@@ -38,19 +40,48 @@ def test_dash_variants_fire_once_each_code():
     assert _codes("a -- b") == ["style-dash"]
 
 
-def test_en_dash_in_date_ranges_is_exempt():
-    for rng in (
+@pytest.mark.parametrize(
+    "rng",
+    [
         "2019 " + EN + " 2021",
         "2019" + EN + "2021",
         "Jan 2019 " + EN + " Present",
         "Jan 2019 " + EN + " Mar 2021",
+        "Sept. 2019 " + EN + " March 2021",
         "2019 " + EN + " Present",
-    ):
-        assert check_style(rng) == [], rng
+        "03/2020 " + EN + " 05/2022",
+        "3/2020 " + EN + " 5/2022",
+        "03/2020" + EN + "05/2022",
+        "2020-03 " + EN + " 2022-05",
+        "2020/03 " + EN + " 2022/05",
+        "03.2020 " + EN + " 05.2022",
+        "jan 2019 " + EN + " current",
+        "2019 " + EN + " now",
+        "2019 " + EN + " ongoing",
+        "2019 " + EN + " Today",
+    ],
+)
+def test_en_dash_in_date_ranges_is_exempt(rng):
+    assert check_style(rng) == []
 
 
-def test_en_dash_outside_range_still_warns():
-    assert _codes("Python " + EN + " fast. 2019 " + EN + " 2021") == ["style-dash"]
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Python " + EN + " Go",
+        "pages 3 " + EN + " 5 of the report",
+        "Python " + EN + " fast. 2019 " + EN + " 2021",
+        "2019 " + EM + " 2021",
+        "2019 -- 2021",
+    ],
+)
+def test_non_date_dashes_still_warn(text):
+    assert _codes(text) == ["style-dash"]
+
+
+def test_original_casing_kept_in_snippets():
+    (w,) = check_style("Leverage Python")
+    assert "'Leverage'" in w["message"]
 
 
 def test_curly_quotes_fire():
@@ -88,6 +119,12 @@ def test_weak_tells_need_two_hits():
 def test_weak_tells_cover_all_families():
     text = "Played a key role, highlighting wins. Associated with the team."
     assert _codes(text) == ["style-weak-tells"]
+
+
+def test_weak_tells_cover_association_and_significance():
+    for phrase in ("Contributed to the launch", "Marking a shift in scope"):
+        text = phrase + ". Was involved in releases."
+        assert _codes(text) == ["style-weak-tells"], phrase
 
 
 def test_snippets_capped_and_distinct():

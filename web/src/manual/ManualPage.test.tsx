@@ -242,7 +242,7 @@ describe("ManualPage", () => {
       pdfUrl: null,
       docxUrl: null,
       text: "Dear hiring manager…",
-      styleWarnings: [{ code: "style-em-dash", message: "Too many em dashes." }],
+      styleWarnings: [{ code: "style-dash", message: "Too many em dashes." }],
     });
     renderPage();
     fillForm();
@@ -290,7 +290,7 @@ describe("ManualPage", () => {
       blocked: false,
       unverifiable: [],
       blockedClaims: [],
-      atsWarnings: [{ code: "style-em-dash", message: "Too many em dashes." }],
+      atsWarnings: [{ code: "style-dash", message: "Too many em dashes." }],
       pdfUrl: null,
       docxUrl: null,
       html: "<p>cv</p>",

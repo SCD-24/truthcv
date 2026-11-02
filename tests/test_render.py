@@ -13,7 +13,7 @@ from render.cover_letter import render_letter_html
 from render.ats import lint
 from render import pdf as pdf_mod
 from render import docx as docx_mod
-from tailor.model import Draft, DraftExperience
+from tailor.model import Draft, DraftEducation, DraftExperience
 import vocabulary.synonyms as vocab_synonyms
 
 
@@ -346,3 +346,31 @@ def test_rendered_cv_trips_no_style_warnings():
     html = render_html(DRAFT, name="Ada Lovelace", contact="ada@example.com", summary="Engineer.")
     style_codes = [w["code"] for w in lint(html) if w["code"].startswith("style-")]
     assert style_codes == []
+
+
+def test_rendered_cv_with_numeric_and_open_ended_dates_trips_no_style_warnings():
+    draft = Draft(
+        experiences=[
+            DraftExperience(
+                source_id="exp-1", role="Engineer", company="Acme",
+                dates="03/2020 – 05/2022", bullets=["Built a payments API"],
+            ),
+            DraftExperience(
+                source_id="exp-2", role="Analyst", company="Beta",
+                dates="Jan 2019 – Current", bullets=["Wrote reports"],
+            ),
+        ],
+        education=[
+            DraftEducation(source_id="ed-1", degree="BSc", school="Uni", dates="03/2020 – 05/2022"),
+            DraftEducation(source_id="ed-2", degree="MSc", school="Tech", dates="Jan 2019 – Current"),
+        ],
+        skills=["Python"],
+    )
+    html = render_html(draft, name="Ada Lovelace", contact="ada@example.com", summary="Engineer.")
+    assert [w["code"] for w in lint(html) if w["code"].startswith("style-")] == []
+
+
+def test_lint_style_snippet_keeps_original_casing():
+    html = "<html><body><p>Leverage Python</p></body></html>"
+    (msg,) = [w["message"] for w in lint(html) if w["code"] == "style-tell-word"]
+    assert "'Leverage'" in msg
