@@ -776,6 +776,8 @@ class CoverLetterResult(_Camel):
     # True when attached to an application and the source was saved, but neither
     # a PDF nor a DOCX could be produced (render backend unavailable).
     render_unavailable: bool = False
+    # Advisory AI-writing tells in the letter text; warn only, never block.
+    style_warnings: list[AtsWarning] = Field(default_factory=list)
 
 
 class ApplicationDocument(_Camel):

@@ -100,6 +100,8 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) - not ex
 
 `POST /api/render` returns `atsWarnings` as `{code, message}` items. The `style-*` codes below flag AI-sounding prose in the CV text. They are advisory: they warn and never block a render.
 
+`POST /api/cover-letter` returns the same `{code, message}` items as `styleWarnings`, checked against the letter text. A blocked response returns `styleWarnings: []`.
+
 | Code | Meaning |
 |---|---|
 | `style-dash` | An em dash, en dash or ` -- ` appears in the text. En dashes inside date ranges are exempt. |

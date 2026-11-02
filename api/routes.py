@@ -2226,6 +2226,7 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
         docx_url=outcome.docx_url,
         text=outcome.text,
         render_unavailable=outcome.render_unavailable,
+        style_warnings=[AtsWarning(**w) for w in outcome.style_warnings],
     )
 
 
