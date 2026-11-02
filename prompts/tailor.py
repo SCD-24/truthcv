@@ -12,7 +12,7 @@ from __future__ import annotations
 from truth.model import Truth
 
 from .conventions import CvConventions, DomainVocabulary, DEFAULT_CONVENTIONS, DEFAULT_VOCABULARY
-from .style import STRICT_TELL_WORDS, cv_style, cv_anti_slop
+from .style import STYLE_ONLY, cv_style, cv_anti_slop, shared_humanizer_rules
 
 
 # --- Keyword extraction -----------------------------------------------------
@@ -147,32 +147,17 @@ def cv_standard(
 _CV_STANDARD = cv_standard()
 
 
-_STYLE_ONLY = " This changes style only and adds no facts."
-
-
 def _cv_humanizer_rules() -> str:
     """Render the humanizer-derived CV bullet rules (humanizer v3.1.0, MIT).
 
-    The banned-word list is generated from ``STRICT_TELL_WORDS`` so the prompt
-    and any checker share one source. Every rule is style only.
+    Shared rules come from ``shared_humanizer_rules``; verb variation is
+    CV-only. Every rule is style only.
     """
-    banned = ", ".join(STRICT_TELL_WORDS)
     return (
-        " No -ing riders: do not bolt a trailing clause onto a bullet, such as "
-        "', ensuring X', ', driving Y', ', highlighting', ', showcasing', "
-        "', fostering', ', reflecting', or ', contributing to'; state a result as "
-        "its own clause only if it is in the referenced fact." + _STYLE_ONLY
-        + " Avoid vague association: do not write 'involved in', 'associated "
-        "with', or 'contributed to' when the fact names the actual role or "
-        "action; if the fact itself is vague keep it vague, never invent a role."
-        + _STYLE_ONLY
-        + " Avoid inflated significance: no 'played a key role', 'pivotal', "
-        "'instrumental in', 'marking a', or 'setting the stage'." + _STYLE_ONLY
-        + " Also never use these banned words: " + banned + ", crucial, "
-        "valuable, enhance, highlight (as a verb)." + _STYLE_ONLY
+        shared_humanizer_rules("bullet")
         + " Vary the opening action verb across consecutive bullets of one "
         "role; never open three bullets in a row with the same verb."
-        + _STYLE_ONLY
+        + STYLE_ONLY
     )
 
 

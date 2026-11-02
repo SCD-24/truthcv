@@ -6,6 +6,8 @@ date range is the one deliberate exemption), or the model will happily echo
 them. Guards against a future edit reintroducing a banned character.
 """
 
+import re
+
 from truth.model import Bullet, Experience, Skill, Truth
 from prompts.tailor import select_system, select_truth_block
 from prompts.coverletter import cover_letter_system_for_preset, cover_letter_facts_block
@@ -175,3 +177,18 @@ def test_cv_system_prompt_has_humanizer_cv_rules():
     assert "played a key role" in prompt
     assert "never open three bullets in a row with the same verb" in prompt
     assert prompt.count("changes style only and adds no facts") >= 5
+
+
+_BANNED_SENTENCE = re.compile(
+    r"Also never use these banned words: .*? This changes style only and adds no facts\."
+)
+
+
+def test_cv_and_letter_prompts_share_identical_banned_word_sentence():
+    cv_match = _BANNED_SENTENCE.search(select_system())
+    assert cv_match
+    for preset in SEEDED_PRESETS:
+        letter = cover_letter_system_for_preset(preset.id, "one page")
+        letter_match = _BANNED_SENTENCE.search(letter)
+        assert letter_match
+        assert letter_match.group(0) == cv_match.group(0)
