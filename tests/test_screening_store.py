@@ -22,6 +22,9 @@ from screening.store import (
     delete_many,
     load_all,
     mark_applied,
+    REJECTED_PAGE_MAX_LIMIT,
+    _write_all,
+    rejected_page,
     screenings_path,
     set_approval,
 )
@@ -598,3 +601,98 @@ def test_mark_applied_is_unconditional_about_claim_ownership(data_dir):
     result = mark_applied(target.id)
     assert result is not None
     assert result.approval == "applied"
+
+
+def _stamp(screening_id, created_at):
+    """Pin created_at on a stored record so ordering tests are deterministic."""
+    records = load_all()
+    for r in records:
+        if r.id == screening_id:
+            r.created_at = created_at
+    _write_all(records)
+
+
+def _reject(n, *, criterion="", by="agent", **extra):
+    """A stored rejection; ``n`` sets a distinct url and an ascending created_at."""
+    rec = create(
+        {
+            "company": f"Co{n}",
+            "role": "Engineer",
+            "url": f"https://example.com/jobs/{n}",
+            "verdict": "rejected",
+            "failing_criterion": criterion,
+            **extra,
+        }
+    )
+    if by == "operator":
+        set_approval(rec.id, "rejected")
+    _stamp(rec.id, f"2026-01-{n:02d}T00:00:00+00:00")
+    return rec
+
+
+def _ids(rows):
+    return [r.screening.id for r in rows]
+
+
+def test_rejected_page_unions_sources_and_excludes_others(data_dir):
+    agent = _reject(1)
+    operator = _reject(2, by="operator", verdict="passed")
+    _reject(3, screening_blocker="not_found")
+    pending = create({"company": "P", "role": "E", "url": "https://example.com/p", "verdict": "deferred"})
+    approved = create({"company": "A", "role": "E", "url": "https://example.com/a", "verdict": "passed"})
+    set_approval(approved.id, "approved")
+    rows, total, _ = rejected_page(50, 0)
+    assert total == 2
+    assert {(r.screening.id, r.rejected_by) for r in rows} == {
+        (agent.id, "agent"),
+        (operator.id, "operator"),
+    }
+    assert pending.id not in _ids(rows) and approved.id not in _ids(rows)
+
+
+def test_rejected_page_operator_rejection_of_rejected_verdict_listed_once(data_dir):
+    rec = _reject(1, by="operator")
+    rows, total, _ = rejected_page(50, 0)
+    assert total == 1 and _ids(rows) == [rec.id]
+    assert rows[0].rejected_by == "operator"
+
+
+def test_rejected_page_orders_newest_first_and_pages(data_dir):
+    recs = [_reject(n) for n in range(1, 6)]
+    rows, total, _ = rejected_page(2, 1)
+    assert total == 5
+    assert _ids(rows) == [recs[3].id, recs[2].id]
+
+
+def test_rejected_page_clamps_offset_and_limit(data_dir):
+    for n in range(1, 4):
+        _reject(n)
+    assert len(rejected_page(10, -5)[0]) == 3
+    assert len(rejected_page(0, 0)[0]) == 1
+    assert len(rejected_page(-3, 0)[0]) == 1
+    assert len(rejected_page(REJECTED_PAGE_MAX_LIMIT + 1000, 0)[0]) == 3
+
+
+def test_rejected_page_category_filter_and_counts_before_filter(data_dir):
+    remote = _reject(1, criterion="remote_model")
+    _reject(2, criterion="salary_floor")
+    none = _reject(3, criterion="")
+    other = _reject(4, criterion="other")
+    legacy = _reject(5, criterion="remote_model")
+    _write_raw_criterion(legacy.id, "Some legacy text")
+    canonical = [("remote_model", 1), ("salary_floor", 1), ("other", 2), ("none", 1)]
+    rows, total, counts = rejected_page(50, 0, "remote_model")
+    assert (_ids(rows), total, counts) == ([remote.id], 1, canonical)
+    assert _ids(rejected_page(50, 0, "none")[0]) == [none.id]
+    rows, total, _ = rejected_page(50, 0, "other")
+    assert (_ids(rows), total) == ([legacy.id, other.id], 2)
+    assert rejected_page(50, 0, "bogus")[:2] == ([], 0)
+    assert rejected_page(50, 0, "all")[1] == 5
+
+
+def _write_raw_criterion(screening_id, value):
+    records = load_all()
+    for r in records:
+        if r.id == screening_id:
+            r.failing_criterion = value
+    _write_all(records)

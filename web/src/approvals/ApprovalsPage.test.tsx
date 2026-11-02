@@ -14,23 +14,24 @@ import {
   markScreeningApplied,
   listApprovedApplications,
   listContradictions,
-  listDidNotPass,
   listPendingApprovals,
   listPromptPresets,
-  listRejectedApprovals,
+  listRejectedPage,
+  listScreenings,
   saveScreeningLetter,
   setScreeningApproval,
   setScreeningPostingText,
   setScreeningUrl,
 } from "../api/client";
-import type { ScreeningRecord } from "../api/types";
+import type { RejectedScreening, RejectedScreeningPage, ScreeningRecord } from "../api/types";
 import { ApprovalsPage, byDateDesc, orderingDate } from "./ApprovalsPage";
+import { countByCategory, filterByCategory } from "./rejectionCategories";
 
 vi.mock("../api/client", () => ({
   listPendingApprovals: vi.fn(),
   listApprovedApplications: vi.fn(),
-  listRejectedApprovals: vi.fn(),
-  listDidNotPass: vi.fn(),
+  listRejectedPage: vi.fn(),
+  listScreenings: vi.fn(),
   listAppliedScreenings: vi.fn(),
   listContradictions: vi.fn(),
   setScreeningApproval: vi.fn(),
@@ -70,8 +71,8 @@ afterEach(() => {
 // cover-letter tests below override it before rendering.
 beforeEach(() => {
   vi.mocked(getScreeningLetter).mockResolvedValue(null);
-  vi.mocked(listRejectedApprovals).mockResolvedValue([]);
-  vi.mocked(listDidNotPass).mockResolvedValue([]);
+  rejectedStore = [];
+  vi.mocked(listRejectedPage).mockImplementation(fakeRejectedPage);
   vi.mocked(listAppliedScreenings).mockResolvedValue([]);
   vi.mocked(listContradictions).mockResolvedValue([]);
   vi.mocked(listPromptPresets).mockResolvedValue([
@@ -79,6 +80,46 @@ beforeEach(() => {
     { id: "concise", name: "Concise", fragmentIds: [], isDefault: false, seeded: false },
   ]);
 });
+
+/** The rejected set the fake server pages over; renderPage fills it. */
+let rejectedStore: RejectedScreening[] = [];
+
+/** Ids the page's own mutations took out of the rejected set, read back from
+ * the mutation mocks so a refetch sees them gone as the real server would:
+ * a move back to pending, a single delete, and each ok bulk-delete result. */
+async function removedIds(): Promise<Set<string>> {
+  const gone = new Set<string>();
+  for (const [id, approval] of vi.mocked(setScreeningApproval).mock.calls) {
+    if (approval === "pending") gone.add(id);
+  }
+  for (const [id] of vi.mocked(deleteScreening).mock.calls) gone.add(id);
+  const bulk = await Promise.all(vi.mocked(bulkDeleteScreenings).mock.results.map((r) => r.value));
+  for (const res of bulk) for (const r of res?.results ?? []) if (r.ok) gone.add(r.id);
+  return gone;
+}
+
+/** Stand-in for GET /api/screenings/rejected over `rejectedStore`: category
+ * filter, then offset/limit; `categories` count the whole set. */
+async function fakeRejectedPage({
+  limit = 50,
+  offset = 0,
+  category = "all",
+}: {
+  limit?: number;
+  offset?: number;
+  category?: string;
+}): Promise<RejectedScreeningPage> {
+  const gone = await removedIds();
+  const rows = rejectedStore.filter((r) => !gone.has(r.id));
+  const matching = filterByCategory(rows, category);
+  return {
+    items: matching.slice(offset, offset + limit),
+    total: matching.length,
+    limit,
+    offset,
+    categories: countByCategory(rows),
+  };
+}
 
 function makeRecord(overrides: Partial<ScreeningRecord> = {}): ScreeningRecord {
   return {
@@ -120,8 +161,10 @@ async function renderPage(
 ) {
   vi.mocked(listPendingApprovals).mockResolvedValue(pending);
   vi.mocked(listApprovedApplications).mockResolvedValue(approved);
-  if (lists.rejected) vi.mocked(listRejectedApprovals).mockResolvedValue(lists.rejected);
-  if (lists.didNotPass) vi.mocked(listDidNotPass).mockResolvedValue(lists.didNotPass);
+  rejectedStore = [
+    ...(lists.didNotPass ?? []).map((r) => ({ ...r, rejectedBy: "agent" as const })),
+    ...(lists.rejected ?? []).map((r) => ({ ...r, rejectedBy: "operator" as const })),
+  ];
   if (lists.applied) vi.mocked(listAppliedScreenings).mockResolvedValue(lists.applied);
   // The style picker links to the preset editor, so it needs a router.
   render(
@@ -692,12 +735,14 @@ describe("ApprovalsPage reviewable lists", () => {
       await renderPage([], [], rows());
       clickTab(/rejected/i);
       await pick(/Salary/);
-      fireEvent.click(await screen.findByRole("checkbox", { name: "Select all rejected" }));
+      // The category is filtered server-side, so wait for the narrowed page.
+      await waitFor(() => expect(screen.queryByText("Gamma")).toBeNull());
+      fireEvent.click(await screen.findByRole("checkbox", { name: "Select all rejected on this page" }));
       expect((screen.getByRole("checkbox", { name: "Select Alpha" }) as HTMLInputElement).checked).toBe(true);
       await pick(/All \(3\)/);
       // Changing the filter clears the selection.
       expect((screen.getByRole("checkbox", { name: "Select Alpha" }) as HTMLInputElement).checked).toBe(false);
-      expect((screen.getByRole("checkbox", { name: "Select Gamma" }) as HTMLInputElement).checked).toBe(false);
+      expect(((await screen.findByRole("checkbox", { name: "Select Gamma" })) as HTMLInputElement).checked).toBe(false);
     });
 
     it("falls back to all rows when the active category empties", async () => {
@@ -712,7 +757,7 @@ describe("ApprovalsPage reviewable lists", () => {
       });
       clickTab(/rejected/i);
       await pick(/Salary/);
-      expect(screen.queryByText("Gamma")).toBeNull();
+      await waitFor(() => expect(screen.queryByText("Gamma")).toBeNull());
       fireEvent.click(await screen.findByRole("button", { name: "Move to approvals" }));
       expect(await screen.findByText("Gamma")).toBeTruthy();
       expect(screen.queryByText("Alpha")).toBeNull();
@@ -729,7 +774,7 @@ describe("ApprovalsPage reviewable lists", () => {
       fireEvent.click(screen.getByRole("checkbox", { name: "Select Gamma" }));
       fireEvent.click(screen.getAllByRole("button", { name: "Move to approvals" })[0]);
       await waitFor(() => expect(screen.queryByText("Alpha")).toBeNull());
-      const all = screen.getByRole("checkbox", { name: "Select all rejected" }) as HTMLInputElement;
+      const all = screen.getByRole("checkbox", { name: "Select all rejected on this page" }) as HTMLInputElement;
       expect(all.checked).toBe(false);
       fireEvent.click(screen.getByRole("button", { name: "Delete selected" }));
       fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
@@ -883,7 +928,7 @@ describe("ApprovalsPage rejected tab delete", () => {
       ],
     });
     clickTab(/rejected/i);
-    fireEvent.click(await screen.findByRole("checkbox", { name: "Select all rejected" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select all rejected on this page" }));
     fireEvent.click(await screen.findByRole("button", { name: "Delete selected" }));
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() =>
@@ -907,7 +952,7 @@ describe("ApprovalsPage rejected tab delete", () => {
       ],
     });
     clickTab(/rejected/i);
-    fireEvent.click(await screen.findByRole("checkbox", { name: "Select all rejected" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select all rejected on this page" }));
     fireEvent.click(await screen.findByRole("button", { name: "Delete selected" }));
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.queryByText("Soylent")).toBeNull());
@@ -939,6 +984,166 @@ describe("ApprovalsPage rejected tab delete", () => {
       name: "Select Found Co",
     })) as HTMLInputElement;
     expect(foundCheckboxAgain.checked).toBe(true);
+  });
+});
+
+describe("ApprovalsPage rejected tab paging", () => {
+  /** `n` agent-rejected rows named "Co 0".."Co n-1", in `criterion`. */
+  const agentRows = (n: number, criterion = "salary_floor", prefix = "Co") =>
+    Array.from({ length: n }, (_, i) =>
+      makeRecord({
+        id: `${prefix}${i}`,
+        company: `${prefix} ${i}`,
+        verdict: "rejected",
+        approval: "",
+        failingCriterion: criterion,
+      }),
+    );
+  const moveButtons = () => screen.queryAllByRole("button", { name: "Move to approvals" });
+  const lastRejectedCall = () => vi.mocked(listRejectedPage).mock.lastCall?.[0];
+
+  it("renders one page of rows when the total exceeds the page size", async () => {
+    await renderPage([], [], { didNotPass: agentRows(51) });
+    clickTab(/rejected \(51\)/i);
+    await waitFor(() => expect(moveButtons()).toHaveLength(50));
+    expect(screen.queryByText("Co 50")).toBeNull();
+    expect(listRejectedPage).toHaveBeenCalledWith({ limit: 50, offset: 0, category: "all" });
+  });
+
+  it("the next page fetches offset 50", async () => {
+    await renderPage([], [], { didNotPass: agentRows(51) });
+    clickTab(/rejected \(51\)/i);
+    fireEvent.click(await screen.findByRole("button", { name: "Go to next page" }));
+    expect(await screen.findByText("Co 50")).toBeTruthy();
+    expect(lastRejectedCall()).toEqual({ limit: 50, offset: 50, category: "all" });
+    expect(moveButtons()).toHaveLength(1);
+  });
+
+  it("a category change refetches with the category and resets to page 0", async () => {
+    await renderPage([], [], {
+      didNotPass: [...agentRows(51), ...agentRows(1, "role_fit", "Fit")],
+    });
+    clickTab(/rejected/i);
+    fireEvent.click(await screen.findByRole("button", { name: "Go to next page" }));
+    await waitFor(() => expect(lastRejectedCall()?.offset).toBe(50));
+    fireEvent.mouseDown(await screen.findByRole("combobox", { name: /rejection reason/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Role fit (1)" }));
+    expect(await screen.findByText("Fit 0")).toBeTruthy();
+    expect(lastRejectedCall()).toEqual({ limit: 50, offset: 0, category: "role_fit" });
+  });
+
+  it("the tab label shows the server's total across every category", async () => {
+    vi.mocked(listRejectedPage).mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 50,
+      offset: 0,
+      categories: [
+        { key: "salary_floor", count: 120 },
+        { key: "none", count: 3 },
+      ],
+    });
+    await renderPage([]);
+    expect(await screen.findByRole("tab", { name: "Rejected (123)" })).toBeTruthy();
+  });
+
+  it("select all selects the current page only", async () => {
+    vi.mocked(bulkDeleteScreenings).mockResolvedValue({ results: [] });
+    await renderPage([], [], { didNotPass: agentRows(51) });
+    clickTab(/rejected/i);
+    await waitFor(() => expect(moveButtons()).toHaveLength(50));
+    expect(screen.getByText("Select all on this page")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all rejected on this page" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete selected" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(bulkDeleteScreenings).toHaveBeenCalled());
+    const ids = vi.mocked(bulkDeleteScreenings).mock.calls[0][0];
+    expect(ids).toHaveLength(50);
+    expect(ids).not.toContain("Co50");
+  });
+
+  it("a page change clears the selection", async () => {
+    await renderPage([], [], { didNotPass: agentRows(51) });
+    clickTab(/rejected/i);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select Co 0" }));
+    fireEvent.click(screen.getByRole("button", { name: "Go to next page" }));
+    await screen.findByText("Co 50");
+    fireEvent.click(screen.getByRole("button", { name: "Go to previous page" }));
+    const first = (await screen.findByRole("checkbox", { name: "Select Co 0" })) as HTMLInputElement;
+    expect(first.checked).toBe(false);
+  });
+
+  it("a delete refetches the page", async () => {
+    vi.mocked(deleteScreening).mockResolvedValue(undefined);
+    await renderPage([], [], { didNotPass: agentRows(2) });
+    clickTab(/rejected/i);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete rejected posting for Co 0" }));
+    const before = vi.mocked(listRejectedPage).mock.calls.length;
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByText("Co 0")).toBeNull());
+    expect(vi.mocked(listRejectedPage).mock.calls.length).toBe(before + 1);
+    expect(await screen.findByRole("tab", { name: "Rejected (1)" })).toBeTruthy();
+  });
+
+  it("a move to approvals refetches the page", async () => {
+    vi.mocked(setScreeningApproval).mockResolvedValue(makeRecord({ id: "Co0", company: "Co 0" }));
+    await renderPage([], [], { didNotPass: agentRows(2) });
+    clickTab(/rejected/i);
+    await waitFor(() => expect(moveButtons()).toHaveLength(2));
+    const before = vi.mocked(listRejectedPage).mock.calls.length;
+    fireEvent.click(moveButtons()[0]);
+    await waitFor(() => expect(moveButtons()).toHaveLength(1));
+    expect(vi.mocked(listRejectedPage).mock.calls.length).toBe(before + 1);
+  });
+
+  it("steps back a page when a delete empties the last page", async () => {
+    vi.mocked(deleteScreening).mockResolvedValue(undefined);
+    await renderPage([], [], { didNotPass: agentRows(51) });
+    clickTab(/rejected/i);
+    fireEvent.click(await screen.findByRole("button", { name: "Go to next page" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete rejected posting for Co 50" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    expect(await screen.findByText("Co 0")).toBeTruthy();
+    expect(lastRejectedCall()).toEqual({ limit: 50, offset: 0, category: "all" });
+  });
+
+  it("a stale response does not overwrite a newer one", async () => {
+    await renderPage([], [], {
+      didNotPass: [...agentRows(1), ...agentRows(1, "role_fit", "Fit")],
+    });
+    clickTab(/rejected/i);
+    await screen.findByText("Co 0");
+    let releaseStale: () => void = () => {};
+    vi.mocked(listRejectedPage).mockImplementationOnce(
+      (opts) =>
+        new Promise((resolve) => {
+          releaseStale = () => resolve(fakeRejectedPage(opts));
+        }),
+    );
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /rejection reason/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Salary (1)" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /rejection reason/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Role fit (1)" }));
+    expect(await screen.findByText("Fit 0")).toBeTruthy();
+    releaseStale();
+    await waitFor(() => expect(listRejectedPage).toHaveBeenCalledTimes(3));
+    await Promise.resolve();
+    expect(screen.queryByText("Co 0")).toBeNull();
+    expect(screen.getByText("Fit 0")).toBeTruthy();
+  });
+
+  it("shows an error when the page fetch fails", async () => {
+    vi.mocked(listRejectedPage).mockRejectedValue(new Error("rejected page down"));
+    await renderPage([]);
+    clickTab(/rejected/i);
+    expect(await screen.findByText(/rejected page down/)).toBeTruthy();
+  });
+
+  it("never downloads every screening", async () => {
+    await renderPage([], [], { didNotPass: agentRows(1) });
+    clickTab(/rejected/i);
+    await screen.findByText("Co 0");
+    expect(listScreenings).not.toHaveBeenCalled();
   });
 });
 

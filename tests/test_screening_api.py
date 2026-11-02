@@ -262,6 +262,90 @@ def test_list_screenings_most_recent_first(client):
     assert ids.index(second["id"]) < ids.index(first["id"])
 
 
+# --- GET screenings/rejected ----------------------------------------------------
+
+def _post_agent_rejection(client, company, criterion=""):
+    r = client.post(
+        "/api/screenings",
+        json={
+            "company": company,
+            "role": "Engineer",
+            "url": f"https://{company.lower()}.example/jobs/1",
+            "verdict": "rejected",
+            "failingCriterion": criterion,
+            "reason": "Does not fit.",
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def _store_operator_rejection(company):
+    from screening import store
+
+    rec, _ = store.create_or_get({
+        "company": company,
+        "role": "Engineer",
+        "url": f"https://{company.lower()}.example/jobs/2",
+        "verdict": "passed",
+        "posting_text": "We are hiring for this role. " * 6,
+    })
+    store.set_approval(rec.id, "rejected")
+    return rec
+
+
+def test_rejected_route_page_shape_and_rejected_by_labels(client):
+    agent = _post_agent_rejection(client, "Acme", "salary_floor")
+    operator = _store_operator_rejection("Beta")
+    r = client.get("/api/screenings/rejected")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert set(body) == {"items", "total", "limit", "offset", "categories"}
+    assert (body["total"], body["limit"], body["offset"]) == (2, 50, 0)
+    assert body["categories"] == [
+        {"key": "salary_floor", "count": 1},
+        {"key": "none", "count": 1},
+    ]
+    by_id = {item["id"]: item for item in body["items"]}
+    assert by_id[agent["id"]]["rejectedBy"] == "agent"
+    assert by_id[agent["id"]]["failingCriterion"] == "salary_floor"
+    assert by_id[agent["id"]]["createdAt"]
+    assert by_id[operator.id]["rejectedBy"] == "operator"
+
+
+def test_rejected_route_pages_with_total_and_echoes_clamped_params(client):
+    for n in range(3):
+        _post_agent_rejection(client, f"Co{n}")
+    page = client.get("/api/screenings/rejected", params={"limit": 2, "offset": 1}).json()
+    assert (len(page["items"]), page["total"], page["limit"], page["offset"]) == (2, 3, 2, 1)
+    clamped = client.get(
+        "/api/screenings/rejected", params={"limit": 0, "offset": -5}
+    ).json()
+    assert (len(clamped["items"]), clamped["limit"], clamped["offset"]) == (1, 1, 0)
+
+
+def test_rejected_route_category_filter_keeps_counts_for_all_categories(client):
+    _post_agent_rejection(client, "Acme", "salary_floor")
+    _post_agent_rejection(client, "Beta", "role_fit")
+    body = client.get("/api/screenings/rejected", params={"category": "role_fit"}).json()
+    assert body["total"] == 1
+    assert [item["failingCriterion"] for item in body["items"]] == ["role_fit"]
+    assert {c["key"]: c["count"] for c in body["categories"]} == {
+        "salary_floor": 1,
+        "role_fit": 1,
+    }
+    unknown = client.get("/api/screenings/rejected", params={"category": "bogus"}).json()
+    assert (unknown["items"], unknown["total"]) == ([], 0)
+
+
+def test_list_screenings_stays_an_unpaged_array_beside_rejected_route(client):
+    for n in range(3):
+        _post_agent_rejection(client, f"Co{n}")
+    listed = client.get("/api/screenings").json()
+    assert isinstance(listed, list) and len(listed) == 3
+    assert len(client.get("/api/screenings/rejected", params={"limit": 2}).json()["items"]) == 2
+
+
 def test_delete_unknown_screening_returns_404(client):
     r = client.delete("/api/screenings/does-not-exist")
     assert r.status_code == 404

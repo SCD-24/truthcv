@@ -1,62 +1,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { listDidNotPass, listRuns, getRun, stopRun } from "./client";
-import type { ScreeningRecord } from "./types";
-
-function makeScreening(overrides: Partial<ScreeningRecord> = {}): ScreeningRecord {
-  return {
-    id: "s1",
-    company: "Acme",
-    role: "Engineer",
-    url: "https://acme.example/jobs/1",
-    screenedDate: "",
-    verdict: "rejected",
-    failingCriterion: "",
-    reason: "",
-    cooldownExpires: "",
-    source: "",
-    postingText: "",
-    postedDate: "",
-    approval: "",
-    applyAttempts: 0,
-    applyError: "",
-    screeningBlocker: "",
-    profile: "",
-    remoteArrangement: "",
-    languageRequirement: "",
-    claimedByRun: "",
-    claimExpiresAt: "",
-    createdAt: "2024-06-01T12:00:00+00:00",
-    updatedAt: "2024-06-01T12:00:00+00:00",
-    ...overrides,
-  } as ScreeningRecord;
-}
+import { listRuns, getRun, stopRun } from "./client";
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-});
-
-describe("listDidNotPass", () => {
-  it("excludes a record blocked at screening time even though its verdict reads rejected", async () => {
-    const rejected = makeScreening({ id: "s-rejected", verdict: "rejected" });
-    const blocked = makeScreening({
-      id: "s-blocked",
-      verdict: "",
-      screeningBlocker: "unreadable",
-    });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => [rejected, blocked],
-      }),
-    );
-
-    const result = await listDidNotPass();
-
-    expect(result.map((r) => r.id)).toEqual(["s-rejected"]);
-  });
 });
 
 describe("listRuns / getRun", () => {

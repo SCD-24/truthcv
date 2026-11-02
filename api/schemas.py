@@ -1530,6 +1530,34 @@ class RunListResponse(_Camel):
     offset: int = 0
 
 
+class RejectedScreeningModel(ScreeningModel):
+    """A rejected screening plus who rejected it: 'agent' or 'operator'."""
+
+    rejected_by: Literal["agent", "operator"]
+
+
+class CategoryCountModel(_Camel):
+    """One rejection category and how many rejected screenings it holds."""
+
+    key: str
+    count: int
+
+
+class RejectedScreeningsResponse(_Camel):
+    """GET /api/screenings/rejected: one page of rejected screenings.
+
+    ``total`` counts rows after the category filter; ``categories`` counts the
+    whole rejected population before it, so the filter chips stay complete.
+    ``limit``/``offset`` are the effective values after clamping.
+    """
+
+    items: list[RejectedScreeningModel]
+    total: int = 0
+    limit: int = 0
+    offset: int = 0
+    categories: list[CategoryCountModel]
+
+
 class SigninQueueSite(_Camel):
     """One host the agent could not get past a sign-in wall on."""
 

@@ -34,6 +34,7 @@ import type {
   ApplicationUpdate,
   SaveDocumentResult,
   ScreeningRecord,
+  RejectedScreeningPage,
   CoverLetterDraft,
   CooldownStatus,
   AgentConfig,
@@ -502,11 +503,6 @@ export function listApprovedApplications(): Promise<ScreeningRecord[]> {
   return request("/api/screenings?approval=approved");
 }
 
-/** Postings you rejected. Kept listed so a decision can be reversed. */
-export function listRejectedApprovals(): Promise<ScreeningRecord[]> {
-  return request("/api/screenings?approval=rejected");
-}
-
 /** Every sourced company research finding, newest observed first. */
 export function listCompanyFindings(): Promise<CompanyFinding[]> {
   return request("/api/company-findings");
@@ -561,18 +557,20 @@ export function listAppliedScreenings(): Promise<ScreeningRecord[]> {
   return request("/api/screenings?approval=applied");
 }
 
-/** Postings the agent rejected on a criterion — never queued, and reviewable
- * so a filter you disagree with does not silently lose a role. Filtered
- * client-side: an agent-criteria rejection has an empty `approval`, but so
- * does any other untouched record (`approval: str = ""` is the schema
- * default), so `?approval=` would also return records that were never
- * screened as rejected at all. */
-export async function listDidNotPass(): Promise<ScreeningRecord[]> {
-  const all = await listScreenings();
-  // A record blocked at screening time (the agent could not read the
-  // posting at all) is not a rejection on its merits — excluding it here
-  // stops that fabricated outcome from ever reaching this list.
-  return all.filter((s) => s.verdict === "rejected" && !s.approval && !s.screeningBlocker);
+/** One page of rejected screenings — agent-filtered and operator-rejected
+ * alike — newest first. `category` narrows the page server-side ('all' when
+ * omitted); the page's `categories` still count the whole rejected set. */
+export function listRejectedPage(opts: {
+  limit?: number;
+  offset?: number;
+  category?: string;
+}): Promise<RejectedScreeningPage> {
+  const params = new URLSearchParams();
+  if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts.offset !== undefined) params.set("offset", String(opts.offset));
+  if (opts.category) params.set("category", opts.category);
+  const qs = params.toString();
+  return request<RejectedScreeningPage>(`/api/screenings/rejected${qs ? `?${qs}` : ""}`);
 }
 
 /** Record the operator's decision on one screening. */

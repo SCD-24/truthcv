@@ -243,6 +243,11 @@
                   "desc": "Accept a pending Gmail suggestion: apply its suggested status to the matched application (404 unknown, 409 not pending or no suggested status)",
                   "method": "POST",
                   "path": "/api/gmail/suggestions/{id}/accept"
+                },
+                {
+                  "desc": "One page of rejected screenings (agent- or operator-rejected, each with rejectedBy), newest first; limit (default 50, clamped 1..200), offset, category (default all); returns {items, total, limit, offset, categories}.",
+                  "method": "GET",
+                  "path": "/api/screenings/rejected"
                 }
               ]
             },
