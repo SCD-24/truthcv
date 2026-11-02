@@ -12,6 +12,7 @@ from prompts.coverletter import cover_letter_system_for_preset, cover_letter_fac
 from prompts.style import (
     CV_STYLE,
     LETTER_STYLE,
+    STRICT_TELL_WORDS,
     cv_style,
     letter_style,
     cv_anti_slop,
@@ -111,3 +112,43 @@ def test_cv_system_prompt_plain_action_verbs_are_vocabulary_driven():
     )
     assert "shipped, delivered" in custom_prompt
     assert "built, led, shipped, owned, cut, raised, fixed" not in custom_prompt
+
+
+_EXPECTED_STRICT_WORDS = (
+    "delve", "tapestry", "synergy", "paradigm", "leverage", "spearhead",
+    "orchestrate", "seamless", "transformative", "holistic", "unlock", "foster",
+    "vibrant", "intricate", "meticulous", "meticulously", "pivotal", "showcase",
+    "showcasing", "underscore", "underscores", "garner", "bolstered", "testament",
+)  # fmt: skip
+_FIGURATIVE_WORDS = (
+    "robust", "key", "landscape", "highlight", "harness", "ecosystem", "navigate",
+    "comprehensive", "innovative", "enhance", "crucial", "valuable", "dynamic",
+    "passionate",
+)  # fmt: skip
+
+
+def test_strict_tell_words_contract():
+    assert isinstance(STRICT_TELL_WORDS, tuple)
+    assert STRICT_TELL_WORDS == _EXPECTED_STRICT_WORDS
+    assert all(w == w.lower() and isinstance(w, str) for w in STRICT_TELL_WORDS)
+    assert not set(_FIGURATIVE_WORDS) & set(STRICT_TELL_WORDS)
+
+
+def test_cv_system_prompt_bans_every_strict_word():
+    prompt = select_system()
+    for word in STRICT_TELL_WORDS:
+        assert word in prompt
+    for word in ("crucial", "valuable", "enhance", "highlight (as a verb)"):
+        assert word in prompt
+
+
+def test_cv_system_prompt_has_humanizer_cv_rules():
+    prompt = select_system()
+    assert "-ing riders" in prompt
+    assert "contributing to" in prompt
+    assert "vague association" in prompt
+    assert "never invent a role" in prompt
+    assert "inflated significance" in prompt
+    assert "played a key role" in prompt
+    assert "never open three bullets in a row with the same verb" in prompt
+    assert prompt.count("changes style only and adds no facts") >= 5

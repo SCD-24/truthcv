@@ -59,6 +59,38 @@ LETTER_STYLE = (
     "brief, forward-looking close."
 )
 
+# Words that are AI-prose tells in nearly any use, so the CV prompt bans them
+# outright. Figurative-only words (robust, key, landscape, ...) are deliberately
+# excluded: they have legitimate literal uses. Word list adapted from the
+# humanizer SKILL.md v3.1.0 (MIT, github.com/blader/humanizer). Style only;
+# adds no facts.
+STRICT_TELL_WORDS = (
+    "delve",
+    "tapestry",
+    "synergy",
+    "paradigm",
+    "leverage",
+    "spearhead",
+    "orchestrate",
+    "seamless",
+    "transformative",
+    "holistic",
+    "unlock",
+    "foster",
+    "vibrant",
+    "intricate",
+    "meticulous",
+    "meticulously",
+    "pivotal",
+    "showcase",
+    "showcasing",
+    "underscore",
+    "underscores",
+    "garner",
+    "bolstered",
+    "testament",
+)
+
 
 _ANTI_SLOP_BANS = (
     " Additional AI-slop guardrails (style only, add no facts), distilled from "
