@@ -245,7 +245,7 @@
                   "path": "/api/gmail/suggestions/{id}/accept"
                 },
                 {
-                  "desc": "",
+                  "desc": "One page of rejected screenings (agent- or operator-rejected, each with rejectedBy), newest first; limit (default 50, clamped 1..200), offset, category (default all); returns {items, total, limit, offset, categories}.",
                   "method": "GET",
                   "path": "/api/screenings/rejected"
                 }
