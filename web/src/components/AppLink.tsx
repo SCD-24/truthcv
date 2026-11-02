@@ -1,5 +1,5 @@
 import { forwardRef } from "react";
-import { Link, type LinkProps } from "react-router-dom";
+import { Link, type LinkProps } from "react-router";
 
 const DANGEROUS_PATH = /\\|^\/\//;
 

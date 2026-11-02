@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, act } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 import { getAgentConfig, getAgentStatus, getProfileAnswers, getRouting, listConnections,
   triggerAgentRun } from "../api/client";
 import type { AgentConfig, AgentStatus, ProfileAnswers } from "../api/types";

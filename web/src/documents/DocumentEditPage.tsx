@@ -2,7 +2,7 @@ import { useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Typography from "@mui/material/Typography";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router";
 import { DocumentEditor } from "../steps/DocumentEditor";
 import type { EditRequest } from "../App";
 import { ROUTES } from "../routes";

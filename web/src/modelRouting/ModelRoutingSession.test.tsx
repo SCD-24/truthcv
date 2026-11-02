@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { StrictMode, useState } from "react";
-import { MemoryRouter, useNavigate } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router";
 import { ModelRoutingSession, useModelRoutingReload } from "./ModelRoutingSession";
 import { useSettingsAutosave, useSettingsAutosaveCoordinator } from "../settings/SettingsAutosave";
 

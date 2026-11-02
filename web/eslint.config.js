@@ -45,7 +45,7 @@ export default tseslint.config(
       "no-restricted-imports": [
         "error",
         {
-          paths: ["react-router", "react-router-dom"].map((name) => ({
+          paths: ["react-router"].map((name) => ({
             name,
             importNames: ["Link", "NavLink"],
             message: "Import AppLink from components/AppLink instead.",

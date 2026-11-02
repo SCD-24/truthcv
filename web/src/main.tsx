@@ -12,7 +12,7 @@ import "@fontsource/ibm-plex-mono/500.css";
 import { ThemeProvider } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 import "./styles/global.css";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter } from "react-router";
 import { App } from "./App";
 import { WizardProvider } from "./wizard/store";
 import { theme } from "./theme";

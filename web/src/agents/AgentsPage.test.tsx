@@ -2,7 +2,7 @@
 /** Run-now status polling: no overlapping request while one is pending. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter } from "react-router";
 import {
   getAgentConfig,
   getAgentStatus,
