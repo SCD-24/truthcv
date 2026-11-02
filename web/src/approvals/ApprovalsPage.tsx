@@ -17,6 +17,7 @@ import Link from "@mui/material/Link";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Tab from "@mui/material/Tab";
+import TablePagination from "@mui/material/TablePagination";
 import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
@@ -38,10 +39,9 @@ import {
   listAppliedScreenings,
   listApprovedApplications,
   listContradictions,
-  listDidNotPass,
   listPendingApprovals,
   listPromptPresets,
-  listRejectedApprovals,
+  listRejectedPage,
   type PromptPreset,
   saveScreeningLetter,
   setScreeningApproval,
@@ -52,13 +52,15 @@ import type {
   BlockedClaim,
   CoverLetterApprovals,
   CoverLetterDraft,
+  RejectedScreening,
+  RejectedScreeningPage,
   ScreeningRecord,
 } from "../api/types";
 import { approvalsFrom, BlockedClaimsPanel, type Decision } from "../components/BlockedClaimsPanel";
 import { ChoiceGroup, LENGTHS, StyleSelector, type Length } from "../components/LetterOptions";
 import { safeHref } from "../utils/safeUrl";
 import { RejectionFilter } from "./RejectionFilter";
-import { categoryLabel, categoryOf, filterByCategory } from "./rejectionCategories";
+import { categoryLabel, categoryOf } from "./rejectionCategories";
 
 /** The letter draft for one posting: fetches its own state on mount because
  * the list endpoint (GET /api/screenings) never carries drafts. Offers
@@ -783,6 +785,198 @@ function AppliedRow({ record }: { record: ScreeningRecord }) {
   );
 }
 
+/** Rows per Rejected-tab page, matching the other paged lists' fixed size. */
+const REJECTED_PAGE_SIZE = 50;
+
+/** Size of the whole rejected set: the server's per-category counts summed,
+ * so it does not shrink when a category filter narrows the page. */
+function rejectedTotal(data: RejectedScreeningPage | null): number {
+  return (data?.categories ?? []).reduce((sum, c) => sum + c.count, 0);
+}
+
+/** Where the Rejected tab must move after a fetch, or null to stay: back to
+ * 'all' when the active category no longer exists, back one page when a
+ * refetch found the current page emptied by a delete or move. */
+function correctedPosition(
+  res: RejectedScreeningPage,
+  page: number,
+  category: string,
+): { page: number; category: string } | null {
+  if (category !== "all" && !res.categories.some((c) => c.key === category)) {
+    return { page: 0, category: "all" };
+  }
+  if (res.items.length === 0 && page > 0 && res.total > 0) return { page: page - 1, category };
+  return null;
+}
+
+/** The Rejected tab's server page, fetched on mount and again whenever the
+ * page, the category, or `refetch` changes it. Each fetch supersedes the one
+ * before it, so a stale response never overwrites a newer one. */
+function useRejectedPage() {
+  const [pos, setPos] = useState({ page: 0, category: "all" });
+  const [nonce, setNonce] = useState(0);
+  const [data, setData] = useState<RejectedScreeningPage | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    const { page, category } = pos;
+    listRejectedPage({ limit: REJECTED_PAGE_SIZE, offset: page * REJECTED_PAGE_SIZE, category })
+      .then((res) => {
+        if (!live) return;
+        setError("");
+        setData(res);
+        const next = correctedPosition(res, page, category);
+        if (next) setPos(next);
+      })
+      .catch((e) => live && setError(String(e)))
+      .finally(() => live && setLoading(false));
+    return () => {
+      live = false;
+    };
+  }, [pos, nonce]);
+
+  /** Swap in an edited record without refetching; it stays rejected. */
+  const patchItem = (updated: ScreeningRecord) =>
+    setData((d) =>
+      d && {
+        ...d,
+        items: d.items.map((r) => (r.id === updated.id ? { ...updated, rejectedBy: r.rejectedBy } : r)),
+      },
+    );
+
+  return {
+    ...pos,
+    data,
+    loading,
+    error,
+    setPage: (page: number) => setPos((p) => ({ ...p, page })),
+    setCategory: (category: string) => setPos({ page: 0, category }),
+    refetch: () => setNonce((n) => n + 1),
+    patchItem,
+  };
+}
+
+type RejectedView = ReturnType<typeof useRejectedPage>;
+
+/** Select-all (this page only), the category filter and bulk delete. */
+function RejectedToolbar({
+  view,
+  busy,
+  allSelected,
+  anySelected,
+  onToggleAll,
+  onCategoryChange,
+  onDeleteSelected,
+}: {
+  view: RejectedView;
+  busy: boolean;
+  allSelected: boolean;
+  anySelected: boolean;
+  onToggleAll: () => void;
+  onCategoryChange: (key: string) => void;
+  onDeleteSelected: () => void;
+}) {
+  return (
+    <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+      <FormControlLabel
+        control={
+          <Checkbox
+            checked={allSelected}
+            onChange={onToggleAll}
+            disabled={busy}
+            slotProps={{ input: { "aria-label": "Select all rejected on this page" } }}
+          />
+        }
+        label="Select all on this page"
+      />
+      <RejectionFilter
+        categories={view.data?.categories ?? []}
+        value={view.category}
+        onChange={onCategoryChange}
+      />
+      <Button
+        variant="outlined"
+        color="error"
+        size="small"
+        disabled={busy || !anySelected}
+        onClick={onDeleteSelected}
+      >
+        Delete selected
+      </Button>
+    </Stack>
+  );
+}
+
+/** The Rejected tab body: one server page of agent-filtered and
+ * operator-rejected postings, with loading and error states and pagination.
+ * Selection and the actions themselves belong to the page. */
+function RejectedPanel({
+  view,
+  busy,
+  selected,
+  toolbar,
+  onToggle,
+  onPageChange,
+  onMoveToApprovals,
+  onSaveUrl,
+  onDelete,
+}: {
+  view: RejectedView;
+  busy: boolean;
+  selected: string[];
+  toolbar: React.ReactNode;
+  onToggle: (id: string) => void;
+  onPageChange: (page: number) => void;
+  onMoveToApprovals: (id: string) => void;
+  onSaveUrl: (id: string, url: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const { data, error } = view;
+  const alert = error ? <Alert severity="error">{error}</Alert> : null;
+  if (!data) return alert ?? <CircularProgress />;
+  if (rejectedTotal(data) === 0) {
+    return alert ?? <Typography variant="body1">Nothing rejected.</Typography>;
+  }
+  const row = (r: RejectedScreening) => (
+    <ReviewRow
+      key={r.id}
+      record={r}
+      busy={busy}
+      checked={selected.includes(r.id)}
+      onToggle={onToggle}
+      onMoveToApprovals={onMoveToApprovals}
+      onSaveUrl={onSaveUrl}
+      onDelete={onDelete}
+      rejectedLabel={r.rejectedBy === "agent" ? "Rejected by agent" : "Rejected by you"}
+    />
+  );
+  return (
+    <Stack spacing={2} aria-busy={view.loading}>
+      {alert}
+      <Typography variant="body2" sx={{ color: "text.secondary" }}>
+        Postings set aside by the agent's criteria or by you. You can send either kind back
+        to the queue, or delete them for good.
+      </Typography>
+      {toolbar}
+      {data.items.length === 0 ? (
+        <Typography variant="body1">No rejections in this category.</Typography>
+      ) : null}
+      {data.items.map(row)}
+      <TablePagination
+        component="div"
+        count={data.total}
+        page={view.page}
+        rowsPerPage={REJECTED_PAGE_SIZE}
+        rowsPerPageOptions={[REJECTED_PAGE_SIZE]}
+        onPageChange={(_, p) => onPageChange(p)}
+      />
+    </Stack>
+  );
+}
+
 /** One tab body. Inactive panels unmount rather than hide, so a hidden tab's
  * PendingCards never mount — otherwise each would fetch a cover-letter draft
  * the operator cannot see. */
@@ -808,12 +1002,11 @@ function QueuePanel({
  * what was set aside and why (Rejected), and what has already settled into
  * tracked applications (Applied, read-only). Counts live in the labels so
  * each queue's size is visible without switching to it; decisions move rows
- * between the in-memory lists so the counts stay right without a refetch. */
+ * between the in-memory lists so the counts stay right without a refetch,
+ * except the server-paged Rejected tab, which refetches its page. */
 export function ApprovalsPage() {
   const [pending, setPending] = useState<ScreeningRecord[]>([]);
   const [approved, setApproved] = useState<ScreeningRecord[]>([]);
-  const [rejected, setRejected] = useState<ScreeningRecord[]>([]);
-  const [didNotPass, setDidNotPass] = useState<ScreeningRecord[]>([]);
   const [applied, setApplied] = useState<ScreeningRecord[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   // Separate selection for the Rejected tab: it must never share state with
@@ -826,7 +1019,7 @@ export function ApprovalsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [tab, setTab] = useState(0);
-  const [rejectedCategory, setRejectedCategory] = useState("all");
+  const rejected = useRejectedPage();
   const [presets, setPresets] = useState<PromptPreset[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const [length, setLength] = useState<Length>("Standard");
@@ -855,17 +1048,13 @@ export function ApprovalsPage() {
     Promise.all([
       listPendingApprovals(),
       listApprovedApplications(),
-      listRejectedApprovals(),
-      listDidNotPass(),
       listAppliedScreenings(),
       listContradictions(),
     ])
-      .then(([p, a, r, d, ap, contradictions]) => {
+      .then(([p, a, ap, contradictions]) => {
         if (!live) return;
         setPending(p);
         setApproved(a);
-        setRejected(r);
-        setDidNotPass(d);
         setApplied(ap);
         setContestedCompanies(
           new Set(contradictions.flatMap((g) => g.findings.map((f) => f.company))),
@@ -878,31 +1067,13 @@ export function ApprovalsPage() {
     };
   }, []);
 
-  // The Rejected tab merges two sources: the agent's criterion rejections
-  // (never queued, empty approval) and the operator's own rejections.
-  // De-duplicated by id — the populations are disjoint in practice, but a
-  // record must never show twice if that ever changes. didNotPass wins the
-  // tie, labelling an overlap as agent-rejected.
-  const rejectedRows: ScreeningRecord[] = [];
-  const seenIds = new Set<string>();
-  for (const r of [...didNotPass, ...rejected]) {
-    if (seenIds.has(r.id)) continue;
-    seenIds.add(r.id);
-    rejectedRows.push(r);
-  }
-  const agentRejected = new Set(didNotPass.map((r) => r.id));
-  // A selected category that no longer has rows is no longer offered by the
-  // filter, so fall back to 'all' rather than showing an invalid, empty list.
-  const activeCategory =
-    rejectedCategory !== "all" && !rejectedRows.some((r) => categoryOf(r) === rejectedCategory)
-      ? "all"
-      : rejectedCategory;
-  const visibleRejected = filterByCategory(rejectedRows, activeCategory);
-  // Selection restricted to rows actually on screen.
-  const visibleRejectedIds = new Set(visibleRejected.map((r) => r.id));
-  const selectedVisibleRejected = selectedRejected.filter((id) => visibleRejectedIds.has(id));
+  // Selection restricted to rows on the current Rejected page.
+  const rejectedItems = rejected.data?.items ?? [];
+  const selectedVisibleRejected = selectedRejected.filter((id) =>
+    rejectedItems.some((r) => r.id === id),
+  );
   const allVisibleRejectedSelected =
-    visibleRejected.length > 0 && selectedVisibleRejected.length === visibleRejected.length;
+    rejectedItems.length > 0 && selectedVisibleRejected.length === rejectedItems.length;
 
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
@@ -914,10 +1085,15 @@ export function ApprovalsPage() {
     setSelectedRejected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   const toggleAllRejected = () =>
-    setSelectedRejected(allVisibleRejectedSelected ? [] : visibleRejected.map((r) => r.id));
+    setSelectedRejected(allVisibleRejectedSelected ? [] : rejectedItems.map((r) => r.id));
 
   const changeRejectedCategory = (key: string) => {
-    setRejectedCategory(key);
+    rejected.setCategory(key);
+    setSelectedRejected([]);
+  };
+
+  const changeRejectedPage = (page: number) => {
+    rejected.setPage(page);
     setSelectedRejected([]);
   };
 
@@ -929,9 +1105,9 @@ export function ApprovalsPage() {
       setPending((rows) => rows.filter((r) => r.id !== id));
       setSelected((s) => s.filter((x) => x !== id));
       // Move the row to the queue it just joined so the tab counts stay
-      // correct without a refetch.
+      // correct; the Rejected tab is server-paged, so it refetches instead.
       if (approval === "approved") setApproved((rows) => [updated, ...rows]);
-      else setRejected((rows) => [updated, ...rows]);
+      else rejected.refetch();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -955,7 +1131,7 @@ export function ApprovalsPage() {
         rows.filter((r) => !selected.includes(r.id) || failed.has(r.id)),
       );
       if (approval === "approved") setApproved((rows) => [...moved, ...rows]);
-      else setRejected((rows) => [...moved, ...rows]);
+      else rejected.refetch();
       setSelected([]);
       if (failed.size) setError(`${failed.size} could not be updated.`);
     } catch (e) {
@@ -992,11 +1168,7 @@ export function ApprovalsPage() {
         succeeded = new Set(results.filter((r) => r.ok).map((r) => r.id));
       }
       const failed = ids.filter((id) => !succeeded.has(id));
-      // Remove succeeded ids from both source lists — the Rejected tab merges
-      // agent-filtered and operator-rejected populations, and a deleted
-      // record could be in either.
-      setRejected((rows) => rows.filter((r) => !succeeded.has(r.id)));
-      setDidNotPass((rows) => rows.filter((r) => !succeeded.has(r.id)));
+      rejected.refetch();
       setSelectedRejected([]);
       if (failed.length) setError(`${failed.length} could not be deleted.`);
     } catch (e) {
@@ -1036,8 +1208,7 @@ export function ApprovalsPage() {
       const updated = await setScreeningUrl(id, url);
       setPending((rows) => rows.map((r) => (r.id === id ? updated : r)));
       setApproved((rows) => rows.map((r) => (r.id === id ? updated : r)));
-      setRejected((rows) => rows.map((r) => (r.id === id ? updated : r)));
-      setDidNotPass((rows) => rows.map((r) => (r.id === id ? updated : r)));
+      rejected.patchItem(updated);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -1064,9 +1235,8 @@ export function ApprovalsPage() {
     setError("");
     try {
       const updated = await setScreeningApproval(id, "pending");
-      setRejected((rows) => rows.filter((r) => r.id !== id));
-      setDidNotPass((rows) => rows.filter((r) => r.id !== id));
       setPending((rows) => [updated, ...rows]);
+      rejected.refetch();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -1103,7 +1273,7 @@ export function ApprovalsPage() {
           >
             <Tab label={`Found (${pending.length})`} />
             <Tab label={`Queued (${approved.length})`} />
-            <Tab label={`Rejected (${rejectedRows.length})`} />
+            <Tab label={`Rejected (${rejectedTotal(rejected.data)})`} />
             <Tab label={`Applied (${applied.length})`} />
           </Tabs>
 
@@ -1212,61 +1382,27 @@ export function ApprovalsPage() {
           </QueuePanel>
 
           <QueuePanel value={tab} index={2}>
-            {rejectedRows.length === 0 ? (
-              <Typography variant="body1">Nothing rejected.</Typography>
-            ) : (
-              <Stack spacing={2}>
-                <Typography variant="body2" sx={{ color: "text.secondary" }}>
-                  Postings set aside by the agent's criteria or by you. You can send
-                  either kind back to the queue, or delete them for good.
-                </Typography>
-                <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={allVisibleRejectedSelected}
-                        onChange={toggleAllRejected}
-                        disabled={busy}
-                        slotProps={{ input: { "aria-label": "Select all rejected" } }}
-                      />
-                    }
-                    label="Select all"
-                  />
-                  <RejectionFilter
-                    rows={rejectedRows}
-                    value={activeCategory}
-                    onChange={changeRejectedCategory}
-                  />
-                  <Button
-                    variant="outlined"
-                    color="error"
-                    size="small"
-                    disabled={busy || selectedVisibleRejected.length === 0}
-                    onClick={requestDeleteSelected}
-                  >
-                    Delete selected
-                  </Button>
-                </Stack>
-                {visibleRejected.length === 0 ? (
-                  <Typography variant="body1">No rejections in this category.</Typography>
-                ) : null}
-                {visibleRejected.map((r) => (
-                  <ReviewRow
-                    key={r.id}
-                    record={r}
-                    busy={busy}
-                    checked={selectedRejected.includes(r.id)}
-                    onToggle={toggleRejected}
-                    onMoveToApprovals={moveToApprovals}
-                    onSaveUrl={saveUrl}
-                    onDelete={requestDeleteSingle}
-                    rejectedLabel={
-                      agentRejected.has(r.id) ? "Rejected by agent" : "Rejected by you"
-                    }
-                  />
-                ))}
-              </Stack>
-            )}
+            <RejectedPanel
+              view={rejected}
+              busy={busy}
+              selected={selectedRejected}
+              toolbar={
+                <RejectedToolbar
+                  view={rejected}
+                  busy={busy}
+                  allSelected={allVisibleRejectedSelected}
+                  anySelected={selectedVisibleRejected.length > 0}
+                  onToggleAll={toggleAllRejected}
+                  onCategoryChange={changeRejectedCategory}
+                  onDeleteSelected={requestDeleteSelected}
+                />
+              }
+              onToggle={toggleRejected}
+              onPageChange={changeRejectedPage}
+              onMoveToApprovals={moveToApprovals}
+              onSaveUrl={saveUrl}
+              onDelete={requestDeleteSingle}
+            />
           </QueuePanel>
 
           <QueuePanel value={tab} index={3}>

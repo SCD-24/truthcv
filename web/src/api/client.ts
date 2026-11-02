@@ -34,6 +34,7 @@ import type {
   ApplicationUpdate,
   SaveDocumentResult,
   ScreeningRecord,
+  RejectedScreeningPage,
   CoverLetterDraft,
   CooldownStatus,
   AgentConfig,
@@ -573,6 +574,22 @@ export async function listDidNotPass(): Promise<ScreeningRecord[]> {
   // posting at all) is not a rejection on its merits — excluding it here
   // stops that fabricated outcome from ever reaching this list.
   return all.filter((s) => s.verdict === "rejected" && !s.approval && !s.screeningBlocker);
+}
+
+/** One page of rejected screenings — agent-filtered and operator-rejected
+ * alike — newest first. `category` narrows the page server-side ('all' when
+ * omitted); the page's `categories` still count the whole rejected set. */
+export function listRejectedPage(opts: {
+  limit?: number;
+  offset?: number;
+  category?: string;
+}): Promise<RejectedScreeningPage> {
+  const params = new URLSearchParams();
+  if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts.offset !== undefined) params.set("offset", String(opts.offset));
+  if (opts.category) params.set("category", opts.category);
+  const qs = params.toString();
+  return request<RejectedScreeningPage>(`/api/screenings/rejected${qs ? `?${qs}` : ""}`);
 }
 
 /** Record the operator's decision on one screening. */

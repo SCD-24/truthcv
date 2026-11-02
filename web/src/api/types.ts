@@ -573,6 +573,29 @@ export interface ScreeningRecord {
   updatedAt: string;
 }
 
+/** A rejected screening as the paged Rejected endpoint returns it: who set it
+ * aside — the agent's criteria or the operator's own decision. */
+export interface RejectedScreening extends ScreeningRecord {
+  rejectedBy: "agent" | "operator";
+}
+
+/** How many rejected screenings fall in one rejection category. */
+export interface RejectionCategoryCount {
+  key: string;
+  count: number;
+}
+
+/** One page of GET /api/screenings/rejected. `total` counts the rows matching
+ * the category filter; `categories` counts the whole rejected set (before the
+ * filter), only categories present, in canonical order. */
+export interface RejectedScreeningPage {
+  items: RejectedScreening[];
+  total: number;
+  limit: number;
+  offset: number;
+  categories: RejectionCategoryCount[];
+}
+
 /** One execution of the unattended job-application agent — its identity, how
  * it ended, and an honest summary of how much of the work it covered. */
 export interface RunRecord {
