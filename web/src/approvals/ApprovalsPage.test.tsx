@@ -14,7 +14,6 @@ import {
   markScreeningApplied,
   listApprovedApplications,
   listContradictions,
-  listDidNotPass,
   listPendingApprovals,
   listPromptPresets,
   listRejectedPage,
@@ -32,7 +31,6 @@ vi.mock("../api/client", () => ({
   listPendingApprovals: vi.fn(),
   listApprovedApplications: vi.fn(),
   listRejectedPage: vi.fn(),
-  listDidNotPass: vi.fn(),
   listScreenings: vi.fn(),
   listAppliedScreenings: vi.fn(),
   listContradictions: vi.fn(),
@@ -1146,7 +1144,6 @@ describe("ApprovalsPage rejected tab paging", () => {
     clickTab(/rejected/i);
     await screen.findByText("Co 0");
     expect(listScreenings).not.toHaveBeenCalled();
-    expect(listDidNotPass).not.toHaveBeenCalled();
   });
 });
 
