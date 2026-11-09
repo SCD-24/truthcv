@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
-from api.routes import reconcile_orphaned_runs
+from services.runs import reconcile_orphaned_runs
 from runs import store
 
 

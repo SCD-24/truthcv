@@ -46,18 +46,13 @@ import modelrouting
 import secretstore
 from services.render_cv import (
     DraftMissing,
-    _claim_id,
     _require_application,
     render_cv,
 )
 from services.cover_letter import generate_cover_letter
-from agentconfig import store as agent_config_store
 from connections import catalog
 from connections.auth import gmail as gmail_auth
-from providers import (
-    ANTHROPIC_COMPAT_OPENROUTER_BASE_URL,
-    build_connection_provider,
-)
+from providers import build_connection_provider
 from providers.base import supports_effort_levels
 from companyresearch import store as company_findings_store
 from screening import store as screening_store
@@ -280,11 +275,6 @@ def post_run_stop(run_id: str) -> RunStopResult:
     """
     outcome, run = runs_service.stop_run(run_id)
     return RunStopResult(outcome=outcome, run=RunModel(**run))
-
-
-def reconcile_orphaned_runs() -> list:
-    """Reconcile orphaned runs at API startup (delegates to services.runs)."""
-    return runs_service.reconcile_orphaned_runs()
 
 
 @router.post("/screenings", response_model=ScreeningModel, status_code=201)
@@ -781,20 +771,6 @@ def delete_application(app_id: str) -> None:
         raise HTTPException(status_code=404, detail="Application not found.")
 
 
-def _strip_html(text: str) -> str:
-    """Drop tags/entities so the guardrail sees prose, not markup.
-
-    Why: an edited CV arrives as HTML; tag names like `p`/`div` are not claims
-    and must not be diffed against the truth. Cover-letter text passes through
-    unchanged (it has no markup).
-    """
-    import html as html_lib
-    import re
-
-    without_tags = re.sub(r"<[^>]+>", " ", text or "")
-    return html_lib.unescape(without_tags)
-
-
 @router.put("/applications/{app_id}/cv", response_model=SaveDocumentResult)
 def save_application_cv(app_id: str, body: SaveCvRequest) -> SaveDocumentResult:
     """Render and save edited CV HTML onto an application.
@@ -863,134 +839,6 @@ def put_profile_answers(body: AnswersUpdate) -> AnswersModel:
     return AnswersModel.model_validate(truth_service.update_answers(sent).to_dict())
 
 
-def _target_company_boards(cfg: agent_config_store.AgentConfig) -> list:
-    """Recorded company boards pruned to the current watchlist.
-
-    Matched by identity key (not raw casefold equality) so a legal-entity
-    suffix on either side does not exclude a board that is really for a
-    target company. Shared by ``get_agent_config``'s ``company_boards``
-    response field and ``_fetch_feed_postings``'s ATS fan-out, so the two
-    never drift onto different prunings of the same store.
-    """
-    from companyboards import store as board_store
-
-    boards_store_boards = board_store.load()
-    board_store.prune(cfg.target_companies)
-    target_company_keys = {company_identity_key(name) for name in cfg.target_companies}
-    return [
-        board for board in boards_store_boards.values()
-        if company_identity_key(board.company) in target_company_keys
-    ]
-
-
-def _merge_feed_results(*results):
-    """Merge several ``FeedResult``s into one, de-duplicated by URL.
-
-    One source failing must not empty out a working one, so every result's
-    postings are kept regardless of whether that same result also carries an
-    error; the errors themselves are joined so a simultaneous failure of more
-    than one source is not silently reduced to just the first.
-    """
-    from jobfeeds import FeedResult
-
-    postings = []
-    seen_urls = set()
-    errors = []
-    for result in results:
-        for posting in result.postings:
-            if posting.url and posting.url not in seen_urls:
-                seen_urls.add(posting.url)
-                postings.append(posting)
-        if result.error:
-            errors.append(result.error)
-    return FeedResult(postings=postings, error=" ".join(errors))
-
-
-# Combined wall-clock ceiling for the Remote Rocketship, Arbeitnow AND
-# per-company ATS fetches TOGETHER, not each source's own separate budget.
-# agent/agent-config.js gives the job_config request a fixed 30s socket
-# timeout and treats a timeout as a hard failure: it destroys the request and
-# calls process.exit(1), discarding the whole config — profiles, feed,
-# company boards, and dorks. Each fetcher's own BUDGET_SECONDS (20.0s) was
-# sized on the assumption it was the ONLY fetch running; fanning out to three
-# independent fetchers with independent budgets can now approach 60s.
-# Threading this ONE shared deadline into every caller instead keeps them
-# together under a single ceiling: whatever the earlier fetchers spend comes
-# out of what the others are given. 25s leaves 5s of headroom under the 30s
-# socket timeout for the rest of the config route's own work.
-FEED_FETCH_BUDGET_SECONDS = 25.0
-
-
-def _fetch_feed_postings(cfg: agent_config_store.AgentConfig, company_boards: list):
-    """Pull postings from Remote Rocketship, Arbeitnow, and every watchlist
-    company's own ATS API, whichever apply.
-
-    Fans out across three independent sources and merges them, de-duplicated
-    by URL (see ``_merge_feed_results``):
-
-    - Remote Rocketship, gated on a resolved board naming it specifically
-      (via ``boards.api_source_key``, not the broader ``is_api_source`` —
-      Arbeitnow is also API-backed and always present as a default, and must
-      not switch Remote Rocketship on) plus its saved key.
-    - Arbeitnow, an always-on default board (agentconfig.boards.DEFAULT_BOARD_SOURCES)
-      with a public API — gated the same way on a resolved board naming it,
-      but never needs a key.
-    - Each watchlist company's own ATS API (jobfeeds.ats), gated only on that
-      company's ``CompanyBoard.ats`` naming a recognised ATS — no key needed.
-
-    No fetcher ever raises, and this function does not either: a source that
-    fails degrades the merged ``error`` rather than emptying the response,
-    while the other sources' postings still arrive.
-
-    All three fetches share ONE wall-clock deadline (FEED_FETCH_BUDGET_SECONDS)
-    instead of each getting its own — see that constant's comment for why.
-    They also run on their own threads instead of one after another, so the
-    slowest of the three governs the wall-clock cost of this function rather
-    than their sum; the shared deadline still bounds each individually
-    exactly as when they ran serially.
-    """
-    import threading
-    import time
-
-    from agentconfig import boards
-    from jobfeeds import arbeitnow, ats, remoterocketship
-
-    deadline = time.monotonic() + FEED_FETCH_BUDGET_SECONDS
-    results: dict = {}
-    resolved_sources = cfg.resolved_board_sources()
-
-    def _run_remote_rocketship() -> None:
-        if any(boards.api_source_key(source) == remoterocketship.SOURCE for source in resolved_sources):
-            results["rr"] = remoterocketship.fetch_postings(
-                cfg.profiles, remoterocketship.api_key(), cfg.max_posting_age_days, deadline=deadline
-            )
-        else:
-            results["rr"] = remoterocketship.FeedResult()
-
-    def _run_arbeitnow() -> None:
-        if any(boards.api_source_key(source) == arbeitnow.SOURCE for source in resolved_sources):
-            results["arbeitnow"] = arbeitnow.fetch_postings(
-                cfg.profiles, cfg.max_posting_age_days, deadline=deadline
-            )
-        else:
-            results["arbeitnow"] = arbeitnow.FeedResult()
-
-    def _run_ats() -> None:
-        results["ats"] = ats.fetch_ats_postings(company_boards, cfg.max_posting_age_days, deadline=deadline)
-
-    threads = [
-        threading.Thread(target=_run_remote_rocketship),
-        threading.Thread(target=_run_arbeitnow),
-        threading.Thread(target=_run_ats),
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-
-    return _merge_feed_results(results["rr"], results["arbeitnow"], results["ats"])
-
-
 @router.get("/job-boards/{source}/key", response_model=JobBoardKeyStatus)
 def get_job_board_key(source: str) -> JobBoardKeyStatus:
     """Whether an API-backed board has a key saved. The key itself is never returned."""
@@ -1036,19 +884,10 @@ def test_jev_settings() -> TestResult:
     return TestResult(ok=ok, detail=detail)
 
 
-def require_gmail_tracking_enabled() -> None:
-    """Raise 403 unless Gmail response-tracking is configured and opted in.
-
-    Thin wrapper over api.guards.require_gmail_tracking_enabled, kept importable
-    from here until the Gmail routes move.
-    """
-    guards.require_gmail_tracking_enabled()
-
-
 @router.post("/auth/gmail/start", response_model=StartLoginResult)
 def start_gmail_login(request: Request) -> StartLoginResult:
     """Begin the Gmail OAuth flow. Gated on the useForEmailTracking opt-in."""
-    require_gmail_tracking_enabled()
+    guards.require_gmail_tracking_enabled()
     redirect_uri = gmail_auth.redirect_uri_override() or str(request.url_for("gmail_callback"))
     try:
         return StartLoginResult.model_validate(gmail_auth.start_login(redirect_uri))
@@ -1102,7 +941,7 @@ def sync_gmail_responses(body: GmailSyncRequest | None = None) -> dict:
 
     Returns gmailsync.service.run_sync's own summary dict unchanged.
     """
-    require_gmail_tracking_enabled()
+    guards.require_gmail_tracking_enabled()
     from gmailsync import service as gmailsync_service
 
     force = body.force if body is not None else False

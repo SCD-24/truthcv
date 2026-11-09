@@ -20,6 +20,7 @@ from mcpschema import input_schema
 from companyresearch.claim_migration import migrate_claims_if_needed
 from screening.purge_unreadable import purge_unreadable_once
 from services import screenings
+from services.runs import reconcile_orphaned_runs
 from services.errors import (
     BadGateway,
     BadRequest,
@@ -43,7 +44,7 @@ from .diagnostics_mcp import (
 from .gmail_suggestion_routes import router as gmail_suggestion_router
 from .job_routes import router as job_router
 from .prompt_routes import prompt_router
-from .routes import reconcile_orphaned_runs, router
+from .routes import router
 
 logger = logging.getLogger(__name__)
 
