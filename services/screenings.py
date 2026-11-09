@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 
 import screening.jev as _jev
 import screening.store as screening_store
+from coverletter import store as _coverletter_store
 from identity.company import validate_company_name as _validate_company_name
 from identity.url import is_posting_url as _is_posting_url
 from identity.url import validate_posting_url as _validate_posting_url
@@ -54,6 +55,40 @@ def create_screening(fields: dict) -> tuple[Screening, bool]:
     caller's decision (see the module docstring).
     """
     return screening_store.create_or_get(fields)
+
+
+def delete_screening(screening_id: str) -> bool:
+    """Delete a screening and, if it was removed, its cover-letter draft.
+
+    The draft cascade lives here rather than in ``screening.store`` so the
+    domain store does not reach up into the cover-letter engine.
+
+    Returns:
+        True if the screening existed and was removed.
+    """
+    if not screening_store.delete(screening_id):
+        return False
+    # Outside the lock: a different file, and holding one file's lock while
+    # touching another is how two writers deadlock on opposite orderings.
+    _coverletter_store.delete(screening_id)
+    return True
+
+
+def delete_screenings(ids: list[str]) -> list[tuple[str, bool]]:
+    """Delete several screenings and the cover-letter drafts of those removed.
+
+    Same cascade as ``delete_screening``, kept out of ``screening.store`` for
+    the same reason. Unknown ids are reported False and have no draft touched.
+
+    Returns:
+        One (id, ok) pair per input id, in input order.
+    """
+    results = screening_store.delete_many(ids)
+    # Outside the lock: a different file, and holding one file's lock while
+    # touching another is how two writers deadlock on opposite orderings.
+    for deleted_id in dict.fromkeys(i for i, ok in results if ok):
+        _coverletter_store.delete(deleted_id)
+    return results
 
 
 def clear_login_blockers_for_host(host: str) -> int:

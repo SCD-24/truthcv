@@ -19,6 +19,7 @@ from agenttools.server import router as mcp_router, tool_specs
 from mcpschema import input_schema
 from companyresearch.claim_migration import migrate_claims_if_needed
 from screening.purge_unreadable import purge_unreadable_once
+from services import screenings
 from services.errors import Conflict, NotFound, Refused, ServiceError, Unavailable
 from storage import data_dir
 
@@ -157,7 +158,7 @@ def _purge_unreadable_screenings() -> None:
     Logs only counts and the backup path - never URLs or posting text.
     """
     try:
-        report = purge_unreadable_once()
+        report = purge_unreadable_once(delete_many=screenings.delete_screenings)
     except Exception:
         logger.exception("startup unreadable-screening purge failed")
         return

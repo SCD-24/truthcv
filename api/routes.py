@@ -525,7 +525,7 @@ def bulk_delete_screenings(body: BulkDeleteRequest) -> BulkDeleteResult:
     is reported ok:false, never a 404 — an empty list is a no-op.
     """
     results = [
-        {"id": sid, "ok": ok} for sid, ok in screening_store.delete_many(body.ids)
+        {"id": sid, "ok": ok} for sid, ok in screenings_service.delete_screenings(body.ids)
     ]
     return BulkDeleteResult(results=results)
 
@@ -794,7 +794,7 @@ def save_screening_letter(
 @router.delete("/screenings/{screening_id}", status_code=204)
 def delete_screening(screening_id: str) -> None:
     """Delete a screening record."""
-    if not screening_store.delete(screening_id):
+    if not screenings_service.delete_screening(screening_id):
         raise HTTPException(status_code=404, detail="Screening not found.")
 
 

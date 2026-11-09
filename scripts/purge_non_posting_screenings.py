@@ -35,6 +35,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import screening.store as screening_store  # noqa: E402
+import services.screenings as screenings_service  # noqa: E402
 from identity.url import is_posting_url  # noqa: E402
 
 _PROTECTED_APPROVALS = frozenset({"applied", "approved"})
@@ -89,7 +90,7 @@ def main(argv: list | None = None) -> int:
     screenings = screening_store.load_all()
     deletable, review = plan(screenings)
     if args.apply and deletable:
-        screening_store.delete_many([s.id for s in deletable])
+        screenings_service.delete_screenings([s.id for s in deletable])
     print_report(deletable, review, len(screenings), args.apply)
     return 0
 
