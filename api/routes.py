@@ -72,7 +72,7 @@ from providers.base import supports_effort_levels
 from companyresearch import store as company_findings_store
 from screening import store as screening_store
 from runs import store as runs_store
-from agenttools.tools_funnel import OUTCOMES as _FUNNEL_OUTCOMES
+from runs.url_ledger import OUTCOMES as _FUNNEL_OUTCOMES
 from runs import url_ledger as _url_ledger
 from runs.derive import board_breakdown_by_run, counters_by_run
 from identity.company import company_identity_key

@@ -56,8 +56,6 @@ ignore_imports = [
     "api.main -> agenttools.mcp_app",
     # Phase 3: same as above.
     "api.diagnostics_mcp -> agenttools.mcp_app",
-    # Phase 3: OUTCOMES moves to services/domain.
-    "api.routes -> agenttools.tools_funnel",
     # Phase 3: the letter operator workflow moves to services.
     "api.routes -> agenttools.letter_operator",
     # Phase 3: deferred imports at screening/store.py:470 and :497; the
