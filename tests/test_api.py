@@ -14,6 +14,10 @@ from fastapi.testclient import TestClient
 
 import api.routes as routes
 import services.render_cv as render_cv
+import services.truth as truth_service
+import truth.document as truth_document
+import truth.pdf as truth_pdf
+import truth.store as truth_store
 from api.main import app
 from providers.fake import FakeProvider
 
@@ -163,7 +167,7 @@ def test_upload_accepts_at_size_limit(client):
 
 
 def test_extract_and_persist_upload_serializes_concurrent_calls(monkeypatch):
-    """Two threads racing through _extract_and_persist_upload must not interleave
+    """Two threads racing through ingest_upload must not interleave
     their persist_source_text/persist_source_hash/persist_profile calls."""
     import threading
     import time
@@ -185,15 +189,15 @@ def test_extract_and_persist_upload_serializes_concurrent_calls(monkeypatch):
     def fake_persist_profile(data, ext):
         calls.append(("profile", data.decode()))
 
-    monkeypatch.setattr(routes, "extract_document_text", fake_extract)
-    monkeypatch.setattr(routes, "extension_for", lambda filename: ".txt")
-    monkeypatch.setattr(routes, "persist_source_text", fake_persist_text)
-    monkeypatch.setattr(routes, "persist_source_hash", fake_persist_hash)
-    monkeypatch.setattr(routes, "persist_profile", fake_persist_profile)
+    monkeypatch.setattr(truth_document, "extract_document_text", fake_extract)
+    monkeypatch.setattr(truth_document, "extension_for", lambda filename: ".txt")
+    monkeypatch.setattr(truth_pdf, "persist_source_text", fake_persist_text)
+    monkeypatch.setattr(truth_store, "persist_source_hash", fake_persist_hash)
+    monkeypatch.setattr(truth_pdf, "persist_profile", fake_persist_profile)
 
     threads = [
         threading.Thread(
-            target=routes._extract_and_persist_upload, args=(f"cv{i}.txt", str(i).encode())
+            target=truth_service.ingest_upload, args=(f"cv{i}.txt", str(i).encode())
         )
         for i in range(2)
     ]

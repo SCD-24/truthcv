@@ -13,7 +13,6 @@ import importlib
 import json
 import logging
 import os
-import threading
 import urllib.error
 import urllib.request
 from urllib.parse import urlencode, urlparse
@@ -21,16 +20,11 @@ from urllib.parse import urlencode, urlparse
 from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, StreamingResponse
 
-import tailor as tailor_engine
 from providers import ProviderError, get_provider
 from render import render_docx, render_pdf
 from render.pdf import RenderUnavailable
-from truth import load, persist_source_hash, save
-from truth.answers import Answers
+from truth import load, save
 from truth.answers import load as load_answers
-from truth.answers import save as save_answers
-from truth.document import extract_document_text, extension_for
-from services.truth_extract import build_truth_from_text
 from services.inferences import confirm_inferences as confirm_inferences_service
 import services.screenings as screenings_service
 import services.screening_letters as screening_letters_service
@@ -40,15 +34,13 @@ import services.applications as applications_service
 import services.runs as runs_service
 import services.supervisor as supervisor_service
 import services.settings as settings_service
+import services.truth as truth_service
+import services.onboarding as onboarding_service
+import services.tailor as tailor_service
+from services.errors import BadGateway
 import services.connections as connections_service
 from truth.model import Truth
-from truth.pdf import (
-    DocumentExtractError,
-    has_profile,
-    load_source_text,
-    persist_profile,
-    persist_source_text,
-)
+from truth.pdf import has_profile
 
 import applications as app_store
 import modelrouting
@@ -61,7 +53,6 @@ from services.render_cv import (
     render_cv,
 )
 from services.cover_letter import generate_cover_letter
-from onboarding import store as onboarding_store
 from agentconfig import store as agent_config_store
 from connections import catalog
 from connections.auth import gmail as gmail_auth
@@ -562,27 +553,6 @@ def _truth_doc(truth: Truth) -> TruthDoc:
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MiB — a CV/cover-letter upload has no legitimate reason to exceed this
 
-# Guards the persist_source_text/persist_source_hash/persist_profile triple below:
-# uploads run in asyncio.to_thread, so two concurrent /upload requests could
-# otherwise interleave their writes (e.g. source text from one request paired
-# with the hash/profile of another).
-_UPLOAD_PERSIST_LOCK = threading.Lock()
-
-
-def _extract_and_persist_upload(filename: str, data: bytes) -> None:
-    """Extract text from an uploaded file and persist it, off the event loop.
-
-    Raises DocumentExtractError on an unsupported/unparseable file; the
-    caller maps that to a 400 response.
-    """
-    ext = extension_for(filename)
-    text = extract_document_text(filename, data)
-    with _UPLOAD_PERSIST_LOCK:
-        persist_source_text(text)
-        persist_source_hash(text)  # keyed cache: lets /extract skip a repeat LLM pass
-        persist_profile(data, ext)
-
-
 @router.post("/upload", status_code=204)
 async def upload(file: UploadFile = File(...)) -> None:
     # Read one byte past the cap so an oversized upload is detected without
@@ -592,27 +562,20 @@ async def upload(file: UploadFile = File(...)) -> None:
         raise HTTPException(
             status_code=413, detail="Upload exceeds the maximum allowed size."
         )
-    try:
-        await asyncio.to_thread(_extract_and_persist_upload, file.filename or "", data)
-    except DocumentExtractError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    await asyncio.to_thread(truth_service.ingest_upload, file.filename or "", data)
 
 
 @router.post("/extract", response_model=TruthDoc)
 def extract() -> TruthDoc:
-    text = load_source_text()
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="Upload your CV before extracting.")
     try:
-        truth = build_truth_from_text(text, get_provider("truth_extract"))
+        provider = get_provider("truth_extract")
     except ProviderError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        raise BadGateway(str(e)) from e
     except Exception as e:  # noqa: BLE001 — surface upstream LLM/SDK errors cleanly
-        raise HTTPException(
-            status_code=502,
-            detail=f"The language model call failed: {type(e).__name__}: {e}",
+        raise BadGateway(
+            f"The language model call failed: {type(e).__name__}: {e}"
         ) from e
-    return _truth_doc(truth)
+    return _truth_doc(truth_service.extract_truth(provider))
 
 
 @router.get("/truth", response_model=TruthDoc)
@@ -631,21 +594,8 @@ def put_truth(body: TruthDoc) -> None:
 
 @router.post("/tailor", response_model=TailorResult)
 def tailor_route(body: TailorRequest) -> TailorResult:
-    try:
-        result = tailor_engine.tailor(body.posting, load(), get_provider)
-    except ProviderError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
-    except Exception as e:  # noqa: BLE001 — surface upstream LLM/SDK errors cleanly
-        raise HTTPException(
-            status_code=502,
-            detail=f"The language model call failed: {type(e).__name__}: {e}",
-        ) from e
-    from storage import data_dir
-
-    (data_dir() / "posting.txt").write_text(body.posting, encoding="utf-8")
-    return TailorResult.model_validate(
-        {"keywords": result["keywords"], "inferences": result["inferences"]}
-    )
+    result = tailor_service.tailor_posting(body.posting, get_provider)
+    return TailorResult.model_validate(result)
 
 
 @router.post("/confirm-inferences", status_code=204)
@@ -929,36 +879,17 @@ def profile() -> ProfileStatus:
     return ProfileStatus(has_profile=has_profile())
 
 
-def _onboarding_state() -> OnboardingState:
-    """Build the current onboarding status from provider routing, the profile,
-    and the persisted onboarding progress."""
-    provider_done = onboarding_store.provider_ready()
-    profile_done = has_profile()
-    state = onboarding_store.load()
-    return OnboardingState(
-        provider_done=provider_done,
-        has_profile=profile_done,
-        cv_reviewed_at=state.cv_reviewed_at,
-        tour_seen_at=state.tour_seen_at,
-        complete=provider_done and profile_done and state.cv_reviewed_at is not None,
-    )
-
-
 @router.get("/onboarding", response_model=OnboardingState)
 def onboarding() -> OnboardingState:
     """First-run onboarding progress: provider setup, profile, CV review, tour."""
-    onboarding_store.ensure_initialized()
-    return _onboarding_state()
+    return OnboardingState(**onboarding_service.get_state())
 
 
 @router.put("/onboarding", response_model=OnboardingState)
 def put_onboarding(body: OnboardingUpdate) -> OnboardingState:
     """Merge only the fields the client actually sent onto the stored state."""
-    onboarding_store.ensure_initialized()
-    merged = onboarding_store.load().to_dict()
-    merged.update(body.model_dump(exclude_unset=True, by_alias=False))
-    onboarding_store.save(onboarding_store.OnboardingState.from_dict(merged))
-    return _onboarding_state()
+    sent = body.model_dump(exclude_unset=True, by_alias=False)
+    return OnboardingState(**onboarding_service.update_state(sent))
 
 
 @router.get("/profile/answers", response_model=AnswersModel)
@@ -974,10 +905,8 @@ def put_profile_answers(body: AnswersUpdate) -> AnswersModel:
     flow means most PUTs carry a strict subset of the 21 fields, and treating
     absence the same as "clear this" would silently blank the rest.
     """
-    merged = load_answers().to_dict()
-    merged.update(body.model_dump(exclude_unset=True, by_alias=False))
-    answers = Answers.from_dict(merged)
-    return AnswersModel.model_validate(save_answers(answers).to_dict())
+    sent = body.model_dump(exclude_unset=True, by_alias=False)
+    return AnswersModel.model_validate(truth_service.update_answers(sent).to_dict())
 
 
 def _target_company_boards(cfg: agent_config_store.AgentConfig) -> list:
