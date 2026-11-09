@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import importlib
 import json
 import logging
 import os
@@ -38,6 +39,7 @@ import services.agent_credentials as agent_credentials_service
 import services.applications as applications_service
 import services.runs as runs_service
 import services.supervisor as supervisor_service
+import services.settings as settings_service
 from truth.model import Truth
 from truth.pdf import (
     DocumentExtractError,
@@ -925,33 +927,6 @@ def save_application_cover_letter(
     )
 
 
-_V1_PROVIDER_TO_CARD = {"anthropic": "claude", "openai": "codex", "ollama": "ollama"}
-_CARD_TO_V1_PROVIDER = {v: k for k, v in _V1_PROVIDER_TO_CARD.items()}
-
-
-def _settings_status() -> SettingsStatus:
-    routing = modelrouting.load()
-    if routing.default is not None:
-        active_provider = _CARD_TO_V1_PROVIDER.get(routing.default.connection, routing.default.connection)
-        model = routing.default.model
-    else:
-        card, model = secretstore.legacy_default()
-        active_provider = _CARD_TO_V1_PROVIDER.get(card, card or "")
-    return SettingsStatus(
-        encryption_available=secretstore.encryption_available(),
-        active_provider=active_provider,
-        model=model,
-        anthropic_key_set=bool(secretstore.get_connection("claude").get("apiKey")),
-        # OpenAI key is set if the codex card has either an api key or a valid
-        # oauth subscription — either mode makes the card usable.
-        openai_key_set=bool(
-            secretstore.get_connection("codex").get("apiKey")
-            or secretstore.get_connection("codex").get("oauth", {}).get("accessToken")
-        ),
-        ollama_host=secretstore.get_connection("ollama").get("baseUrl", ""),
-    )
-
-
 @router.get("/profile", response_model=ProfileStatus)
 def profile() -> ProfileStatus:
     return ProfileStatus(has_profile=has_profile())
@@ -1185,13 +1160,7 @@ def test_job_board_key(source: str) -> TestResult:
 @router.get("/settings/jev", response_model=JevSettingsStatus)
 def get_jev_settings() -> JevSettingsStatus:
     """Whether Jev cross-checking is configured. The key itself is never returned."""
-    conn = secretstore.get_connection("jev")
-    return JevSettingsStatus(
-        key_set=bool(conn.get("apiKey")),
-        use_for_screening=conn.get("useForScreening") is True,
-        use_for_email_tracking=conn.get("useForEmailTracking") is True,
-        encryption_available=secretstore.encryption_available(),
-    )
+    return JevSettingsStatus(**settings_service.jev_status())
 
 
 @router.put("/settings/jev", response_model=JevSettingsStatus)
@@ -1199,27 +1168,10 @@ def put_jev_settings(body: JevSettingsUpdate) -> JevSettingsStatus:
     """Save (or, with an empty string, clear) the Jev API key and/or the
     useForScreening / useForEmailTracking toggles. Saving a non-empty key
     requires encryption."""
-    updates: dict = {}
-    if body.api_key is not None:
-        updates["apiKey"] = body.api_key.strip() or None
-    if body.use_for_screening is not None:
-        updates["useForScreening"] = body.use_for_screening
-    if body.use_for_email_tracking is not None:
-        updates["useForEmailTracking"] = body.use_for_email_tracking
-    # Any persisted field — including the toggle — is written through the
-    # same encrypted store as the key, so a write of either kind needs a
-    # valid ENCRYPTION_KEY, not just a non-empty api_key.
-    if updates and not secretstore.encryption_available():
-        raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
-    if updates:
-        secretstore.set_connection("jev", updates)
-    conn = secretstore.get_connection("jev")
-    return JevSettingsStatus(
-        key_set=bool(conn.get("apiKey")),
-        use_for_screening=conn.get("useForScreening") is True,
-        use_for_email_tracking=conn.get("useForEmailTracking") is True,
-        encryption_available=secretstore.encryption_available(),
+    status = settings_service.update_jev(
+        body.api_key, body.use_for_screening, body.use_for_email_tracking
     )
+    return JevSettingsStatus(**status)
 
 
 @router.post("/settings/jev/test", response_model=TestResult)
@@ -1731,7 +1683,7 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
 
 @router.get("/settings", response_model=SettingsStatus)
 def get_settings() -> SettingsStatus:
-    return _settings_status()
+    return SettingsStatus(**settings_service.settings_status())
 
 
 @router.post("/settings", response_model=SettingsStatus)
@@ -1739,88 +1691,47 @@ def post_settings(body: SettingsUpdate) -> SettingsStatus:
     """Old single-provider POST shape, shimmed onto the v2 store: the key/host
     lands in that provider's connection, and {connection, model} becomes the
     routing default."""
-    if not secretstore.encryption_available():
-        raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
-    card = _V1_PROVIDER_TO_CARD.get(body.active_provider, body.active_provider)
-    if card not in catalog.CARDS:
-        raise HTTPException(
-            status_code=400, detail=f"Unknown provider '{body.active_provider}'."
-        )
-
-    updates: dict = {}
-    if body.api_key:  # empty/None leaves the stored key unchanged
-        updates["apiKey"] = body.api_key
-    if body.ollama_host:
-        updates["baseUrl"] = body.ollama_host
-    if updates:
-        secretstore.set_connection(card, updates)
-
-    routing = modelrouting.load()
-    if body.model is not None:
-        model = body.model
-    else:
-        model = routing.default.model if routing.default else ""
-    routing.default = modelrouting.Route(card, model)
-    modelrouting.save(routing)
-
-    reset_provider()
-    return _settings_status()
+    status = settings_service.save_v1_settings(
+        body.active_provider, body.api_key, body.ollama_host, body.model
+    )
+    return SettingsStatus(**status)
 
 
 @router.post("/settings/test", response_model=TestResult)
 def test_settings(body: SettingsUpdate) -> TestResult:
-    try:
-        post_settings(body)
-        provider = get_provider(refresh=True)
-        provider.complete("ping", [{"role": "user", "content": "ping"}])
-        return TestResult(ok=True, detail="Connection succeeded.")
-    except HTTPException as e:
-        return TestResult(ok=False, detail=str(e.detail))
-    except Exception as e:  # noqa: BLE001
-        return TestResult(ok=False, detail=f"{type(e).__name__}: {e}")
+    ok, detail = settings_service.test_v1_settings(
+        body.active_provider,
+        body.api_key,
+        body.ollama_host,
+        body.model,
+        provider_factory=lambda: get_provider(refresh=True),
+    )
+    return TestResult(ok=ok, detail=detail)
 
 
-def _provider_from_update(body: SettingsUpdate):
-    """Build a provider from the submitted settings WITHOUT persisting anything.
+def _lazy_provider(module: str, cls: str):
+    """Constructor that imports the provider SDK module only when called, so
+    the model list keeps importing just the provider it was asked for."""
 
-    Uses a key/host typed in the form if present, otherwise the saved connection
-    — so the model list can load with an unsaved key (like Test connection) and
-    without writing secrets just to populate a dropdown.
-    """
-    name = (body.active_provider or "").strip().lower()
-    card = _V1_PROVIDER_TO_CARD.get(name)
-    if card is None:
-        raise HTTPException(status_code=400, detail=f"Unknown provider '{name}'.")
-    conn = secretstore.get_connection(card)
-    if card == "claude":
-        from providers.anthropic_provider import AnthropicProvider
+    def build(**kwargs):
+        return getattr(importlib.import_module(module), cls)(**kwargs)
 
-        return AnthropicProvider(api_key=body.api_key or conn.get("apiKey") or None)
-    if card == "codex":
-        from providers.openai_provider import OpenAIProvider
+    return build
 
-        return OpenAIProvider(api_key=body.api_key or conn.get("apiKey") or None)
-    if card == "ollama":
-        from providers.ollama_provider import OllamaProvider
 
-        return OllamaProvider(host=body.ollama_host or conn.get("baseUrl") or None)
-    raise HTTPException(status_code=400, detail=f"Unknown provider '{name}'.")
+_V1_PROVIDER_BUILDERS = {
+    "claude": _lazy_provider("providers.anthropic_provider", "AnthropicProvider"),
+    "codex": _lazy_provider("providers.openai_provider", "OpenAIProvider"),
+    "ollama": _lazy_provider("providers.ollama_provider", "OllamaProvider"),
+}
 
 
 @router.post("/models", response_model=ModelList)
 def list_models(body: SettingsUpdate) -> ModelList:
     """Live model list for the selected provider, pulled from its API/SDK."""
-    name = (body.active_provider or "").strip().lower()
-    card = _V1_PROVIDER_TO_CARD.get(name, "")
-    try:
-        provider = _provider_from_update(body)
-        models = provider.list_models()
-    except HTTPException:
-        raise
-    except ProviderError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}") from e
+    models, card = settings_service.list_v1_models(
+        body.active_provider, body.api_key, body.ollama_host, _V1_PROVIDER_BUILDERS
+    )
     return _models_result(models, card)
 
 
@@ -2037,13 +1948,7 @@ def logout_connection(provider: str, mode: str | None = None) -> ConnectionStatu
 @router.get("/routing", response_model=RoutingModel)
 def get_routing() -> RoutingModel:
     """Get the current model routing configuration."""
-    routing = modelrouting.load()
-    return RoutingModel(
-        tasks={k: _route_model(v) for k, v in routing.tasks.items()},
-        agent=_route_model(routing.agent) if routing.agent else None,
-        default=_route_model(routing.default) if routing.default else None,
-        agent_stages={k: _route_model(v) for k, v in routing.agent_stages.items()},
-    )
+    return _routing_model(modelrouting.load())
 
 
 @router.put("/routing", response_model=RoutingModel)
@@ -2054,75 +1959,20 @@ def put_routing(body: RoutingUpdate) -> RoutingModel:
     clears that route (`default`/`agent` sent as null, or a `tasks` entry
     sent as null, removes it) instead of leaving the stored value untouched.
     """
-    # Load current routing
-    stored = modelrouting.load()
-    stored_dict = stored.to_dict()
-
     # Prepare update from body — exclude_unset only, so an explicit null
     # survives into update_dict and is distinguishable from an absent field.
     update_dict = body.model_dump(exclude_unset=True, by_alias=False)
+    return _routing_model(settings_service.update_routing(update_dict))
 
-    # Validate all connections and effort levels in the update before applying
-    for route_dict in _all_routes_in_dict(update_dict):
-        connection = route_dict.get("connection")
-        if connection not in catalog.CARDS:
-            raise HTTPException(status_code=400, detail=f"unknown connection: {connection}")
-        effort = route_dict.get("effort", "")
-        if effort and not supports_effort_levels(connection, route_dict.get("model", "")):
-            raise HTTPException(
-                status_code=400,
-                detail=f"effort '{effort}' is not supported for {connection}/{route_dict.get('model', '')}",
-            )
 
-    # Merge: update the stored dict with only the fields that were sent.
-    # A None value clears the corresponding route rather than being ignored.
-    if "tasks" in update_dict:
-        for name, route in (update_dict["tasks"] or {}).items():
-            if route is None:
-                stored_dict["tasks"].pop(name, None)
-            else:
-                stored_dict["tasks"][name] = route
-    if "agent" in update_dict:
-        stored_dict["agent"] = update_dict["agent"]
-    if "default" in update_dict:
-        stored_dict["default"] = update_dict["default"]
-    if "agent_stages" in update_dict:
-        for name, route in (update_dict["agent_stages"] or {}).items():
-            if route is None:
-                stored_dict["agent_stages"].pop(name, None)
-            else:
-                stored_dict["agent_stages"][name] = route
-
-    # Parse back to Routing and save
-    routing = modelrouting.Routing.from_dict(stored_dict)
-    modelrouting.save(routing)
-    reset_provider()
-
-    # Return fresh routing
+def _routing_model(routing: modelrouting.Routing) -> RoutingModel:
+    """Convert a stored Routing to its API wire model."""
     return RoutingModel(
         tasks={k: _route_model(v) for k, v in routing.tasks.items()},
         agent=_route_model(routing.agent) if routing.agent else None,
         default=_route_model(routing.default) if routing.default else None,
         agent_stages={k: _route_model(v) for k, v in routing.agent_stages.items()},
     )
-
-
-def _all_routes_in_dict(d: dict) -> list[dict]:
-    """Collect all route dicts from a routing update dict."""
-    routes = []
-    if "agent" in d and isinstance(d["agent"], dict):
-        routes.append(d["agent"])
-    if "default" in d and isinstance(d["default"], dict):
-        routes.append(d["default"])
-    if "tasks" in d and isinstance(d["tasks"], dict):
-        for route in d["tasks"].values():
-            if isinstance(route, dict):
-                routes.append(route)
-    if "agent_stages" in d and isinstance(d["agent_stages"], dict):
-        for route in d["agent_stages"].values():
-            if isinstance(route, dict):
-                routes.append(route)
-    return routes
 
 
 def _route_model(route: modelrouting.Route) -> RouteModel:
