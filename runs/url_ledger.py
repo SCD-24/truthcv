@@ -16,6 +16,17 @@ from pathlib import Path
 
 from storage import atomic_write_text, data_dir, locked
 
+CHANNELS = ("feed", "direct", "dork")
+OUTCOMES = (
+    "previously_screened",
+    "not_a_posting",
+    "duplicate",
+    "failed",
+    "for_review",
+    "rejected",
+    "blocked",
+)
+
 # Most entries kept per run; counts elsewhere stay complete when truncated.
 URL_LEDGER_CAP = 1000
 

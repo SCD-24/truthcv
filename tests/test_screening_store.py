@@ -14,6 +14,7 @@ from coverletter.store import save as save_letter_draft
 from coverletter.store import draft_path as letter_draft_path
 from companyresearch import store as findings_store
 from screening.cooldown import cooldown
+from services.screenings import delete_screening, delete_screenings
 from screening.model import VERDICT_VALUES
 from screening.store import (
     claim_for_apply,
@@ -382,7 +383,7 @@ def test_delete_removes_saved_cover_letter_draft(data_dir):
     save_letter_draft(a.id, CoverLetterDraft(text="Dear hiring manager,"))
     assert letter_draft_path(a.id).exists()
 
-    assert delete(a.id) is True
+    assert delete_screening(a.id) is True
 
     assert not letter_draft_path(a.id).exists()
 
@@ -395,7 +396,7 @@ def test_delete_many_removes_saved_cover_letter_drafts(data_dir):
     assert letter_draft_path(a.id).exists()
     assert letter_draft_path(b.id).exists()
 
-    delete_many([a.id, b.id])
+    delete_screenings([a.id, b.id])
 
     assert not letter_draft_path(a.id).exists()
     assert not letter_draft_path(b.id).exists()

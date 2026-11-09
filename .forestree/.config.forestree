@@ -2376,6 +2376,14 @@
       "id": "identity-leaf",
       "name": "Identity Leaf",
       "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "id": "mcpschema-leaf",
+      "name": "MCP Schema Leaf",
+      "type": "library"
     }
   ],
   "connections": [
@@ -2883,6 +2891,21 @@
       "from": "services-layer",
       "protocol": "in-process",
       "to": "prompt-store"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "run-store"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "secret-store"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "gmail-response-sync"
     }
   ],
   "definitions": [

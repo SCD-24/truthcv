@@ -462,30 +462,28 @@ def update(screening_id: str, patch: dict) -> Screening | None:
 
 
 def delete(screening_id: str) -> bool:
-    """Remove a screening record and its orphaned cover-letter draft.
+    """Remove a screening record.
+
+    Does not touch the cover-letter draft; callers that need it gone too
+    go through ``services.screenings.delete_screening``.
 
     Returns:
         True if the screening existed and was removed.
     """
-    from coverletter import store as _coverletter_store
-
     with locked(screenings_path()):
         screenings = load_all()
         screening = next((s for s in screenings if s.id == screening_id), None)
         if screening is None:
             return False
         _write_all([s for s in screenings if s.id != screening_id])
-    # Outside the lock: a different file, and holding one file's lock while
-    # touching another is how two writers deadlock on opposite orderings.
-    _coverletter_store.delete(screening_id)
     return True
 
 
 def delete_many(ids: list[str]) -> list[tuple[str, bool]]:
-    """Remove several screening records (and their draft letters) in one write.
+    """Remove several screening records in one write.
 
-    Loads the list once, writes the survivors once, and removes each deleted
-    id's cover-letter draft. Unknown ids are reported False rather than
+    Loads the list once and writes the survivors once; cover-letter drafts
+    are not touched (see ``services.screenings.delete_screenings``). Unknown ids are reported False rather than
     raising, so a partially-stale selection from the client is not fatal.
 
     Args:
@@ -494,16 +492,12 @@ def delete_many(ids: list[str]) -> list[tuple[str, bool]]:
     Returns:
         One (id, ok) pair per input id, in input order.
     """
-    from coverletter import store as _coverletter_store
-
     with locked(screenings_path()):
         screenings = load_all()
         existing_ids = {s.id for s in screenings}
         to_delete = {i for i in ids if i in existing_ids}
         if to_delete:
             _write_all([s for s in screenings if s.id not in to_delete])
-    for deleted_id in to_delete:
-        _coverletter_store.delete(deleted_id)
     return [(i, i in to_delete) for i in ids]
 
 

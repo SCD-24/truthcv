@@ -22,6 +22,7 @@ graph TD
     keyword-vocabulary["Keyword Vocabulary <br/> <small>(BACKEND)</small>"]
     llm-provider-layer["LLM Provider Layer <br/> <small>(BACKEND)</small>"]
     llm-provider-service["LLM Provider Service <br/> <small>(CUSTOM)</small>"]
+    mcpschema-leaf["MCP Schema Leaf <br/> <small>(LIBRARY)</small>"]
     onboarding-store["Onboarding Store <br/> <small>(BACKEND)</small>"]
     prompt-store["Prompt Store <br/> <small>(BACKEND)</small>"]
     renderer["Renderer <br/> <small>(BACKEND)</small>"]
@@ -118,11 +119,14 @@ graph TD
     services-layer -->|in-process| application-tracker
     services-layer -->|in-process| company-research
     services-layer -->|in-process| cover-letter-engine
+    services-layer -->|in-process| gmail-response-sync
     services-layer -->|in-process| guardrail-validator
     services-layer -->|in-process| llm-provider-layer
     services-layer -->|in-process| prompt-store
     services-layer -->|in-process| renderer
+    services-layer -->|in-process| run-store
     services-layer -->|in-process| screening-engine
+    services-layer -->|in-process| secret-store
     services-layer -->|in-process| storage-leaf
     services-layer -->|in-process| tailor-engine
     services-layer -->|in-process| truth-store
@@ -158,6 +162,7 @@ graph TD
 - [Keyword Vocabulary](overview.md) (`keyword-vocabulary`, backend)
 - [LLM Provider Layer](overview.md) (`llm-provider-layer`, backend)
 - [LLM Provider Service](overview.md) (`llm-provider-service`, custom)
+- [MCP Schema Leaf](overview.md) (`mcpschema-leaf`, library)
 - [Onboarding Store](overview.md) (`onboarding-store`, backend)
 - [Prompt Store](overview.md) (`prompt-store`, backend)
 - [Renderer](overview.md) (`renderer`, backend)
@@ -257,11 +262,14 @@ graph TD
 - [services-layer → application-tracker](interactions/services-layer--application-tracker.md) via `in-process`
 - [services-layer → company-research](interactions/services-layer--company-research.md) via `in-process`
 - [services-layer → cover-letter-engine](interactions/services-layer--cover-letter-engine.md) via `in-process`
+- [services-layer → gmail-response-sync](interactions/services-layer--gmail-response-sync.md) via `in-process`
 - [services-layer → guardrail-validator](interactions/services-layer--guardrail-validator.md) via `in-process`
 - [services-layer → llm-provider-layer](interactions/services-layer--llm-provider-layer.md) via `in-process`
 - [services-layer → prompt-store](interactions/services-layer--prompt-store.md) via `in-process`
 - [services-layer → renderer](interactions/services-layer--renderer.md) via `in-process`
+- [services-layer → run-store](interactions/services-layer--run-store.md) via `in-process`
 - [services-layer → screening-engine](interactions/services-layer--screening-engine.md) via `in-process`
+- [services-layer → secret-store](interactions/services-layer--secret-store.md) via `in-process`
 - [services-layer → storage-leaf](interactions/services-layer--storage-leaf.md) via `in-process`
 - [services-layer → tailor-engine](interactions/services-layer--tailor-engine.md) via `in-process`
 - [services-layer → truth-store](interactions/services-layer--truth-store.md) via `in-process`

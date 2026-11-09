@@ -18,7 +18,7 @@ import pytest
 import coverletter.store as letters
 import render.cover_letter as render_letter
 import screening.store as store
-from agenttools import letter_files
+import services.letters as letter_files
 from agenttools.tools_ledger import get_approved_applications
 from storage import data_dir as _data_dir
 
@@ -290,7 +290,7 @@ def test_an_unreadable_truth_store_does_not_fail_the_queue(data_dir, fake_render
     def _boom():
         raise ValueError("Duplicate truth id: 's1'")
 
-    import agenttools.letter_files as lf
+    import services.letters as lf
 
     original = lf.load_truth
     lf.load_truth = _boom

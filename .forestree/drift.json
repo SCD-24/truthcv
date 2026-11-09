@@ -22,7 +22,11 @@
     "c9a7213e",
     "2880a4a6",
     "a61aa60a",
-    "ce0de3b8"
+    "ce0de3b8",
+    "d8a5567e",
+    "5ea53b90",
+    "9bc21752",
+    "82c93172"
   ],
   "dismissals": [],
   "acceptances": [
@@ -111,6 +115,73 @@
         "action": "none",
         "args": {}
       }
+    },
+    {
+      "id": "d8a5567e",
+      "title": "New mcpschema/ infra leaf package is not declared",
+      "target": {
+        "type": "component",
+        "id": "api"
+      },
+      "suggestion": {
+        "action": "create_component",
+        "args": {
+          "id": "mcpschema-leaf",
+          "name": "MCP Schema Leaf",
+          "type": "library"
+        }
+      }
+    },
+    {
+      "id": "5ea53b90",
+      "title": "services-layer now uses run-store (services/runs.py, services/funnel.py)",
+      "target": {
+        "type": "connection",
+        "from": "services-layer",
+        "to": "run-store"
+      },
+      "suggestion": {
+        "action": "set_connection",
+        "args": {
+          "from": "services-layer",
+          "to": "run-store",
+          "protocol": "in-process"
+        }
+      }
+    },
+    {
+      "id": "9bc21752",
+      "title": "services-layer now uses secret-store (services/gmail.py)",
+      "target": {
+        "type": "connection",
+        "from": "services-layer",
+        "to": "secret-store"
+      },
+      "suggestion": {
+        "action": "set_connection",
+        "args": {
+          "from": "services-layer",
+          "to": "secret-store",
+          "protocol": "in-process"
+        }
+      }
+    },
+    {
+      "id": "82c93172",
+      "title": "services-layer now calls gmail-response-sync (services/gmail.py)",
+      "target": {
+        "type": "connection",
+        "from": "services-layer",
+        "to": "gmail-response-sync"
+      },
+      "suggestion": {
+        "action": "set_connection",
+        "args": {
+          "from": "services-layer",
+          "to": "gmail-response-sync",
+          "protocol": "in-process"
+        }
+      }
     }
   ],
   "decisions": [
@@ -177,6 +248,50 @@
         "actor": "external-agent",
         "via": "chat",
         "at": "2026-11-09T10:35:54.849Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "d8a5567e",
+      "title": "New mcpschema/ infra leaf package is not declared",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T16:20:41.407Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "5ea53b90",
+      "title": "services-layer now uses run-store (services/runs.py, services/funnel.py)",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T16:20:42.565Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "9bc21752",
+      "title": "services-layer now uses secret-store (services/gmail.py)",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T16:20:43.738Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "82c93172",
+      "title": "services-layer now calls gmail-response-sync (services/gmail.py)",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T16:20:44.708Z",
         "verified": false
       }
     }

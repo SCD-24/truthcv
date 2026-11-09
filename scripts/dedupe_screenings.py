@@ -55,6 +55,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import screening.store as screening_store  # noqa: E402
+import services.screenings as screenings_service  # noqa: E402
 from identity.url import posting_dedupe_key  # noqa: E402
 
 # Furthest-advanced decision wins. An unknown approval value sorts with "no
@@ -149,7 +150,7 @@ def main(argv: list | None = None) -> int:
     if args.apply:
         doomed = [d.id for _, dupes in duplicated for d in dupes]
         if doomed:
-            screening_store.delete_many(doomed)
+            screenings_service.delete_screenings(doomed)
     print_report(duplicated, len(screenings), args.apply)
     return 0
 

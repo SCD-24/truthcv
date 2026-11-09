@@ -9,18 +9,8 @@ concurrently without clobbering each other's state.
 
 from __future__ import annotations
 
-from dataclasses import asdict
-
-# The private helper is used (instead of letting build_letter generate its own
-# paragraphs) because build_letter's lazy path calls save_letter_draft(paragraphs),
-# which writes the single global data_dir()/"cover_letter_draft.json". Passing
-# paragraphs= unconditionally below is what keeps build_letter from writing that
-# shared file, so each application's draft lives only in this call's return value.
-from agentconfig.store import is_blocked, load as load_agent_config
-from coverletter.generate import _generate_paragraphs, build_letter
 from providers import get_provider
-from truth.answers import load as load_answers
-from truth.store import load as load_truth
+from services.letters import generate_letter
 
 
 def generate_cover_letter(
@@ -49,43 +39,13 @@ def generate_cover_letter(
     from this signature by agenttools/mcp_app.py, automatically exposes
     presetId as a schema argument.
     """
-    if company is not None and is_blocked(load_agent_config(), company):
-        return {
-            "text": "",
-            "blocked": True,
-            "blocked_claims": [],
-            "unverifiable": [],
-            "paragraphs": [],
-            "blocked_reason": "company_blocked",
-        }
-    if provider is None:
-        provider = get_provider("cover_letter")
-    truth = load_truth()
-    paras = (
-        paragraphs
-        if paragraphs is not None
-        else _generate_paragraphs(
-            posting, length, truth, provider, preset_id=preset_id
-        )
-    )
-    result = build_letter(
+    return generate_letter(
         posting,
         length,
-        truth,
-        provider,
-        denied_texts=set(denied_texts or []),
-        paragraphs=paras,
-        # Same signature the wizard produces. Only the name is taken from the
-        # answers store here — the answers are deliberately NOT passed as
-        # guardrail claim sources on this path, which would widen what the
-        # unattended agent is allowed to assert.
-        sign_off_name=load_answers().name or truth.profile.name,
+        denied_texts=denied_texts,
+        paragraphs=paragraphs,
+        provider=provider,
+        provider_factory=get_provider,
+        company=company,
         preset_id=preset_id,
     )
-    return {
-        "text": result["text"],
-        "blocked": result["blocked"],
-        "blocked_claims": [asdict(c) for c in result["blocked_claims"]],
-        "unverifiable": result["unverifiable"],
-        "paragraphs": paras,
-    }

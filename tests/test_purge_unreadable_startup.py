@@ -97,7 +97,7 @@ def test_second_startup_does_not_purge_again(data_dir):
 
 
 def test_startup_survives_purge_failure(monkeypatch, caplog):
-    def boom():
+    def boom(**_kwargs):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(main_mod, "purge_unreadable_once", boom)

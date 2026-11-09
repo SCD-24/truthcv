@@ -171,3 +171,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:start comp:identity-leaf -->
 - **Identity Leaf** (`identity-leaf`) - backend component.
 <!-- generated:end comp:identity-leaf -->
+
+<!-- generated:start comp:mcpschema-leaf -->
+- **MCP Schema Leaf** (`mcpschema-leaf`) - library component.
+<!-- generated:end comp:mcpschema-leaf -->

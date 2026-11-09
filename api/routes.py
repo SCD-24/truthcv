@@ -72,7 +72,7 @@ from providers.base import supports_effort_levels
 from companyresearch import store as company_findings_store
 from screening import store as screening_store
 from runs import store as runs_store
-from agenttools.tools_funnel import OUTCOMES as _FUNNEL_OUTCOMES
+from runs.url_ledger import OUTCOMES as _FUNNEL_OUTCOMES
 from runs import url_ledger as _url_ledger
 from runs.derive import board_breakdown_by_run, counters_by_run
 from identity.company import company_identity_key
@@ -81,7 +81,7 @@ from screening.model import Screening
 from identity.url import posting_dedupe_key
 
 import coverletter.store as letter_store
-from agenttools.letter_operator import generate_cover_letter_for_operator as _generate_letter_for_operator
+from services.letters import generate_cover_letter_for_operator as _generate_letter_for_operator
 
 from .schemas import (
     AgentConfigModel,
@@ -525,7 +525,7 @@ def bulk_delete_screenings(body: BulkDeleteRequest) -> BulkDeleteResult:
     is reported ok:false, never a 404 — an empty list is a no-op.
     """
     results = [
-        {"id": sid, "ok": ok} for sid, ok in screening_store.delete_many(body.ids)
+        {"id": sid, "ok": ok} for sid, ok in screenings_service.delete_screenings(body.ids)
     ]
     return BulkDeleteResult(results=results)
 
@@ -737,6 +737,7 @@ def generate_screening_letter(
         denied_texts=denied_texts,
         paragraphs=body.paragraphs,
         company=screening.company or None,
+        provider_factory=get_provider,
     )
     if result["blocked"]:
         raise HTTPException(
@@ -793,7 +794,7 @@ def save_screening_letter(
 @router.delete("/screenings/{screening_id}", status_code=204)
 def delete_screening(screening_id: str) -> None:
     """Delete a screening record."""
-    if not screening_store.delete(screening_id):
+    if not screenings_service.delete_screening(screening_id):
         raise HTTPException(status_code=404, detail="Screening not found.")
 
 

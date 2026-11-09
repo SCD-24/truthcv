@@ -15,10 +15,11 @@ from mcp import types
 from mcp.server import Server
 from mcp.server.transport_security import TransportSecuritySettings
 
-from agenttools.server import router as mcp_router
-from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
+from agenttools.server import router as mcp_router, tool_specs
+from mcpschema import input_schema
 from companyresearch.claim_migration import migrate_claims_if_needed
 from screening.purge_unreadable import purge_unreadable_once
+from services import screenings
 from services.errors import Conflict, NotFound, Refused, ServiceError, Unavailable
 from storage import data_dir
 
@@ -55,6 +56,8 @@ _mcp_http_app = _mcp_server.streamable_http_app(
     stateless_http=True,
 )
 
+_TOOL_REGISTRY = tool_specs()
+
 # Register MCP tool handlers on the server
 async def _handle_list_tools(ctx, params) -> types.ListToolsResult:
     """Return the list of available tools.
@@ -66,7 +69,7 @@ async def _handle_list_tools(ctx, params) -> types.ListToolsResult:
         types.Tool(
             name=name,
             description=description,
-            inputSchema=_input_schema(fn),
+            inputSchema=input_schema(fn),
         )
         for name, (fn, description) in _TOOL_REGISTRY.items()
     ]
@@ -155,7 +158,7 @@ def _purge_unreadable_screenings() -> None:
     Logs only counts and the backup path - never URLs or posting text.
     """
     try:
-        report = purge_unreadable_once()
+        report = purge_unreadable_once(delete_many=screenings.delete_screenings)
     except Exception:
         logger.exception("startup unreadable-screening purge failed")
         return

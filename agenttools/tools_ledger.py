@@ -17,74 +17,16 @@ so the agent and the wizard can never disagree about what happened.
 from __future__ import annotations
 
 import json
-import logging
-from datetime import datetime, timezone
 
 import agentconfig.store as _agentconfig_store
-from agentconfig.salary import clamp_ask as _clamp_ask
-from agentconfig.salary import format_ask as _format_ask
-from agenttools.letter_files import (
-    NO_FILE as _NO_LETTER_FILE,
-    render_screening_letter as _render_screening_letter,
-)
 from applications.model import Attachment, Confirmation, FieldSubmitted, Screening
-from applications.store import save_attachments as _save_attachments
-from applications.store import save_confirmation as _save_confirmation
-from applications.store import save_fields_submitted as _save_fields_submitted
-from applications.store import save_screening as _save_screening
-import applications.store as _apps_store
-from runs.derive import counters_by_run as _counters_by_run
-import screening.store as _screening_store
-import agenttools.tools_runs as _tools_runs
-from identity.company import company_identity_key as _company_identity_key
-from identity.company import validate_company_name as _validate_company_name
 from screening.cooldown import cooldown as _cooldown
-from screening.model import validate_blocker as _validate_blocker
-from screening.model import validate_verdict as _validate_verdict
-from screening.posting import validate_posting_text as _validate_posting_text
-from screening.role import validate_role_title as _validate_role_title
-from screening.criteria import validate_remote_arrangement as _validate_remote_arrangement
-from screening.criteria import validate_language_requirement as _validate_language_requirement
-from screening.criteria import validate_eor_stated as _validate_eor_stated
-from screening.criteria import validate_stated_text as _validate_stated_text
-from screening.criteria import evaluate_hard_requirements as _evaluate_hard_requirements
-from screening.criteria import holds_for_review as _holds_for_review
-import screening.jev as _jev
-from services.screenings import create_screening as create_or_get_screening
+from services.screenings import record_screening_verdict as _record_screening_verdict
+import services.agent_config as _agent_config_service
 import services.applications as _applications_service
-from identity.url import is_posting_url as _is_posting_url
-from identity.url import validate_posting_url as _validate_posting_url
 from truth.answers import canonical_cv as _canonical_cv
 from truth.answers import load as _load_answers
 from truth.emailalias import alias_email as _alias_email
-
-logger = logging.getLogger(__name__)
-
-
-def _backfill_from_screening(fields: dict, screening_id: str) -> dict:
-    """Fill identity fields the caller left absent or empty from the screening.
-
-    An application recorded against an approved queue item should carry that
-    item's company, role, URL and posting so the Applications row is populated
-    without the agent having to repeat them. Caller-supplied non-empty values
-    always win; an unknown ``screening_id`` changes nothing (the caller's
-    fields stand, exactly as before this backfill existed).
-    """
-    if not screening_id:
-        return fields
-    s = _screening_store.get(screening_id)
-    if s is None:
-        return fields
-    inherited = {
-        "company": s.company,
-        "role": s.role,
-        "application_url": s.url,
-        "posting": s.posting_text,
-    }
-    for key, value in inherited.items():
-        if not fields.get(key):
-            fields[key] = value
-    return fields
 
 
 def _as_list(value, name: str):
@@ -259,228 +201,16 @@ def record_application(
         if attachments is not None else None
     )
 
-    backfilled = _backfill_from_screening(fields, screening_id)
-    if screening_id:
-        app, created = _apps_store.create_for_screening(backfilled, screening_id)
-        if not created:
-            # A retry against an existing row: apply the caller's editable
-            # fields so the re-record improves the record instead of being
-            # silently dropped. Use `fields`, not `backfilled`, so inherited
-            # values the caller did not actually send are not reintroduced.
-            app = _applications_service.update_application_record(app.id, fields) or app
-    else:
-        app = _applications_service.create_application_record(backfilled)
-        created = True
-
-    if parsed_fields_submitted is not None:
-        app = _save_fields_submitted(app.id, parsed_fields_submitted) or app
-    if parsed_confirmation is not None:
-        app = _save_confirmation(app.id, parsed_confirmation) or app
-    if parsed_screening is not None:
-        app = _save_screening(app.id, parsed_screening) or app
-    if parsed_attachments is not None:
-        app = _save_attachments(app.id, parsed_attachments) or app
-
-    # An approved queue item retires on evidence of a confirmed application,
-    # not on the agent electing to retire it.
-    if screening_id:
-        # Read the claim before mark_applied clears it, so a submission for an
-        # item this run did not hold can be flagged. Best-effort throughout:
-        # the ledger write above already happened, so nothing here may raise
-        # or change the return shape — a real submission must never be lost
-        # over an accounting failure.
-        # applications_submitted is NOT bumped here: it is derived on read from
-        # the application records themselves (runs/derive.py), and bumping it
-        # too would double-count. over_cap_writes stays an incremented counter
-        # because it records a lease violation with no derivable source.
-        if run_id:
-            try:
-                held = _screening_store.get(screening_id)
-                over_cap = bool(held) and held.claimed_by_run != run_id
-                if over_cap:
-                    _tools_runs.bump_run_counters(run_id=run_id, over_cap_writes=1)
-            except Exception:
-                pass
-        _screening_store.mark_applied(screening_id)
-
+    app, created = _applications_service.record_application(
+        fields,
+        screening_id,
+        run_id,
+        fields_submitted=parsed_fields_submitted,
+        confirmation=parsed_confirmation,
+        screening=parsed_screening,
+        attachments=parsed_attachments,
+    )
     result = app.to_dict()
-    result["created"] = created
-    return result
-
-
-def _load_enabled_profile(profile_name: str):
-    """Return the named ENABLED JobProfile, or raise ``ValueError`` naming the enabled ones.
-
-    Evaluating hard requirements against a profile nobody is currently
-    searching under would be meaningless, so a disabled or unknown name is
-    refused rather than silently matched.
-    """
-    cfg = _agentconfig_store.load()
-    enabled = [p for p in cfg.profiles if p.enabled]
-    needle = profile_name.strip().casefold()
-    profile = next((p for p in enabled if p.name.strip().casefold() == needle), None)
-    if profile is None:
-        names = ", ".join(p.name for p in enabled) or "(none enabled)"
-        raise ValueError(
-            f"Unknown or disabled profile {profile_name!r}. Enabled profiles: {names}."
-        )
-    return profile
-
-
-def _evaluate_profile_criteria(profile_name: str, evidence: dict, agent_reason: str) -> dict:
-    """Check ``profile_name``'s six hard requirements against the posting's stated evidence.
-
-    Loads the named ENABLED profile via ``_load_enabled_profile`` (which
-    raises ``ValueError`` naming the enabled ones for an unknown/disabled
-    name), then runs ``screening.criteria.evaluate_hard_requirements`` over
-    ``evidence``. Returns ``{}`` when the posting is compatible with every
-    one of remote model, working language, salary floor, employment country,
-    rejected role types, and EOR/PEO allowance. Otherwise returns a dict with
-    ``verdict='rejected'``, the failing criterion, and a reason that prefixes
-    the criteria evidence onto whatever reason the agent supplied, so the
-    operator sees both why the posting failed and what the agent said about
-    it.
-    """
-    profile = _load_enabled_profile(profile_name)
-    failing_criterion, evidence_reason = _evaluate_hard_requirements(profile, evidence)
-    if not failing_criterion:
-        return {}
-    combined_reason = f"{evidence_reason} {agent_reason}".strip()
-    return {
-        "verdict": "rejected",
-        "failing_criterion": failing_criterion,
-        "reason": combined_reason,
-    }
-
-
-def _evaluate_jev_criteria(profile_name: str, posting_text: str, agent_reason: str) -> dict:
-    """Cross-check the posting against Jev's opinion of the profile's hard requirements.
-
-    Called only after the deterministic checks in ``_evaluate_profile_criteria``
-    pass, since Jev never overrides a deterministic rejection. Returns ``{}``
-    when Jev is disabled, reports no failures, or errors for any reason — a
-    transport error, a timeout, or an unexpected response must never break
-    screening, so any exception is logged and swallowed here. Otherwise uses
-    only the FIRST reported failure and returns the same ``verdict='rejected'``/
-    ``failing_criterion``/``reason`` shape as ``_evaluate_profile_criteria``,
-    with the reason prefixed 'Jev: '.
-    """
-    try:
-        if not _jev.enabled():
-            return {}
-        profile = _load_enabled_profile(profile_name)
-        failures = _jev.evaluate_hard_requirements(profile, posting_text)
-    except Exception:
-        logger.warning("Jev hard-requirement cross-check failed; ignoring.", exc_info=True)
-        return {}
-    if not failures:
-        return {}
-    failing_criterion, jev_reason = failures[0]
-    combined_reason = f"Jev: {jev_reason} {agent_reason}".strip()
-    return {
-        "verdict": "rejected",
-        "failing_criterion": failing_criterion,
-        "reason": combined_reason,
-    }
-
-
-def _gate_queueing_verdict(
-    validated_verdict: str,
-    posting_text: str,
-    profile: str,
-    remote_arrangement: str,
-    language_requirement: str,
-    salary_stated: str,
-    employment_country_stated: str,
-    role_type_stated: str,
-    eor_stated: str,
-    failing_criterion: str,
-    reason: str,
-) -> dict:
-    """Enforce the queueing gate for a validated 'passed'/'deferred' verdict.
-
-    Called only when the record is about to queue (no ``screening_blocker``).
-    Validates ``posting_text``, refuses (raises ``ValueError``) a call with no
-    ``profile`` or no ``remote_arrangement``, normalises all six evidence
-    fields, then evaluates them against the named ENABLED profile's six hard
-    requirements (remote model, working language, salary floor, employment
-    country, rejected role types, EOR). A contradicted verdict is downgraded
-    to ``rejected`` — with ``failing_criterion`` set and the criteria evidence
-    prefixed onto ``reason`` — rather than raised, so a genuinely bad call
-    still gets a stored, explained record instead of nothing. When the
-    deterministic checks all pass and Jev cross-checking is enabled, Jev's own
-    opinion of the same six requirements is checked too (see
-    ``_evaluate_jev_criteria``); its first reported failure downgrades the
-    verdict the same way, with the reason prefixed 'Jev: '. Returns the
-    (possibly updated) posting_text/verdict/failing_criterion/reason plus the
-    six (possibly normalised) evidence fields, as a dict.
-    """
-    posting_text = _validate_posting_text(posting_text)
-    if not profile or not remote_arrangement:
-        raise ValueError(
-            "profile and remote_arrangement are required to queue a "
-            "passed/deferred verdict — without profile the operator cannot "
-            "tell which profile's criteria this posting supposedly met, and "
-            "an unchecked remote_arrangement is how non-remote postings "
-            "reached the queue. Pass the JobProfile name and the posting's "
-            "stated remote arrangement (screening_blocker exempts a posting "
-            "the agent could not read)."
-        )
-    remote_arrangement = _validate_remote_arrangement(remote_arrangement)
-    language_requirement = _validate_language_requirement(language_requirement)
-    eor_stated = _validate_eor_stated(eor_stated)
-    if salary_stated:
-        salary_stated = _validate_stated_text(salary_stated)
-    if employment_country_stated:
-        employment_country_stated = _validate_stated_text(employment_country_stated)
-    if role_type_stated:
-        role_type_stated = _validate_stated_text(role_type_stated)
-    evidence = {
-        "remote_arrangement": remote_arrangement,
-        "language_requirement": language_requirement,
-        "salary_stated": salary_stated,
-        "employment_country_stated": employment_country_stated,
-        "role_type_stated": role_type_stated,
-        "eor_stated": eor_stated,
-    }
-    override = _evaluate_profile_criteria(profile, evidence, reason)
-    if override:
-        validated_verdict = override["verdict"]
-        failing_criterion = override["failing_criterion"]
-        reason = override["reason"]
-    else:
-        override = _evaluate_jev_criteria(profile, posting_text, reason)
-        if override:
-            validated_verdict = override["verdict"]
-            failing_criterion = override["failing_criterion"]
-            reason = override["reason"]
-    return {
-        "posting_text": posting_text,
-        "verdict": validated_verdict,
-        "failing_criterion": failing_criterion,
-        "reason": reason,
-        "remote_arrangement": remote_arrangement,
-        "language_requirement": language_requirement,
-        "salary_stated": salary_stated,
-        "employment_country_stated": employment_country_stated,
-        "role_type_stated": role_type_stated,
-        "eor_stated": eor_stated,
-    }
-
-
-def _finalize_screening(fields: dict, named: dict) -> dict:
-    """Merge non-empty ``named`` fields into ``fields``, persist, and shape the result.
-
-    Split out of ``record_screening`` purely to keep that function short: the
-    optional-field merge (an omitted field never overwrites a stored value,
-    which is why only truthy values are copied), the store call, and the
-    ``created`` flag on the result all belong together as one step.
-    """
-    for name, value in named.items():
-        if value:
-            fields[name] = value
-    screening, created = create_or_get_screening(fields)
-    result = screening.to_dict()
     result["created"] = created
     return result
 
@@ -608,81 +338,32 @@ def record_screening(
     none of them reached the approval queue. The optional fields are written
     only when non-empty, so an omitted one never overwrites a stored value.
     """
-    validated_url = _validate_posting_url(url)
-    if not _is_posting_url(validated_url):
-        raise ValueError(
-            f"{validated_url!r} is a LinkedIn search/listing page, not a "
-            "posting. Only linkedin.com/jobs/view/<id> URLs are accepted."
-        )
-    validated_role = _validate_role_title(role)
-    fields["url"] = validated_url
-    fields["role"] = validated_role
-    fields["company"] = _validate_company_name(company)
-    validated_blocker = _validate_blocker(screening_blocker) if screening_blocker else ""
-    validated_verdict = _validate_verdict(verdict, blocker=validated_blocker)
-    if not validated_blocker and _holds_for_review(
-        validated_verdict, failing_criterion, remote_arrangement
-    ):
-        validated_verdict = "deferred"
-        failing_criterion = ""
-        reason = (
-            "Remote arrangement not stated in the posting — held for your "
-            "review. " + reason
-        )
-    fields["verdict"] = validated_verdict
-    if validated_verdict in ("passed", "deferred") and not validated_blocker:
-        # This is about to queue for the operator's decision: see
-        # _gate_queueing_verdict for the posting_text/profile/criteria checks
-        # that guard what reaches the approval queue.
-        gated = _gate_queueing_verdict(
-            validated_verdict,
-            posting_text,
-            profile,
-            remote_arrangement,
-            language_requirement,
-            salary_stated,
-            employment_country_stated,
-            role_type_stated,
-            eor_stated,
-            failing_criterion,
-            reason,
-        )
-        posting_text = gated["posting_text"]
-        validated_verdict = gated["verdict"]
-        fields["verdict"] = validated_verdict
-        failing_criterion = gated["failing_criterion"]
-        reason = gated["reason"]
-        remote_arrangement = gated["remote_arrangement"]
-        language_requirement = gated["language_requirement"]
-        salary_stated = gated["salary_stated"]
-        employment_country_stated = gated["employment_country_stated"]
-        role_type_stated = gated["role_type_stated"]
-        eor_stated = gated["eor_stated"]
-    if not screened_date:
-        # The caller left it blank: stamp today's UTC date rather than leave
-        # it empty, since that is what an operator scanning screening dates
-        # expects a just-recorded screening to carry. An explicitly supplied
-        # date is always kept as given.
-        screened_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    named = {
-        "failing_criterion": failing_criterion,
-        "reason": reason,
-        "cooldown_expires": cooldown_expires,
-        "source": source,
-        "screened_date": screened_date,
-        "posting_text": posting_text,
-        "posted_date": posted_date,
-        "screening_blocker": validated_blocker,
-        "run_id": run_id,
-        "profile": profile,
-        "remote_arrangement": remote_arrangement,
-        "language_requirement": language_requirement,
-        "salary_stated": salary_stated,
-        "employment_country_stated": employment_country_stated,
-        "role_type_stated": role_type_stated,
-        "eor_stated": eor_stated,
-    }
-    return _finalize_screening(fields, named)
+    screening, created = _record_screening_verdict(
+        url,
+        role,
+        company,
+        verdict,
+        failing_criterion=failing_criterion,
+        reason=reason,
+        cooldown_expires=cooldown_expires,
+        source=source,
+        screened_date=screened_date,
+        posting_text=posting_text,
+        posted_date=posted_date,
+        screening_blocker=screening_blocker,
+        run_id=run_id,
+        profile=profile,
+        remote_arrangement=remote_arrangement,
+        language_requirement=language_requirement,
+        salary_stated=salary_stated,
+        employment_country_stated=employment_country_stated,
+        role_type_stated=role_type_stated,
+        eor_stated=eor_stated,
+        extra_fields=fields,
+    )
+    result = screening.to_dict()
+    result["created"] = created
+    return result
 
 
 def check_cooldown(company: str, role: str | None = None) -> dict:
@@ -751,41 +432,8 @@ def get_profile_answers(company: str = "") -> dict:
     data = _load_answers().to_dict()
     email = data.get("email")
     if isinstance(email, str) and email:
-        data["email"] = _alias_email(email, _resolve_alias_company(company))
+        data["email"] = _alias_email(email, _applications_service.resolve_alias_company(company))
     return data
-
-
-def _resolve_alias_company(company: str) -> str:
-    """Resolve the company string ``get_profile_answers`` should alias against.
-
-    If an application row already exists whose company matches ``company``'s
-    identity key, that row's stored ``company`` string is returned (the
-    earliest-created one wins, when several match) so the alias stays frozen
-    to the address already submitted to that employer. Otherwise the
-    identity key itself is returned, so a brand-new company is aliased from
-    its normalized slug rather than its raw, possibly differently-cased or
-    -suffixed, spelling. Never raises: a blank/non-str ``company``, or a
-    failure to load the applications store, falls back to ``company``
-    unchanged (aliasing degrades to today's plain per-call transform).
-    """
-    if not isinstance(company, str) or not company.strip():
-        return company
-    target_key = _company_identity_key(company)
-    if not target_key:
-        return company
-    try:
-        rows = _apps_store.load_all()
-    except Exception:
-        return company
-    candidates = [
-        row
-        for row in rows
-        if isinstance(row.company, str) and _company_identity_key(row.company) == target_key
-    ]
-    if not candidates:
-        return target_key
-    earliest = min(candidates, key=lambda row: row.created_at or "")
-    return earliest.company
 
 
 def get_job_profiles() -> list[dict]:
@@ -802,50 +450,7 @@ def recommend_salary(profile_name: str, proposed: int | None = None) -> dict:
     ``[salary_ask_min, salary_ask_max]`` via ``agentconfig.salary.clamp_ask``.
     Returns a refusal dict if the profile is unknown or has no salary band.
     """
-    cfg = _agentconfig_store.load()
-    profile = next((p for p in cfg.profiles if p.name == profile_name), None)
-    if profile is None:
-        return {"refused": f"Profile not found: {profile_name}"}
-
-    clamped = _clamp_ask(profile, proposed)
-    if clamped is None:
-        return {"refused": "Profile has no salary band configured"}
-
-    return {
-        "amount": clamped,
-        "formatted": _format_ask(profile, clamped),
-        "band": {"min": profile.salary_ask_min, "max": profile.salary_ask_max},
-        # Only a figure the caller actually proposed can be "clamped"; with
-        # proposed=None the band minimum is supplied, not adjusted.
-        "clamped": proposed is not None and proposed != clamped,
-    }
-
-
-# How long a hand-out claim holds before another run may reclaim the item —
-# long enough to cover one application's browser interaction, short enough
-# that a crashed run's work comes back reasonably soon.
-_CLAIM_LEASE_SECONDS = 900
-
-
-def _already_submitted_this_run(run_id: str) -> int:
-    """How many applications this run has already submitted, so a repeated
-    ``get_approved_applications`` call within the same run counts them
-    against the per-run cap instead of resetting it every call.
-
-    A submitted item has already left the approved queue (it is not one of
-    the items the loop below re-claims), so this must be seeded separately
-    rather than double counted with the loop's own claimed_count. Reuses
-    ``runs.derive.counters_by_run`` over the applications store alone
-    (``screenings=[]``, since only ``applications_submitted`` is wanted).
-    Best-effort: any error here must not block the tool, so it falls back
-    to 0.
-    """
-    try:
-        applications = _apps_store.load_all()
-        counters = _counters_by_run([run_id], [], applications)
-        return counters[run_id]["applications_submitted"]
-    except Exception:
-        return 0
+    return _agent_config_service.recommend_salary(profile_name, proposed)
 
 
 def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:
@@ -912,63 +517,7 @@ def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:
       draft was since blanked or deleted comes back with ``blocked_reason`` set
       to "" rather than reaching the agent with nothing to send.
     """
-    cap = 0
-    if limit and limit > 0:
-        cap = limit
-    else:
-        cfg = _agentconfig_store.load()
-        cap = getattr(cfg, "max_applications_per_run", None) or 0
-
-    # The reusable reads and the blocked-reason cascade live in the service; the
-    # per-run cap and the claim-lease below are agent-only and stay here, since
-    # only the agent claims work.
-    items = []
-    claimed_count = _already_submitted_this_run(run_id) if run_id else 0
-    for entry in _applications_service.gather_approvable_screenings():
-        s = entry["screening"]
-        blocked_reason = entry["blocked_reason"]
-
-        claimed_by_run = s.claimed_by_run
-        if not blocked_reason and run_id:
-            if cap and claimed_count >= cap:
-                continue  # over this run's cap: leave it for a later run
-            claimed = _screening_store.claim_for_run(s.id, run_id, _CLAIM_LEASE_SECONDS)
-            if claimed is None:
-                continue  # lost a race for this item; skip rather than misreport it
-            claimed_by_run = claimed.claimed_by_run
-            claimed_count += 1
-        elif not blocked_reason and cap and claimed_count >= cap:
-            continue
-        elif not blocked_reason:
-            claimed_count += 1
-
-        # Only an item that is actually going out gets a file rendered for it:
-        # a blocked item is reported, never applied to, so rendering it would
-        # buy nothing and cost a WeasyPrint pass per blocked item per run.
-        letter_file = (
-            _render_screening_letter(s.id, entry["cover_letter"])
-            if not blocked_reason
-            else dict(_NO_LETTER_FILE)
-        )
-
-        items.append(
-            {
-                "screening_id": s.id,
-                "company": s.company,
-                "role": s.role,
-                "url": s.url,
-                "attempts": s.apply_attempts,
-                "blocked_reason": blocked_reason,
-                "contradictions": entry["contradictions"],
-                "cover_letter": entry["cover_letter"],
-                "letter_source": entry["letter_source"],
-                "cover_letter_asset_id": letter_file["asset_id"],
-                "cover_letter_path": letter_file["path"],
-                "cover_letter_download_url": letter_file["download_url"],
-                "claimed_by_run": claimed_by_run,
-            }
-        )
-    return items
+    return _applications_service.get_approved_applications(run_id, limit)
 
 
 def report_apply_failure(
@@ -986,7 +535,7 @@ def report_apply_failure(
     the operator's sign-in queue. Without them the failure is recorded but the
     operator is never told which site to go and authorise.
     """
-    updated = _screening_store.record_apply_failure(
+    updated = _applications_service.record_apply_failure(
         screening_id, error, blocker=blocker, signin_url=signin_url
     )
     if updated is None:
