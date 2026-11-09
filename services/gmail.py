@@ -124,3 +124,29 @@ def status() -> dict:
         "reauth_required": oauth.get("reauthRequired") is True,
         "tracking_enabled": tracking_enabled(),
     }
+
+
+def dismiss_and_count(ids: list[str]) -> tuple[int, int]:
+    """Dismiss the given suggestions and return (dismissed, pending remaining).
+
+    Exists so the route makes one call; the pending total is read after the
+    dismissal so it reflects the new state.
+    """
+    from gmailsync import service as gmailsync_service
+
+    dismissed = gmailsync_service.dismiss(ids)
+    _, pending = gmailsync_service.list_pending(1, 0)
+    return dismissed, pending
+
+
+def accept_and_count(suggestion_id: str):
+    """Accept one suggestion and return (accepted, pending remaining).
+
+    SuggestionNotFound / SuggestionNotAcceptable from gmailsync propagate for
+    the route to map to 404 / 409.
+    """
+    from gmailsync import service as gmailsync_service
+
+    accepted = gmailsync_service.accept(suggestion_id)
+    _, pending = gmailsync_service.list_pending(1, 0)
+    return accepted, pending

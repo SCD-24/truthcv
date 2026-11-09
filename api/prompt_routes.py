@@ -12,18 +12,14 @@ from api.schemas import (
     PromptPresetIn,
     PromptPresetOut,
 )
-from prompts.fragments import Fragment, Preset
 from prompts.library import (
-    delete_fragment,
-    delete_preset,
-    get_fragment,
     get_preset,
     list_fragments,
     list_presets,
     set_default_preset,
-    upsert_fragment,
-    upsert_preset,
 )
+
+from services import prompt_library
 
 prompt_router = APIRouter(prefix="/api")
 
@@ -32,30 +28,14 @@ def _slugify(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
 
 
-def _raise_seeded_or_bad_request(exc: ValueError) -> None:
-    message = str(exc)
-    if "seeded" in message or "default" in message:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=message) from exc
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
-
-
 @prompt_router.get("/prompt-fragments", response_model=list[PromptFragmentOut])
 def get_prompt_fragments() -> list[PromptFragmentOut]:
     return [PromptFragmentOut(**f.to_dict()) for f in list_fragments()]
 
 
 def _save_fragment(body: PromptFragmentIn) -> PromptFragmentOut:
-    fragment = Fragment(
-        id=body.id,
-        slot=body.slot,
-        title=body.title,
-        text=body.text,
-    )
-    try:
-        upsert_fragment(fragment)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    return PromptFragmentOut(**get_fragment(fragment.id).to_dict())
+    fragment = prompt_library.save_fragment(body.id, body.slot, body.title, body.text)
+    return PromptFragmentOut(**fragment.to_dict())
 
 
 @prompt_router.post("/prompt-fragments", response_model=PromptFragmentOut)
@@ -74,9 +54,7 @@ def update_prompt_fragment(id: str, body: PromptFragmentIn) -> PromptFragmentOut
 @prompt_router.delete("/prompt-fragments/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_prompt_fragment(id: str) -> None:
     try:
-        delete_fragment(id)
-    except ValueError as exc:
-        _raise_seeded_or_bad_request(exc)
+        prompt_library.remove_fragment(id)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -87,17 +65,8 @@ def get_prompt_presets() -> list[PromptPresetOut]:
 
 
 def _save_preset(body: PromptPresetIn) -> PromptPresetOut:
-    preset = Preset(
-        id=body.id,
-        name=body.name,
-        fragment_ids=body.fragment_ids,
-        is_default=body.is_default,
-    )
-    try:
-        upsert_preset(preset)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    return PromptPresetOut(**get_preset(preset.id).to_dict())
+    preset = prompt_library.save_preset(body.id, body.name, body.fragment_ids, body.is_default)
+    return PromptPresetOut(**preset.to_dict())
 
 
 @prompt_router.post("/prompt-presets", response_model=PromptPresetOut)
@@ -114,9 +83,7 @@ def update_prompt_preset(id: str, body: PromptPresetIn) -> PromptPresetOut:
 @prompt_router.delete("/prompt-presets/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_prompt_preset(id: str) -> None:
     try:
-        delete_preset(id)
-    except ValueError as exc:
-        _raise_seeded_or_bad_request(exc)
+        prompt_library.remove_preset(id)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

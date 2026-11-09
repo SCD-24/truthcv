@@ -35,7 +35,7 @@ def _run_gmail_sync() -> dict:
 
 def _guard_gmail_sync() -> None:
     """Reuse the exact gate the existing Gmail sync route enforces."""
-    from api.routes import require_gmail_tracking_enabled
+    from api.guards import require_gmail_tracking_enabled
 
     require_gmail_tracking_enabled()
 
@@ -47,11 +47,11 @@ def _run_feed_refresh() -> dict:
     reuses that route's own helpers so the two never drift apart.
     """
     from agentconfig import store as agent_config_store
-    from api.routes import _fetch_feed_postings, _target_company_boards
+    from services.agent_config import fetch_feed_postings, target_company_boards
 
     cfg = agent_config_store.load()
-    target_boards = _target_company_boards(cfg)
-    feed = _fetch_feed_postings(cfg, target_boards)
+    target_boards = target_company_boards(cfg)
+    feed = fetch_feed_postings(cfg, target_boards)
     return {"postings": [p.to_dict() for p in feed.postings], "error": feed.error}
 
 
