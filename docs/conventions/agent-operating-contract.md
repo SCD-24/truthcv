@@ -99,6 +99,7 @@ Use these exact names and ids when discussing the architecture.
 | Keyword Vocabulary | `keyword-vocabulary` | backend |
 | LLM Provider Layer | `llm-provider-layer` | backend |
 | LLM Provider Service | `llm-provider-service` | custom |
+| MCP Schema Leaf | `mcpschema-leaf` | library |
 | Onboarding Store | `onboarding-store` | backend |
 | Prompt Store | `prompt-store` | backend |
 | Renderer | `renderer` | backend |
@@ -116,5 +117,5 @@ Use these exact names and ids when discussing the architecture.
 <!-- generated:start cap:system-boundary -->
 ## System Boundary
 
-The declared system consists of 31 component(s) and 101 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
+The declared system consists of 32 component(s) and 104 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
 <!-- generated:end cap:system-boundary -->
