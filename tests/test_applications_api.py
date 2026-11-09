@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api.routes as routes
+import render
 from api.main import app
 from providers.fake import FakeProvider
 from truth import Bullet, Experience, Skill, Truth, save
@@ -301,8 +302,8 @@ def test_edited_cv_persists_link_when_render_unavailable(client, monkeypatch):
     def _unavailable(*_a, **_k):
         raise RenderUnavailable("no backend")
 
-    monkeypatch.setattr(routes, "render_pdf", _unavailable)
-    monkeypatch.setattr(routes, "render_docx", _unavailable)
+    monkeypatch.setattr(render, "render_pdf", _unavailable)
+    monkeypatch.setattr(render, "render_docx", _unavailable)
 
     _seed_truth()
     app_id = client.post("/api/applications", json={"company": "Acme"}).json()["id"]
@@ -332,8 +333,8 @@ def test_edited_cover_letter_persists_link_when_render_unavailable(client, monke
     def _unavailable(*_a, **_k):
         raise RenderUnavailable("no backend")
 
-    monkeypatch.setattr(routes, "render_pdf", _unavailable)
-    monkeypatch.setattr(routes, "render_docx", _unavailable)
+    monkeypatch.setattr(render, "render_pdf", _unavailable)
+    monkeypatch.setattr(render, "render_docx", _unavailable)
 
     _seed_truth()
     app_id = client.post("/api/applications", json={"company": "Acme"}).json()["id"]

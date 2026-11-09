@@ -21,8 +21,6 @@ from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, StreamingResponse
 
 from providers import ProviderError, get_provider
-from render import render_docx, render_pdf
-from render.pdf import RenderUnavailable
 from truth import load, save
 from truth.answers import load as load_answers
 from services.inferences import confirm_inferences as confirm_inferences_service
@@ -48,7 +46,6 @@ import secretstore
 from services.render_cv import (
     DraftMissing,
     _claim_id,
-    _contact_line,
     _require_application,
     render_cv,
 )
@@ -797,28 +794,6 @@ def _strip_html(text: str) -> str:
     return html_lib.unescape(without_tags)
 
 
-def _render_to_files(html: str, pdf_name: str, docx_name: str) -> bool:
-    """Best-effort render HTML to the named PDF and DOCX on the volume.
-
-    Returns True if at least one format was produced. It never raises on an
-    unavailable backend: callers that have already recorded the document must
-    keep the saved link even when WeasyPrint/pandoc are missing, and the
-    download-URL builder nulls links for files that were not produced.
-    """
-    produced = False
-    try:
-        render_pdf(html, pdf_name)
-        produced = True
-    except RenderUnavailable:
-        pass
-    try:
-        render_docx(html, docx_name)
-        produced = True
-    except RenderUnavailable:
-        pass
-    return produced
-
-
 @router.put("/applications/{app_id}/cv", response_model=SaveDocumentResult)
 def save_application_cv(app_id: str, body: SaveCvRequest) -> SaveDocumentResult:
     """Render and save edited CV HTML onto an application.
@@ -827,14 +802,7 @@ def save_application_cv(app_id: str, body: SaveCvRequest) -> SaveDocumentResult:
     as-is — the truthfulness guardrail only gates the automatic AI generation
     (/render, /tailor), not a document the user edited by hand.
     """
-    if app_store.get(app_id) is None:
-        raise HTTPException(status_code=404, detail="Application not found.")
-
-    # Record the document FIRST so the link always persists, then render
-    # best-effort — a missing render backend must never lose the saved CV.
-    app = app_store.save_cv_document(app_id, body.html)
-    pdf_name, docx_name = app_store.cv_filenames(app_id)
-    produced = _render_to_files(body.html, pdf_name, docx_name)
+    app, produced = applications_service.save_cv(app_id, body.html)
     return SaveDocumentResult(
         blocked=False,
         application=_application_model(app),
@@ -851,22 +819,7 @@ def save_application_cover_letter(
     A manual edit is trusted and saved as-is; the truthfulness guardrail only
     gates the automatic AI generation, not a hand-edited document.
     """
-    if app_store.get(app_id) is None:
-        raise HTTPException(status_code=404, detail="Application not found.")
-
-    from render.cover_letter import render_letter_html
-
-    _profile = load().profile
-    html = render_letter_html(
-        body.text,
-        name=_profile.name or "Your Name",
-        contact=_contact_line(_profile),
-    )
-    # Record the document FIRST so the link always persists, then render
-    # best-effort — a missing backend must never lose the saved cover letter.
-    app = app_store.save_cover_letter_document(app_id, body.text)
-    pdf_name, docx_name = app_store.cover_letter_filenames(app_id)
-    produced = _render_to_files(html, pdf_name, docx_name)
+    app, produced = applications_service.save_cover_letter(app_id, body.text)
     return SaveDocumentResult(
         blocked=False,
         application=_application_model(app),
