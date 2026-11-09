@@ -19,6 +19,7 @@ root_packages = [
     "jobfeeds",
     "jobs",
     "launcher",
+    "mcpschema",
     "modelrouting",
     "onboarding",
     "prompts",
@@ -44,7 +45,7 @@ layers = [
     "tailor : coverletter : guardrail : render : prompts : vocabulary",
     "truth : screening : applications : companyresearch : runs : agentconfig : companyboards : onboarding : gmailsync : jobfeeds",
     "providers : connections : modelrouting",
-    "storage : secretstore : jobs : identity",
+    "storage : secretstore : jobs : identity : mcpschema",
 ]
 # A stale ignore entry fails the check, so this list can only shrink.
 unmatched_ignore_imports_alerting = "error"
@@ -52,10 +53,6 @@ ignore_imports = [
     # Permanent: api/main.py is the composition root that mounts the MCP
     # server; a named exception.
     "api.main -> agenttools.server",
-    # Phase 3: a public registry accessor replaces _TOOL_REGISTRY/_input_schema.
-    "api.main -> agenttools.mcp_app",
-    # Phase 3: same as above.
-    "api.diagnostics_mcp -> agenttools.mcp_app",
     # Phase 3: the letter operator workflow moves to services.
     "api.routes -> agenttools.letter_operator",
     # Phase 3: deferred imports at screening/store.py:470 and :497; the

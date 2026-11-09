@@ -32,7 +32,7 @@ import gmailsync.store as _gmailsync_store
 import runs.store as _runs_store
 import screening.store as _screening_store
 import secretstore
-from agenttools.mcp_app import _input_schema
+from mcpschema import input_schema
 from api.agent_diagnostics import get_agent_status, get_run_events
 from api.agent_run_logs import get_run_logs
 from api.diagnostics_paging import (  # noqa: F401
@@ -266,7 +266,7 @@ async def _handle_diag_list_tools(ctx, params) -> types.ListToolsResult:
         types.Tool(
             name=name,
             description=description,
-            inputSchema=_input_schema(fn),
+            inputSchema=input_schema(fn),
         )
         for name, (fn, description) in _DIAG_TOOL_REGISTRY.items()
     ]

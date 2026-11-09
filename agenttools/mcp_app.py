@@ -9,6 +9,12 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
+from mcpschema import (
+    INTERNAL_PARAMS,
+    JSON_TYPES,
+    input_schema,
+    json_type,
+)
 from agenttools.tools_boards import record_company_board as _record_company_board
 from agenttools.tools_gmail import check_gmail_responses as _check_gmail_responses
 from agenttools.tools_ledger import (
@@ -232,66 +238,8 @@ _TOOL_REGISTRY = {
 }
 
 
-_JSON_TYPES: dict[Any, str] = {
-    str: "string",
-    int: "integer",
-    float: "number",
-    bool: "boolean",
-    list: "array",
-    dict: "object",
-}
-
-
-def _json_type(annotation: Any) -> str:
-    """Best-effort JSON Schema type for a parameter annotation.
-
-    Annotations here are evaluated lazily (``from __future__ import
-    annotations``), so they arrive as strings. Unions and anything unrecognised
-    fall back to "string", which keeps the tool callable rather than
-    advertising a type the caller cannot satisfy.
-    """
-    if not isinstance(annotation, str):
-        return _JSON_TYPES.get(annotation, "string")
-    text = annotation.split("|")[0].strip().lower()
-    for py_type, json_type in _JSON_TYPES.items():
-        if text.startswith(py_type.__name__):
-            return json_type
-    return "string"
-
-
-# Parameters that exist for the process, not the caller. `provider` is
-# generate_cover_letter's dependency-injection seam for tests; advertising it
-# would invite the agent to pass one. Excluded from every tool's schema.
-_INTERNAL_PARAMS = frozenset({"provider"})
-
-
-def _input_schema(fn: Any) -> dict:
-    """Derive a tool's inputSchema from its signature.
-
-    Without this every tool advertised an empty property set, so a caller
-    reading the schema had no way to know that seven of the nine take
-    arguments — it would call them bare and get a TypeError back. Parameters
-    with no default are required; a ``**kwargs`` tool accepts any field.
-    """
-    properties: dict[str, dict] = {}
-    required: list[str] = []
-    additional = False
-    for name, param in inspect.signature(fn).parameters.items():
-        if param.kind is inspect.Parameter.VAR_KEYWORD:
-            additional = True
-            continue
-        if param.kind is inspect.Parameter.VAR_POSITIONAL:
-            continue
-        if name in _INTERNAL_PARAMS:
-            continue
-        properties[name] = {"type": _json_type(param.annotation)}
-        if param.default is inspect.Parameter.empty:
-            required.append(name)
-    schema: dict[str, Any] = {
-        "type": "object",
-        "properties": properties,
-        "required": required,
-    }
-    if additional:
-        schema["additionalProperties"] = True
-    return schema
+# Private aliases kept so existing importers of these names keep working.
+_JSON_TYPES = JSON_TYPES
+_json_type = json_type
+_INTERNAL_PARAMS = INTERNAL_PARAMS
+_input_schema = input_schema

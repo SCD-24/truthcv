@@ -84,3 +84,14 @@ def call_tool(name: str, body: dict[str, Any]) -> dict:
         return fn(**body)
     except TypeError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+def tool_specs() -> dict[str, tuple[Callable[..., dict], str]]:
+    """The MCP tool registry: tool name -> (callable, description).
+
+    Lets ``api`` reach the registry through the one permitted
+    api -> agenttools.server edge instead of importing ``agenttools.mcp_app``.
+    """
+    from agenttools.mcp_app import _TOOL_REGISTRY
+
+    return _TOOL_REGISTRY

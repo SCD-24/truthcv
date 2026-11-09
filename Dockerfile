@@ -43,6 +43,7 @@ COPY coverletter/ ./coverletter/
 COPY applications/ ./applications/
 COPY screening/ ./screening/
 COPY identity/ ./identity/
+COPY mcpschema/ ./mcpschema/
 COPY runs/ ./runs/
 COPY agentconfig/ ./agentconfig/
 COPY jobfeeds/ ./jobfeeds/
