@@ -2,3 +2,65 @@
 testpaths = ["tests"]
 addopts = "-q"
 pythonpath = ["."]
+
+[tool.importlinter]
+root_packages = [
+    "agentconfig",
+    "agenttools",
+    "api",
+    "applications",
+    "companyboards",
+    "companyresearch",
+    "connections",
+    "coverletter",
+    "gmailsync",
+    "guardrail",
+    "identity",
+    "jobfeeds",
+    "jobs",
+    "launcher",
+    "modelrouting",
+    "onboarding",
+    "prompts",
+    "providers",
+    "render",
+    "runs",
+    "screening",
+    "secretstore",
+    "services",
+    "storage",
+    "tailor",
+    "truth",
+    "vocabulary",
+]
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture"
+type = "layers"
+# Top to bottom. '|' = independent siblings, ':' = non-independent siblings.
+layers = [
+    "api | agenttools | launcher",
+    "services",
+    "tailor : coverletter : guardrail : render : prompts : vocabulary",
+    "truth : screening : applications : companyresearch : runs : agentconfig : companyboards : onboarding : gmailsync : jobfeeds",
+    "providers : connections : modelrouting",
+    "storage : secretstore : jobs : identity",
+]
+# A stale ignore entry fails the check, so this list can only shrink.
+unmatched_ignore_imports_alerting = "error"
+ignore_imports = [
+    # Permanent: api/main.py is the composition root that mounts the MCP
+    # server; a named exception.
+    "api.main -> agenttools.server",
+    # Phase 3: a public registry accessor replaces _TOOL_REGISTRY/_input_schema.
+    "api.main -> agenttools.mcp_app",
+    # Phase 3: same as above.
+    "api.diagnostics_mcp -> agenttools.mcp_app",
+    # Phase 3: OUTCOMES moves to services/domain.
+    "api.routes -> agenttools.tools_funnel",
+    # Phase 3: the letter operator workflow moves to services.
+    "api.routes -> agenttools.letter_operator",
+    # Phase 3: deferred imports at screening/store.py:470 and :497; the
+    # domain store reaches up into an engine.
+    "screening.store -> coverletter.store",
+]

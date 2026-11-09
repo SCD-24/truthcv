@@ -1,3 +1,4 @@
 -r requirements.txt
 pytest>=8.0
 respx>=0.21
+import-linter==2.15

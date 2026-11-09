@@ -42,6 +42,14 @@
       "scope": "repo"
     },
     {
+      "id": "import-boundaries",
+      "name": "Python import boundaries (import-linter)",
+      "kind": "lint",
+      "command": "bash scripts/check.sh imports",
+      "enabled": true,
+      "scope": "repo"
+    },
+    {
       "id": "python-tests",
       "name": "Python Tests",
       "kind": "test",
