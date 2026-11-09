@@ -1,24 +1,18 @@
-"""Operator-facing cover-letter generation, with generation-scoped approvals.
+"""Operator-route adapter over services/letters.py's operator letter workflow.
 
-Unlike agenttools/tools_letter.py (the agent-facing tool surface), this module
-is NOT registered anywhere as an agent tool — nothing in agenttools/mcp_app.py
-or agenttools/server.py references it. It exists solely for the operator HTTP
-route (api/routes.py's POST /screenings/{id}/letter) to call directly, where a
-human is making an approval decision in the moment. An unattended agent must
-never get this lever: if it could pass approved claim texts it would be
-self-approving its own inferences, which is exactly what the registered
-`generate_cover_letter` tool forbids by not exposing any such parameter.
+The workflow itself lives in services/letters.py, which never builds a
+provider; this wrapper supplies `get_provider` as the provider factory. It
+looks `get_provider` up as a module global at call time, so tests patch
+`agenttools.letter_operator.get_provider`.
+
+Kept only because api/routes.py still imports from here; a later wave deletes
+this module once that importer is repointed.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict
-
-from agentconfig.store import is_blocked, load as load_agent_config
-from coverletter.generate import _generate_paragraphs, build_letter
 from providers import get_provider
-from truth.answers import load as load_answers
-from truth.store import load as load_truth
+from services import letters as _letters
 
 
 def generate_cover_letter_for_operator(
@@ -31,59 +25,22 @@ def generate_cover_letter_for_operator(
     company: str | None = None,
     preset_id: str | None = None,
 ) -> dict:
-    """Generate a guardrailed cover letter, honouring operator approvals.
+    """Generate an operator letter, building the provider via `get_provider`.
 
-    ``approved_texts`` are claim strings an operator has approved for THIS
-    single generation only. They are added to the guardrail's allowed set and
-    are NEVER written to truth — the approval widens what may ship in this one
-    letter and evaporates when the call returns. This function is deliberately
-    NOT registered as an agent tool (see module docstring): only the
-    operator-facing HTTP route may call it.
-
-    ``company``, when given, is refused outright if blocklisted in the agent
-    config.
-
-    ``preset_id`` (optional) selects a writing style preset; when omitted, the
-    operator's default preset applies.
+    Same contract as services.letters.generate_cover_letter_for_operator; this
+    only injects the provider factory the service must not construct itself.
     """
-    if company is not None and is_blocked(load_agent_config(), company):
-        return {
-            "text": "",
-            "blocked": True,
-            "blocked_claims": [],
-            "unverifiable": [],
-            "paragraphs": [],
-            "blocked_reason": "company_blocked",
-        }
-    if provider is None:
-        provider = get_provider("cover_letter")
-    truth = load_truth()
-    paras = (
-        paragraphs
-        if paragraphs is not None
-        else _generate_paragraphs(
-            posting, length, truth, provider, preset_id=preset_id
-        )
-    )
-    result = build_letter(
+    return _letters.generate_cover_letter_for_operator(
         posting,
         length,
-        truth,
-        provider,
-        approved_texts=set(approved_texts or []),
-        denied_texts=set(denied_texts or []),
-        paragraphs=paras,
-        # Same signature the wizard produces. Only the name is taken from the
-        # answers store here — the answers are deliberately NOT passed as
-        # guardrail claim sources on this path, which would widen what the
-        # unattended agent is allowed to assert.
-        sign_off_name=load_answers().name or truth.profile.name,
+        approved_texts=approved_texts,
+        denied_texts=denied_texts,
+        paragraphs=paragraphs,
+        provider=provider,
+        company=company,
         preset_id=preset_id,
+        provider_factory=get_provider,
     )
-    return {
-        "text": result["text"],
-        "blocked": result["blocked"],
-        "blocked_claims": [asdict(c) for c in result["blocked_claims"]],
-        "unverifiable": result["unverifiable"],
-        "paragraphs": paras,
-    }
+
+
+__all__ = ["generate_cover_letter_for_operator"]
