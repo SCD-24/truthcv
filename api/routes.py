@@ -40,6 +40,7 @@ import services.applications as applications_service
 import services.runs as runs_service
 import services.supervisor as supervisor_service
 import services.settings as settings_service
+import services.connections as connections_service
 from truth.model import Truth
 from truth.pdf import (
     DocumentExtractError,
@@ -63,14 +64,10 @@ from services.cover_letter import generate_cover_letter
 from onboarding import store as onboarding_store
 from agentconfig import store as agent_config_store
 from connections import catalog
-from connections.auth import claude as claude_auth
-from connections.auth import codex as codex_auth
 from connections.auth import gmail as gmail_auth
 from providers import (
     ANTHROPIC_COMPAT_OPENROUTER_BASE_URL,
-    OPENROUTER_BASE_URL,
     build_connection_provider,
-    reset_provider,
 )
 from providers.base import supports_effort_levels
 from companyresearch import store as company_findings_store
@@ -1735,13 +1732,6 @@ def list_models(body: SettingsUpdate) -> ModelList:
     return _models_result(models, card)
 
 
-def _require_card(provider: str) -> dict:
-    try:
-        return catalog.card(provider)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Unknown connection '{provider}'.") from None
-
-
 def _connection_status(card_key: str) -> ConnectionStatus:
     meta = catalog.card(card_key)
     conn = secretstore.get_connection(card_key)
@@ -1781,22 +1771,9 @@ def get_connection_status() -> ConnectionList:
     )
 
 
-# Card -> auth module registry
-_AUTH_MODULES = {"claude": claude_auth, "codex": codex_auth}
-
-
 @router.post("/auth/{provider}/start", response_model=StartLoginResult)
 def start_connection_login(provider: str) -> StartLoginResult:
-    _require_card(provider)
-    if provider not in _AUTH_MODULES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Subscription sign-in is not available for '{provider}'.",
-        )
-    try:
-        return StartLoginResult.model_validate(_AUTH_MODULES[provider].start_login())
-    except (claude_auth.AuthError, codex_auth.AuthError) as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return StartLoginResult.model_validate(connections_service.start_login(provider))
 
 
 # Specific route must come BEFORE the generic /{provider}/complete to avoid
@@ -1810,27 +1787,13 @@ def complete_claude_login_alias(body: CompleteLoginRequest) -> ConnectionStatus:
 
 @router.post("/auth/{provider}/complete", response_model=ConnectionStatus)
 def _complete_login(provider: str, body: CompleteLoginRequest) -> ConnectionStatus:
-    if provider not in _AUTH_MODULES:
-        raise HTTPException(status_code=404, detail=f"Unknown connection '{provider}'.")
-    try:
-        _AUTH_MODULES[provider].complete_login(body.code)
-    except (claude_auth.AuthError, codex_auth.AuthError) as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    reset_provider()
+    connections_service.complete_login(provider, body.code)
     return _connection_status(provider)
 
 
 @router.post("/auth/{provider}/poll", response_model=PollLoginResult)
 def _poll_login(provider: str) -> PollLoginResult:
-    if provider not in _AUTH_MODULES:
-        raise HTTPException(status_code=404, detail=f"Unknown connection '{provider}'.")
-    mod = _AUTH_MODULES[provider]
-    if not hasattr(mod, "poll_login"):
-        raise HTTPException(status_code=400, detail=f"Provider '{provider}' does not support polling.")
-    try:
-        result = mod.poll_login()
-    except (claude_auth.AuthError, codex_auth.AuthError) as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    result = connections_service.poll_login(provider)
     if result.get("status") == "complete":
         return PollLoginResult(
             status="complete",
@@ -1844,63 +1807,15 @@ def _poll_login(provider: str) -> PollLoginResult:
     )
 
 
-def _probe_key(card: str, body: ApiKeyRequest) -> list[dict]:
-    """Construct a provider directly from the submitted credential (never via
-    the stored oauth path) and list its models. An empty submitted value falls
-    back to the currently stored credential, so a bare re-validate still works."""
-    conn = secretstore.get_connection(card)
-    if card == "claude":
-        from providers.anthropic_provider import AnthropicProvider
-
-        provider = AnthropicProvider(api_key=body.api_key or conn.get("apiKey") or None)
-    elif card in ("codex", "openrouter"):
-        from providers.openai_provider import OpenAIProvider
-
-        base_url = OPENROUTER_BASE_URL if card == "openrouter" else None
-        provider = OpenAIProvider(
-            api_key=body.api_key or conn.get("apiKey") or None, base_url=base_url
-        )
-    elif card == "ollama":
-        from providers.ollama_provider import OllamaProvider
-
-        provider = OllamaProvider(
-            host=body.base_url or conn.get("baseUrl") or None,
-            bearer=body.bearer or conn.get("bearer") or None,
-        )
-    else:
-        raise ProviderError(f"Unknown connection '{card}'.")
-    return provider.list_models()
-
-
 @router.post("/auth/{provider}/key", response_model=ModelList)
 def post_connection_key(provider: str, body: ApiKeyRequest) -> ModelList:
-    _require_card(provider)
-    if not secretstore.encryption_available():
-        raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
-    try:
-        models = _probe_key(provider, body)
-    except ProviderError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:  # noqa: BLE001 — surface upstream SDK auth errors as 400s
-        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}") from e
-    updates: dict = {}
-    if body.api_key:
-        updates["apiKey"] = body.api_key
-    if body.base_url:
-        updates["baseUrl"] = body.base_url
-    if body.bearer:
-        updates["bearer"] = body.bearer
-    if body.api_key and "subscription" in catalog.card(provider)["modes"]:
-        updates["authMode"] = "apikey"
-    if updates:
-        secretstore.set_connection(provider, updates)
-    reset_provider()
+    models = connections_service.save_key(provider, body.api_key, body.base_url, body.bearer)
     return _models_result(models, provider)
 
 
 @router.get("/auth/{provider}/models", response_model=ModelList)
 def get_connection_models(provider: str) -> ModelList:
-    _require_card(provider)
+    connections_service.require_card(provider)
     try:
         models = build_connection_provider(provider, None).list_models()
     except ProviderError as e:
@@ -1912,7 +1827,7 @@ def get_connection_models(provider: str) -> ModelList:
 
 @router.post("/auth/{provider}/test", response_model=TestResult)
 def test_connection(provider: str, body: ConnectionTestRequest) -> TestResult:
-    _require_card(provider)
+    connections_service.require_card(provider)
     try:
         provider_obj = build_connection_provider(provider, body.model)
         provider_obj.complete("ping", [{"role": "user", "content": "ping"}])
@@ -1932,16 +1847,7 @@ def logout_connection(provider: str, mode: str | None = None) -> ConnectionStatu
     mode. Passing `mode` clears just that mode and leaves the other intact —
     that is the same semantics the existing per-mode logout tests pin.
     """
-    _require_card(provider)
-    if mode is not None:
-        secretstore.clear_mode(provider, mode)
-    else:
-        conn = secretstore.get_connection(provider)
-        # Pick the mode that is actually active: subscription if oauth is set,
-        # otherwise apikey. clear_mode is a no-op on the missing side.
-        active = "subscription" if conn.get("oauth", {}).get("accessToken") else "apikey"
-        secretstore.clear_mode(provider, active)
-    reset_provider()
+    connections_service.logout(provider, mode)
     return _connection_status(provider)
 
 
