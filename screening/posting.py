@@ -7,7 +7,7 @@ that captured text, kept standalone and deliberately separate from
 ``screening.store`` — the store stays lenient so the legacy importer
 (``scripts/migrate_jobs_history.py``) can bring in historical records that
 predate this requirement, exactly as ``screening.role`` and
-``screening.company`` do for their fields.
+``identity.company`` do for their fields.
 """
 
 from __future__ import annotations
