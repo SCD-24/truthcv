@@ -81,7 +81,7 @@ from screening.model import Screening
 from identity.url import posting_dedupe_key
 
 import coverletter.store as letter_store
-from agenttools.letter_operator import generate_cover_letter_for_operator as _generate_letter_for_operator
+from services.letters import generate_cover_letter_for_operator as _generate_letter_for_operator
 
 from .schemas import (
     AgentConfigModel,
@@ -737,6 +737,7 @@ def generate_screening_letter(
         denied_texts=denied_texts,
         paragraphs=body.paragraphs,
         company=screening.company or None,
+        provider_factory=get_provider,
     )
     if result["blocked"]:
         raise HTTPException(
