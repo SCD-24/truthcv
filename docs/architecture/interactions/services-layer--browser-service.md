@@ -1,9 +1,9 @@
-<!-- generated:start edge:api→job-feeds -->
-# Interaction: API → Job Feeds
+<!-- generated:start edge:services-layer→browser-service -->
+# Interaction: Services Layer → Browser Service
 
-- **Participants:** `api` → `job-feeds`
-- **Transport:** `in-process`
-<!-- generated:end edge:api→job-feeds -->
+- **Participants:** `services-layer` → `browser-service`
+- **Transport:** `HTTP`
+<!-- generated:end edge:services-layer→browser-service -->
 
 ## Contract
 
