@@ -132,8 +132,6 @@ graph TD
     tailor-engine -->|in-process| prompt-store
     tailor-engine -->|in-process| storage-leaf
     tailor-engine -->|in-process| truth-store
-    truth-store -->|in-process| llm-provider-layer
-    truth-store -->|in-process| prompt-store
     truth-store -->|in-process| storage-leaf
     truth-store -->|file I/O| truth-data-volume
     web-ui -->|HTTP/REST| api
@@ -273,8 +271,6 @@ graph TD
 - [tailor-engine → prompt-store](interactions/tailor-engine--prompt-store.md) via `in-process`
 - [tailor-engine → storage-leaf](interactions/tailor-engine--storage-leaf.md) via `in-process`
 - [tailor-engine → truth-store](interactions/tailor-engine--truth-store.md) via `in-process`
-- [truth-store → llm-provider-layer](interactions/truth-store--llm-provider-layer.md) via `in-process`
-- [truth-store → prompt-store](interactions/truth-store--prompt-store.md) via `in-process`
 - [truth-store → storage-leaf](interactions/truth-store--storage-leaf.md) via `in-process`
 - [truth-store → truth-data-volume](interactions/truth-store--truth-data-volume.md) via `file I/O`
 - [web-ui → api](interactions/web-ui--api.md) via `HTTP/REST`

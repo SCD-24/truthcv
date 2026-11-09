@@ -23,7 +23,7 @@ FastAPI backend (api/) that serves the static React bundle and exposes the wizar
 <!-- generated:start comp:truth-store -->
 ## Truth Store (`truth-store`, BACKEND)
 
-Owns truth.yaml, the single origin of all facts (truth/). Extracts text from an uploaded CV in any supported format — PDF (pypdf), DOCX (python-docx), TXT or Markdown — uses a provider to build a structured truth file (every role/company/date/bullet/skill tagged source:uploaded-cv with a stable id), and builds/validates/persists it. Legacy entries tagged linkedin-pdf remain valid. User-confirmed inferences are tagged user-confirmed.
+Owns truth.yaml, the single origin of all facts (truth/). Extracts text from an uploaded CV in any supported format — PDF (pypdf), DOCX (python-docx), TXT or Markdown — and builds, validates and persists the structured truth file (every role/company/date/bullet/skill tagged source:uploaded-cv with a stable id). The LLM step that turns that text into a truth file lives in the Services Layer (services/truth_extract.py), so truth/ imports neither prompts nor providers. Legacy entries tagged linkedin-pdf remain valid. User-confirmed inferences are tagged user-confirmed.
 
 **Tech:** Python, pypdf, PyYAML, python-docx
 <!-- generated:end comp:truth-store -->
