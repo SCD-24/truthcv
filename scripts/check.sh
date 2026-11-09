@@ -10,7 +10,8 @@
 # symlink convention .gitignore already documents) rather than reinstalling
 # hundreds of megabytes per worktree.
 #
-# Usage: scripts/check.sh lint
+# Usage: scripts/check.sh lint          (import boundaries + TypeScript typecheck)
+#        scripts/check.sh imports       (import-linter layer contract only)
 #        scripts/check.sh test         (all three suites)
 #        scripts/check.sh test-python
 #        scripts/check.sh test-web
@@ -39,10 +40,18 @@ link_node_modules agent
 pytest_bin="$main_root/.venv/bin/pytest"
 [ -x "$pytest_bin" ] || pytest_bin="pytest"
 
+lint_imports_bin="$main_root/.venv/bin/lint-imports"
+[ -x "$lint_imports_bin" ] || lint_imports_bin="lint-imports"
+
 case "${1:-}" in
+  imports)
+    "$lint_imports_bin"
+    ;;
   lint)
     # There is no Python linter configured in this repo; the TypeScript
-    # projects' typecheck is the standing static check.
+    # projects' typecheck is the standing static check. import-linter is a
+    # boundary check, not a linter.
+    "$lint_imports_bin"
     npm --prefix web run typecheck
     npm --prefix agent run typecheck
     ;;
@@ -69,7 +78,7 @@ case "${1:-}" in
     exec "$@"
     ;;
   *)
-    echo "usage: scripts/check.sh {lint|test|test-python|test-web|test-agent|run}" >&2
+    echo "usage: scripts/check.sh {lint|imports|test|test-python|test-web|test-agent|run}" >&2
     exit 2
     ;;
 esac
