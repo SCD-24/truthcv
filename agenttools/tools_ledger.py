@@ -22,19 +22,8 @@ import logging
 import agentconfig.store as _agentconfig_store
 from agentconfig.salary import clamp_ask as _clamp_ask
 from agentconfig.salary import format_ask as _format_ask
-from agenttools.letter_files import (
-    NO_FILE as _NO_LETTER_FILE,
-    render_screening_letter as _render_screening_letter,
-)
 from applications.model import Attachment, Confirmation, FieldSubmitted, Screening
-from applications.store import save_attachments as _save_attachments
-from applications.store import save_confirmation as _save_confirmation
-from applications.store import save_fields_submitted as _save_fields_submitted
-from applications.store import save_screening as _save_screening
 import applications.store as _apps_store
-from runs.derive import counters_by_run as _counters_by_run
-import screening.store as _screening_store
-import agenttools.tools_runs as _tools_runs
 from identity.company import company_identity_key as _company_identity_key
 from screening.cooldown import cooldown as _cooldown
 from services.screenings import record_screening_verdict as _record_screening_verdict
@@ -44,32 +33,6 @@ from truth.answers import load as _load_answers
 from truth.emailalias import alias_email as _alias_email
 
 logger = logging.getLogger(__name__)
-
-
-def _backfill_from_screening(fields: dict, screening_id: str) -> dict:
-    """Fill identity fields the caller left absent or empty from the screening.
-
-    An application recorded against an approved queue item should carry that
-    item's company, role, URL and posting so the Applications row is populated
-    without the agent having to repeat them. Caller-supplied non-empty values
-    always win; an unknown ``screening_id`` changes nothing (the caller's
-    fields stand, exactly as before this backfill existed).
-    """
-    if not screening_id:
-        return fields
-    s = _screening_store.get(screening_id)
-    if s is None:
-        return fields
-    inherited = {
-        "company": s.company,
-        "role": s.role,
-        "application_url": s.url,
-        "posting": s.posting_text,
-    }
-    for key, value in inherited.items():
-        if not fields.get(key):
-            fields[key] = value
-    return fields
 
 
 def _as_list(value, name: str):
@@ -244,50 +207,15 @@ def record_application(
         if attachments is not None else None
     )
 
-    backfilled = _backfill_from_screening(fields, screening_id)
-    if screening_id:
-        app, created = _apps_store.create_for_screening(backfilled, screening_id)
-        if not created:
-            # A retry against an existing row: apply the caller's editable
-            # fields so the re-record improves the record instead of being
-            # silently dropped. Use `fields`, not `backfilled`, so inherited
-            # values the caller did not actually send are not reintroduced.
-            app = _applications_service.update_application_record(app.id, fields) or app
-    else:
-        app = _applications_service.create_application_record(backfilled)
-        created = True
-
-    if parsed_fields_submitted is not None:
-        app = _save_fields_submitted(app.id, parsed_fields_submitted) or app
-    if parsed_confirmation is not None:
-        app = _save_confirmation(app.id, parsed_confirmation) or app
-    if parsed_screening is not None:
-        app = _save_screening(app.id, parsed_screening) or app
-    if parsed_attachments is not None:
-        app = _save_attachments(app.id, parsed_attachments) or app
-
-    # An approved queue item retires on evidence of a confirmed application,
-    # not on the agent electing to retire it.
-    if screening_id:
-        # Read the claim before mark_applied clears it, so a submission for an
-        # item this run did not hold can be flagged. Best-effort throughout:
-        # the ledger write above already happened, so nothing here may raise
-        # or change the return shape — a real submission must never be lost
-        # over an accounting failure.
-        # applications_submitted is NOT bumped here: it is derived on read from
-        # the application records themselves (runs/derive.py), and bumping it
-        # too would double-count. over_cap_writes stays an incremented counter
-        # because it records a lease violation with no derivable source.
-        if run_id:
-            try:
-                held = _screening_store.get(screening_id)
-                over_cap = bool(held) and held.claimed_by_run != run_id
-                if over_cap:
-                    _tools_runs.bump_run_counters(run_id=run_id, over_cap_writes=1)
-            except Exception:
-                pass
-        _screening_store.mark_applied(screening_id)
-
+    app, created = _applications_service.record_application(
+        fields,
+        screening_id,
+        run_id,
+        fields_submitted=parsed_fields_submitted,
+        confirmation=parsed_confirmation,
+        screening=parsed_screening,
+        attachments=parsed_attachments,
+    )
     result = app.to_dict()
     result["created"] = created
     return result
@@ -599,33 +527,6 @@ def recommend_salary(profile_name: str, proposed: int | None = None) -> dict:
     }
 
 
-# How long a hand-out claim holds before another run may reclaim the item —
-# long enough to cover one application's browser interaction, short enough
-# that a crashed run's work comes back reasonably soon.
-_CLAIM_LEASE_SECONDS = 900
-
-
-def _already_submitted_this_run(run_id: str) -> int:
-    """How many applications this run has already submitted, so a repeated
-    ``get_approved_applications`` call within the same run counts them
-    against the per-run cap instead of resetting it every call.
-
-    A submitted item has already left the approved queue (it is not one of
-    the items the loop below re-claims), so this must be seeded separately
-    rather than double counted with the loop's own claimed_count. Reuses
-    ``runs.derive.counters_by_run`` over the applications store alone
-    (``screenings=[]``, since only ``applications_submitted`` is wanted).
-    Best-effort: any error here must not block the tool, so it falls back
-    to 0.
-    """
-    try:
-        applications = _apps_store.load_all()
-        counters = _counters_by_run([run_id], [], applications)
-        return counters[run_id]["applications_submitted"]
-    except Exception:
-        return 0
-
-
 def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:
     """Postings the operator approved and this run should apply to.
 
@@ -690,63 +591,7 @@ def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:
       draft was since blanked or deleted comes back with ``blocked_reason`` set
       to "" rather than reaching the agent with nothing to send.
     """
-    cap = 0
-    if limit and limit > 0:
-        cap = limit
-    else:
-        cfg = _agentconfig_store.load()
-        cap = getattr(cfg, "max_applications_per_run", None) or 0
-
-    # The reusable reads and the blocked-reason cascade live in the service; the
-    # per-run cap and the claim-lease below are agent-only and stay here, since
-    # only the agent claims work.
-    items = []
-    claimed_count = _already_submitted_this_run(run_id) if run_id else 0
-    for entry in _applications_service.gather_approvable_screenings():
-        s = entry["screening"]
-        blocked_reason = entry["blocked_reason"]
-
-        claimed_by_run = s.claimed_by_run
-        if not blocked_reason and run_id:
-            if cap and claimed_count >= cap:
-                continue  # over this run's cap: leave it for a later run
-            claimed = _screening_store.claim_for_run(s.id, run_id, _CLAIM_LEASE_SECONDS)
-            if claimed is None:
-                continue  # lost a race for this item; skip rather than misreport it
-            claimed_by_run = claimed.claimed_by_run
-            claimed_count += 1
-        elif not blocked_reason and cap and claimed_count >= cap:
-            continue
-        elif not blocked_reason:
-            claimed_count += 1
-
-        # Only an item that is actually going out gets a file rendered for it:
-        # a blocked item is reported, never applied to, so rendering it would
-        # buy nothing and cost a WeasyPrint pass per blocked item per run.
-        letter_file = (
-            _render_screening_letter(s.id, entry["cover_letter"])
-            if not blocked_reason
-            else dict(_NO_LETTER_FILE)
-        )
-
-        items.append(
-            {
-                "screening_id": s.id,
-                "company": s.company,
-                "role": s.role,
-                "url": s.url,
-                "attempts": s.apply_attempts,
-                "blocked_reason": blocked_reason,
-                "contradictions": entry["contradictions"],
-                "cover_letter": entry["cover_letter"],
-                "letter_source": entry["letter_source"],
-                "cover_letter_asset_id": letter_file["asset_id"],
-                "cover_letter_path": letter_file["path"],
-                "cover_letter_download_url": letter_file["download_url"],
-                "claimed_by_run": claimed_by_run,
-            }
-        )
-    return items
+    return _applications_service.get_approved_applications(run_id, limit)
 
 
 def report_apply_failure(
@@ -764,7 +609,7 @@ def report_apply_failure(
     the operator's sign-in queue. Without them the failure is recorded but the
     operator is never told which site to go and authorise.
     """
-    updated = _screening_store.record_apply_failure(
+    updated = _applications_service.record_apply_failure(
         screening_id, error, blocker=blocker, signin_url=signin_url
     )
     if updated is None:
