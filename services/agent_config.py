@@ -5,6 +5,8 @@ stored AgentConfig.
 from __future__ import annotations
 
 from agentconfig import boards, store as agent_config_store
+from agentconfig.salary import clamp_ask as _clamp_ask
+from agentconfig.salary import format_ask as _format_ask
 
 # The optional numeric windows are the exception to exclude_none: for them a
 # null is a real value meaning "unset", and dropping it made those fields
@@ -76,3 +78,57 @@ def update_agent_config(sent: dict) -> agent_config_store.AgentConfig:
 
     cfg = agent_config_store.AgentConfig.from_dict(merged)
     return agent_config_store.save(cfg)
+
+
+def load_enabled_profile(profile_name: str):
+    """Return the named ENABLED JobProfile, or raise ``ValueError`` naming the enabled ones.
+
+    Evaluating hard requirements against a profile nobody is currently
+    searching under would be meaningless, so a disabled or unknown name is
+    refused rather than silently matched.
+
+    Public because the screening gate (services/screenings.py) and the agent
+    tools both need the same lookup; one definition keeps the match rule and
+    the refusal text from drifting apart.
+    """
+    cfg = agent_config_store.load()
+    enabled = [p for p in cfg.profiles if p.enabled]
+    needle = profile_name.strip().casefold()
+    profile = next((p for p in enabled if p.name.strip().casefold() == needle), None)
+    if profile is None:
+        names = ", ".join(p.name for p in enabled) or "(none enabled)"
+        raise ValueError(
+            f"Unknown or disabled profile {profile_name!r}. Enabled profiles: {names}."
+        )
+    return profile
+
+
+def recommend_salary(profile_name: str, proposed: int | None = None) -> dict:
+    """Recommend a salary ask for a named profile, clamped to its configured band.
+
+    Looks up ``profile_name`` in the configured job profiles and clamps
+    ``proposed`` (or the band minimum, if omitted) into
+    ``[salary_ask_min, salary_ask_max]`` via ``agentconfig.salary.clamp_ask``.
+    Returns a refusal dict if the profile is unknown or has no salary band.
+
+    Lives here so the agent's ``recommend_salary`` tool is a thin adapter and
+    the band-lookup and refusal strings have one home next to the config they
+    read.
+    """
+    cfg = agent_config_store.load()
+    profile = next((p for p in cfg.profiles if p.name == profile_name), None)
+    if profile is None:
+        return {"refused": f"Profile not found: {profile_name}"}
+
+    clamped = _clamp_ask(profile, proposed)
+    if clamped is None:
+        return {"refused": "Profile has no salary band configured"}
+
+    return {
+        "amount": clamped,
+        "formatted": _format_ask(profile, clamped),
+        "band": {"min": profile.salary_ask_min, "max": profile.salary_ask_max},
+        # Only a figure the caller actually proposed can be "clamped"; with
+        # proposed=None the band minimum is supplied, not adjusted.
+        "clamped": proposed is not None and proposed != clamped,
+    }

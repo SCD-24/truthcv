@@ -25,7 +25,6 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-import agentconfig.store as _agentconfig_store
 import screening.jev as _jev
 import screening.store as screening_store
 from identity.company import validate_company_name as _validate_company_name
@@ -42,6 +41,7 @@ from screening.model import validate_verdict as _validate_verdict
 from screening.posting import validate_posting_text as _validate_posting_text
 from screening.role import validate_role_title as _validate_role_title
 from screening.store import Screening
+from services.agent_config import load_enabled_profile as _load_enabled_profile
 
 logger = logging.getLogger(__name__)
 
@@ -136,29 +136,10 @@ def claim_screening_for_apply(screening_id: str) -> ApplyClaimResult:
     return ApplyClaimResult(refused_screening=refused_screening, reason=reason)
 
 
-def _load_enabled_profile(profile_name: str):
-    """Return the named ENABLED JobProfile, or raise ``ValueError`` naming the enabled ones.
-
-    Evaluating hard requirements against a profile nobody is currently
-    searching under would be meaningless, so a disabled or unknown name is
-    refused rather than silently matched.
-    """
-    cfg = _agentconfig_store.load()
-    enabled = [p for p in cfg.profiles if p.enabled]
-    needle = profile_name.strip().casefold()
-    profile = next((p for p in enabled if p.name.strip().casefold() == needle), None)
-    if profile is None:
-        names = ", ".join(p.name for p in enabled) or "(none enabled)"
-        raise ValueError(
-            f"Unknown or disabled profile {profile_name!r}. Enabled profiles: {names}."
-        )
-    return profile
-
-
 def _evaluate_profile_criteria(profile_name: str, evidence: dict, agent_reason: str) -> dict:
     """Check ``profile_name``'s six hard requirements against the posting's stated evidence.
 
-    Loads the named ENABLED profile via ``_load_enabled_profile`` (which
+    Loads the named ENABLED profile via ``load_enabled_profile`` (which
     raises ``ValueError`` naming the enabled ones for an unknown/disabled
     name), then runs ``screening.criteria.evaluate_hard_requirements`` over
     ``evidence``. Returns ``{}`` when the posting is compatible with every

@@ -17,22 +17,16 @@ so the agent and the wizard can never disagree about what happened.
 from __future__ import annotations
 
 import json
-import logging
 
 import agentconfig.store as _agentconfig_store
-from agentconfig.salary import clamp_ask as _clamp_ask
-from agentconfig.salary import format_ask as _format_ask
 from applications.model import Attachment, Confirmation, FieldSubmitted, Screening
-import applications.store as _apps_store
-from identity.company import company_identity_key as _company_identity_key
 from screening.cooldown import cooldown as _cooldown
 from services.screenings import record_screening_verdict as _record_screening_verdict
+import services.agent_config as _agent_config_service
 import services.applications as _applications_service
 from truth.answers import canonical_cv as _canonical_cv
 from truth.answers import load as _load_answers
 from truth.emailalias import alias_email as _alias_email
-
-logger = logging.getLogger(__name__)
 
 
 def _as_list(value, name: str):
@@ -219,25 +213,6 @@ def record_application(
     result = app.to_dict()
     result["created"] = created
     return result
-
-
-def _load_enabled_profile(profile_name: str):
-    """Return the named ENABLED JobProfile, or raise ``ValueError`` naming the enabled ones.
-
-    Evaluating hard requirements against a profile nobody is currently
-    searching under would be meaningless, so a disabled or unknown name is
-    refused rather than silently matched.
-    """
-    cfg = _agentconfig_store.load()
-    enabled = [p for p in cfg.profiles if p.enabled]
-    needle = profile_name.strip().casefold()
-    profile = next((p for p in enabled if p.name.strip().casefold() == needle), None)
-    if profile is None:
-        names = ", ".join(p.name for p in enabled) or "(none enabled)"
-        raise ValueError(
-            f"Unknown or disabled profile {profile_name!r}. Enabled profiles: {names}."
-        )
-    return profile
 
 
 def record_screening(
@@ -457,41 +432,8 @@ def get_profile_answers(company: str = "") -> dict:
     data = _load_answers().to_dict()
     email = data.get("email")
     if isinstance(email, str) and email:
-        data["email"] = _alias_email(email, _resolve_alias_company(company))
+        data["email"] = _alias_email(email, _applications_service.resolve_alias_company(company))
     return data
-
-
-def _resolve_alias_company(company: str) -> str:
-    """Resolve the company string ``get_profile_answers`` should alias against.
-
-    If an application row already exists whose company matches ``company``'s
-    identity key, that row's stored ``company`` string is returned (the
-    earliest-created one wins, when several match) so the alias stays frozen
-    to the address already submitted to that employer. Otherwise the
-    identity key itself is returned, so a brand-new company is aliased from
-    its normalized slug rather than its raw, possibly differently-cased or
-    -suffixed, spelling. Never raises: a blank/non-str ``company``, or a
-    failure to load the applications store, falls back to ``company``
-    unchanged (aliasing degrades to today's plain per-call transform).
-    """
-    if not isinstance(company, str) or not company.strip():
-        return company
-    target_key = _company_identity_key(company)
-    if not target_key:
-        return company
-    try:
-        rows = _apps_store.load_all()
-    except Exception:
-        return company
-    candidates = [
-        row
-        for row in rows
-        if isinstance(row.company, str) and _company_identity_key(row.company) == target_key
-    ]
-    if not candidates:
-        return target_key
-    earliest = min(candidates, key=lambda row: row.created_at or "")
-    return earliest.company
 
 
 def get_job_profiles() -> list[dict]:
@@ -508,23 +450,7 @@ def recommend_salary(profile_name: str, proposed: int | None = None) -> dict:
     ``[salary_ask_min, salary_ask_max]`` via ``agentconfig.salary.clamp_ask``.
     Returns a refusal dict if the profile is unknown or has no salary band.
     """
-    cfg = _agentconfig_store.load()
-    profile = next((p for p in cfg.profiles if p.name == profile_name), None)
-    if profile is None:
-        return {"refused": f"Profile not found: {profile_name}"}
-
-    clamped = _clamp_ask(profile, proposed)
-    if clamped is None:
-        return {"refused": "Profile has no salary band configured"}
-
-    return {
-        "amount": clamped,
-        "formatted": _format_ask(profile, clamped),
-        "band": {"min": profile.salary_ask_min, "max": profile.salary_ask_max},
-        # Only a figure the caller actually proposed can be "clamped"; with
-        # proposed=None the band minimum is supplied, not adjusted.
-        "clamped": proposed is not None and proposed != clamped,
-    }
+    return _agent_config_service.recommend_salary(profile_name, proposed)
 
 
 def get_approved_applications(run_id: str = "", limit: int = 0) -> list[dict]:

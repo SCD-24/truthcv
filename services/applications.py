@@ -35,6 +35,7 @@ import coverletter.store as letter_store
 import screening.store as screening_store
 from companyresearch.store import open_contradictions
 from screening.cooldown import cooldown
+from identity.company import company_identity_key as _company_identity_key
 from identity.url import normalize_application_url
 from runs.derive import counters_by_run as _counters_by_run
 from services.letters import (
@@ -503,3 +504,39 @@ def record_apply_failure(
     return screening_store.record_apply_failure(
         screening_id, error, blocker=blocker, signin_url=signin_url
     )
+
+
+def resolve_alias_company(company: str) -> str:
+    """Resolve the company string ``get_profile_answers`` should alias against.
+
+    If an application row already exists whose company matches ``company``'s
+    identity key, that row's stored ``company`` string is returned (the
+    earliest-created one wins, when several match) so the alias stays frozen
+    to the address already submitted to that employer. Otherwise the
+    identity key itself is returned, so a brand-new company is aliased from
+    its normalized slug rather than its raw, possibly differently-cased or
+    -suffixed, spelling. Never raises: a blank/non-str ``company``, or a
+    failure to load the applications store, falls back to ``company``
+    unchanged (aliasing degrades to today's plain per-call transform).
+
+    Public so the ``get_profile_answers`` tool stays a thin adapter; the
+    applications store is read through module-attribute access at call time.
+    """
+    if not isinstance(company, str) or not company.strip():
+        return company
+    target_key = _company_identity_key(company)
+    if not target_key:
+        return company
+    try:
+        rows = _apps_store.load_all()
+    except Exception:
+        return company
+    candidates = [
+        row
+        for row in rows
+        if isinstance(row.company, str) and _company_identity_key(row.company) == target_key
+    ]
+    if not candidates:
+        return target_key
+    earliest = min(candidates, key=lambda row: row.created_at or "")
+    return earliest.company
