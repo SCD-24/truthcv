@@ -13,7 +13,6 @@ import json
 import logging
 import os
 import threading
-from datetime import date
 import urllib.error
 import urllib.request
 from urllib.parse import urlencode, urlparse
@@ -33,6 +32,7 @@ from truth.document import extract_document_text, extension_for
 from services.truth_extract import build_truth_from_text
 from services.inferences import confirm_inferences as confirm_inferences_service
 import services.screenings as screenings_service
+import services.screening_letters as screening_letters_service
 import services.agent_config as agent_config_service
 import services.applications as applications_service
 from truth.model import Truth
@@ -81,7 +81,6 @@ from screening.model import Screening
 from identity.url import posting_dedupe_key
 
 import coverletter.store as letter_store
-from services.letters import generate_cover_letter_for_operator as _generate_letter_for_operator
 
 from .schemas import (
     AgentConfigModel,
@@ -121,7 +120,6 @@ from .schemas import (
     CompanyFindingModel,
     CompanyFindingResolve,
     ContradictionGroupModel,
-    CoverLetterApprovals,
     CoverLetterRequest,
     CooldownResult,
     CoverLetterResult,
@@ -197,12 +195,7 @@ def _screening_model(screening: Screening) -> ScreeningModel:
 @router.get("/screenings", response_model=list[ScreeningModel])
 def list_screenings(approval: str | None = None) -> list[ScreeningModel]:
     """Every screening record, most recent first; `approval` narrows to the queue."""
-    screenings = sorted(
-        screening_store.load_all(), key=lambda s: s.created_at, reverse=True
-    )
-    if approval is not None:
-        screenings = [s for s in screenings if s.approval == approval]
-    return [_screening_model(s) for s in screenings]
+    return [_screening_model(s) for s in screenings_service.list_screenings(approval)]
 
 
 # Default page size for GET /screenings/rejected; the store clamps the bounds.
@@ -228,18 +221,13 @@ def list_rejected_screenings(
     never read as an id. limit is clamped into the store's bounds and a
     negative offset to 0; the effective values are echoed back.
     """
-    limit = min(
-        max(limit, screening_store.REJECTED_PAGE_MIN_LIMIT),
-        screening_store.REJECTED_PAGE_MAX_LIMIT,
-    )
-    offset = max(0, offset)
-    rows, total, counts = screening_store.rejected_page(limit, offset, category)
+    page = screenings_service.rejected_page(limit, offset, category)
     return RejectedScreeningsResponse(
-        items=[_rejected_model(r) for r in rows],
-        total=total,
-        limit=limit,
-        offset=offset,
-        categories=[CategoryCountModel(key=k, count=c) for k, c in counts],
+        items=[_rejected_model(r) for r in page.rows],
+        total=page.total,
+        limit=page.limit,
+        offset=page.offset,
+        categories=[CategoryCountModel(key=k, count=c) for k, c in page.counts],
     )
 
 
@@ -447,16 +435,7 @@ def bulk_set_approval(body: BulkApprovalUpdate) -> BulkApprovalResult:
     the same way as any other — the agent applies with whatever cover letter is
     stored, or none.
     """
-    try:
-        results = []
-        for sid in body.ids:
-            try:
-                ok = screening_store.set_approval(sid, body.approval) is not None
-            except screening_store.ApprovalConflict:
-                ok = False
-            results.append({"id": sid, "ok": ok})
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
+    results = screenings_service.bulk_set_approval(body.ids, body.approval)
     return BulkApprovalResult(results=results)
 
 
@@ -472,46 +451,7 @@ def mark_screening_applied(screening_id: str) -> ApplicationModel:
     409 rather than a second row when the screening has already been applied:
     a double click must not create a duplicate application.
     """
-    if screening_store.get(screening_id) is None:
-        raise HTTPException(status_code=404, detail="Screening not found.")
-
-    # Retire FIRST, atomically, and create the row only if this call is the one
-    # that won the claim. Checking then creating then retiring let two requests
-    # both pass the check and create two Applications rows for one posting —
-    # two tabs, or one slow response and a second click, was enough. Ordering
-    # it this way also means a crash between the two writes leaves a retired
-    # screening with no row (visible, fixable) rather than a duplicate row.
-    result = screenings_service.claim_screening_for_apply(screening_id)
-    if result.refused:
-        if result.reason == "contradictory_research":
-            refused = result.refused_screening
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"{refused.company} has an open company-research contradiction — "
-                    "resolve it at /api/company-findings/contradictions before applying."
-                ),
-            )
-        raise HTTPException(
-            status_code=409, detail="This screening has already been applied to."
-        )
-    screening = result.screening
-
-    app = app_store.create(
-        {
-            "company": screening.company,
-            "role": screening.role,
-            "application_url": screening.url,
-            "posting": screening.posting_text,
-            "submission_type": "Posting" if screening.url else "General",
-            "submitted": True,
-            "status": "Applied",
-            "application_date": date.today().isoformat(),
-            "capture_method": "manual",
-            "screening_id": screening_id,
-        }
-    )
-    return _application_model(app)
+    return _application_model(screenings_service.mark_applied(screening_id))
 
 
 # Declared BEFORE /screenings/{screening_id}: otherwise the router binds
@@ -543,36 +483,13 @@ def set_screening_approval(screening_id: str, body: ApprovalUpdate) -> Screening
             status_code=422, detail="Provide approval, role, url or postingText."
         )
 
-    screening = None
-    if body.role is not None:
-        screening = screening_store.update(screening_id, {"role": body.role})
-        if screening is None:
-            raise HTTPException(status_code=404, detail="Screening not found.")
-
-    if body.url is not None:
-        screening = screening_store.update(screening_id, {"url": body.url})
-        if screening is None:
-            raise HTTPException(status_code=404, detail="Screening not found.")
-
-    if body.posting_text is not None:
-        screening = screening_store.update(
-            screening_id, {"posting_text": body.posting_text}
-        )
-        if screening is None:
-            raise HTTPException(status_code=404, detail="Screening not found.")
-
-    if body.approval is not None:
-        # Existence wins over the unknown-id check: an unknown id is 404
-        # regardless of approval value, matching the url-only branch above.
-        try:
-            screening = screening_store.set_approval(screening_id, body.approval)
-        except screening_store.ApprovalConflict as e:
-            raise HTTPException(status_code=409, detail=str(e)) from e
-        except ValueError as e:
-            raise HTTPException(status_code=422, detail=str(e)) from e
-        if screening is None:
-            raise HTTPException(status_code=404, detail="Screening not found.")
-
+    screening = screenings_service.update_screening(
+        screening_id,
+        role=body.role,
+        url=body.url,
+        posting_text=body.posting_text,
+        approval=body.approval,
+    )
     return _screening_model(screening)
 
 
@@ -672,34 +589,6 @@ def get_screening_letter(screening_id: str) -> CoverLetterDraftModel:
     return _draft_model(draft)
 
 
-def _screening_letter_approvals(
-    approvals: CoverLetterApprovals | None,
-    paragraphs: list[dict] | None,
-) -> tuple[set[str], set[str]]:
-    """Resolve blocked-claim ids to claim texts against the paragraphs SUPPLIED
-    IN THIS REQUEST, not the wizard's cached draft (_letter_approvals uses that
-    one; it is wrong here — a screening's letter is per-screening, not global).
-    Mirrors the wizard's id derivation exactly: LETTER_SCOPE_ID + _claim_id.
-    """
-    if not approvals or not paragraphs:
-        return set(), set()
-
-    from coverletter import LETTER_SCOPE_ID
-
-    approved_ids = set(approvals.approved_claim_ids)
-    denied_ids = set(approvals.denied_claim_ids)
-    approved: set[str] = set()
-    denied: set[str] = set()
-    for para in paragraphs:
-        for claim in para.get("claims", []):
-            cid = _claim_id(LETTER_SCOPE_ID, claim)
-            if cid in approved_ids:
-                approved.add(claim)
-            if cid in denied_ids:
-                denied.add(claim)
-    return approved, denied
-
-
 @router.post("/screenings/{screening_id}/letter", response_model=CoverLetterDraftModel)
 def generate_screening_letter(
     screening_id: str, body: LetterGenerateRequest
@@ -714,53 +603,18 @@ def generate_screening_letter(
     The retry can carry `approvals` and the blocked attempt's `paragraphs` to
     re-validate the SAME letter, mirroring `/api/cover-letter`.
     """
-    screening = screening_store.get(screening_id)
-    if screening is None:
-        raise HTTPException(status_code=404, detail="Screening not found.")
-    if not screening.posting_text.strip():
-        raise HTTPException(
-            status_code=409,
-            detail="No posting text stored for this screening, so there is nothing to draft from.",
-        )
-    existing = letter_store.load(screening_id)
-    if existing is not None and existing.source == "operator" and not body.force:
-        raise HTTPException(
-            status_code=409,
-            detail="This letter was edited by you. Redrafting would discard those edits.",
-        )
-    approved_texts, denied_texts = _screening_letter_approvals(body.approvals, body.paragraphs)
-    result = _generate_letter_for_operator(
-        posting=screening.posting_text,
+    approvals = body.approvals
+    draft = screening_letters_service.generate(
+        screening_id,
+        force=body.force,
+        approved_ids=approvals.approved_claim_ids if approvals else None,
+        denied_ids=approvals.denied_claim_ids if approvals else None,
+        paragraphs=body.paragraphs,
         preset_id=body.preset_id,
         length=body.length,
-        approved_texts=approved_texts,
-        denied_texts=denied_texts,
-        paragraphs=body.paragraphs,
-        company=screening.company or None,
         provider_factory=get_provider,
     )
-    if result["blocked"]:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": "The letter was blocked by the truthfulness guardrail.",
-                "blockedReason": result.get("blocked_reason", ""),
-                "blockedClaims": [
-                    {
-                        "claimId": _claim_id(c["scope_id"], c["text"]),
-                        "experienceId": c["scope_id"],
-                        "text": c["text"],
-                        "tokens": c["tokens"],
-                    }
-                    for c in result["blocked_claims"]
-                ],
-                "paragraphs": result["paragraphs"],
-            },
-        )
-    draft = letter_store.CoverLetterDraft(
-        text=result["text"], paragraphs=result["paragraphs"], source="generated"
-    )
-    return _draft_model(letter_store.save(screening_id, draft))
+    return _draft_model(draft)
 
 
 @router.put("/screenings/{screening_id}/letter", response_model=CoverLetterDraftModel)
@@ -775,20 +629,7 @@ def save_screening_letter(
     operator is the source of that document. `source` records that a human wrote
     this, and the agent applies with it unchanged.
     """
-    if screening_store.get(screening_id) is None:
-        raise HTTPException(status_code=404, detail="Screening not found.")
-    if not body.text.strip():
-        raise HTTPException(
-            status_code=422,
-            detail="An empty letter cannot be saved — blanking is not an edit; regenerate instead.",
-        )
-    existing = letter_store.load(screening_id)
-    draft = letter_store.CoverLetterDraft(
-        text=body.text,
-        paragraphs=existing.paragraphs if existing else [],
-        source="operator",
-    )
-    return _draft_model(letter_store.save(screening_id, draft))
+    return _draft_model(screening_letters_service.save_operator_text(screening_id, body.text))
 
 
 @router.delete("/screenings/{screening_id}", status_code=204)
@@ -2080,29 +1921,7 @@ def get_signin_queue() -> SigninQueue:
     state: the agent's experience is the only source of truth here, so an entry
     exists exactly as long as a posting is still waiting behind that sign-in.
     """
-    grouped: dict[str, dict] = {}
-    for s in screening_store.load_all():
-        if s.apply_blocker != "login_required":
-            continue
-        # Only items still queued to be applied to. Applied or rejected means
-        # nothing is waiting on this sign-in any more.
-        if s.approval not in ("pending", "approved"):
-            continue
-        url = s.signin_url or s.url
-        host = _host_of(url)
-        if not host:
-            continue
-        entry = grouped.setdefault(
-            host,
-            {"host": host, "signin_url": url, "waiting": 0, "last_blocked_at": "", "companies": []},
-        )
-        entry["waiting"] += 1
-        if s.updated_at > entry["last_blocked_at"]:
-            entry["last_blocked_at"] = s.updated_at
-        if s.company and s.company not in entry["companies"]:
-            entry["companies"].append(s.company)
-    sites = [SigninQueueSite(**e) for e in grouped.values()]
-    sites.sort(key=lambda s: (-s.waiting, s.host))
+    sites = [SigninQueueSite(**e) for e in screenings_service.signin_queue()]
     return SigninQueue(sites=sites)
 
 
