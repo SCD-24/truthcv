@@ -66,7 +66,7 @@ def test_claude_forwards_sha(client, monkeypatch):
         seen.update(kw)
         return "new-tok"
 
-    monkeypatch.setattr("api.routes.get_valid_access_token", fake)
+    monkeypatch.setattr("services.agent_credentials.get_valid_access_token", fake)
     resp = client.post(URL, json=_body(sha=SHA.upper()), headers=_hdr())
     assert resp.status_code == 200 and resp.json() == {"token": "new-tok"}
     assert seen == {"rejected_sha256": SHA}
@@ -92,7 +92,7 @@ def test_claude_auth_error_503(client, monkeypatch):
     def boom(**kw):
         raise AuthError("boom")
 
-    monkeypatch.setattr("api.routes.get_valid_access_token", boom)
+    monkeypatch.setattr("services.agent_credentials.get_valid_access_token", boom)
     resp = client.post(URL, json=_body(), headers=_hdr())
     assert resp.status_code == 503
     assert resp.json()["detail"] == "Claude subscription needs reconnecting."

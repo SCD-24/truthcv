@@ -54,7 +54,7 @@ def test_oauth_path_uses_fresh_token(client, monkeypatch):
         "oauth": {"accessToken": "at", "refreshToken": "rt", "expiresAt": time.time() + 3600},
         "authMode": "subscription",
     })
-    monkeypatch.setattr("api.routes.get_valid_access_token", lambda: "fresh-tok")
+    monkeypatch.setattr("services.agent_credentials.get_valid_access_token", lambda: "fresh-tok")
     body = client.get("/api/agent/llm-credentials", headers=_hdr()).json()
     assert body["authType"] == "oauth" and body["token"] == "fresh-tok"
 
@@ -70,7 +70,7 @@ def test_oauth_refresh_fails_503(client, monkeypatch):
 
         raise AuthError("boom")
 
-    monkeypatch.setattr("api.routes.get_valid_access_token", _raise)
+    monkeypatch.setattr("services.agent_credentials.get_valid_access_token", _raise)
     resp = client.get("/api/agent/llm-credentials", headers=_hdr())
     assert resp.status_code == 503
     assert "boom" not in resp.text

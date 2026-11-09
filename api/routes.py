@@ -34,6 +34,7 @@ from services.inferences import confirm_inferences as confirm_inferences_service
 import services.screenings as screenings_service
 import services.screening_letters as screening_letters_service
 import services.agent_config as agent_config_service
+import services.agent_credentials as agent_credentials_service
 import services.applications as applications_service
 import services.runs as runs_service
 import services.supervisor as supervisor_service
@@ -60,7 +61,6 @@ from services.cover_letter import generate_cover_letter
 from onboarding import store as onboarding_store
 from agentconfig import store as agent_config_store
 from connections import catalog
-from connections.auth.claude import AuthError, get_valid_access_token
 from connections.auth import claude as claude_auth
 from connections.auth import codex as codex_auth
 from connections.auth import gmail as gmail_auth
@@ -77,7 +77,6 @@ from runs import store as runs_store
 from identity.company import company_identity_key
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
-from identity.url import posting_dedupe_key
 
 import coverletter.store as letter_store
 
@@ -1009,41 +1008,6 @@ def put_profile_answers(body: AnswersUpdate) -> AnswersModel:
     return AnswersModel.model_validate(save_answers(answers).to_dict())
 
 
-def _resolved_job_boards(cfg: agent_config_store.AgentConfig) -> list[dict]:
-    """Build the RESOLVED wire list of job boards from an agent config.
-
-    Both GET and PUT responses go through this helper so they cannot drift.
-    Iterates ``cfg.resolved_boards()`` (the four defaults, then the operator's
-    own boards, each already carrying its EFFECTIVE mode) and for each board
-    emits its stored sign-in override (if any), plus the server-resolved
-    domain, effective sign-in URL, default marker and mode. ``mode_locked``
-    is True for any catalog source — its mode is fixed and not operator-
-    editable — and False only for a custom board. The response deliberately
-    carries this resolved list rather than the stored one, so the client
-    never re-implements the union — and ``is_default`` is what tells the UI
-    to withhold a remove button.
-    """
-    from agentconfig import boards
-
-    result = []
-    for board in cfg.resolved_boards():
-        result.append({
-            "source": board.source,
-            "signin_url": board.signin_url,
-            "mode": board.mode,
-            "search_url": board.search_url,
-            "enabled": board.enabled,
-            "posting_url_pattern": board.posting_url_pattern,
-            "mode_locked": not boards.is_custom_source(board.source),
-            "domain": boards.resolve_domain(board.source) or "",
-            "effective_signin_url": boards.resolve_signin_url(board.source, board.signin_url),
-            "is_default": boards.is_default_source(board.source),
-            "is_api": boards.is_api_source(board.source),
-            "key_required": boards.requires_key(board.source),
-        })
-    return result
-
-
 def _target_company_boards(cfg: agent_config_store.AgentConfig) -> list:
     """Recorded company boards pruned to the current watchlist.
 
@@ -1376,55 +1340,9 @@ def get_agent_config(include_feed: bool = False) -> AgentConfigModel:
     making every page load wait on a third-party API — or fail with it — is a
     cost paid for nothing, since the browser never renders the postings.
     """
-    from agentconfig.dorks import compose_direct_boards, compose_queries
-
-    cfg = agent_config_store.load()
-    data = cfg.to_dict()
-
-    # Company boards, pruned to the current target watchlist. Shared with the
-    # feed fan-out below so the two do not load/prune the store separately.
-    target_boards = _target_company_boards(cfg)
-    data["company_boards"] = [
-        {"company": board.company, "careers_url": board.careers_url, "ats": board.ats, "status": board.status, "resolved_at": board.resolved_at}
-        for board in target_boards
-    ]
-
-    # Populate job_boards with the resolved (defaults-first) list.
-    data["job_boards"] = _resolved_job_boards(cfg)
-
-    # Populate search_queries in response. The freshness window is applied to
-    # the composed URLs here rather than stored on them, so changing the
-    # setting takes effect on the next fetch with no stored state to migrate.
-    # searched_boards() (not resolved_boards()) is passed so a direct-mode OR
-    # operator-disabled board is excluded from the dorks rather than
-    # defaulting to "dork"/enabled the way a bare source string would.
-    searched = cfg.searched_boards()
-    data["search_queries"] = compose_queries(cfg.profiles, cfg.dork_recency, searched)
-
-    # One entry per direct-mode board, for the agent to search on-site.
-    data["direct_boards"] = compose_direct_boards(cfg.profiles, searched)
-
-    # Postings from API-backed boards, on request only. fetch_postings never
-    # raises, so a Remote Rocketship outage degrades this response to the
-    # config it always carried rather than failing the agent's config fetch.
-    if include_feed:
-        feed = _fetch_feed_postings(cfg, target_boards)
-        # Drop postings the ledger already screened, so the agent stops
-        # re-screening postings that only come back created:false. An
-        # unread-placeholder screening is not in `keys` (screened_dedupe_keys
-        # excludes it), so that posting stays in the feed for a real screen.
-        # Only postings screened for EVERY enabled profile (or passed/deferred,
-        # or profile-less) count as screened; a rejection under one profile
-        # must not hide the posting from the others.
-        keys = screening_store.screened_dedupe_keys(
-            [p.name for p in cfg.profiles if p.enabled]
-        )
-        kept = [p for p in feed.postings if posting_dedupe_key(p.url) not in keys]
-        data["feed_postings"] = [p.to_dict() for p in kept]
-        data["feed_error"] = feed.error
-        data["feed_already_screened"] = len(feed.postings) - len(kept)
-
-    return AgentConfigModel.model_validate(data)
+    return AgentConfigModel.model_validate(
+        agent_config_service.build_agent_config(include_feed)
+    )
 
 
 @router.put("/agent/config", response_model=AgentConfigModel)
@@ -1452,89 +1370,8 @@ def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:
     sent = body.model_dump(exclude_unset=True, by_alias=False)
     saved = agent_config_service.update_agent_config(sent)
     data = saved.to_dict()
-    data["job_boards"] = _resolved_job_boards(saved)
+    data["job_boards"] = agent_config_service.resolved_job_boards(saved)
     return AgentConfigModel.model_validate(data)
-
-
-def _claude_credentials(model: str) -> AgentLlmCredentials:
-    """Resolve claude card credentials: oauth first, then apikey, else 404/503."""
-    conn = secretstore.get_connection("claude")
-    oauth = conn.get("oauth") or {}
-    if oauth.get("accessToken") and conn.get("authMode") != "apikey":
-        try:
-            token = get_valid_access_token()
-        except AuthError:
-            raise HTTPException(
-                status_code=503, detail="Claude subscription needs reconnecting."
-            ) from None
-        return AgentLlmCredentials(
-            auth_type="oauth", token=token, model=model,
-            provider="claude", wire="anthropic-messages",
-        )
-
-    api_key = conn.get("apiKey")
-    if api_key:
-        return AgentLlmCredentials(
-            auth_type="api_key", token=api_key, model=model,
-            provider="claude", wire="anthropic-messages",
-        )
-    raise HTTPException(status_code=404)
-
-
-def _codex_credentials(model: str) -> AgentLlmCredentials:
-    """Resolve codex card credentials: subscription oauth or apikey, OpenAI wire."""
-    conn = secretstore.get_connection("codex")
-    oauth = conn.get("oauth") or {}
-    if oauth.get("accessToken") and conn.get("authMode") != "apikey":
-        try:
-            token = codex_auth.get_valid_access_token()
-        except codex_auth.AuthError:
-            raise HTTPException(
-                status_code=503, detail="ChatGPT subscription needs reconnecting."
-            ) from None
-        return AgentLlmCredentials(
-            auth_type="oauth", token=token, model=model,
-            provider="codex", wire="openai-responses",
-        )
-    api_key = conn.get("apiKey")
-    if not api_key:
-        raise HTTPException(status_code=404)
-    return AgentLlmCredentials(
-        auth_type="api_key", token=api_key, model=model,
-        provider="codex", wire="openai-chat-completions",
-    )
-
-
-def _openrouter_credentials(model: str) -> AgentLlmCredentials:
-    """Resolve openrouter card credentials: apikey-only, plain OpenAI wire (not
-    the Anthropic-compat shim, which is only for the claude CLI)."""
-    api_key = secretstore.get_connection("openrouter").get("apiKey")
-    if not api_key:
-        raise HTTPException(status_code=404)
-    return AgentLlmCredentials(
-        auth_type="api_key", token=api_key, model=model,
-        base_url=OPENROUTER_BASE_URL,
-        provider="openrouter", wire="openai-chat-completions",
-    )
-
-
-def _ollama_credentials(model: str) -> AgentLlmCredentials:
-    """Resolve ollama card credentials: url-only, no token, OpenAI-shaped wire."""
-    base_url = secretstore.get_connection("ollama").get("baseUrl")
-    if not base_url:
-        raise HTTPException(status_code=404)
-    return AgentLlmCredentials(
-        auth_type="url", token="", model=model, base_url=base_url,
-        provider="ollama", wire="openai-chat-completions",
-    )
-
-
-_CARD_CREDENTIALS = {
-    "claude": _claude_credentials,
-    "codex": _codex_credentials,
-    "openrouter": _openrouter_credentials,
-    "ollama": _ollama_credentials,
-}
 
 
 @router.get("/agent/llm-credentials", response_model=AgentLlmCredentials)
@@ -1550,29 +1387,9 @@ def get_agent_llm_credentials(x_agent_token: str = Header(default="")) -> AgentL
     if not secret or not hmac.compare_digest(given, secret.encode("utf-8")):
         raise HTTPException(status_code=404)
 
-    return _credentials_for_route(modelrouting.load().agent)
-
-
-def _credentials_for_route(route: modelrouting.Route | None) -> AgentLlmCredentials:
-    """Credentials for a route (None = the claude card, default model).
-    Raises 404 when the card is unknown or has no usable credentials."""
-    card = route.connection if route else "claude"
-    model = route.model if route else ""
-    resolve = _CARD_CREDENTIALS.get(card)
-    if resolve is None:
-        raise HTTPException(status_code=404)
-    return resolve(model)
-
-
-_REFRESH_PROVIDERS = {
-    "claude": (
-        lambda **kw: get_valid_access_token(**kw), AuthError, "Claude subscription needs reconnecting."),
-    "codex": (
-        lambda **kw: codex_auth.get_valid_access_token(**kw),
-        codex_auth.AuthError,
-        "ChatGPT subscription needs reconnecting.",
-    ),
-}
+    return AgentLlmCredentials.model_validate(
+        agent_credentials_service.credentials_for_route(modelrouting.load().agent)
+    )
 
 
 @router.post("/agent/llm-token/refresh", response_model=AgentLlmTokenResult)
@@ -1585,14 +1402,7 @@ def post_agent_llm_token_refresh(
     The token is response-only and never logged."""
     if not _agent_token_ok(x_agent_token):
         raise HTTPException(status_code=404)
-    conn = secretstore.get_connection(body.provider)
-    if not (conn.get("oauth") or {}).get("accessToken") or conn.get("authMode") == "apikey":
-        raise HTTPException(status_code=404)
-    fetch, auth_error, detail = _REFRESH_PROVIDERS[body.provider]
-    try:
-        token = fetch(rejected_sha256=body.rejected_token_sha256)
-    except auth_error:
-        raise HTTPException(status_code=503, detail=detail) from None
+    token = agent_credentials_service.refresh_token(body.provider, body.rejected_token_sha256)
     return AgentLlmTokenResult(token=token)
 
 
@@ -1603,22 +1413,7 @@ def get_agent_llm_routes(x_agent_token: str = Header(default="")) -> dict:
     egress; tokens are never logged."""
     if not _agent_token_ok(x_agent_token):
         raise HTTPException(status_code=404)
-    r = modelrouting.load()
-
-    def _creds(route):
-        if route is None:
-            return None
-        # One stage whose card has no usable credentials must not blank the
-        # others: it resolves to null and the harness falls back per stages.ts.
-        try:
-            return _credentials_for_route(route).model_dump(by_alias=True)
-        except HTTPException:
-            return None
-
-    stages = {"apply": _creds(r.agent)}
-    for name in modelrouting.AGENT_STAGE_NAMES:
-        stages[name] = _creds(modelrouting.resolve_agent_stage(r, name))
-    return {"stages": stages}
+    return agent_credentials_service.stage_routes()
 
 
 def _agent_token_ok(given: str) -> bool:

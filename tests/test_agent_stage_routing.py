@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import modelrouting
-from api import routes
+from services import agent_credentials
 from api.main import app
 from api.schemas import AgentLlmCredentials
 from modelrouting.store import routing_path
@@ -80,9 +80,9 @@ def test_llm_routes_shape(client, monkeypatch):
         return AgentLlmCredentials(
             auth_type="url", token="", model=model, base_url="http://o",
             provider="ollama", wire="openai-chat-completions",
-        )
+        ).model_dump(by_alias=True)
 
-    monkeypatch.setitem(routes._CARD_CREDENTIALS, "ollama", fake)
+    monkeypatch.setitem(agent_credentials._CARD_CREDENTIALS, "ollama", fake)
     empty = client.get("/api/agent/llm-routes", headers={"X-Agent-Token": "secret"})
     assert empty.status_code == 200
     assert empty.json() == {"stages": {"apply": None, "screening": None, "extract": None}}
