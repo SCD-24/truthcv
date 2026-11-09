@@ -167,3 +167,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:start comp:arbeitnow-api -->
 - **Arbeitnow Job Board API** (`arbeitnow-api`) - custom component. External public Arbeitnow job-board API (https://www.arbeitnow.com/api/job-board-api). Job Feeds (jobfeeds/arbeitnow.py) fetches paginated postings from it on every feed refresh, because arbeitnow is a default, non-removable board (agentconfig/boards.py).
 <!-- generated:end comp:arbeitnow-api -->
+
+<!-- generated:start comp:identity-leaf -->
+- **Identity Leaf** (`identity-leaf`) - backend component.
+<!-- generated:end comp:identity-leaf -->

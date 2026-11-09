@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-30 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+31 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -218,3 +218,7 @@ External public Arbeitnow job-board API (https://www.arbeitnow.com/api/job-board
 
 **Tech:** Arbeitnow public REST API, HTTPS
 <!-- generated:end comp:arbeitnow-api -->
+
+<!-- generated:start comp:identity-leaf -->
+## Identity Leaf (`identity-leaf`, BACKEND)
+<!-- generated:end comp:identity-leaf -->

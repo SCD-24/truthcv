@@ -2367,6 +2367,14 @@
       "id": "arbeitnow-api",
       "name": "Arbeitnow Job Board API",
       "type": "custom"
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "id": "identity-leaf",
+      "name": "Identity Leaf",
+      "type": "backend"
     }
   ],
   "connections": [
@@ -2879,6 +2887,11 @@
       "from": "job-feeds",
       "protocol": "HTTPS",
       "to": "arbeitnow-api"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "prompt-store"
     }
   ],
   "definitions": [
