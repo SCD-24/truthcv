@@ -10,12 +10,9 @@ from __future__ import annotations
 import asyncio
 import hmac
 import importlib
-import json
 import logging
 import os
-import urllib.error
-import urllib.request
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -31,6 +28,10 @@ import services.agent_credentials as agent_credentials_service
 import services.applications as applications_service
 import services.runs as runs_service
 import services.supervisor as supervisor_service
+import services.gmail as gmail_service
+import services.job_boards as job_boards_service
+import services.browser as browser_service
+from api import guards
 import services.settings as settings_service
 import services.truth as truth_service
 import services.onboarding as onboarding_service
@@ -993,46 +994,19 @@ def _fetch_feed_postings(cfg: agent_config_store.AgentConfig, company_boards: li
 @router.get("/job-boards/{source}/key", response_model=JobBoardKeyStatus)
 def get_job_board_key(source: str) -> JobBoardKeyStatus:
     """Whether an API-backed board has a key saved. The key itself is never returned."""
-    from agentconfig import boards
-    from jobfeeds import remoterocketship
-
-    if not boards.requires_key(source):
-        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board that needs a key.")
-    return JobBoardKeyStatus(
-        source=remoterocketship.SOURCE,
-        key_set=bool(remoterocketship.api_key()),
-        encryption_available=secretstore.encryption_available(),
-    )
+    return JobBoardKeyStatus(**job_boards_service.key_status(source))
 
 
 @router.put("/job-boards/{source}/key", response_model=JobBoardKeyStatus)
 def put_job_board_key(source: str, body: JobBoardKeyUpdate) -> JobBoardKeyStatus:
     """Save (or, with an empty string, clear) an API-backed board's key."""
-    from agentconfig import boards
-    from jobfeeds import remoterocketship
-
-    if not boards.requires_key(source):
-        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board that needs a key.")
-    if not secretstore.encryption_available():
-        raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
-    value = body.api_key.strip()
-    secretstore.set_connection(remoterocketship.SOURCE, {"apiKey": value or None})
-    return JobBoardKeyStatus(
-        source=remoterocketship.SOURCE,
-        key_set=bool(remoterocketship.api_key()),
-        encryption_available=True,
-    )
+    return JobBoardKeyStatus(**job_boards_service.set_key(source, body.api_key))
 
 
 @router.post("/job-boards/{source}/key/test", response_model=TestResult)
 def test_job_board_key(source: str) -> TestResult:
     """Verify the saved key with one live request against the board's API."""
-    from agentconfig import boards
-    from jobfeeds import remoterocketship
-
-    if not boards.requires_key(source):
-        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board that needs a key.")
-    ok, detail = remoterocketship.check_key(remoterocketship.api_key())
+    ok, detail = job_boards_service.test_key(source)
     return TestResult(ok=ok, detail=detail)
 
 
@@ -1065,17 +1039,10 @@ def test_jev_settings() -> TestResult:
 def require_gmail_tracking_enabled() -> None:
     """Raise 403 unless Gmail response-tracking is configured and opted in.
 
-    Gated on the same secretstore "jev" record as Jev screening cross-checks:
-    a non-empty apiKey AND useForEmailTracking set to True. Gmail sync
-    auto-applies Jev-confirmed transitions, so it must never run on a bare
-    Gmail connection without this explicit opt-in.
+    Thin wrapper over api.guards.require_gmail_tracking_enabled, kept importable
+    from here until the Gmail routes move.
     """
-    conn = secretstore.get_connection("jev")
-    if not conn.get("apiKey") or conn.get("useForEmailTracking") is not True:
-        raise HTTPException(
-            status_code=403,
-            detail="Gmail response-tracking requires a saved Jev API key and useForEmailTracking enabled.",
-        )
+    guards.require_gmail_tracking_enabled()
 
 
 @router.post("/auth/gmail/start", response_model=StartLoginResult)
@@ -1109,18 +1076,9 @@ def complete_gmail_login(
     turned off while the consent screen was open), it redirects with
     `gmailError=not_enabled` rather than rendering a 403 JSON body.
     """
-    try:
-        require_gmail_tracking_enabled()
-    except HTTPException:
-        query = urlencode({"gmailError": "not_enabled"})
-        return RedirectResponse(url=f"/?{query}")
-    if error or not code or not state:
-        query = urlencode({"gmailError": error or "missing_code"})
-        return RedirectResponse(url=f"/?{query}")
-    try:
-        gmail_auth.complete_login(code, state)
-    except gmail_auth.AuthError:
-        query = urlencode({"gmailError": "auth_failed"})
+    code_error = gmail_service.complete_login(code, state, error)
+    if code_error:
+        query = urlencode({"gmailError": code_error})
         return RedirectResponse(url=f"/?{query}")
     return RedirectResponse(url="/")
 
@@ -1134,15 +1092,7 @@ def get_gmail_status() -> GmailStatusModel:
     the UI can explain why Gmail is unavailable, rather than getting a
     blanket error.
     """
-    jev_conn = secretstore.get_connection("jev")
-    tracking_enabled = bool(jev_conn.get("apiKey")) and jev_conn.get("useForEmailTracking") is True
-    oauth = secretstore.get_connection("gmail").get("oauth") or {}
-    return GmailStatusModel(
-        connected=bool(oauth.get("email")),
-        email=oauth.get("email") or None,
-        reauth_required=oauth.get("reauthRequired") is True,
-        tracking_enabled=tracking_enabled,
-    )
+    return GmailStatusModel(**gmail_service.status())
 
 
 @router.post("/gmail/responses/sync")
@@ -1366,22 +1316,6 @@ def post_agent_cancel() -> AgentCancelResult:
     )
 
 
-def _host_of(url: str) -> str:
-    """The full host of an absolute http(s) URL, or "" if it is not one.
-
-    Anything without a scheme and a netloc is not addressable, so it cannot be
-    a sign-in destination — returning "" drops it rather than grouping several
-    unrelated records under a blank host.
-    """
-    try:
-        parsed = urlparse(url or "")
-    except ValueError:
-        return ""
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        return ""
-    return parsed.netloc.casefold()
-
-
 @router.get("/browser/signin-queue", response_model=SigninQueue)
 def get_signin_queue() -> SigninQueue:
     """Sites the agent hit a sign-in wall on, grouped by host.
@@ -1392,45 +1326,6 @@ def get_signin_queue() -> SigninQueue:
     """
     sites = [SigninQueueSite(**e) for e in screenings_service.signin_queue()]
     return SigninQueue(sites=sites)
-
-
-def _browser_control_url(path: str) -> str:
-    """Build the session-server control URL from env, defaulting port 8932."""
-    port = os.environ.get("SESSION_SERVER_PORT", "8932")
-    return f"http://browser:{port}{path}"
-
-
-def _forward_to_session_server(path: str, method: str = "GET", body: dict | None = None) -> dict:
-    """Forward a request to browser/session-server.js.
-
-    Distinguishes three outcomes the UI must tell apart: a normal answer, a
-    refusal the session server made deliberately (4xx/503 — forwarded with its
-    own status so "the agent is applying right now" does not read as "the
-    browser is broken"), and the container being unreachable (503).
-    """
-    token = os.environ.get("AGENT_API_TOKEN", "")
-    data = json.dumps(body or {}).encode() if method == "POST" else None
-    req = urllib.request.Request(
-        _browser_control_url(path),
-        method=method,
-        headers={"X-Agent-Token": token, "Content-Type": "application/json"},
-        data=data,
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as exc:
-        # Forward the session server's own refusal payload. It distinguishes
-        # session_open (which carries the already-open session's URL, so the UI
-        # can offer to return to it) from agent_running and profile_busy — all
-        # three are 409s that call for different words on screen.
-        try:
-            detail = json.loads(exc.read())
-        except (ValueError, OSError):
-            detail = {"reason": "refused"}
-        raise HTTPException(status_code=exc.code, detail=detail) from exc
-    except urllib.error.URLError as exc:
-        raise HTTPException(status_code=503, detail="Browser service unreachable") from exc
 
 
 def _session_from(data: dict) -> BrowserSession:
@@ -1445,7 +1340,7 @@ def _session_from(data: dict) -> BrowserSession:
 @router.get("/browser/session", response_model=BrowserSession)
 def get_browser_session() -> BrowserSession:
     """Whether an attended sign-in session is open, and at which URL."""
-    return _session_from(_forward_to_session_server("/session", method="GET"))
+    return _session_from(browser_service.forward_to_session_server("/session", method="GET"))
 
 
 @router.post("/browser/session", response_model=BrowserSession)
@@ -1455,10 +1350,10 @@ def post_browser_session(payload: BrowserSessionRequest) -> BrowserSession:
     Refused with 409 while a run is in progress: unattended runs win, and the
     operator is told to try again shortly rather than the run being disturbed.
     """
-    if _host_of(payload.url) == "":
+    if browser_service._host_of(payload.url) == "":
         raise HTTPException(status_code=422, detail="An http(s) URL is required")
     return _session_from(
-        _forward_to_session_server("/session", method="POST", body={"url": payload.url})
+        browser_service.forward_to_session_server("/session", method="POST", body={"url": payload.url})
     )
 
 
@@ -1469,26 +1364,12 @@ def delete_browser_session() -> BrowserSessionClosed:
     When closing a session, re-arm any login-blocked items whose host matches
     the closed session's URL, so they re-enter the queue for the next run.
     """
-    # Read the current session URL before closing it
-    session_data = _forward_to_session_server("/session")
-    session_url = session_data.get("url", "")
-    
-    # Forward the close request
-    data = _forward_to_session_server("/session/close", method="POST")
-    
-    signins_cleared = 0
-    # Only clear blockers if the session existed and the close was accepted
-    if session_url and (data.get("closed", False) or data.get("closing", False)):
-        # Clear login blockers for this host
-        host = _host_of(session_url)
-        if host:
-            signins_cleared = screenings_service.clear_login_blockers_for_host(host)
-    
+    data = browser_service.close_session()
     return BrowserSessionClosed(
-        closed=data.get("closed", False),
-        closing=data.get("closing", False),
-        reserving=data.get("reserving", False),
-        signins_cleared=signins_cleared,
+        closed=data["closed"],
+        closing=data["closing"],
+        reserving=data["reserving"],
+        signins_cleared=data["signins_cleared"],
     )
 
 
