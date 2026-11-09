@@ -28,9 +28,12 @@ from __future__ import annotations
 
 from storage import data_dir
 
+import render as _render
+import truth as _truth
 import agentconfig.store as _agentconfig_store
 import applications as app_store
 import applications.store as _apps_store
+from applications.model import Application
 import coverletter.store as letter_store
 import screening.store as screening_store
 from companyresearch.store import open_contradictions
@@ -42,6 +45,8 @@ from services.letters import (
     NO_FILE as _NO_LETTER_FILE,
     render_screening_letter as _render_screening_letter,
 )
+from services.errors import NotFound
+from services.render_cv import _contact_line
 from services.runs import bump_counters as _bump_run_counters
 
 
@@ -540,3 +545,69 @@ def resolve_alias_company(company: str) -> str:
         return target_key
     earliest = min(candidates, key=lambda row: row.created_at or "")
     return earliest.company
+
+
+def render_to_files(html: str, pdf_name: str, docx_name: str) -> bool:
+    """Best-effort render HTML to the named PDF and DOCX on the volume.
+
+    Returns True if at least one format was produced. It never raises on an
+    unavailable backend: callers that have already recorded the document must
+    keep the saved link even when WeasyPrint/pandoc are missing, and the
+    download-URL builder nulls links for files that were not produced.
+    """
+    from render.pdf import RenderUnavailable
+
+    produced = False
+    try:
+        _render.render_pdf(html, pdf_name)
+        produced = True
+    except RenderUnavailable:
+        pass
+    try:
+        _render.render_docx(html, docx_name)
+        produced = True
+    except RenderUnavailable:
+        pass
+    return produced
+
+
+def save_cv(app_id: str, html: str) -> tuple[Application, bool]:
+    """Save edited CV HTML onto an application, then render it best-effort.
+
+    Returns ``(application, produced)``. A manual edit is trusted and saved
+    as-is: the truthfulness guardrail only gates the automatic AI generation.
+    Raises NotFound when the application does not exist.
+    """
+    if app_store.get(app_id) is None:
+        raise NotFound("Application not found.")
+
+    # Record the document FIRST so the link always persists, then render
+    # best-effort — a missing render backend must never lose the saved CV.
+    app = app_store.save_cv_document(app_id, html)
+    pdf_name, docx_name = app_store.cv_filenames(app_id)
+    return app, render_to_files(html, pdf_name, docx_name)
+
+
+def save_cover_letter(app_id: str, text: str) -> tuple[Application, bool]:
+    """Save edited cover-letter text onto an application, then render it.
+
+    Returns ``(application, produced)``. A manual edit is trusted and saved
+    as-is: the truthfulness guardrail only gates the automatic AI generation.
+    Raises NotFound when the application does not exist.
+    """
+    if app_store.get(app_id) is None:
+        raise NotFound("Application not found.")
+
+    from render.cover_letter import render_letter_html
+
+    _profile = _truth.load().profile
+    html = render_letter_html(
+        text,
+        name=_profile.name or "Your Name",
+        contact=_contact_line(_profile),
+    )
+    # Record the document FIRST so the link always persists, then render
+    # best-effort — a missing backend must never lose the saved cover letter.
+    app = app_store.save_cover_letter_document(app_id, text)
+    pdf_name, docx_name = app_store.cover_letter_filenames(app_id)
+    return app, render_to_files(html, pdf_name, docx_name)
