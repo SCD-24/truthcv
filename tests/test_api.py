@@ -19,6 +19,7 @@ import truth.document as truth_document
 import truth.pdf as truth_pdf
 import truth.store as truth_store
 from api.main import app
+from providers.base import ProviderError
 from providers.fake import FakeProvider
 
 
@@ -212,6 +213,21 @@ def test_extract_and_persist_upload_serializes_concurrent_calls(monkeypatch):
     for idx, (kind, value) in enumerate(calls):
         if kind == "text":
             assert calls[idx + 1] == ("text-done", value)
+
+
+def test_extract_without_cv_is_400_before_provider_lookup(data_dir, monkeypatch):
+    """No uploaded CV must win over a missing provider: 400, never 502."""
+    calls = []
+
+    def no_provider(*a, **k):
+        calls.append(a)
+        raise ProviderError("no routing default")
+
+    monkeypatch.setattr(routes, "get_provider", no_provider)
+    r = TestClient(app).post("/api/extract")
+    assert r.status_code == 400
+    assert r.json() == {"detail": "Upload your CV before extracting."}
+    assert calls == []
 
 
 def test_confirm_writes_edited_claim(client):

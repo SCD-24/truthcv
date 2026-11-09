@@ -90,7 +90,12 @@ def test_test_v1_settings_success(encrypted, resets):
     )
 
 
-def _classes(list_models):
+def _classes(monkeypatch, list_models):
+    """Patch each provider class on its own module, where list_v1_models looks it up."""
+    import providers.anthropic_provider as anthropic_mod
+    import providers.ollama_provider as ollama_mod
+    import providers.openai_provider as openai_mod
+
     class Fake:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
@@ -98,33 +103,41 @@ def _classes(list_models):
         def list_models(self):
             return list_models()
 
-    return {"claude": Fake, "codex": Fake, "ollama": Fake}
+    monkeypatch.setattr(anthropic_mod, "AnthropicProvider", Fake)
+    monkeypatch.setattr(openai_mod, "OpenAIProvider", Fake)
+    monkeypatch.setattr(ollama_mod, "OllamaProvider", Fake)
 
 
-def test_list_v1_models_unknown_provider():
+def test_list_v1_models_unknown_provider(monkeypatch):
+    _classes(monkeypatch, list)
     with pytest.raises(BadRequest, match=r"^Unknown provider 'nope'\.$"):
-        settings.list_v1_models(" NOPE ", None, None, _classes(list))
+        settings.list_v1_models(" NOPE ", None, None)
 
 
-def test_list_v1_models_provider_error_is_bad_request():
+def test_list_v1_models_provider_error_is_bad_request(monkeypatch):
     def fail():
         raise ProviderError("no key")
 
+    _classes(monkeypatch, fail)
+
     with pytest.raises(BadRequest, match=r"^no key$"):
-        settings.list_v1_models("anthropic", None, None, _classes(fail))
+        settings.list_v1_models("anthropic", None, None)
 
 
-def test_list_v1_models_other_error_is_bad_gateway():
+def test_list_v1_models_other_error_is_bad_gateway(monkeypatch):
     def fail():
         raise ValueError("bad json")
 
+    _classes(monkeypatch, fail)
+
     with pytest.raises(BadGateway, match=r"^ValueError: bad json$"):
-        settings.list_v1_models("openai", None, None, _classes(fail))
+        settings.list_v1_models("openai", None, None)
 
 
-def test_list_v1_models_returns_models_and_card():
+def test_list_v1_models_returns_models_and_card(monkeypatch):
     models = [{"id": "llama3"}]
-    assert settings.list_v1_models("ollama", None, "http://h", _classes(lambda: models)) == (
+    _classes(monkeypatch, lambda: models)
+    assert settings.list_v1_models("ollama", None, "http://h") == (
         models,
         "ollama",
     )

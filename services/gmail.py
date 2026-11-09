@@ -30,7 +30,7 @@ def require_tracking_enabled() -> None:
     Exists as a service function so every caller that runs a Gmail sync gates
     the same way, not only the agent tool.
 
-    Mirrors api.routes.require_gmail_tracking_enabled's gate exactly: the
+    Mirrors api.guards.require_gmail_tracking_enabled's gate exactly: the
     secretstore "jev" connection must have a non-empty apiKey AND
     useForEmailTracking set to True. Gmail sync auto-applies Jev-confirmed
     status transitions, so it must never run without this explicit opt-in.

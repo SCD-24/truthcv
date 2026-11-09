@@ -159,4 +159,4 @@ def test_signin_queue_groups_by_host():
     sites = svc.signin_queue()
     assert [(e["host"], e["waiting"], e["companies"]) for e in sites] == [
         ("login.acme.example", 1, ["Acme"])]
-    assert svc._host_of("not a url") == ""
+    assert svc.host_of("not a url") == ""

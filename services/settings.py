@@ -8,7 +8,7 @@ routes returned before the move.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 
 import modelrouting
 import providers as _providers
@@ -159,7 +159,6 @@ def _provider_from_update(
     active_provider: str | None,
     api_key: str | None,
     ollama_host: str | None,
-    provider_classes: Mapping[str, type],
 ):
     """Build a provider from the submitted settings WITHOUT persisting anything.
 
@@ -172,10 +171,18 @@ def _provider_from_update(
     if card is None:
         raise BadRequest(f"Unknown provider '{name}'.")
     conn = secretstore.get_connection(card)
-    if card in ("claude", "codex"):
-        return provider_classes[card](api_key=api_key or conn.get("apiKey") or None)
+    if card == "claude":
+        from providers.anthropic_provider import AnthropicProvider
+
+        return AnthropicProvider(api_key=api_key or conn.get("apiKey") or None)
+    if card == "codex":
+        from providers.openai_provider import OpenAIProvider
+
+        return OpenAIProvider(api_key=api_key or conn.get("apiKey") or None)
     if card == "ollama":
-        return provider_classes[card](host=ollama_host or conn.get("baseUrl") or None)
+        from providers.ollama_provider import OllamaProvider
+
+        return OllamaProvider(host=ollama_host or conn.get("baseUrl") or None)
     raise BadRequest(f"Unknown provider '{name}'.")
 
 
@@ -183,18 +190,17 @@ def list_v1_models(
     active_provider: str | None,
     api_key: str | None,
     ollama_host: str | None,
-    provider_classes: Mapping[str, type],
 ) -> tuple[list[dict], str]:
     """Live model list for the selected provider, pulled from its API/SDK.
 
-    ``provider_classes`` maps card ("claude", "codex", "ollama") to the
-    provider class, so services never imports the provider SDK modules the
-    route imports lazily. Returns (models, card) for the handler to shape.
+    The provider SDK module is imported lazily inside the try, so only the
+    selected provider is imported and an import failure maps to BadGateway.
+    Returns (models, card) for the handler to shape.
     """
     name = (active_provider or "").strip().lower()
     card = _V1_PROVIDER_TO_CARD.get(name, "")
     try:
-        provider = _provider_from_update(active_provider, api_key, ollama_host, provider_classes)
+        provider = _provider_from_update(active_provider, api_key, ollama_host)
         models = provider.list_models()
     except ServiceError:
         raise
@@ -236,6 +242,7 @@ def update_routing(update: dict) -> modelrouting.Routing:
     it) instead of leaving the stored value untouched. Returns the saved
     Routing.
     """
+    # Load current routing
     stored_dict = modelrouting.load().to_dict()
     _validate_routes(update)
 
@@ -254,6 +261,8 @@ def update_routing(update: dict) -> modelrouting.Routing:
     routing = modelrouting.Routing.from_dict(stored_dict)
     modelrouting.save(routing)
     _providers.reset_provider()
+
+    # Return fresh routing
     return routing
 
 

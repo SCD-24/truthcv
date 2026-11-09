@@ -104,22 +104,10 @@ def clear_login_blockers_for_host(host: str) -> int:
     apply_blocker. Preserve apply_attempts and other fields.
 
     Host comparison parses each record URL with urlparse and casefolded netloc,
-    matching the same logic as api/routes.py's _host_of.
+    via host_of below.
 
     Return the count of items cleared.
     """
-    from urllib.parse import urlparse
-
-    def _host_of_local(url: str) -> str:
-        """The full host of an absolute http(s) URL, or "" if it is not one."""
-        try:
-            parsed = urlparse(url or "")
-        except ValueError:
-            return ""
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            return ""
-        return parsed.netloc.casefold()
-
     target_host = host.casefold() if host else ""
     count = 0
     for s in screening_store.load_all():
@@ -129,7 +117,7 @@ def clear_login_blockers_for_host(host: str) -> int:
             continue
         # Use signin_url if available, otherwise fall back to the posting url
         url_to_check = s.signin_url or s.url
-        if _host_of_local(url_to_check) == target_host:
+        if host_of(url_to_check) == target_host:
             screening_store.clear_apply_failure(s.id)
             count += 1
     return count
@@ -613,12 +601,16 @@ def update_screening(
     return screening
 
 
-def _host_of(url: str) -> str:
+def host_of(url: str) -> str:
     """The full host of an absolute http(s) URL, or "" if it is not one.
 
     Anything without a scheme and a netloc is not addressable, so it cannot be
     a sign-in destination — returning "" drops it rather than grouping several
     unrelated records under a blank host.
+
+    Public because it is the one host rule shared by the sign-in queue, the
+    login-blocker clear, the browser session close and the session-open URL
+    check; one copy keeps them grouping and matching hosts identically.
     """
     try:
         parsed = urlparse(url or "")
@@ -632,7 +624,7 @@ def _host_of(url: str) -> str:
 def _signin_entry(grouped: dict, s: Screening) -> None:
     """Fold one screening into its host's sign-in queue entry, if it has one."""
     url = s.signin_url or s.url
-    host = _host_of(url)
+    host = host_of(url)
     if not host:
         return
     entry = grouped.setdefault(

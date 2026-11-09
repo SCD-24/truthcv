@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import hmac
-import importlib
 import logging
 import os
 from urllib.parse import urlencode
@@ -36,7 +35,6 @@ import services.settings as settings_service
 import services.truth as truth_service
 import services.onboarding as onboarding_service
 import services.tailor as tailor_service
-from services.errors import BadGateway
 import services.connections as connections_service
 from truth.model import Truth
 from truth.pdf import has_profile
@@ -555,15 +553,9 @@ async def upload(file: UploadFile = File(...)) -> None:
 
 @router.post("/extract", response_model=TruthDoc)
 def extract() -> TruthDoc:
-    try:
-        provider = get_provider("truth_extract")
-    except ProviderError as e:
-        raise BadGateway(str(e)) from e
-    except Exception as e:  # noqa: BLE001 — surface upstream LLM/SDK errors cleanly
-        raise BadGateway(
-            f"The language model call failed: {type(e).__name__}: {e}"
-        ) from e
-    return _truth_doc(truth_service.extract_truth(provider))
+    return _truth_doc(
+        truth_service.extract_truth(lambda: get_provider("truth_extract"))
+    )
 
 
 @router.get("/truth", response_model=TruthDoc)
@@ -1189,7 +1181,7 @@ def post_browser_session(payload: BrowserSessionRequest) -> BrowserSession:
     Refused with 409 while a run is in progress: unattended runs win, and the
     operator is told to try again shortly rather than the run being disturbed.
     """
-    if browser_service._host_of(payload.url) == "":
+    if screenings_service.host_of(payload.url) == "":
         raise HTTPException(status_code=422, detail="An http(s) URL is required")
     return _session_from(
         browser_service.forward_to_session_server("/session", method="POST", body={"url": payload.url})
@@ -1308,28 +1300,11 @@ def test_settings(body: SettingsUpdate) -> TestResult:
     return TestResult(ok=ok, detail=detail)
 
 
-def _lazy_provider(module: str, cls: str):
-    """Constructor that imports the provider SDK module only when called, so
-    the model list keeps importing just the provider it was asked for."""
-
-    def build(**kwargs):
-        return getattr(importlib.import_module(module), cls)(**kwargs)
-
-    return build
-
-
-_V1_PROVIDER_BUILDERS = {
-    "claude": _lazy_provider("providers.anthropic_provider", "AnthropicProvider"),
-    "codex": _lazy_provider("providers.openai_provider", "OpenAIProvider"),
-    "ollama": _lazy_provider("providers.ollama_provider", "OllamaProvider"),
-}
-
-
 @router.post("/models", response_model=ModelList)
 def list_models(body: SettingsUpdate) -> ModelList:
     """Live model list for the selected provider, pulled from its API/SDK."""
     models, card = settings_service.list_v1_models(
-        body.active_provider, body.api_key, body.ollama_host, _V1_PROVIDER_BUILDERS
+        body.active_provider, body.api_key, body.ollama_host
     )
     return _models_result(models, card)
 

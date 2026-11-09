@@ -37,9 +37,25 @@ def test_ingest_upload_extract_error_is_bad_request(monkeypatch):
 
 def test_extract_truth_empty_source(monkeypatch):
     monkeypatch.setattr(truth_svc._pdf, "load_source_text", lambda: "  ")
+    factory = MagicMock()
     with pytest.raises(BadRequest) as e:
-        truth_svc.extract_truth(MagicMock())
+        truth_svc.extract_truth(factory)
     assert str(e.value) == "Upload your CV before extracting."
+    factory.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "exc,text",
+    [
+        (ProviderError("no key"), "no key"),
+        (ValueError("bad"), "The language model call failed: ValueError: bad"),
+    ],
+)
+def test_extract_truth_provider_lookup_failure_is_bad_gateway(monkeypatch, exc, text):
+    monkeypatch.setattr(truth_svc._pdf, "load_source_text", lambda: "cv")
+    with pytest.raises(BadGateway) as e:
+        truth_svc.extract_truth(MagicMock(side_effect=exc))
+    assert str(e.value) == text
 
 
 @pytest.mark.parametrize(
@@ -57,7 +73,7 @@ def test_extract_truth_failure_is_bad_gateway(monkeypatch, exc, text):
 
     monkeypatch.setattr(truth_svc, "build_truth_from_text", boom)
     with pytest.raises(BadGateway) as e:
-        truth_svc.extract_truth(MagicMock())
+        truth_svc.extract_truth(lambda: MagicMock())
     assert str(e.value) == text
 
 
@@ -66,7 +82,7 @@ def test_extract_truth_returns_truth(monkeypatch):
     provider = object()
     monkeypatch.setattr(truth_svc._pdf, "load_source_text", lambda: "cv")
     monkeypatch.setattr(truth_svc, "build_truth_from_text", lambda t, p: sentinel if p is provider else None)
-    assert truth_svc.extract_truth(provider) is sentinel
+    assert truth_svc.extract_truth(lambda: provider) is sentinel
 
 
 def test_update_answers_merges_only_sent(monkeypatch):

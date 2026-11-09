@@ -8,6 +8,7 @@ looked up through their source modules at call time.
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 
 import truth.answers as _answers
 import truth.document as _document
@@ -45,17 +46,18 @@ def ingest_upload(filename: str, data: bytes) -> None:
         raise BadRequest(str(e)) from e
 
 
-def extract_truth(provider: LLMProvider) -> Truth:
+def extract_truth(provider_factory: Callable[[], LLMProvider]) -> Truth:
     """Run the LLM extraction over the stored CV text and return the Truth.
 
-    Exists so the route only chooses the provider. Raises BadRequest when no
-    CV has been uploaded and BadGateway on any provider/LLM failure.
+    Exists so the route only chooses the provider. Takes a factory, not a
+    provider, so a missing CV is reported (BadRequest) before any provider
+    lookup can fail. Raises BadGateway on any provider lookup/LLM failure.
     """
     text = _pdf.load_source_text()
     if not text.strip():
         raise BadRequest("Upload your CV before extracting.")
     try:
-        return build_truth_from_text(text, provider)
+        return build_truth_from_text(text, provider_factory())
     except ProviderError as e:
         raise BadGateway(str(e)) from e
     except Exception as e:  # noqa: BLE001 — surface upstream LLM/SDK errors cleanly

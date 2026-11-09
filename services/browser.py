@@ -11,7 +11,6 @@ import json
 import os
 import urllib.error
 import urllib.request
-from urllib.parse import urlparse
 
 from services import screenings as _screenings
 from services.errors import Unavailable, UpstreamRefused
@@ -57,21 +56,6 @@ def forward_to_session_server(path: str, method: str = "GET", body: dict | None 
         raise Unavailable("Browser service unreachable") from exc
 
 
-def _host_of(url: str) -> str:
-    """The full host of an absolute http(s) URL, or "" if it is not one.
-
-    Same rule as api/routes.py's _host_of: anything without a scheme and a
-    netloc is not addressable, so it cannot be a sign-in destination.
-    """
-    try:
-        parsed = urlparse(url or "")
-    except ValueError:
-        return ""
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        return ""
-    return parsed.netloc.casefold()
-
-
 def close_session() -> dict:
     """Close the attended session and release the browser.
 
@@ -91,7 +75,7 @@ def close_session() -> dict:
     # Only clear blockers if the session existed and the close was accepted
     if session_url and (data.get("closed", False) or data.get("closing", False)):
         # Clear login blockers for this host
-        host = _host_of(session_url)
+        host = _screenings.host_of(session_url)
         if host:
             signins_cleared = _screenings.clear_login_blockers_for_host(host)
 
