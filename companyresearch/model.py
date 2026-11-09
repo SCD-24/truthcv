@@ -18,7 +18,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 
-from screening.company import validate_company_name
+from identity.company import validate_company_name
 
 # Source classes, strongest first. Used to rank which side of a contradiction
 # is better evidenced — never to auto-resolve one, which would defeat the

@@ -21,7 +21,7 @@ land together:
   ``confirmation`` carries any text/evidence) and only if its normalized URL is
   non-empty. Rows that are neither submitted nor confirmed, and rows whose URL
   normalizes to nothing, never group with anything by URL: they are left
-  strictly alone. The company identity key (``screening.company.company_identity_key``)
+  strictly alone. The company identity key (``identity.company.company_identity_key``)
   ignores a trailing legal-entity suffix, so e.g. "RobCo" and "RobCo GmbH" are
   treated as the same employer for grouping purposes.
 * A bucket holding a single row is UNCHANGED — never reported as a merge.
@@ -77,8 +77,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import applications.store as applications_store  # noqa: E402
 from applications.model import Application  # noqa: E402
-from screening.company import company_identity_key  # noqa: E402
-from screening.url import normalize_application_url  # noqa: E402
+from identity.company import company_identity_key  # noqa: E402
+from identity.url import normalize_application_url  # noqa: E402
 
 
 # --- "populated" / "non-empty" helpers ----------------------------------------
@@ -127,7 +127,7 @@ def _bucket_key(app: Application):
     ``(company identity key, normalized url)`` — but only when it looks like a
     real submission and its URL normalizes to something non-empty; anything else
     is left ungrouped (returns None). The company identity key
-    (``screening.company.company_identity_key``) ignores a trailing
+    (``identity.company.company_identity_key``) ignores a trailing
     legal-entity suffix, so "RobCo" and "RobCo GmbH" bucket together instead of
     a suffix manufacturing a second company.
     """

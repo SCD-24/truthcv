@@ -16,7 +16,7 @@ from agentconfig.boards import (
     posting_url_pattern_error,
     search_url_error,
 )
-from screening.company import company_identity_key
+from identity.company import company_identity_key
 from storage import data_dir
 
 
@@ -543,7 +543,7 @@ def save(cfg: AgentConfig) -> AgentConfig:
 def is_blocked(cfg: AgentConfig, company: str) -> bool:
     """Check if a company is blocked.
 
-    Company matching: identity-key equality (screening.company.company_identity_key),
+    Company matching: identity-key equality (identity.company.company_identity_key),
     the same key used by screening/cooldown.py, so a legal-entity suffix does
     not let a blocked company slip through under a slightly different name
     (blocking "RobCo" also blocks "RobCo GmbH"). Non-string or blank company

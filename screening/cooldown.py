@@ -6,7 +6,7 @@ application has no explicit cooldown field, so one is derived from its
 itself a reason to wait before reconsidering the same company/role. Whichever
 source yields the later expiry wins.
 
-Company matching is by identity key (``screening.company.company_identity_key``),
+Company matching is by identity key (``identity.company.company_identity_key``),
 not raw casefold equality, so a legal-entity suffix does not manufacture a
 second company: an application to "RobCo GmbH" puts "RobCo" in cooldown too.
 """
@@ -21,7 +21,7 @@ from agentconfig.store import is_blocked as agent_config_is_blocked
 from agentconfig.store import load as agent_config_load
 from applications.store import load_all as load_applications
 
-from .company import company_identity_key
+from identity.company import company_identity_key
 from .store import load_all as load_screenings
 
 

@@ -36,8 +36,8 @@ import applications.store as _apps_store
 from runs.derive import counters_by_run as _counters_by_run
 import screening.store as _screening_store
 import agenttools.tools_runs as _tools_runs
-from screening.company import company_identity_key as _company_identity_key
-from screening.company import validate_company_name as _validate_company_name
+from identity.company import company_identity_key as _company_identity_key
+from identity.company import validate_company_name as _validate_company_name
 from screening.cooldown import cooldown as _cooldown
 from screening.model import validate_blocker as _validate_blocker
 from screening.model import validate_verdict as _validate_verdict
@@ -52,8 +52,8 @@ from screening.criteria import holds_for_review as _holds_for_review
 import screening.jev as _jev
 from services.screenings import create_screening as create_or_get_screening
 import services.applications as _applications_service
-from screening.url import is_posting_url as _is_posting_url
-from screening.url import validate_posting_url as _validate_posting_url
+from identity.url import is_posting_url as _is_posting_url
+from identity.url import validate_posting_url as _validate_posting_url
 from truth.answers import canonical_cv as _canonical_cv
 from truth.answers import load as _load_answers
 from truth.emailalias import alias_email as _alias_email
@@ -520,7 +520,7 @@ def record_screening(
     The posting's own ``url`` is mandatory: the operator must be able to open
     the posting to act on this verdict, and the agent cannot apply to a
     posting it has no URL for. The URL is validated by
-    ``screening.url.validate_posting_url``; a ``ValueError`` it raises is left
+    ``identity.url.validate_posting_url``; a ``ValueError`` it raises is left
     to propagate, which is the intended rejection of a call that gave no
     usable URL.
 
@@ -536,7 +536,7 @@ def record_screening(
     ``company`` is mandatory for the same reason: cooldown matching, the
     blocked-company list and the approval queue all key on the employer, so a
     blank one makes the record unusable for every one of them. It is validated
-    by ``screening.company.validate_company_name``, which rejects placeholders
+    by ``identity.company.validate_company_name``, which rejects placeholders
     ("Unknown", "Confidential", an empty string) and pasted URLs.
 
     ``verdict`` must be one of ``VERDICT_VALUES``, or blank if and only if
@@ -738,7 +738,7 @@ def get_profile_answers(company: str = "") -> dict:
     the returned email is unchanged from what is stored.
 
     Alias freezing: once an application already exists for a company (by
-    identity key — see ``screening.company.company_identity_key``), the alias
+    identity key — see ``identity.company.company_identity_key``), the alias
     is computed from THAT application's stored ``company`` string, not the
     company string passed in this call. This keeps the tracking address
     stable for an employer already applied to even if a later call spells

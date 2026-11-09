@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from storage import atomic_write_text, locked
-from screening.company import company_identity_key
+from identity.company import company_identity_key
 from storage import data_dir
 
 from .model import (
@@ -84,7 +84,7 @@ def get(finding_id: str) -> CompanyFinding | None:
 def _key(company: str) -> str:
     """Normalized key used to match findings to the same company.
 
-    Delegates to ``screening.company.company_identity_key``, the single
+    Delegates to ``identity.company.company_identity_key``, the single
     shared company-identity key, so a legal-entity suffix does not split one
     employer's research across two buckets: findings recorded against
     "RobCo GmbH" are matched (and contradiction-checked) against those

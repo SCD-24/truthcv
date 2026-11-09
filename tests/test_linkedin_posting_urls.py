@@ -1,7 +1,7 @@
 import pytest
 
 from screening import store as screening_store
-from screening.url import is_posting_url, linkedin_job_id, posting_dedupe_key
+from identity.url import is_posting_url, linkedin_job_id, posting_dedupe_key
 
 CANON = "https://www.linkedin.com/jobs/view/123456"
 SPAM = [

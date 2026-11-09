@@ -35,7 +35,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import screening.store as screening_store  # noqa: E402
-from screening.url import is_posting_url  # noqa: E402
+from identity.url import is_posting_url  # noqa: E402
 
 _PROTECTED_APPROVALS = frozenset({"applied", "approved"})
 

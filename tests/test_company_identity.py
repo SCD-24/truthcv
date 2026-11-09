@@ -1,6 +1,6 @@
-"""Tests for screening.company.company_identity_key."""
+"""Tests for identity.company.company_identity_key."""
 
-from screening.company import company_identity_key
+from identity.company import company_identity_key
 
 
 def test_robco_suffix_variants_collapse_to_same_key():

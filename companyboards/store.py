@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 from storage import atomic_write_text, data_dir
-from screening.company import company_identity_key
+from identity.company import company_identity_key
 import json
 
 
@@ -138,7 +138,7 @@ def save(boards: dict[str, CompanyBoard]) -> None:
 def _normalize_company(name: str) -> str:
     """Normalize a company name to its identity key for use as the store's dict key.
 
-    Delegates to ``screening.company.company_identity_key`` so a
+    Delegates to ``identity.company.company_identity_key`` so a
     legal-entity suffix (e.g. "RobCo" vs "RobCo GmbH") does not produce two
     board entries for the same employer. See ``load()``/``_reconcile_keys``
     for how already-persisted entries under the old plain

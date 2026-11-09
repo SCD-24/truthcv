@@ -34,7 +34,7 @@ import coverletter.store as letter_store
 import screening.store as screening_store
 from companyresearch.store import open_contradictions
 from screening.cooldown import cooldown
-from screening.url import normalize_application_url
+from identity.url import normalize_application_url
 
 
 def _matches(app, needle: str) -> bool:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from screening.url import normalize_application_url, validate_posting_url
+from identity.url import normalize_application_url, validate_posting_url
 
 
 def test_valid_https_url_returned_stripped():
