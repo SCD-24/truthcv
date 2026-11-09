@@ -15,8 +15,8 @@ from providers.base import LLMProvider
 
 import prompts
 
-from .model import Bullet, Education, Experience, Hobby, Link, Profile, Skill, Truth, make_id
-from . import store
+from truth.model import Bullet, Education, Experience, Hobby, Link, Profile, Skill, Truth, make_id
+from truth import store
 
 _EXTRACTION_SCHEMA: dict[str, Any] = {
     "type": "object",

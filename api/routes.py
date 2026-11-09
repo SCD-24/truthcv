@@ -30,7 +30,7 @@ from truth.answers import Answers
 from truth.answers import load as load_answers
 from truth.answers import save as save_answers
 from truth.document import extract_document_text, extension_for
-from truth.extract import build_truth_from_text
+from services.truth_extract import build_truth_from_text
 from services.inferences import confirm_inferences as confirm_inferences_service
 import services.screenings as screenings_service
 import services.agent_config as agent_config_service

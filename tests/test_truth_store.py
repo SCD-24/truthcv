@@ -19,7 +19,7 @@ from truth import (
     save,
     validate,
 )
-from truth import extract
+from services import truth_extract as extract
 
 
 def _truth() -> Truth:
