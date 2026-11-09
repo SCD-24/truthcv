@@ -15,11 +15,11 @@ from pydantic.alias_generators import to_camel
 
 from agentconfig.boards import posting_url_pattern_error, search_url_error
 from agentconfig.store import DORK_RECENCIES, AgentConfig
-from screening.company import validate_company_name
+from identity.company import validate_company_name
 from screening.model import validate_verdict
 from screening.posting import validate_posting_text
 from screening.role import normalize_role_title, validate_role_title
-from screening.url import validate_posting_url
+from identity.url import validate_posting_url
 
 _RUN_AT_RE = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 _RUN_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}

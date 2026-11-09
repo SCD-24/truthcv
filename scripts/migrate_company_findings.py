@@ -43,7 +43,7 @@ from applications.store import applications_path
 from companyresearch import store as findings_store
 from companyresearch.model import UNCITED
 from storage import atomic_write_text, locked
-from screening.company import validate_company_name
+from identity.company import validate_company_name
 
 CLAIM_ENTITY = "employment_entity"
 CLAIM_RATING = "employer_rating"

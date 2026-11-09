@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from agenttools import tools_ledger
 from api.main import app
 from screening import store
-from screening.url import posting_dedupe_key
+from identity.url import posting_dedupe_key
 
 client = TestClient(app)
 

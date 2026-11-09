@@ -19,7 +19,7 @@ Canonical component names projected from the architecture canvas.
 <!-- generated:end comp:api -->
 
 <!-- generated:start comp:truth-store -->
-- **Truth Store** (`truth-store`) - backend component. Owns truth.yaml, the single origin of all facts (truth/). Extracts text from an uploaded CV in any supported format — PDF (pypdf), DOCX (python-docx), TXT or Markdown — uses a provider to build a structured truth file (every role/company/date/bullet/skill tagged source:uploaded-cv with a stable id), and builds/validates/persists it. Legacy entries tagged linkedin-pdf remain valid. User-confirmed inferences are tagged user-confirmed.
+- **Truth Store** (`truth-store`) - backend component. Owns truth.yaml, the single origin of all facts (truth/). Extracts text from an uploaded CV in any supported format — PDF (pypdf), DOCX (python-docx), TXT or Markdown — and builds, validates and persists the structured truth file (every role/company/date/bullet/skill tagged source:uploaded-cv with a stable id). The LLM step that turns that text into a truth file lives in the Services Layer (services/truth_extract.py), so truth/ imports neither prompts nor providers. Legacy entries tagged linkedin-pdf remain valid. User-confirmed inferences are tagged user-confirmed.
 <!-- generated:end comp:truth-store -->
 
 <!-- generated:start comp:tailor-engine -->
@@ -167,3 +167,7 @@ The per-user truth.yaml: the single, authoritative origin of all facts a CV may 
 <!-- generated:start comp:arbeitnow-api -->
 - **Arbeitnow Job Board API** (`arbeitnow-api`) - custom component. External public Arbeitnow job-board API (https://www.arbeitnow.com/api/job-board-api). Job Feeds (jobfeeds/arbeitnow.py) fetches paginated postings from it on every feed refresh, because arbeitnow is a default, non-removable board (agentconfig/boards.py).
 <!-- generated:end comp:arbeitnow-api -->
+
+<!-- generated:start comp:identity-leaf -->
+- **Identity Leaf** (`identity-leaf`) - backend component.
+<!-- generated:end comp:identity-leaf -->

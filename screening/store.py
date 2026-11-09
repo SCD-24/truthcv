@@ -31,7 +31,7 @@ from .criteria import (
 )
 from .model import APPROVAL_VALUES, Screening, new_id, validate_blocker
 from .rejection_categories import REJECTION_CATEGORIES, normalize_failing_criterion
-from .url import posting_dedupe_key
+from identity.url import posting_dedupe_key
 
 # screening_blocker values that stay operator-actionable: the operator can sign
 # in themselves (login_required). 'not_found', 'expired' and 'unreadable' are

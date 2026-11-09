@@ -9,7 +9,7 @@ one Grafana Labs job accumulated ten records, nine of them rejected by hand.
 The store now refuses the second record (``create_or_get``). This one-off
 script cleans up what the old behaviour already wrote.
 
-Records are grouped by ``screening.url.posting_dedupe_key`` — the same key the
+Records are grouped by ``identity.url.posting_dedupe_key`` — the same key the
 store now enforces on — and each group keeps exactly one record. Records whose
 URL has no key (blank, or no http(s) scheme and host: the legacy importer is
 the one writer that can produce those) are never grouped and never deleted,
@@ -55,7 +55,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import screening.store as screening_store  # noqa: E402
-from screening.url import posting_dedupe_key  # noqa: E402
+from identity.url import posting_dedupe_key  # noqa: E402
 
 # Furthest-advanced decision wins. An unknown approval value sorts with "no
 # decision" rather than raising: a hand-edited file must not stop the cleanup,

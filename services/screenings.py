@@ -11,7 +11,7 @@ own, deliberately different, contracts on top:
   docstring for why.
 * **Validation and error tiers.** Each adapter validates its own inputs
   (the route via ``ScreeningCreate``'s pydantic validators, the tool via
-  direct calls to ``screening.company``/``screening.model``/``screening.posting``)
+  direct calls to ``identity.company``/``screening.model``/``screening.posting``)
   and raises in its own idiom (HTTPException vs ValueError/refusal dict).
   Only the terminal store call is shared.
 """

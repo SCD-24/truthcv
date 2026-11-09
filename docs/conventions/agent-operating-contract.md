@@ -92,6 +92,7 @@ Use these exact names and ids when discussing the architecture.
 | Gmail / Google OAuth API | `gmail-api` | custom |
 | Gmail Response Sync | `gmail-response-sync` | backend |
 | Guardrail Validator | `guardrail-validator` | backend |
+| Identity Leaf | `identity-leaf` | backend |
 | Jev (TypeSafe System One) API | `jev-api` | custom |
 | Job Feeds | `job-feeds` | backend |
 | Job Runner | `job-runner` | backend |
@@ -115,5 +116,5 @@ Use these exact names and ids when discussing the architecture.
 <!-- generated:start cap:system-boundary -->
 ## System Boundary
 
-The declared system consists of 30 component(s) and 102 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
+The declared system consists of 31 component(s) and 101 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
 <!-- generated:end cap:system-boundary -->

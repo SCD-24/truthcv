@@ -30,7 +30,7 @@ from truth.answers import Answers
 from truth.answers import load as load_answers
 from truth.answers import save as save_answers
 from truth.document import extract_document_text, extension_for
-from truth.extract import build_truth_from_text
+from services.truth_extract import build_truth_from_text
 from services.inferences import confirm_inferences as confirm_inferences_service
 import services.screenings as screenings_service
 import services.agent_config as agent_config_service
@@ -75,10 +75,10 @@ from runs import store as runs_store
 from agenttools.tools_funnel import OUTCOMES as _FUNNEL_OUTCOMES
 from runs import url_ledger as _url_ledger
 from runs.derive import board_breakdown_by_run, counters_by_run
-from screening.company import company_identity_key
+from identity.company import company_identity_key
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
-from screening.url import posting_dedupe_key
+from identity.url import posting_dedupe_key
 
 import coverletter.store as letter_store
 from agenttools.letter_operator import generate_cover_letter_for_operator as _generate_letter_for_operator

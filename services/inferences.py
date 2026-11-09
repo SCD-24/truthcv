@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Iterable
 
 import tailor as tailor_engine
-from truth.extract import write_confirmed
+from services.truth_extract import write_confirmed
 
 
 def confirm_inferences(approved: Iterable | None, approved_ids: Iterable[str]) -> None:

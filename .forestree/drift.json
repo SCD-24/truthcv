@@ -18,7 +18,11 @@
     "8991fdff",
     "9b763f27",
     "138d3d40",
-    "067f081d"
+    "067f081d",
+    "c9a7213e",
+    "2880a4a6",
+    "a61aa60a",
+    "ce0de3b8"
   ],
   "dismissals": [],
   "acceptances": [
@@ -49,6 +53,64 @@
           "path": "/api/screenings/rejected"
         }
       }
+    },
+    {
+      "id": "c9a7213e",
+      "title": "New leaf package identity/ is not a declared component",
+      "target": {
+        "type": "component",
+        "id": "screening-engine"
+      },
+      "suggestion": {
+        "action": "create_component",
+        "args": {
+          "id": "identity-leaf",
+          "name": "Identity Leaf",
+          "type": "backend"
+        }
+      }
+    },
+    {
+      "id": "2880a4a6",
+      "title": "Truth extraction workflow moved from truth-store to services-layer",
+      "target": {
+        "type": "component",
+        "id": "truth-store"
+      },
+      "suggestion": {
+        "action": "none",
+        "args": {}
+      }
+    },
+    {
+      "id": "a61aa60a",
+      "title": "services-layer now imports the prompt store",
+      "target": {
+        "type": "connection",
+        "from": "services-layer",
+        "to": "prompt-store"
+      },
+      "suggestion": {
+        "action": "set_connection",
+        "args": {
+          "from": "services-layer",
+          "to": "prompt-store",
+          "protocol": "in-process"
+        }
+      }
+    },
+    {
+      "id": "ce0de3b8",
+      "title": "truth-store no longer calls prompt-store or llm-provider-layer",
+      "target": {
+        "type": "connection",
+        "from": "truth-store",
+        "to": "prompt-store"
+      },
+      "suggestion": {
+        "action": "none",
+        "args": {}
+      }
     }
   ],
   "decisions": [
@@ -71,6 +133,50 @@
         "actor": "external-agent",
         "via": "chat",
         "at": "2026-11-02T12:46:24.966Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "c9a7213e",
+      "title": "New leaf package identity/ is not a declared component",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T10:35:52.788Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "2880a4a6",
+      "title": "Truth extraction workflow moved from truth-store to services-layer",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T10:35:53.159Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "a61aa60a",
+      "title": "services-layer now imports the prompt store",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T10:35:54.053Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "ce0de3b8",
+      "title": "truth-store no longer calls prompt-store or llm-provider-layer",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T10:35:54.849Z",
         "verified": false
       }
     }

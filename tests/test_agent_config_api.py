@@ -800,7 +800,7 @@ def test_get_returns_resolved_boards_for_target_companies(client, data_dir):
 def test_get_returns_resolved_boards_for_suffix_equivalent_target_company(client, data_dir):
     """A target company matches a board recorded under a legal-entity-suffix variant.
 
-    The match is by identity key (screening.company.company_identity_key), so
+    The match is by identity key (identity.company.company_identity_key), so
     a target company "RobCo" also picks up a board recorded as "RobCo GmbH".
     """
     from companyboards import store as board_store

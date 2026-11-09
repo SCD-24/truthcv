@@ -15,6 +15,7 @@ graph TD
     gmail-api["Gmail / Google OAuth API <br/> <small>(CUSTOM)</small>"]
     gmail-response-sync["Gmail Response Sync <br/> <small>(BACKEND)</small>"]
     guardrail-validator["Guardrail Validator <br/> <small>(BACKEND)</small>"]
+    identity-leaf["Identity Leaf <br/> <small>(BACKEND)</small>"]
     jev-api["Jev (TypeSafe System One) API <br/> <small>(CUSTOM)</small>"]
     job-feeds["Job Feeds <br/> <small>(BACKEND)</small>"]
     job-runner["Job Runner <br/> <small>(BACKEND)</small>"]
@@ -119,6 +120,7 @@ graph TD
     services-layer -->|in-process| cover-letter-engine
     services-layer -->|in-process| guardrail-validator
     services-layer -->|in-process| llm-provider-layer
+    services-layer -->|in-process| prompt-store
     services-layer -->|in-process| renderer
     services-layer -->|in-process| screening-engine
     services-layer -->|in-process| storage-leaf
@@ -130,8 +132,6 @@ graph TD
     tailor-engine -->|in-process| prompt-store
     tailor-engine -->|in-process| storage-leaf
     tailor-engine -->|in-process| truth-store
-    truth-store -->|in-process| llm-provider-layer
-    truth-store -->|in-process| prompt-store
     truth-store -->|in-process| storage-leaf
     truth-store -->|file I/O| truth-data-volume
     web-ui -->|HTTP/REST| api
@@ -151,6 +151,7 @@ graph TD
 - [Gmail / Google OAuth API](overview.md) (`gmail-api`, custom)
 - [Gmail Response Sync](overview.md) (`gmail-response-sync`, backend)
 - [Guardrail Validator](overview.md) (`guardrail-validator`, backend)
+- [Identity Leaf](overview.md) (`identity-leaf`, backend)
 - [Jev (TypeSafe System One) API](overview.md) (`jev-api`, custom)
 - [Job Feeds](overview.md) (`job-feeds`, backend)
 - [Job Runner](overview.md) (`job-runner`, backend)
@@ -258,6 +259,7 @@ graph TD
 - [services-layer → cover-letter-engine](interactions/services-layer--cover-letter-engine.md) via `in-process`
 - [services-layer → guardrail-validator](interactions/services-layer--guardrail-validator.md) via `in-process`
 - [services-layer → llm-provider-layer](interactions/services-layer--llm-provider-layer.md) via `in-process`
+- [services-layer → prompt-store](interactions/services-layer--prompt-store.md) via `in-process`
 - [services-layer → renderer](interactions/services-layer--renderer.md) via `in-process`
 - [services-layer → screening-engine](interactions/services-layer--screening-engine.md) via `in-process`
 - [services-layer → storage-leaf](interactions/services-layer--storage-leaf.md) via `in-process`
@@ -269,8 +271,6 @@ graph TD
 - [tailor-engine → prompt-store](interactions/tailor-engine--prompt-store.md) via `in-process`
 - [tailor-engine → storage-leaf](interactions/tailor-engine--storage-leaf.md) via `in-process`
 - [tailor-engine → truth-store](interactions/tailor-engine--truth-store.md) via `in-process`
-- [truth-store → llm-provider-layer](interactions/truth-store--llm-provider-layer.md) via `in-process`
-- [truth-store → prompt-store](interactions/truth-store--prompt-store.md) via `in-process`
 - [truth-store → storage-leaf](interactions/truth-store--storage-leaf.md) via `in-process`
 - [truth-store → truth-data-volume](interactions/truth-store--truth-data-volume.md) via `file I/O`
 - [web-ui → api](interactions/web-ui--api.md) via `HTTP/REST`

@@ -10,7 +10,7 @@ from __future__ import annotations
 import runs.store as _runs_store
 from agentconfig.store import load as _agent_config_load
 from screening import store as _screening_store
-from screening.url import is_posting_url, posting_dedupe_key
+from identity.url import is_posting_url, posting_dedupe_key
 
 
 def _strip_fragment(url: str) -> str:

@@ -4,7 +4,7 @@ import json
 
 import pytest
 from companyboards import store
-from screening.company import company_identity_key
+from identity.company import company_identity_key
 
 
 def test_record_and_load():
