@@ -20,7 +20,18 @@ from mcpschema import input_schema
 from companyresearch.claim_migration import migrate_claims_if_needed
 from screening.purge_unreadable import purge_unreadable_once
 from services import screenings
-from services.errors import Conflict, NotFound, Refused, ServiceError, Unavailable
+from services.errors import (
+    BadGateway,
+    BadRequest,
+    Conflict,
+    Forbidden,
+    InternalError,
+    NotFound,
+    Refused,
+    ServiceError,
+    Unavailable,
+    UpstreamRefused,
+)
 from storage import data_dir
 
 from .config import cors_origins, port, public_url, static_dir
@@ -229,6 +240,21 @@ async def _service_error_handler(request: Request, exc: ServiceError):
         detail = exc.payload
     elif isinstance(exc, Unavailable):
         status_code = 503
+        detail = str(exc)
+    elif isinstance(exc, UpstreamRefused):
+        status_code = exc.status
+        detail = exc.detail
+    elif isinstance(exc, BadRequest):
+        status_code = 400
+        detail = str(exc)
+    elif isinstance(exc, Forbidden):
+        status_code = 403
+        detail = str(exc)
+    elif isinstance(exc, InternalError):
+        status_code = 500
+        detail = str(exc)
+    elif isinstance(exc, BadGateway):
+        status_code = 502
         detail = str(exc)
     else:  # pragma: no cover - defensive: an unmapped ServiceError subclass
         status_code = 500

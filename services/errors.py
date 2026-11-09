@@ -46,3 +46,49 @@ class Refused(ServiceError):
 
 class Unavailable(ServiceError):
     """A required backend/dependency is unavailable. Maps to HTTP 503."""
+
+
+class BadRequest(ServiceError):
+    """The request is malformed or its input is invalid. Maps to HTTP 400.
+
+    Exists so extracted route logic can keep the 400 its handlers returned
+    before the move without importing FastAPI.
+    """
+
+
+class Forbidden(ServiceError):
+    """The caller is not allowed to do this. Maps to HTTP 403.
+
+    Exists so extracted route logic can keep the 403 its handlers returned
+    before the move without importing FastAPI.
+    """
+
+
+class InternalError(ServiceError):
+    """An unexpected server-side failure with a client-safe message. Maps to HTTP 500.
+
+    Exists so extracted route logic can keep an explicit 500 detail string,
+    rather than falling through to the handler's defensive default.
+    """
+
+
+class BadGateway(ServiceError):
+    """An upstream dependency answered badly or not at all. Maps to HTTP 502.
+
+    Exists so extracted route logic can keep the 502 its handlers returned
+    before the move without importing FastAPI.
+    """
+
+
+class UpstreamRefused(ServiceError):
+    """An upstream service refused the call; relay its answer unchanged.
+
+    ``status`` and ``detail`` are the upstream HTTP status and detail, passed
+    through verbatim, because some routes proxy a third party's status code
+    (e.g. 401/429) and clients depend on seeing it.
+    """
+
+    def __init__(self, status: int, detail: dict | str):
+        super().__init__(status, detail)
+        self.status = status
+        self.detail = detail
