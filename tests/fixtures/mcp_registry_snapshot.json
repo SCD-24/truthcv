@@ -1,0 +1,658 @@
+{
+  "mcp_registry": {
+    "check_cooldown": {
+      "description": "Checks whether a company/role is in cooldown.",
+      "inputSchema": {
+        "properties": {
+          "company": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "company"
+        ],
+        "type": "object"
+      }
+    },
+    "check_gmail_responses": {
+      "description": "Runs a Gmail response-tracking sync and returns a summary: skipped (true when the sync was throttled and did nothing this call), processed (messages processed this sync, 0 when skipped), applied (status transitions auto-applied by THIS sync from Jev-confirmed employer replies \u2014 not the lifetime total), and pending (suggestions currently awaiting operator review). Call this once at the start of a scheduled run. Errors when Gmail response-tracking isn't configured and opted in \u2014 that's expected when the operator hasn't enabled it, and not a run failure.",
+      "inputSchema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      }
+    },
+    "filter_unscreened_urls": {
+      "description": "Given candidate posting URLs (urls), returns {unscreened: [...], dropped: [...]}: unscreened are those not already screened, in input order, deduplicated, with URL fragments ignored. dropped lists every other non-empty URL as {url, reason, duplicate_of?} with reason not_a_posting, duplicate (duplicate_of is the earlier URL) or previously_screened, so unscreened + dropped accounts for every input. Call before opening postings.",
+      "inputSchema": {
+        "properties": {
+          "urls": {
+            "type": "array"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    "finish_application": {
+      "description": "Notes the outcome of one application (url, outcome, note) on the run record. Non-terminal: never ends the run or changes its status. Pass your run_id.",
+      "inputSchema": {
+        "properties": {
+          "note": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    "finish_phase": {
+      "description": "Reports progress on one discovery channel (feed, direct or dork) mid-run, WITHOUT ending the run \u2014 use this to check in or leave a note partway through, not just at the end. May raise (and record nothing) when this channel's coverage looks short and, per turns_remaining, there is still enough run left to act on it \u2014 the same discipline as finish_run, but scoped to one channel and never terminal.",
+      "inputSchema": {
+        "properties": {
+          "channel": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "turns_remaining": {
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    "finish_run": {
+      "description": "Call this before exiting \u2014 including when you are stopping EARLY, not only on a normal finish. Pass an honest stopped_reason describing where you stopped (e.g. 'apply cap reached', 'browser session died', 'no more postings found'). A run that ends without calling this is indistinguishable from one that crashed.",
+      "inputSchema": {
+        "properties": {
+          "item_errors": {
+            "type": "array"
+          },
+          "items_failed": {
+            "type": "integer"
+          },
+          "note": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "stopped_reason": {
+            "type": "string"
+          },
+          "turns_remaining": {
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    "generate_cover_letter": {
+      "description": "Generates a guardrailed, per-role cover letter, as TEXT. A letter generated in-run is never a file: paste it into the form. Only an operator-approved queue item carries a document to upload.",
+      "inputSchema": {
+        "properties": {
+          "company": {
+            "type": "string"
+          },
+          "denied_texts": {
+            "type": "array"
+          },
+          "length": {
+            "type": "string"
+          },
+          "paragraphs": {
+            "type": "array"
+          },
+          "posting": {
+            "type": "string"
+          },
+          "preset_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "posting",
+          "length"
+        ],
+        "type": "object"
+      }
+    },
+    "get_approved_applications": {
+      "description": "Returns the postings the operator approved for this run to apply to. Pass your run_id (from start_run) so the list is capped for this run and every returned item is claimed by it \u2014 a shorter list than you expected means the per-run cap was reached, not that work was lost; call it again on a later run for the rest. An entry with a non-empty blocked_reason must NOT be applied to \u2014 report it instead, and it never counts against the cap. Every entry that is going out carries the operator's letter twice: cover_letter (the text, to be submitted verbatim) and cover_letter_path (a PDF of that same text on the data volume, to upload where the form has a place for a document). A null cover_letter_path means the letter exists only as text \u2014 check it before passing it to an upload. cover_letter_asset_id is that file's bare name, and cover_letter_download_url fetches it over HTTP for a client that cannot see the data volume; the browser can see it, so the path is what you use. NEVER upload it through a control that already holds the CV unless the page visibly accumulates files (a list of filenames, an 'Add another' affordance): a control showing one filename will REPLACE the CV, and an application that arrives with the cover letter filed as the resume and no CV is worse than one with no letter. When in doubt, keep the CV and paste the text.",
+      "inputSchema": {
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    "get_canonical_cv": {
+      "description": "Returns the stored canonical CV asset to attach.",
+      "inputSchema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      }
+    },
+    "get_company_findings": {
+      "description": "Returns every finding recorded for a company and its open contradictions. A non-empty open_contradictions means the company must NOT be applied to until the operator resolves it.",
+      "inputSchema": {
+        "properties": {
+          "company": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "company"
+        ],
+        "type": "object"
+      }
+    },
+    "get_job_profiles": {
+      "description": "Returns the configured job search profiles and their full criteria (salary band, remote model, employment country, and the rest).",
+      "inputSchema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      }
+    },
+    "get_profile_answers": {
+      "description": "Returns the operator's canonical screening answers from the answers store. Never assume or hard-code any of these \u2014 always call this tool. Pass company \u2014 the employing entity for the application currently being filled in \u2014 so the returned email is the per-company tracking address for that employer. Type the returned email verbatim; never construct, edit, or 'correct' an address yourself. Omitting company returns the plain address, which is correct only when no specific application is being filled in.",
+      "inputSchema": {
+        "properties": {
+          "company": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    "recommend_salary": {
+      "description": "Given the matched profile's name (and optionally a derived proposed figure), returns the operator's salary ask for that profile, clamped to its configured band.",
+      "inputSchema": {
+        "properties": {
+          "profile_name": {
+            "type": "string"
+          },
+          "proposed": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "profile_name"
+        ],
+        "type": "object"
+      }
+    },
+    "record_application": {
+      "description": "Records a submitted application and its evidence trail. Pass company and role, or a screening_id to inherit them from the approved queue item. Pass your run_id (from start_run) on every call, so the application is attributed to your run and counted in its coverage numbers.",
+      "inputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "application_url": {
+            "type": "string"
+          },
+          "applied_date": {
+            "type": "string"
+          },
+          "ats": {
+            "type": "string"
+          },
+          "attachments": {
+            "type": "array"
+          },
+          "capture_method": {
+            "type": "string"
+          },
+          "company": {
+            "type": "string"
+          },
+          "confirmation": {
+            "type": "object"
+          },
+          "fields_submitted": {
+            "type": "array"
+          },
+          "method": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "posting": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "screening": {
+            "type": "object"
+          },
+          "screening_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "submission_type": {
+            "type": "string"
+          },
+          "submitted": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    "record_company_board": {
+      "description": "Records a target company's careers URL and ATS once verified on the employer's own site.",
+      "inputSchema": {
+        "properties": {
+          "ats": {
+            "type": "string"
+          },
+          "careers_url": {
+            "type": "string"
+          },
+          "company": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "company",
+          "careers_url"
+        ],
+        "type": "object"
+      }
+    },
+    "record_company_finding": {
+      "description": "Records one sourced, dated company research finding (claim is one of employment_entity, employer_rating, other \u2014 other requires claim_label). Every field is required except as_of, note and claim_label. source_url must be the page the claim was actually read from \u2014 a company-level claim must be traceable. source_class is one of the ranked classes, strongest first: audited_accounts, regulatory_filing, listed_bond_price, company_statement, press, review_site, unattributed \u2014 pick the strongest source actually available, not the first one found. as_of is the date the SOURCE is dated and must be left empty when the source carries no date \u2014 never inferred, never today's date.",
+      "inputSchema": {
+        "properties": {
+          "as_of": {
+            "type": "string"
+          },
+          "claim": {
+            "type": "string"
+          },
+          "claim_label": {
+            "type": "string"
+          },
+          "company": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "source_class": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "company",
+          "claim",
+          "value",
+          "source_url",
+          "source_class"
+        ],
+        "type": "object"
+      }
+    },
+    "record_discovery_coverage": {
+      "description": "Records one board or query's discovery coverage for this run: which channel (feed, direct or dork), which board, and its status (searched, empty, login_walled, blocked, extraction_failed, skipped or deferred), plus how many postings it found. 'extraction_failed' means the board was reachable and not walled, but harvest could not extract or read its results \u2014 never report it as 'empty' or 'blocked'. 'deferred' means not searched this run because of a deliberate pause (e.g. Google cooldown/rate-limit), queued for the next run. Call ONE TIME per board or query you searched. A board you never call this for is read by the operator as 'not reached', not as searched-and-empty \u2014 so an entry left uncalled is itself an honest coverage gap, and a board you never reached must NOT be reported as empty. 'empty' means the search ran and genuinely matched nothing; 'blocked' means the board or query was reachable but the results could not be read (CAPTCHA, consent interstitial, bot wall) \u2014 reporting a blocked board as empty hides a broken channel. Pass tier (api, harvest or llm, or '' when not applicable) to record which extraction tier produced the postings.",
+      "inputSchema": {
+        "properties": {
+          "board": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "postings_found": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    "record_postings_seen": {
+      "description": "Reports how many job postings you have looked at \u2014 the ONE coverage number that cannot be counted from the records you write, because a posting you skipped on cooldown, as a duplicate, or because it was already screened leaves no record behind. Call it as you go with the number seen since your last call: it ADDS to the run total, it does not set it. Screenings recorded, blocked, queued for approval and applications submitted are counted automatically from your records and must not be reported here.",
+      "inputSchema": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    "record_run_note": {
+      "description": "Leaves a free-text note on the run record for context that is not captured by the run's coverage numbers \u2014 the postings-seen count you report with record_postings_seen, or the screening and application records the rest is counted from.",
+      "inputSchema": {
+        "properties": {
+          "note": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    "record_screening": {
+      "description": "Records one screening verdict. company, role and url are ALL required and the call is rejected, storing nothing, without a usable value for each: company is the employing entity (never a placeholder like \"Unknown\"), role is the job title as posted, url is the posting's own URL. verdict is required and must be exactly rejected, passed or deferred \u2014 UNLESS the posting could not be read at all (403, login wall, dead link, expired listing), in which case leave verdict empty and pass screening_blocker instead, set to one of: login_required, unreadable, not_found, expired. Never guess a verdict for a posting you could not read \u2014 that fabricates an evaluation that never happened. You must also pass posting_text \u2014 the posting exactly as you read it \u2014 because the operator will draft the cover letter from it days later, on a page the agent never sees. A 'passed' or 'deferred' verdict is REJECTED, storing nothing, when it has no usable posting text (a real posting body, not a login wall or a 404 page). A posting you could not read takes a screening_blocker instead. For a passed or deferred verdict, also pass profile (the enabled JobProfile name you screened against), remote_arrangement (what the posting itself states \u2014 remote, hybrid, on_site, or unstated), language_requirement (any language the posting explicitly requires, or '' for none), and the posting's own stated evidence for its other hard requirements: salary_stated (the posting's stated salary or range), employment_country_stated (the posting's stated employment country), role_type_stated (the posting's stated role type, e.g. contract vs permanent), and eor_stated (yes, no, or unstated \u2014 whether the posting requires an EOR/PEO employer of record) \u2014 profile and remote_arrangement are required and the call is rejected without them; the rest are optional and '' means the posting stated nothing on that point. Evidence that contradicts ANY of the named profile's six hard requirements \u2014 remote model, working language, salary floor, employment country, rejected role types, or EOR \u2014 is stored as an automatic rejection (verdict downgraded to rejected), not an error to retry. There is one record per posting per profile: a record without a profile, or any passed/deferred record, covers the posting for every profile; created:false means the posting is already covered, so count it as a skip. Pass your run_id (from start_run) on EVERY call, so this screening is attributed to your run and the run's coverage counters reflect the work you actually did. For a rejected verdict, pass failing_criterion as exactly one of remote_model, working_language, salary_floor, employment_country, rejected_role_types, eor_allowed, role_fit, posting_age, cooldown, other, and put the specifics in reason; other values are normalized server-side.",
+      "inputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "company": {
+            "type": "string"
+          },
+          "cooldown_expires": {
+            "type": "string"
+          },
+          "employment_country_stated": {
+            "type": "string"
+          },
+          "eor_stated": {
+            "type": "string"
+          },
+          "failing_criterion": {
+            "type": "string"
+          },
+          "language_requirement": {
+            "type": "string"
+          },
+          "posted_date": {
+            "type": "string"
+          },
+          "posting_text": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "remote_arrangement": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "role_type_stated": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "salary_stated": {
+            "type": "string"
+          },
+          "screened_date": {
+            "type": "string"
+          },
+          "screening_blocker": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "role",
+          "company",
+          "verdict"
+        ],
+        "type": "object"
+      }
+    },
+    "record_source_funnel": {
+      "description": "Reports this run's per-source funnel, REPLACING any earlier report (send the full picture each time). run_id: your run. sources: one row per source {source, channel (feed, direct or dork), postings_seen, previously_screened, not_a_posting, duplicate, failed, for_review, rejected, blocked}; postings_seen must equal the sum of the seven outcome columns or the source is reported back as a mismatch. totals: the same counts over UNIQUE URLs across all sources. urls: the ledger [{url, outcome (one of the seven outcome columns), detail, sources: [{source, channel}]}], capped at 1000 entries. Returns {recorded, mismatches, truncated}.",
+      "inputSchema": {
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array"
+          },
+          "totals": {
+            "type": "object"
+          },
+          "urls": {
+            "type": "array"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    "report_apply_failure": {
+      "description": "Records why an approved application could not be completed. The item stays queued: if the failure is login_required it is held until the operator signs in to that host, otherwise it is retried on the next run. When the form sat behind a sign-in or registration wall, also pass blocker='login_required' and signin_url (the login page URL) \u2014 that is what tells the operator which site to sign in to. Never create an account yourself.",
+      "inputSchema": {
+        "properties": {
+          "blocker": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "screening_id": {
+            "type": "string"
+          },
+          "signin_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "screening_id",
+          "error"
+        ],
+        "type": "object"
+      }
+    },
+    "start_run": {
+      "description": "Call this ONCE, at the very start of a run, with the run_id given in your prompt. Keep passing that same run_id on every subsequent tool call that accepts one. Safe to call again with the same run_id if you are unsure whether you already did \u2014 it will not reset your coverage counters.",
+      "inputSchema": {
+        "properties": {
+          "apply_cap": {
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "trigger": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    }
+  },
+  "rest_tools": {
+    "check_cooldown": {
+      "params": [
+        "company",
+        "role"
+      ]
+    },
+    "check_gmail_responses": {
+      "params": []
+    },
+    "generate_cover_letter": {
+      "params": [
+        "posting",
+        "length",
+        "denied_texts",
+        "paragraphs",
+        "provider",
+        "company",
+        "preset_id"
+      ]
+    },
+    "get_canonical_cv": {
+      "params": []
+    },
+    "get_company_findings": {
+      "params": [
+        "company"
+      ]
+    },
+    "get_job_profiles": {
+      "params": []
+    },
+    "get_profile_answers": {
+      "params": [
+        "company"
+      ]
+    },
+    "recommend_salary": {
+      "params": [
+        "profile_name",
+        "proposed"
+      ]
+    },
+    "record_application": {
+      "params": [
+        "company",
+        "role",
+        "application_url",
+        "screening_id",
+        "applied_date",
+        "submission_type",
+        "method",
+        "status",
+        "posting",
+        "ats",
+        "capture_method",
+        "profile",
+        "notes",
+        "fields_submitted",
+        "confirmation",
+        "screening",
+        "attachments",
+        "submitted",
+        "run_id",
+        "fields"
+      ]
+    },
+    "record_company_board": {
+      "params": [
+        "company",
+        "careers_url",
+        "ats",
+        "status"
+      ]
+    },
+    "record_company_finding": {
+      "params": [
+        "company",
+        "claim",
+        "value",
+        "source_url",
+        "source_class",
+        "as_of",
+        "note",
+        "claim_label"
+      ]
+    },
+    "record_screening": {
+      "params": [
+        "url",
+        "role",
+        "company",
+        "verdict",
+        "failing_criterion",
+        "reason",
+        "cooldown_expires",
+        "source",
+        "screened_date",
+        "posting_text",
+        "posted_date",
+        "screening_blocker",
+        "run_id",
+        "profile",
+        "remote_arrangement",
+        "language_requirement",
+        "salary_stated",
+        "employment_country_stated",
+        "role_type_stated",
+        "eor_stated",
+        "fields"
+      ]
+    }
+  }
+}
