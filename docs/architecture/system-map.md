@@ -18,11 +18,11 @@ graph TD
     identity-leaf["Identity Leaf <br/> <small>(BACKEND)</small>"]
     jev-api["Jev (TypeSafe System One) API <br/> <small>(CUSTOM)</small>"]
     job-feeds["Job Feeds <br/> <small>(BACKEND)</small>"]
-    job-runner["Job Runner <br/> <small>(BACKEND)</small>"]
+    job-runner["Background Tasks <br/> <small>(BACKEND)</small>"]
     keyword-vocabulary["Keyword Vocabulary <br/> <small>(BACKEND)</small>"]
     llm-provider-layer["LLM Provider Layer <br/> <small>(BACKEND)</small>"]
     llm-provider-service["LLM Provider Service <br/> <small>(CUSTOM)</small>"]
-    mcpschema-leaf["MCP Schema Leaf <br/> <small>(LIBRARY)</small>"]
+    mcpschema-leaf["MCP Schema Leaf <br/> <small>(BACKEND)</small>"]
     onboarding-store["Onboarding Store <br/> <small>(BACKEND)</small>"]
     prompt-store["Prompt Store <br/> <small>(BACKEND)</small>"]
     renderer["Renderer <br/> <small>(BACKEND)</small>"]
@@ -159,11 +159,11 @@ graph TD
 - [Identity Leaf](overview.md) (`identity-leaf`, backend)
 - [Jev (TypeSafe System One) API](overview.md) (`jev-api`, custom)
 - [Job Feeds](overview.md) (`job-feeds`, backend)
-- [Job Runner](overview.md) (`job-runner`, backend)
+- [Background Tasks](overview.md) (`job-runner`, backend)
 - [Keyword Vocabulary](overview.md) (`keyword-vocabulary`, backend)
 - [LLM Provider Layer](overview.md) (`llm-provider-layer`, backend)
 - [LLM Provider Service](overview.md) (`llm-provider-service`, custom)
-- [MCP Schema Leaf](overview.md) (`mcpschema-leaf`, library)
+- [MCP Schema Leaf](overview.md) (`mcpschema-leaf`, backend)
 - [Onboarding Store](overview.md) (`onboarding-store`, backend)
 - [Prompt Store](overview.md) (`prompt-store`, backend)
 - [Renderer](overview.md) (`renderer`, backend)

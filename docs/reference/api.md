@@ -22,8 +22,8 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) - not ex
 | **PUT** | `/api/applications/{id}/cv` | Save edited CV content for an application and re-render its pdf/docx (guardrail-checked). |
 | **PUT** | `/api/applications/{id}/cover-letter` | Save edited cover-letter content for an application and re-render its pdf/docx. |
 | **GET** | `/api/applications/page` | One page of applications, server-sorted and paginated. Query: limit (25), offset (0, negative clamped to 0), sort (date), direction (desc). Returns {applications, total, limit, offset, sort, direction}; 400 on an invalid sort/direction. |
-| **GET** | `/api/runs` | One page of agent runs, newest first. `limit` (default 50; 0 or negative means no limit) and `offset` (default 0, clamped at 0, applied before the limit). Returns {runs, total, limit, offset}; `total` counts every run currently retained, which a capped page cannot report. An offset past the end is an empty page, not an error. Only the 200 most recent runs are retained (runs.store trims on write), so `total` is a count of what is kept, not of every run ever. Read in-process from runs.store on the data volume, not proxied to the supervisor. |
-| **GET** | `/api/runs/{run_id}` | One agent run record by id, read in-process from runs.store.get; 404 when unknown. |
+| **GET** | `/api/runs` | One page of agent runs, newest first. `limit` (default 50; 0 or negative means no limit) and `offset` (default 0, clamped at 0, applied before the limit). Returns {runs, total, limit, offset}; `total` counts every run currently retained, which a capped page cannot report. An offset past the end is an empty page, not an error. Only the 200 most recent runs are retained (truthcv.domain.runs.store trims on write), so `total` is a count of what is kept, not of every run ever. Read in-process from truthcv.domain.runs.store on the data volume, not proxied to the supervisor. |
+| **GET** | `/api/runs/{run_id}` | One agent run record by id, read in-process from truthcv.domain.runs.store.get; 404 when unknown. |
 | **POST** | `/api/runs/{run_id}/stop` | Stop a running run: cancels via the agent supervisor if it owns the run (outcome "cancelling"), otherwise closes the orphaned record as failed/orphaned. Returns RunStopResult {outcome, run}; 404 if unknown, 409 if not running. |
 | **POST** | `/api/extract` | LLM extracts structured truth.yaml from the uploaded PDF text. |
 | **GET** | `/api/truth` | Return the current truth.yaml for the Review step. |
@@ -34,8 +34,8 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) - not ex
 | **POST** | `/api/cover-letter` | Generate a guardrail-truthful cover letter (tone, length). Returns {blocked, unverifiable, pdfUrl, docxUrl}; blocked if any factual claim fails truth validation. |
 | **GET** | `/api/profile` | Saved-profile status ({hasProfile}) so the wizard can offer "use saved profile" and skip re-upload. |
 | **GET** | `/api/download/{name}` | Download a rendered artifact (CV/cover-letter PDF or DOCX) by filename. |
-| **GET** | `/api/profile/answers` | Return the canonical ATS screening answers stored in truth.answers. |
-| **PUT** | `/api/profile/answers` | Partially update the canonical ATS screening answers in truth.answers; returns the merged answers. |
+| **GET** | `/api/profile/answers` | Return the canonical ATS screening answers stored in truthcv.domain.truth.answers. |
+| **PUT** | `/api/profile/answers` | Partially update the canonical ATS screening answers in truthcv.domain.truth.answers; returns the merged answers. |
 | **POST** | `/api/screenings/deletions` | Delete many screenings in one call; reports per-id outcomes. Operator-only — not an agent route and not an MCP tool. |
 | **POST** | `/api/upload` | Upload a CV as PDF, DOCX, TXT or Markdown (multipart); backend extracts text per format and stores the file under its own extension. |
 | **GET** | `/api/agent/llm-credentials` | Agent-token-authenticated credential handoff for the unattended agent. Returns provider, wire format, auth type, token, model and base URL for the configured agent route; serves all four connection cards. |
@@ -71,7 +71,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) - not ex
 | **DELETE** | `/api/prompt-presets/{id}` | Delete a preset (204); 404 if unknown, seeded presets refused |
 | **POST** | `/api/prompt-presets/validate` | Validate a fragment_ids set, returning conflicts without saving |
 | **PUT** | `/api/prompt-presets/{id}/default` | Mark a preset as the default; 404 if unknown |
-| **POST** | `/api/prompt-presets` | Create a new prompt preset (api/prompt_routes.py) |
+| **POST** | `/api/prompt-presets` | Create a new prompt preset (truthcv/adapters/http/prompt_routes.py) |
 | **PUT** | `/api/prompt-presets/{id}` | Update an existing prompt preset (body: PromptPresetIn; id taken from the path); returns PromptPresetOut |
 | **DELETE** | `/api/prompt-presets/{id}` | Delete a user prompt preset (204); seeded presets rejected with 400, unknown id 404 |
 | **PUT** | `/api/prompt-presets/{id}/default` | Mark the given prompt preset as the default; returns the updated preset |
@@ -84,7 +84,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) - not ex
 | **GET** | `/api/settings/jev` | Read the Jev key status and screening toggle |
 | **PUT** | `/api/settings/jev` | Update the Jev key and screening toggle |
 | **POST** | `/api/settings/jev/test` | Test the configured Jev key |
-| **POST** | `/mcp` | Streamable-HTTP JSON-RPC MCP tool surface (agenttools/mcp_app.py) used by the Application Agent container; in-network only. |
+| **POST** | `/mcp` | Streamable-HTTP JSON-RPC MCP tool surface (truthcv/adapters/mcp/mcp_app.py) used by the Application Agent container; in-network only. |
 | **DELETE** | `/api/prompt-fragments/{id}` | Delete a user prompt fragment by id; 204 on success, 404 if unknown, 400 if seeded/undeletable |
 | **GET** | `/api/screenings` | Every screening record, most recent first; optional ?approval= narrows to the queue. |
 | **POST** | `/api/screenings` | Create a screening record from client-supplied fields. |

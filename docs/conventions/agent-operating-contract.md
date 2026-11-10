@@ -95,11 +95,11 @@ Use these exact names and ids when discussing the architecture.
 | Identity Leaf | `identity-leaf` | backend |
 | Jev (TypeSafe System One) API | `jev-api` | custom |
 | Job Feeds | `job-feeds` | backend |
-| Job Runner | `job-runner` | backend |
+| Background Tasks | `job-runner` | backend |
 | Keyword Vocabulary | `keyword-vocabulary` | backend |
 | LLM Provider Layer | `llm-provider-layer` | backend |
 | LLM Provider Service | `llm-provider-service` | custom |
-| MCP Schema Leaf | `mcpschema-leaf` | library |
+| MCP Schema Leaf | `mcpschema-leaf` | backend |
 | Onboarding Store | `onboarding-store` | backend |
 | Prompt Store | `prompt-store` | backend |
 | Renderer | `renderer` | backend |

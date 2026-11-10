@@ -70,7 +70,7 @@
         "widgets": [
           {
             "data": {
-              "text": "FastAPI backend (api/) that serves the static React bundle and exposes the wizard REST routes. Orchestrates the pipeline: PDF upload → truth extraction → job tailoring → guardrail validation → render/download. Configured entirely from env / .env at container start (no secrets entered in the UI)."
+              "text": "FastAPI backend (truthcv/adapters/http/) that serves the static React bundle and exposes the wizard REST routes. Its route handlers only parse and validate input, call one Services Layer function and translate the result to HTTP; the Services Layer orchestrates the pipeline: PDF upload → truth extraction → job tailoring → guardrail validation → render/download. Configured entirely from env / .env at container start (no secrets entered in the UI). Routes are split into one module per resource (truthcv/adapters/http/*_routes.py) and registered in match order by truthcv/adapters/http/routes.py; request and response models live in the truthcv/adapters/http/schemas/ package. The same process mounts the MCP tool surface from truthcv/adapters/mcp/, the only permitted import between the two adapters."
             },
             "h": 180,
             "id": "widget-1783591752373-0",
@@ -145,12 +145,12 @@
                   "path": "/api/download/{name}"
                 },
                 {
-                  "desc": "Return the canonical ATS screening answers stored in truth.answers.",
+                  "desc": "Return the canonical ATS screening answers stored in truthcv.domain.truth.answers.",
                   "method": "GET",
                   "path": "/api/profile/answers"
                 },
                 {
-                  "desc": "Partially update the canonical ATS screening answers in truth.answers; returns the merged answers.",
+                  "desc": "Partially update the canonical ATS screening answers in truthcv.domain.truth.answers; returns the merged answers.",
                   "method": "PUT",
                   "path": "/api/profile/answers"
                 },
@@ -288,13 +288,13 @@
                   "key": "OLLAMA_HOST"
                 },
                 {
-                  "desc": "Fernet master key (URL-safe base64, 32 bytes) that encrypts saved provider API keys in ./data/secrets.enc. Generate via `python -m api.genkey`. Missing/invalid disables the secrets feature (falls back to env-var credentials).",
+                  "desc": "Fernet master key (URL-safe base64, 32 bytes) that encrypts saved provider API keys in ./data/secrets.enc. Generate via `python -m truthcv.adapters.http.genkey`. Missing/invalid disables the secrets feature (falls back to env-var credentials).",
                   "example": "aQ2mA0m3wF6b8xk2s9v0Xr7uY1zC4dN6pQ8rS0tU2w=",
                   "key": "ENCRYPTION_KEY"
                 },
                 {
                   "desc": "Directory of the built React bundle to serve.",
-                  "example": "api/static",
+                  "example": "truthcv/adapters/http/static",
                   "key": "STATIC_DIR"
                 },
                 {
@@ -313,7 +313,7 @@
                   "key": "DATA_DIR"
                 },
                 {
-                  "desc": "Host-side port the compose stack publishes the UI on (docker-compose.yml ${APP_PORT:-5627}). Display only — the app still binds PORT (8080) inside the container. Read by api.config.public_url() to print a reachable URL at startup. Unset in local dev, where it falls back to PORT.",
+                  "desc": "Host-side port the compose stack publishes the UI on (docker-compose.yml ${APP_PORT:-5627}). Display only — the app still binds PORT (8080) inside the container. Read by truthcv.adapters.http.config.public_url() to print a reachable URL at startup. Unset in local dev, where it falls back to PORT.",
                   "example": "8123",
                   "key": "PUBLIC_PORT"
                 },
@@ -392,7 +392,7 @@
           },
           {
             "data": {
-              "text": "POST /api/render accepts optional approvals:{approvedClaimIds[],deniedClaimIds[]}. On a guardrail block it returns blockedClaims:[{claimId,experienceId,text,tokens[]}] — each a whole draft bullet that tripped the guardrail. Approving a claim makes its text allowed for THAT render only (merged into the matching scope's allowed set before guardrail.validate); denying drops the bullet from the rendered draft. Approvals must NOT be persisted to truth.yaml (write_confirmed is NOT used here) because the user generates many tailored CVs/cover letters from one immutable truth file. claimId is a deterministic hash of experienceId+text so the frontend can round-trip decisions."
+              "text": "POST /api/render accepts optional approvals:{approvedClaimIds[],deniedClaimIds[]}. On a guardrail block it returns blockedClaims:[{claimId,experienceId,text,tokens[]}] — each a whole draft bullet that tripped the guardrail. Approving a claim makes its text allowed for THAT render only (merged into the matching scope's allowed set before truthcv.engines.guardrail.validate); denying drops the bullet from the rendered draft. Approvals must NOT be persisted to truth.yaml (write_confirmed is NOT used here) because the user generates many tailored CVs/cover letters from one immutable truth file. claimId is a deterministic hash of experienceId+text so the frontend can round-trip decisions."
             },
             "h": 200,
             "id": "widget-1783610638800-5",
@@ -514,7 +514,7 @@
             "data": {
               "routes": [
                 {
-                  "desc": "Streamable-HTTP JSON-RPC MCP tool surface (agenttools/mcp_app.py) used by the Application Agent container; in-network only.",
+                  "desc": "Streamable-HTTP JSON-RPC MCP tool surface (truthcv/adapters/mcp/mcp_app.py) used by the Application Agent container; in-network only.",
                   "method": "POST",
                   "path": "/mcp"
                 }
@@ -615,12 +615,12 @@
             "data": {
               "routes": [
                 {
-                  "desc": "One page of agent runs, newest first. `limit` (default 50; 0 or negative means no limit) and `offset` (default 0, clamped at 0, applied before the limit). Returns {runs, total, limit, offset}; `total` counts every run currently retained, which a capped page cannot report. An offset past the end is an empty page, not an error. Only the 200 most recent runs are retained (runs.store trims on write), so `total` is a count of what is kept, not of every run ever. Read in-process from runs.store on the data volume, not proxied to the supervisor.",
+                  "desc": "One page of agent runs, newest first. `limit` (default 50; 0 or negative means no limit) and `offset` (default 0, clamped at 0, applied before the limit). Returns {runs, total, limit, offset}; `total` counts every run currently retained, which a capped page cannot report. An offset past the end is an empty page, not an error. Only the 200 most recent runs are retained (truthcv.domain.runs.store trims on write), so `total` is a count of what is kept, not of every run ever. Read in-process from truthcv.domain.runs.store on the data volume, not proxied to the supervisor.",
                   "method": "GET",
                   "path": "/api/runs"
                 },
                 {
-                  "desc": "One agent run record by id, read in-process from runs.store.get; 404 when unknown.",
+                  "desc": "One agent run record by id, read in-process from truthcv.domain.runs.store.get; 404 when unknown.",
                   "method": "GET",
                   "path": "/api/runs/{run_id}"
                 },
@@ -736,7 +736,7 @@
                   "path": "/api/prompt-presets/{id}/default"
                 },
                 {
-                  "desc": "Create a new prompt preset (api/prompt_routes.py)",
+                  "desc": "Create a new prompt preset (truthcv/adapters/http/prompt_routes.py)",
                   "method": "POST",
                   "path": "/api/prompt-presets"
                 },
@@ -860,7 +860,7 @@
         "widgets": [
           {
             "data": {
-              "text": "Owns truth.yaml, the single origin of all facts (truth/). Extracts text from an uploaded CV in any supported format — PDF (pypdf), DOCX (python-docx), TXT or Markdown — and builds, validates and persists the structured truth file (every role/company/date/bullet/skill tagged source:uploaded-cv with a stable id). The LLM step that turns that text into a truth file lives in the Services Layer (services/truth_extract.py), so truth/ imports neither prompts nor providers. Legacy entries tagged linkedin-pdf remain valid. User-confirmed inferences are tagged user-confirmed."
+              "text": "Owns truth.yaml, the single origin of all facts (truthcv/domain/truth/). Extracts text from an uploaded CV in any supported format — PDF (pypdf), DOCX (python-docx), TXT or Markdown — and builds, validates and persists the structured truth file (every role/company/date/bullet/skill tagged source:uploaded-cv with a stable id). The LLM step that turns that text into a truth file lives in the Services Layer (truthcv/services/truth_extract.py), so truthcv/domain/truth/ imports neither prompts nor providers. Legacy entries tagged linkedin-pdf remain valid. User-confirmed inferences are tagged user-confirmed."
             },
             "h": 180,
             "id": "widget-1783591752580-0",
@@ -981,7 +981,7 @@
           },
           {
             "data": {
-              "text": "TruthEntry.kind ∈ {role, company, date, bullet, skill, hobby}; TruthEntry.source ∈ {linkedin-pdf, user-confirmed, uploaded-cv}. The store enforces non-empty, unique id and valid kind/source. Persisted YAML is wrapped as { entries: [...] }, not a bare list. Hobbies (truth/model.py Hobby) are extracted from the uploaded CV as a standalone hobbies[] list, guardrail-validated like any other fact, and used by the Cover Letter Engine only — never rendered into the CV."
+              "text": "TruthEntry.kind ∈ {role, company, date, bullet, skill, hobby}; TruthEntry.source ∈ {linkedin-pdf, user-confirmed, uploaded-cv}. The store enforces non-empty, unique id and valid kind/source. Persisted YAML is wrapped as { entries: [...] }, not a bare list. Hobbies (truthcv/domain/truth/model.py Hobby) are extracted from the uploaded CV as a standalone hobbies[] list, guardrail-validated like any other fact, and used by the Cover Letter Engine only — never rendered into the CV."
             },
             "h": 200,
             "id": "widget-1788554941333-4",
@@ -1024,7 +1024,7 @@
           }
         ]
       },
-      "description": "Owns truth.yaml, the single origin of all facts (truth/). Extracts text from an uploaded CV in any supported format — PDF (pypdf), DOCX (python-docx), TXT or Markdown — and builds, validates and persists the structured truth file (every role/company/date/bullet/skill tagged source:uploaded-cv with a stable id). The LLM step that turns that text into a truth file lives in the Services Layer (services/truth_extract.py), so truth/ imports neither prompts nor providers. Legacy entries tagged linkedin-pdf remain valid. User-confirmed inferences are tagged user-confirmed.",
+      "description": "Owns truth.yaml, the single origin of all facts (truthcv/domain/truth/). Extracts text from an uploaded CV in any supported format — PDF (pypdf), DOCX (python-docx), TXT or Markdown — and builds, validates and persists the structured truth file (every role/company/date/bullet/skill tagged source:uploaded-cv with a stable id). The LLM step that turns that text into a truth file lives in the Services Layer (truthcv/services/truth_extract.py), so truthcv/domain/truth/ imports neither prompts nor providers. Legacy entries tagged linkedin-pdf remain valid. User-confirmed inferences are tagged user-confirmed.",
       "id": "truth-store",
       "name": "Truth Store",
       "type": "backend"
@@ -1034,7 +1034,7 @@
         "widgets": [
           {
             "data": {
-              "text": "Tailors a CV to a specific posting (tailor/). Extracts the posting's keywords/requirements via a provider, then selects, reorders, and rephrases ONLY entries referenced by id from truth.yaml. Detects any claim the LLM wants to add that is not already in the truth file and surfaces it as an approval checklist (confirm-inferences step); nothing unapproved reaches the CV."
+              "text": "Tailors a CV to a specific posting (truthcv/engines/tailor/). Extracts the posting's keywords/requirements via a provider, then selects, reorders, and rephrases ONLY entries referenced by id from truth.yaml. Detects any claim the LLM wants to add that is not already in the truth file and surfaces it as an approval checklist (confirm-inferences step); nothing unapproved reaches the CV."
             },
             "h": 180,
             "id": "widget-1783591752782-0",
@@ -1069,7 +1069,7 @@
         "widgets": [
           {
             "data": {
-              "text": "The core truthfulness guardrail (guardrail/): a pure, deterministic, scoped token-diff of a draft against truth — no LLM. validate(scopes, global_values) returns ok plus BOTH a flat unverifiable[] token list (back-compat) and structured blocked_claims grouping untraceable tokens under the specific source text (bullet) and scope id they came from, so callers can present whole-claim approve/deny. A token is verifiable if it is a stopword or appears (post-tokenization) in its own scope's allowed set (or the caller-supplied global_values — global skills for CV renders; for cover letters the Cover Letter Engine passes every truth value, including hobbies and the profile header, since a letter weaves the whole career). Render-scoped approvals are passed in by merging an approved claim's text into that scope's allowed set for a single render — the guardrail itself never mutates truth."
+              "text": "The core truthfulness guardrail (truthcv/engines/guardrail/): a pure, deterministic, scoped token-diff of a draft against truth — no LLM. validate(scopes, global_values) returns ok plus BOTH a flat unverifiable[] token list (back-compat) and structured blocked_claims grouping untraceable tokens under the specific source text (bullet) and scope id they came from, so callers can present whole-claim approve/deny. A token is verifiable if it is a stopword or appears (post-tokenization) in its own scope's allowed set (or the caller-supplied global_values — global skills for CV renders; for cover letters the Cover Letter Engine passes every truth value, including hobbies and the profile header, since a letter weaves the whole career). Render-scoped approvals are passed in by merging an approved claim's text into that scope's allowed set for a single render — the guardrail itself never mutates truth."
             },
             "h": 180,
             "id": "widget-1783591752977-0",
@@ -1116,7 +1116,7 @@
         "widgets": [
           {
             "data": {
-              "text": "Renders the approved CV from one Jinja-templated ATS-safe HTML source (render/): PDF via WeasyPrint (pure-Python, single column, selectable text) and DOCX via pandoc. Runs an ATS linter before download that warns on multi-column layouts, tables, text-in-images, non-standard headings, missing contact block, and posting keywords absent from the CV. No LLM dependency."
+              "text": "Renders the approved CV from one Jinja-templated ATS-safe HTML source (truthcv/engines/render/): PDF via WeasyPrint (pure-Python, single column, selectable text) and DOCX via pandoc. Runs an ATS linter before download that warns on multi-column layouts, tables, text-in-images, non-standard headings, missing contact block, and posting keywords absent from the CV. No LLM dependency."
             },
             "h": 180,
             "id": "widget-1783591753179-0",
@@ -1154,7 +1154,7 @@
         "widgets": [
           {
             "data": {
-              "text": "Thin LLMProvider abstraction (providers/) with three implementations — anthropic | openai | ollama — selected by the LLM_PROVIDER env var. Interface: complete(system, messages) → str and extract_json(system, messages, schema) → dict. Adding a provider later = one new file; no truthfulness logic depends on which provider is active."
+              "text": "Thin LLMProvider abstraction (truthcv/integrations/providers/) with three implementations — anthropic | openai | ollama — selected by the LLM_PROVIDER env var. Interface: complete(system, messages) → str and extract_json(system, messages, schema) → dict. Adding a provider later = one new file; no truthfulness logic depends on which provider is active."
             },
             "h": 180,
             "id": "widget-1783591753395-0",
@@ -1333,7 +1333,7 @@
         "widgets": [
           {
             "data": {
-              "text": "Guardrailed cover-letter generation (coverletter/). build_letter() asks the LLM (via the provider layer) for a cover letter as tagged paragraphs, each declaring the factual claims it makes. Every claim is validated by the Guardrail Validator against the Truth Store; if any claim is unverifiable the letter is BLOCKED (returns {blocked: true, unverifiable, text: \"\"}). Otherwise the paragraph text is joined and handed to the Renderer for HTML/PDF/DOCX output. Serves /api/cover-letter together with render/."
+              "text": "Guardrailed cover-letter generation (truthcv/engines/coverletter/). build_letter() asks the LLM (via the provider layer) for a cover letter as tagged paragraphs, each declaring the factual claims it makes. Every claim is validated by the Guardrail Validator against the Truth Store; if any claim is unverifiable the letter is BLOCKED (returns {blocked: true, unverifiable, text: \"\"}). Otherwise the paragraph text is joined and handed to the Renderer for HTML/PDF/DOCX output. Serves /api/cover-letter together with truthcv/engines/render/."
             },
             "h": 180,
             "id": "widget-1783605694390-0",
@@ -1403,7 +1403,7 @@
         "widgets": [
           {
             "data": {
-              "text": "Neutral encrypted credential/secrets vault (secretstore/), extracted from the API to break the api↔providers import cycle. Resolves LLM credentials — reading data/secrets.enc (Fernet, gated on ENCRYPTION_KEY) and falling back to environment variables — and persists them via atomic tmp-rename. A leaf that uses truth.store.data_dir only for the data path. Depended on downward by both the API and the LLM Provider Layer."
+              "text": "Neutral encrypted credential/secrets vault (truthcv/infra/secretstore/), extracted from the API to break the api↔providers import cycle. Resolves LLM credentials — reading data/secrets.enc (Fernet, gated on ENCRYPTION_KEY) and falling back to environment variables — and persists them via atomic tmp-rename. A leaf that uses Storage (truthcv.infra.storage data_dir) only for the data path. Depended on downward by both the API and the LLM Provider Layer."
             },
             "h": 180,
             "id": "widget-1783612689915-0",
@@ -1439,7 +1439,7 @@
         "widgets": [
           {
             "data": {
-              "text": "Owns the user's job-application records (applications/) persisted as applications.json on the Truth Data Volume. Each Application tracks a submission (Company, Website, Application URL, Submitted, Submission Type, Reached Out, To Who, Response Received, Method) and OWNS its generated documents: an editable CV and cover letter saved per-application (so old outputs are retained and traceable to the application they went out with). Applications may exist WITHOUT a job posting (General/portal submissions). CRUD helpers use atomic writes mirroring truth/store.py; re-renders edited document content via the Renderer."
+              "text": "Owns the user's job-application records (truthcv/domain/applications/) persisted as applications.json on the Truth Data Volume. Each Application tracks a submission (Company, Website, Application URL, Submitted, Submission Type, Reached Out, To Who, Response Received, Method) and OWNS its generated documents: an editable CV and cover letter saved per-application (so old outputs are retained and traceable to the application they went out with). Applications may exist WITHOUT a job posting (General/portal submissions). CRUD helpers use atomic writes mirroring truthcv/domain/truth/store.py; re-renders edited document content via the Renderer."
             },
             "h": 180,
             "id": "widget-1783684073873-0",
@@ -1827,7 +1827,7 @@
         "widgets": [
           {
             "data": {
-              "text": "External Google service used for the Gmail connection: the OAuth 2.0 browser flow (accounts.google.com authorize, oauth2.googleapis.com/token for the PKCE code exchange and refresh-token renewal) and the Gmail REST API (gmail.googleapis.com/gmail/v1/users/me/profile) read to identify the connected mailbox. Reached over HTTPS with httpx from connections/auth/gmail.py; tokens are persisted via the Secret Store."
+              "text": "External Google service used for the Gmail connection: the OAuth 2.0 browser flow (accounts.google.com authorize, oauth2.googleapis.com/token for the PKCE code exchange and refresh-token renewal) and the Gmail REST API (gmail.googleapis.com/gmail/v1/users/me/profile) read to identify the connected mailbox. Reached over HTTPS with httpx from truthcv/integrations/connections/auth/gmail.py; tokens are persisted via the Secret Store."
             },
             "h": 180,
             "id": "widget-1787568269048-0",
@@ -1864,7 +1864,7 @@
         "widgets": [
           {
             "data": {
-              "text": "Provider connection layer (connections/): a static catalog of connection cards plus per-vendor auth flows. Claude Pro/Max signs in with a PKCE paste-code flow; ChatGPT (OpenAI) signs in with an OAuth device-code flow; Gmail uses Google OAuth 2.0 PKCE. Tokens are persisted encrypted in the Secret Store and refreshed lazily on use."
+              "text": "Provider connection layer (truthcv/integrations/connections/): a static catalog of connection cards plus per-vendor auth flows. Claude Pro/Max signs in with a PKCE paste-code flow; ChatGPT (OpenAI) signs in with an OAuth device-code flow; Gmail uses Google OAuth 2.0 PKCE. Tokens are persisted encrypted in the Secret Store and refreshed lazily on use."
             },
             "h": 180,
             "id": "widget-1787568456174-0",
@@ -1979,7 +1979,7 @@
         "widgets": [
           {
             "data": {
-              "text": "Owns the unattended agent's configuration (agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed, but any board (default or the operator's own) can be switched off, and a disabled board is not searched. Also composes the deterministic dork-style search queries handed to each run (titles, locations, remote terms and recency only; rejected role types are enforced by screening, not search), and supplies built-in search/posting URL presets for known direct boards."
+              "text": "Owns the unattended agent's configuration (truthcv/domain/agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed, but any board (default or the operator's own) can be switched off, and a disabled board is not searched. Also composes the deterministic dork-style search queries handed to each run (titles, locations, remote terms and recency only; rejected role types are enforced by screening, not search), and supplies built-in search/posting URL presets for known direct boards."
             },
             "h": 200,
             "id": "widget-text-agent-config",
@@ -2055,7 +2055,7 @@
         "widgets": [
           {
             "data": {
-              "text": "Screens discovered postings against the active job profile's criteria and records the verdict. Owns the hard-criteria validators (screening/criteria.py): a posting's stated remote arrangement and any explicitly required working language are checked against the profile's remote_model / working_language, and the evidence is stored on the Screening record alongside the profile it was judged against."
+              "text": "Screens discovered postings against the active job profile's criteria and records the verdict. Owns the hard-criteria validators (truthcv/domain/screening/criteria.py): a posting's stated remote arrangement and any explicitly required working language are checked against the profile's remote_model / working_language, and the evidence is stored on the Screening record alongside the profile it was judged against."
             },
             "h": 200,
             "id": "widget-text-screening-engine",
@@ -2073,7 +2073,20 @@
     },
     {
       "canvas": {
-        "widgets": []
+        "widgets": [
+          {
+            "data": {
+              "text": "First-run onboarding state (truthcv/domain/onboarding/): records which setup steps are complete, such as a provider being ready and a CV profile existing, and persists it on the Truth Data Volume through Storage. The API reads and updates it through truthcv/services/onboarding.py."
+            },
+            "h": 200,
+            "id": "widget-text-onboarding-store",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
       },
       "id": "onboarding-store",
       "name": "Onboarding Store",
@@ -2081,7 +2094,20 @@
     },
     {
       "canvas": {
-        "widgets": []
+        "widgets": [
+          {
+            "data": {
+              "text": "Company research findings (truthcv/domain/companyresearch/): structured claims about a company, each with a claim type and source class, keyed by the company identity key from the Identity Leaf. Tracks superseded claims and open contradictions, which screening consults. Persisted on the Truth Data Volume."
+            },
+            "h": 200,
+            "id": "widget-text-company-research",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
       },
       "id": "company-research",
       "name": "Company Research",
@@ -2090,6 +2116,18 @@
     {
       "canvas": {
         "widgets": [
+          {
+            "data": {
+              "text": "Records of unattended agent runs (truthcv/domain/runs/): run lifecycle and status, counters, discovery coverage, and the per-run URL ledger with its channels and outcomes (truthcv/domain/runs/url_ledger.py). Persisted on the Truth Data Volume; only the most recent runs are retained. Run guards and the source funnel live in truthcv/services/runs.py and funnel.py."
+            },
+            "h": 200,
+            "id": "widget-text-run-store",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
           {
             "data": {
               "fields": [
@@ -2135,7 +2173,20 @@
     },
     {
       "canvas": {
-        "widgets": []
+        "widgets": [
+          {
+            "data": {
+              "text": "Keyword vocabulary (truthcv/engines/vocabulary/): the shared keyword data used by tailoring, the guardrail and the renderer's ATS keyword check, persisted on the Truth Data Volume."
+            },
+            "h": 200,
+            "id": "widget-text-keyword-vocabulary",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
       },
       "id": "keyword-vocabulary",
       "name": "Keyword Vocabulary",
@@ -2143,7 +2194,20 @@
     },
     {
       "canvas": {
-        "widgets": []
+        "widgets": [
+          {
+            "data": {
+              "text": "The containerised headful Chromium (browser/ container, served by @playwright/mcp). The Application Agent drives it over in-network HTTP MCP. The API reads, opens and closes the operator browser session through its session-control endpoint via truthcv/services/browser.py."
+            },
+            "h": 200,
+            "id": "widget-text-browser-service",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
       },
       "id": "browser-service",
       "name": "Browser Service",
@@ -2151,7 +2215,20 @@
     },
     {
       "canvas": {
-        "widgets": []
+        "widgets": [
+          {
+            "data": {
+              "text": "Lowest-level file storage (truthcv/infra/storage/): data_dir() resolution (DATA_DIR, default ./data) and atomic, locked file writes used by every store. Imports nothing first-party."
+            },
+            "h": 200,
+            "id": "widget-text-storage-leaf",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
       },
       "id": "storage-leaf",
       "name": "Storage",
@@ -2159,7 +2236,20 @@
     },
     {
       "canvas": {
-        "widgets": []
+        "widgets": [
+          {
+            "data": {
+              "text": "All business logic (truthcv/services/). Both adapters, the HTTP API (truthcv/adapters/http/) and the MCP tool surface (truthcv/adapters/mcp/), parse input, call one service function, and translate its result or a services.errors exception into their wire format. Services never import the adapters or FastAPI, and receive the LLM provider (or a provider factory) from the caller. The layering is enforced by import-linter in pyproject.toml."
+            },
+            "h": 200,
+            "id": "widget-text-services-layer",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
       },
       "id": "services-layer",
       "name": "Services Layer",
@@ -2191,7 +2281,7 @@
         "widgets": [
           {
             "data": {
-              "text": "External third-party Jev (TypeSafe) service at https://api.typesafe.ai/v1/systemone. Screening posts job-posting text to it for hard-requirement cross-checks (screening/jev.py), invoked from the agent tool surface (_evaluate_jev_criteria) and the API's check_key route."
+              "text": "External third-party Jev (TypeSafe) service at https://api.typesafe.ai/v1/systemone. Screening posts job-posting text to it for hard-requirement cross-checks (truthcv/domain/screening/jev.py), invoked from the agent tool surface (_evaluate_jev_criteria) and the API's check_key route."
             },
             "h": 180,
             "id": "widget-1790064185007-0",
@@ -2224,7 +2314,20 @@
     },
     {
       "canvas": {
-        "widgets": []
+        "widgets": [
+          {
+            "data": {
+              "text": "Matches Gmail replies to tracked applications (truthcv/domain/gmailsync/): reads the connected mailbox through the Gmail connection, produces response suggestions, can cross-check them with Jev, and records accepted ones on the Application Tracker. Runs on demand or as a background task."
+            },
+            "h": 200,
+            "id": "widget-text-gmail-response-sync",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
       },
       "id": "gmail-response-sync",
       "name": "Gmail Response Sync",
@@ -2235,7 +2338,7 @@
         "widgets": [
           {
             "data": {
-              "text": "Bounded background job executor (jobs/): a shared thread pool (MAX_WORKERS=4) plus an in-memory, thread-safe registry of Job records. Callers submit a zero-argument callable via submit(kind, fn); it runs on a worker thread and its outcome (result or exception) is recorded on the returned Job. get()/list_jobs() poll registry state. Registry is in-memory only - jobs are not persisted across restarts."
+              "text": "Bounded background job executor (truthcv/infra/background_tasks/): a shared thread pool (MAX_WORKERS=4) plus an in-memory, thread-safe registry of Job records. Callers submit a zero-argument callable via submit(kind, fn); it runs on a worker thread and its outcome (result or exception) is recorded on the returned Job. get()/list_jobs() poll registry state. Registry is in-memory only - jobs are not persisted across restarts."
             },
             "h": 180,
             "id": "widget-1790091508394-0",
@@ -2330,7 +2433,7 @@
         ]
       },
       "id": "job-runner",
-      "name": "Job Runner",
+      "name": "Background Tasks",
       "type": "backend"
     },
     {
@@ -2338,7 +2441,7 @@
         "widgets": [
           {
             "data": {
-              "text": "External public Arbeitnow job-board API (https://www.arbeitnow.com/api/job-board-api). Job Feeds (jobfeeds/arbeitnow.py) fetches paginated postings from it on every feed refresh, because arbeitnow is a default, non-removable board (agentconfig/boards.py)."
+              "text": "External public Arbeitnow job-board API (https://www.arbeitnow.com/api/job-board-api). Job Feeds (truthcv/domain/jobfeeds/arbeitnow.py) fetches paginated postings from it on every feed refresh, because arbeitnow is a default, non-removable board (truthcv/domain/agentconfig/boards.py)."
             },
             "h": 180,
             "id": "widget-1790600842460-0",
@@ -2371,7 +2474,20 @@
     },
     {
       "canvas": {
-        "widgets": []
+        "widgets": [
+          {
+            "data": {
+              "text": "Stdlib-only identity helpers shared by every layer (truthcv/infra/identity/): company identity keys and name validation (company.py) and posting-URL validation, normalisation and dedupe keys (url.py). Imports nothing first-party."
+            },
+            "h": 200,
+            "id": "widget-text-identity-leaf",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
       },
       "id": "identity-leaf",
       "name": "Identity Leaf",
@@ -2379,11 +2495,24 @@
     },
     {
       "canvas": {
-        "widgets": []
+        "widgets": [
+          {
+            "data": {
+              "text": "Stdlib-only MCP input-schema builder (truthcv/infra/mcpschema/): derives each MCP tool's JSON input schema from its Python signature. Used by the MCP tool surface and by the API's MCP endpoints. Imports nothing first-party."
+            },
+            "h": 200,
+            "id": "widget-text-mcpschema-leaf",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
       },
       "id": "mcpschema-leaf",
       "name": "MCP Schema Leaf",
-      "type": "library"
+      "type": "backend"
     }
   ],
   "connections": [

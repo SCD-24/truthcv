@@ -1,5 +1,5 @@
 <!-- generated:start edge:job-runner→job-feeds -->
-# Interaction: Job Runner → Job Feeds
+# Interaction: Background Tasks → Job Feeds
 
 - **Participants:** `job-runner` → `job-feeds`
 - **Transport:** `in-process`

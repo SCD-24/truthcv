@@ -1,5 +1,5 @@
 <!-- generated:start edge:api→job-runner -->
-# Interaction: API → Job Runner
+# Interaction: API → Background Tasks
 
 - **Participants:** `api` → `job-runner`
 - **Transport:** `in-process`

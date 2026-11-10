@@ -24,7 +24,7 @@
 - **Services Layer** (`services-layer`)
 - **Job Feeds** (`job-feeds`)
 - **Gmail Response Sync** (`gmail-response-sync`)
-- **Job Runner** (`job-runner`)
+- **Background Tasks** (`job-runner`)
 
 *No specific widgets have been placed in this group yet. Define guidelines, stack tech, or schemas in the workspace.*
 <!-- generated:end group:truthcv-container-single-docker-image -->
