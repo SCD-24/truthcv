@@ -1,8 +1,5 @@
 <!-- generated:start edge:tailor-engine→truth-store -->
-# Interaction: Tailor Engine → Truth Store
-
-- **Participants:** `tailor-engine` → `truth-store`
-- **Transport:** `in-process`
+> **orphaned - edge removed from architecture.** This interaction no longer exists on the architecture canvas. Restore the connection, or resolve and delete this file.
 <!-- generated:end edge:tailor-engine→truth-store -->
 
 > _Drafted by Aether from source — not human-verified._

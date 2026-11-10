@@ -1,8 +1,5 @@
 <!-- generated:start edge:truth-store→truth-data-volume -->
-# Interaction: Truth Store → Truth Data Volume
-
-- **Participants:** `truth-store` → `truth-data-volume`
-- **Transport:** `file I/O`
+> **orphaned - edge removed from architecture.** This interaction no longer exists on the architecture canvas. Restore the connection, or resolve and delete this file.
 <!-- generated:end edge:truth-store→truth-data-volume -->
 
 > _Drafted by Aether from source — not human-verified._

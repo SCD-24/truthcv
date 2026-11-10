@@ -1,7 +1,7 @@
 <!-- generated:start cap:overview-intro -->
 # Architecture Overview
 
-32 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
+18 component(s) declared on the architecture canvas. Topology: [system-map.md](system-map.md).
 <!-- generated:end cap:overview-intro -->
 
 <!-- generated:start comp:web-ui -->
@@ -28,13 +28,6 @@ Owns truth.yaml, the single origin of all facts (truthcv/domain/truth/). Extract
 **Tech:** Python, pypdf, PyYAML, python-docx
 <!-- generated:end comp:truth-store -->
 
-<!-- generated:start comp:tailor-engine -->
-## Tailor Engine (`tailor-engine`, BACKEND)
-
-Tailors a CV to a specific posting (truthcv/engines/tailor/). Extracts the posting's keywords/requirements via a provider, then selects, reorders, and rephrases ONLY entries referenced by id from truth.yaml. Detects any claim the LLM wants to add that is not already in the truth file and surfaces it as an approval checklist (confirm-inferences step); nothing unapproved reaches the CV.
-
-**Tech:** Python
-<!-- generated:end comp:tailor-engine -->
 
 <!-- generated:start comp:guardrail-validator -->
 ## Guardrail Validator (`guardrail-validator`, BACKEND)
@@ -44,13 +37,6 @@ The core truthfulness guardrail (truthcv/engines/guardrail/): a pure, determinis
 **Tech:** Python
 <!-- generated:end comp:guardrail-validator -->
 
-<!-- generated:start comp:renderer -->
-## Renderer (`renderer`, BACKEND)
-
-Renders the approved CV from one Jinja-templated ATS-safe HTML source (truthcv/engines/render/): PDF via WeasyPrint (pure-Python, single column, selectable text) and DOCX via pandoc. Runs an ATS linter before download that warns on multi-column layouts, tables, text-in-images, non-standard headings, missing contact block, and posting keywords absent from the CV. No LLM dependency.
-
-**Tech:** Python, Jinja2, WeasyPrint, pandoc
-<!-- generated:end comp:renderer -->
 
 <!-- generated:start comp:llm-provider-layer -->
 ## LLM Provider Layer (`llm-provider-layer`, BACKEND)
@@ -89,21 +75,7 @@ External LLM inference reached by the provider layer: Anthropic or OpenAI cloud 
 **Tech:** Anthropic API, OpenAI API, Ollama
 <!-- generated:end comp:llm-provider-service -->
 
-<!-- generated:start comp:cover-letter-engine -->
-## Cover Letter Engine (`cover-letter-engine`, BACKEND)
 
-Guardrailed cover-letter generation (truthcv/engines/coverletter/). build_letter() asks the LLM (via the provider layer) for a cover letter as tagged paragraphs, each declaring the factual claims it makes. Every claim is validated by the Guardrail Validator against the Truth Store; if any claim is unverifiable the letter is BLOCKED (returns {blocked: true, unverifiable, text: ""}). Otherwise the paragraph text is joined and handed to the Renderer for HTML/PDF/DOCX output. Serves /api/cover-letter together with truthcv/engines/render/.
-
-**Tech:** Python
-<!-- generated:end comp:cover-letter-engine -->
-
-<!-- generated:start comp:prompt-store -->
-## Prompt Store (`prompt-store`, BACKEND)
-
-Stores operator-editable prompt fragments and presets as JSON on the truth data volume, layered over seeded records defined in code. Fragments are atomic style blocks grouped into four display slots (voice, structure, opener, rules); any number may be combined in a preset. The default preset marker is stored separately so seeded records are never materialised on disk.
-
-**Tech:** Python
-<!-- generated:end comp:prompt-store -->
 
 <!-- generated:start comp:secret-store -->
 ## Secret Store (`secret-store`, BACKEND)
@@ -113,13 +85,6 @@ Neutral encrypted credential/secrets vault (truthcv/infra/secretstore/), extract
 **Tech:** Python, cryptography (Fernet)
 <!-- generated:end comp:secret-store -->
 
-<!-- generated:start comp:application-tracker -->
-## Application Tracker (`application-tracker`, BACKEND)
-
-Owns the user's job-application records (truthcv/domain/applications/) persisted as applications.json on the Truth Data Volume. Each Application tracks a submission (Company, Website, Application URL, Submitted, Submission Type, Reached Out, To Who, Response Received, Method) and OWNS its generated documents: an editable CV and cover letter saved per-application (so old outputs are retained and traceable to the application they went out with). Applications may exist WITHOUT a job posting (General/portal submissions). CRUD helpers use atomic writes mirroring truthcv/domain/truth/store.py; re-renders edited document content via the Renderer.
-
-**Tech:** Python, PyYAML/JSON
-<!-- generated:end comp:application-tracker -->
 
 <!-- generated:start comp:application-agent -->
 ## Application Agent (`application-agent`, BACKEND)
@@ -137,49 +102,12 @@ External Google service used for the Gmail connection: the OAuth 2.0 browser flo
 **Tech:** Google OAuth 2.0 (PKCE, offline access), Gmail REST API v1, httpx
 <!-- generated:end comp:gmail-api -->
 
-<!-- generated:start comp:connections -->
-## Connections (`connections`, BACKEND)
 
-Provider connection layer (truthcv/integrations/connections/): a static catalog of connection cards plus per-vendor auth flows. Claude Pro/Max signs in with a PKCE paste-code flow; ChatGPT (OpenAI) signs in with an OAuth device-code flow; Gmail uses Google OAuth 2.0 PKCE. Tokens are persisted encrypted in the Secret Store and refreshed lazily on use.
 
-**Tech:** Python, httpx, Google OAuth 2.0 (PKCE)
-<!-- generated:end comp:connections -->
 
-<!-- generated:start comp:agent-config -->
-## Agent Config (`agent-config`, BACKEND)
 
-Owns the unattended agent's configuration (truthcv/domain/agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed, but any board (default or the operator's own) can be switched off, and a disabled board is not searched. Also composes the deterministic dork-style search queries handed to each run (titles, locations, remote terms and recency only; rejected role types are enforced by screening, not search), and supplies built-in search/posting URL presets for known direct boards.
-<!-- generated:end comp:agent-config -->
 
-<!-- generated:start comp:screening-engine -->
-## Screening Engine (`screening-engine`, BACKEND)
 
-Screens discovered postings against the active job profile's criteria and records the verdict. Owns the hard-criteria validators (truthcv/domain/screening/criteria.py): a posting's stated remote arrangement and any explicitly required working language are checked against the profile's remote_model / working_language, and the evidence is stored on the Screening record alongside the profile it was judged against.
-<!-- generated:end comp:screening-engine -->
-
-<!-- generated:start comp:onboarding-store -->
-## Onboarding Store (`onboarding-store`, BACKEND)
-
-First-run onboarding state (truthcv/domain/onboarding/): records which setup steps are complete, such as a provider being ready and a CV profile existing, and persists it on the Truth Data Volume through Storage. The API reads and updates it through truthcv/services/onboarding.py.
-<!-- generated:end comp:onboarding-store -->
-
-<!-- generated:start comp:company-research -->
-## Company Research (`company-research`, BACKEND)
-
-Company research findings (truthcv/domain/companyresearch/): structured claims about a company, each with a claim type and source class, keyed by the company identity key from the Identity Leaf. Tracks superseded claims and open contradictions, which screening consults. Persisted on the Truth Data Volume.
-<!-- generated:end comp:company-research -->
-
-<!-- generated:start comp:run-store -->
-## Run Store (`run-store`, BACKEND)
-
-Records of unattended agent runs (truthcv/domain/runs/): run lifecycle and status, counters, discovery coverage, and the per-run URL ledger with its channels and outcomes (truthcv/domain/runs/url_ledger.py). Persisted on the Truth Data Volume; only the most recent runs are retained. Run guards and the source funnel live in truthcv/services/runs.py and funnel.py.
-<!-- generated:end comp:run-store -->
-
-<!-- generated:start comp:keyword-vocabulary -->
-## Keyword Vocabulary (`keyword-vocabulary`, BACKEND)
-
-Keyword vocabulary (truthcv/engines/vocabulary/): the shared keyword data used by tailoring, the guardrail and the renderer's ATS keyword check, persisted on the Truth Data Volume.
-<!-- generated:end comp:keyword-vocabulary -->
 
 <!-- generated:start comp:browser-service -->
 ## Browser Service (`browser-service`, BACKEND)
@@ -187,23 +115,8 @@ Keyword vocabulary (truthcv/engines/vocabulary/): the shared keyword data used b
 The containerised headful Chromium (browser/ container, served by @playwright/mcp). The Application Agent drives it over in-network HTTP MCP. The API reads, opens and closes the operator browser session through its session-control endpoint via truthcv/services/browser.py.
 <!-- generated:end comp:browser-service -->
 
-<!-- generated:start comp:storage-leaf -->
-## Storage (`storage-leaf`, BACKEND)
 
-Lowest-level file storage (truthcv/infra/storage/): data_dir() resolution (DATA_DIR, default ./data) and atomic, locked file writes used by every store. Imports nothing first-party.
-<!-- generated:end comp:storage-leaf -->
 
-<!-- generated:start comp:services-layer -->
-## Services Layer (`services-layer`, BACKEND)
-
-All business logic (truthcv/services/). Both adapters, the HTTP API (truthcv/adapters/http/) and the MCP tool surface (truthcv/adapters/mcp/), parse input, call one service function, and translate its result or a services.errors exception into their wire format. Services never import the adapters or FastAPI, and receive the LLM provider (or a provider factory) from the caller. The layering is enforced by import-linter in pyproject.toml.
-<!-- generated:end comp:services-layer -->
-
-<!-- generated:start comp:job-feeds -->
-## Job Feeds (`job-feeds`, BACKEND)
-
-API-backed job feeds pulled directly by TruthCV: Remote Rocketship (keyed, opt-in), Arbeitnow (keyless, a default board that is always searched), and per-company ATS APIs. Results are merged and de-duplicated by URL under one shared fetch deadline.
-<!-- generated:end comp:job-feeds -->
 
 <!-- generated:start comp:jev-api -->
 ## Jev (TypeSafe System One) API (`jev-api`, CUSTOM)
@@ -213,19 +126,7 @@ External third-party Jev (TypeSafe) service at https://api.typesafe.ai/v1/system
 **Tech:** TypeSafe System One REST API, HTTPS
 <!-- generated:end comp:jev-api -->
 
-<!-- generated:start comp:gmail-response-sync -->
-## Gmail Response Sync (`gmail-response-sync`, BACKEND)
 
-Matches Gmail replies to tracked applications (truthcv/domain/gmailsync/): reads the connected mailbox through the Gmail connection, produces response suggestions, can cross-check them with Jev, and records accepted ones on the Application Tracker. Runs on demand or as a background task.
-<!-- generated:end comp:gmail-response-sync -->
-
-<!-- generated:start comp:job-runner -->
-## Background Tasks (`job-runner`, BACKEND)
-
-Bounded background job executor (truthcv/infra/background_tasks/): a shared thread pool (MAX_WORKERS=4) plus an in-memory, thread-safe registry of Job records. Callers submit a zero-argument callable via submit(kind, fn); it runs on a worker thread and its outcome (result or exception) is recorded on the returned Job. get()/list_jobs() poll registry state. Registry is in-memory only - jobs are not persisted across restarts.
-
-**Tech:** Python, concurrent.futures ThreadPoolExecutor
-<!-- generated:end comp:job-runner -->
 
 <!-- generated:start comp:arbeitnow-api -->
 ## Arbeitnow Job Board API (`arbeitnow-api`, CUSTOM)
@@ -235,14 +136,143 @@ External public Arbeitnow job-board API (https://www.arbeitnow.com/api/job-board
 **Tech:** Arbeitnow public REST API, HTTPS
 <!-- generated:end comp:arbeitnow-api -->
 
-<!-- generated:start comp:identity-leaf -->
-## Identity Leaf (`identity-leaf`, BACKEND)
+<!-- generated:start comp:application-pipeline -->
+## Application Pipeline (`application-pipeline`, BACKEND)
 
-Stdlib-only identity helpers shared by every layer (truthcv/infra/identity/): company identity keys and name validation (company.py) and posting-URL validation, normalisation and dedupe keys (url.py). Imports nothing first-party.
-<!-- generated:end comp:identity-leaf -->
+Everything the unattended agent's work is recorded in and judged by: configuration, screening, runs, company research and the application ledger. Five parts:
 
-<!-- generated:start comp:mcpschema-leaf -->
-## MCP Schema Leaf (`mcpschema-leaf`, BACKEND)
+APPLICATION TRACKER (truthcv/domain/applications/): owns the user's job-application records, persisted as applications.json on the Truth Data Volume. Each Application tracks a submission (Company, Website, Application URL, Submitted, Submission Type, Reached Out, To Who, Response Received, Method) and OWNS its generated documents: an editable CV and cover letter saved per-application (so old outputs are retained and traceable to the application they went out with). Applications may exist WITHOUT a job posting (General/portal submissions). CRUD helpers use atomic writes mirroring truthcv/domain/truth/store.py; re-renders edited document content via Document Generation's Renderer.
 
-Stdlib-only MCP input-schema builder (truthcv/infra/mcpschema/): derives each MCP tool's JSON input schema from its Python signature. Used by the MCP tool surface and by the API's MCP endpoints. Imports nothing first-party.
-<!-- generated:end comp:mcpschema-leaf -->
+SCREENING ENGINE (truthcv/domain/screening/): screens discovered postings against the active job profile's criteria and records the verdict. Owns the hard-criteria validators (criteria.py): a posting's stated remote arrangement and any explicitly required working language are checked against the profile's remote_model / working_language, and the evidence is stored on the Screening record alongside the profile it was judged against. Posts posting text to the Jev API for hard-requirement cross-checks (jev.py).
+
+RUN STORE (truthcv/domain/runs/): records of unattended agent runs - run lifecycle and status, counters, discovery coverage, and the per-run URL ledger with its channels and outcomes (url_ledger.py). Only the most recent runs are retained. Run guards and the source funnel live in truthcv/services/runs.py and funnel.py.
+
+AGENT CONFIG (truthcv/domain/agentconfig/): owns the unattended agent's configuration - autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed, but any board (default or the operator's own) can be switched off, and a disabled board is not searched. Also composes the deterministic dork-style search queries handed to each run (titles, locations, remote terms and recency only; rejected role types are enforced by screening, not search), and supplies built-in search/posting URL presets for known direct boards.
+
+COMPANY RESEARCH (truthcv/domain/companyresearch/): structured claims about a company, each with a claim type and source class, keyed by the company identity key from the identity helpers. Tracks superseded claims and open contradictions, which screening consults.
+
+**Tech:** Python, PyYAML/JSON
+
+**Internal structure:**
+
+```mermaid
+flowchart LR
+    run-store["Run Store<br/><small>truthcv/domain/runs/</small>"]
+    screening-engine["Screening Engine<br/><small>truthcv/domain/screening/</small>"]
+    application-tracker["Application Tracker<br/><small>truthcv/domain/applications/</small>"]
+    agent-config["Agent Config<br/><small>truthcv/domain/agentconfig/</small>"]
+    company-research["Company Research<br/><small>truthcv/domain/companyresearch/</small>"]
+    run-store --> screening-engine
+    run-store --> application-tracker
+    screening-engine --> application-tracker
+    screening-engine --> agent-config
+    screening-engine --> company-research
+    application-tracker --> company-research
+```
+<!-- generated:end comp:application-pipeline -->
+
+<!-- generated:start comp:document-generation -->
+## Document Generation (`document-generation`, BACKEND)
+
+Produces the tailored CV and cover letter from the truth file. Four parts:
+
+TAILOR ENGINE (truthcv/engines/tailor/): tailors a CV to a specific posting. Extracts the posting's keywords/requirements via a provider, then selects, reorders, and rephrases ONLY entries referenced by id from truth.yaml. Detects any claim the LLM wants to add that is not already in the truth file and surfaces it as an approval checklist (confirm-inferences step); nothing unapproved reaches the CV.
+
+COVER LETTER ENGINE (truthcv/engines/coverletter/): guardrailed cover-letter generation. build_letter() asks the LLM (via the provider layer) for a cover letter as tagged paragraphs, each declaring the factual claims it makes. Every claim is validated by the Guardrail Validator against the Truth Store; if any claim is unverifiable the letter is BLOCKED (returns {blocked: true, unverifiable, text: ""}). Otherwise the paragraph text is joined and handed to the Renderer for HTML/PDF/DOCX output. Serves /api/cover-letter together with truthcv/engines/render/.
+
+RENDERER (truthcv/engines/render/): renders the approved CV from one Jinja-templated ATS-safe HTML source: PDF via WeasyPrint (pure-Python, single column, selectable text) and DOCX via pandoc. Runs an ATS linter before download that warns on multi-column layouts, tables, text-in-images, non-standard headings, missing contact block, and posting keywords absent from the CV. No LLM dependency.
+
+PROMPT STORE: stores operator-editable prompt fragments and presets as JSON on the truth data volume, layered over seeded records defined in code. Fragments are atomic style blocks grouped into four display slots (voice, structure, opener, rules); any number may be combined in a preset. The default preset marker is stored separately so seeded records are never materialised on disk.
+
+**Tech:** Python, Jinja2, WeasyPrint, pandoc
+
+**Internal structure:**
+
+```mermaid
+flowchart LR
+    tailor-engine["Tailor Engine<br/><small>truthcv/engines/tailor/</small>"]
+    cover-letter-engine["Cover Letter Engine<br/><small>truthcv/engines/coverletter/</small>"]
+    renderer["Renderer<br/><small>truthcv/engines/render/ - PDF, DOCX, ATS lint</small>"]
+    prompt-store["Prompt Store<br/><small>prompt fragments and presets</small>"]
+    tailor-engine --> prompt-store
+    cover-letter-engine --> prompt-store
+    cover-letter-engine --> renderer
+    renderer --> prompt-store
+```
+<!-- generated:end comp:document-generation -->
+
+<!-- generated:start comp:integrations -->
+## Integrations (`integrations`, BACKEND)
+
+Everything that reaches a third-party service on the app's behalf, other than LLM completions. Three parts:
+
+CONNECTIONS (truthcv/integrations/connections/): the provider connection layer - a static catalog of connection cards plus per-vendor auth flows. Claude Pro/Max signs in with a PKCE paste-code flow; ChatGPT (OpenAI) signs in with an OAuth device-code flow; Gmail uses Google OAuth 2.0 PKCE. Tokens are persisted encrypted in the Secret Store and refreshed lazily on use.
+
+GMAIL RESPONSE SYNC (truthcv/domain/gmailsync/): matches Gmail replies to tracked applications - reads the connected mailbox through the Gmail connection, produces response suggestions, can cross-check them with Jev, and records accepted ones on the Application Pipeline's tracker. Runs on demand or as a background task.
+
+JOB FEEDS: API-backed job feeds pulled directly by TruthCV - Remote Rocketship (keyed, opt-in), Arbeitnow (keyless, a default board that is always searched), and per-company ATS APIs. Results are merged and de-duplicated by URL under one shared fetch deadline.
+
+**Tech:** Python, httpx, Google OAuth 2.0 (PKCE)
+
+**Internal structure:**
+
+```mermaid
+flowchart LR
+    gmail-response-sync["Gmail Response Sync<br/><small>truthcv/domain/gmailsync/</small>"]
+    connections["Connections<br/><small>truthcv/integrations/connections/ - OAuth flows</small>"]
+    job-feeds["Job Feeds<br/><small>Remote Rocketship, Arbeitnow, ATS APIs</small>"]
+    gmail-response-sync --> connections
+```
+<!-- generated:end comp:integrations -->
+
+<!-- generated:start comp:orchestration -->
+## Orchestration (`orchestration`, BACKEND)
+
+All business logic plus the background executor that runs it off the request thread. Two parts:
+
+SERVICES LAYER (truthcv/services/): both adapters, the HTTP API (truthcv/adapters/http/) and the MCP tool surface (truthcv/adapters/mcp/), parse input, call one service function, and translate its result or a services.errors exception into their wire format. Services never import the adapters or FastAPI, and receive the LLM provider (or a provider factory) from the caller. The layering is enforced by import-linter in pyproject.toml.
+
+BACKGROUND TASKS (truthcv/infra/background_tasks/): a bounded background job executor - a shared thread pool (MAX_WORKERS=4) plus an in-memory, thread-safe registry of Job records. Callers submit a zero-argument callable via submit(kind, fn); it runs on a worker thread and its outcome (result or exception) is recorded on the returned Job. get()/list_jobs() poll registry state. The registry is in-memory only - jobs are not persisted across restarts. Used for Gmail sync and feed refresh.
+
+**Tech:** Python, concurrent.futures ThreadPoolExecutor, import-linter
+
+**Internal structure:**
+
+```mermaid
+flowchart LR
+    services-layer["Services Layer<br/><small>truthcv/services/ - all business logic</small>"]
+    background-tasks["Background Tasks<br/><small>thread pool + in-memory Job registry</small>"]
+    services-layer --> background-tasks
+```
+<!-- generated:end comp:orchestration -->
+
+<!-- generated:start comp:storage -->
+## Storage & Shared Leaves (`storage`, BACKEND)
+
+The lowest layer: file storage and the small shared helpers every other component may depend on. Five parts:
+
+STORAGE (truthcv/infra/storage/): lowest-level file storage - data_dir() resolution (DATA_DIR, default ./data) and atomic, locked file writes used by every store. Imports nothing first-party. The only component that touches the Truth Data Volume.
+
+ONBOARDING STORE (truthcv/domain/onboarding/): first-run onboarding state - records which setup steps are complete, such as a provider being ready and a CV profile existing. The API reads and updates it through truthcv/services/onboarding.py.
+
+KEYWORD VOCABULARY (truthcv/engines/vocabulary/): the shared keyword data used by tailoring, the guardrail and the renderer's ATS keyword check.
+
+IDENTITY HELPERS (truthcv/infra/identity/): stdlib-only identity helpers shared by every layer - company identity keys and name validation (company.py) and posting-URL validation, normalisation and dedupe keys (url.py). Imports nothing first-party.
+
+MCP SCHEMA BUILDER (truthcv/infra/mcpschema/): stdlib-only MCP input-schema builder that derives each MCP tool's JSON input schema from its Python signature. Used by the MCP tool surface and by the API's MCP endpoints. Imports nothing first-party.
+
+**Tech:** Python (stdlib only for the infra leaves)
+
+**Internal structure:**
+
+```mermaid
+flowchart LR
+    storage-leaf["Storage<br/><small>truthcv/infra/storage/ - atomic file writes</small>"]
+    onboarding-store["Onboarding Store<br/><small>truthcv/domain/onboarding/</small>"]
+    keyword-vocabulary["Keyword Vocabulary<br/><small>truthcv/engines/vocabulary/</small>"]
+    identity-helpers["Identity Helpers<br/><small>truthcv/infra/identity/</small>"]
+    mcp-schema-builder["MCP Schema Builder<br/><small>truthcv/infra/mcpschema/</small>"]
+    onboarding-store --> storage-leaf
+    keyword-vocabulary --> storage-leaf
+```
+<!-- generated:end comp:storage -->

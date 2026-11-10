@@ -1,8 +1,5 @@
 <!-- generated:start edge:cover-letter-engine→renderer -->
-# Interaction: Cover Letter Engine → Renderer
-
-- **Participants:** `cover-letter-engine` → `renderer`
-- **Transport:** `in-process`
+> **orphaned - edge removed from architecture.** This interaction no longer exists on the architecture canvas. Restore the connection, or resolve and delete this file.
 <!-- generated:end edge:cover-letter-engine→renderer -->
 
 > _Drafted by Aether from source — not human-verified._

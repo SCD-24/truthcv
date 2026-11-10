@@ -1,8 +1,5 @@
 <!-- generated:start edge:renderer→truth-data-volume -->
-# Interaction: Renderer → Truth Data Volume
-
-- **Participants:** `renderer` → `truth-data-volume`
-- **Transport:** `file I/O`
+> **orphaned - edge removed from architecture.** This interaction no longer exists on the architecture canvas. Restore the connection, or resolve and delete this file.
 <!-- generated:end edge:renderer→truth-data-volume -->
 
 > _Drafted by Aether from source — not human-verified._

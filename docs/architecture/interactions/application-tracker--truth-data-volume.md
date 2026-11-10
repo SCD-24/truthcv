@@ -1,8 +1,5 @@
 <!-- generated:start edge:application-tracker→truth-data-volume -->
-# Interaction: Application Tracker → Truth Data Volume
-
-- **Participants:** `application-tracker` → `truth-data-volume`
-- **Transport:** `file I/O`
+> **orphaned - edge removed from architecture.** This interaction no longer exists on the architecture canvas. Restore the connection, or resolve and delete this file.
 <!-- generated:end edge:application-tracker→truth-data-volume -->
 
 > _Drafted by Aether from source — not human-verified._

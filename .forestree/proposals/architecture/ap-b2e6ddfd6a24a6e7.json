@@ -1,0 +1,2109 @@
+{
+  "id": "ap-b2e6ddfd6a24a6e7",
+  "status": "pending",
+  "title": "Point architecture at the truthcv package layout (post Phase 1-5 refactor)",
+  "rationale": "Phases 1-5 (PRs #223-#228, main c217dd0) moved every Python package under one truthcv/ package and renamed jobs to background_tasks. Behaviour is unchanged.\n\nOnly description text changes here, and only for the 26 components listed. The other 6 (web-ui, truth-data-volume, llm-provider-service, prompt-store, application-agent, job-feeds) are left out because nothing in them is stale, and they stay as they are. No connection changes: the drift decisions already applied them. Every widget, tech list, route table and schema is carried over unchanged except for the text fixes below.\n\nWhat changes:\n(1) Old code paths in 16 descriptions now name the new truthcv/ paths. Examples: api/ → truthcv/adapters/http/, truth/ → truthcv/domain/truth/, jobs/ → truthcv/infra/background_tasks/. URL paths (/api/...) and data file names (truth.yaml, applications.json) do not change.\n(2) API: the description says handlers are now thin and the Services Layer orchestrates. It also describes the per-resource route modules, the schemas/ package, and the MCP mount (the one allowed import between the adapters).\n(3) Secret Store: corrects a statement that was wrong before this work. It gets data_dir from Storage, not from truth.store.\n(4) 10 components that had no description get one: onboarding-store, company-research, run-store, keyword-vocabulary, browser-service, storage-leaf, services-layer, gmail-response-sync, identity-leaf and mcpschema-leaf.\n(5) Job Runner is renamed to \"Background Tasks\" to match the new package name. Its id stays job-runner.\n\nAfter approval, the generated docs (docs/architecture/**, plus the generated blocks in docs/domain/glossary.md, docs/reference/api.md and docs/reference/data-model.md) should be regenerated from the canvas.",
+  "components": [
+    {
+      "id": "api",
+      "name": "API",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "FastAPI backend (truthcv/adapters/http/) that serves the static React bundle and exposes the wizard REST routes. Its route handlers only parse and validate input, call one Services Layer function and translate the result to HTTP; the Services Layer orchestrates the pipeline: PDF upload → truth extraction → job tailoring → guardrail validation → render/download. Configured entirely from env / .env at container start (no secrets entered in the UI). Routes are split into one module per resource (truthcv/adapters/http/*_routes.py) and registered in match order by truthcv/adapters/http/routes.py; request and response models live in the truthcv/adapters/http/schemas/ package. The same process mounts the MCP tool surface from truthcv/adapters/mcp/, the only permitted import between the two adapters."
+            },
+            "h": 180,
+            "id": "widget-1783591752373-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Python",
+                "FastAPI",
+                "Uvicorn"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1783591752477-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "LLM extracts structured truth.yaml from the uploaded PDF text.",
+                  "method": "POST",
+                  "path": "/api/extract"
+                },
+                {
+                  "desc": "Return the current truth.yaml for the Review step.",
+                  "method": "GET",
+                  "path": "/api/truth"
+                },
+                {
+                  "desc": "Save user corrections to truth.yaml (Review step); after this it is trusted.",
+                  "method": "PUT",
+                  "path": "/api/truth"
+                },
+                {
+                  "desc": "Extract posting keywords and produce an id-referenced tailored draft; returns any inferences needing confirmation.",
+                  "method": "POST",
+                  "path": "/api/tailor"
+                },
+                {
+                  "desc": "Approve/reject inferred claims; approved ones are written back into truth.yaml as source:user-confirmed.",
+                  "method": "POST",
+                  "path": "/api/confirm-inferences"
+                },
+                {
+                  "desc": "Guardrail-check the draft then render PDF/DOCX. On block, returns blockedClaims:[{claimId,experienceId,text,tokens[]}] (whole flagged bullets, not loose tokens; keeps unverifiable[] for back-compat). Accepts optional approvals:{approvedClaimIds[],deniedClaimIds[]} — approved claims count as allowed for THIS render only (no truth.yaml write), denied claims are dropped from the draft.",
+                  "method": "POST",
+                  "path": "/api/render"
+                },
+                {
+                  "desc": "Generate a guardrail-truthful cover letter (tone, length). Returns {blocked, unverifiable, pdfUrl, docxUrl}; blocked if any factual claim fails truth validation.",
+                  "method": "POST",
+                  "path": "/api/cover-letter"
+                },
+                {
+                  "desc": "Saved-profile status ({hasProfile}) so the wizard can offer \"use saved profile\" and skip re-upload.",
+                  "method": "GET",
+                  "path": "/api/profile"
+                },
+                {
+                  "desc": "Download a rendered artifact (CV/cover-letter PDF or DOCX) by filename.",
+                  "method": "GET",
+                  "path": "/api/download/{name}"
+                },
+                {
+                  "desc": "Return the canonical ATS screening answers stored in truthcv.domain.truth.answers.",
+                  "method": "GET",
+                  "path": "/api/profile/answers"
+                },
+                {
+                  "desc": "Partially update the canonical ATS screening answers in truthcv.domain.truth.answers; returns the merged answers.",
+                  "method": "PUT",
+                  "path": "/api/profile/answers"
+                },
+                {
+                  "desc": "Delete many screenings in one call; reports per-id outcomes. Operator-only — not an agent route and not an MCP tool.",
+                  "method": "POST",
+                  "path": "/api/screenings/deletions"
+                },
+                {
+                  "desc": "Upload a CV as PDF, DOCX, TXT or Markdown (multipart); backend extracts text per format and stores the file under its own extension.",
+                  "method": "POST",
+                  "path": "/api/upload"
+                },
+                {
+                  "desc": "Agent-token-authenticated credential handoff for the unattended agent. Returns provider, wire format, auth type, token, model and base URL for the configured agent route; serves all four connection cards.",
+                  "method": "GET",
+                  "path": "/api/agent/llm-credentials"
+                },
+                {
+                  "desc": "Set one screening's approval decision and/or posting URL. A cover letter is optional — approval no longer requires a drafted letter.",
+                  "method": "PATCH",
+                  "path": "/api/screenings/{screening_id}"
+                },
+                {
+                  "desc": "Begin subscription sign-in for a connection card; returns a paste-code or device-code flow descriptor.",
+                  "method": "POST",
+                  "path": "/api/auth/{provider}/start"
+                },
+                {
+                  "desc": "Card-generic completion of a paste-code subscription sign-in (supersedes /api/auth/claude/complete, kept as an alias).",
+                  "method": "POST",
+                  "path": "/api/auth/{provider}/complete"
+                },
+                {
+                  "desc": "Perform one non-blocking poll of an in-progress device-code sign-in; returns pending or complete.",
+                  "method": "POST",
+                  "path": "/api/auth/{provider}/poll"
+                },
+                {
+                  "desc": "Optional q: case-insensitive substring filter over company, website, application URL, notes, posting, role; empty returns all.",
+                  "method": "GET",
+                  "path": "/api/applications?q="
+                },
+                {
+                  "desc": "One page of applications (limit default 25, offset, sort key, direction) with total; sorted server-side.",
+                  "method": "GET",
+                  "path": "/api/applications/page"
+                },
+                {
+                  "desc": "Closes the attended sign-in session; when a session existed and the close was accepted, clears the login_required apply-blocker on every pending/approved screening queued for that host so the next run retries them",
+                  "method": "DELETE",
+                  "path": "/api/browser/session"
+                },
+                {
+                  "desc": "Stop a run: forwards cancel to the supervisor when it owns the run, otherwise closes the record as failed/orphaned. 404 unknown run, 409 already finished.",
+                  "method": "POST",
+                  "path": "/api/runs/{run_id}/stop"
+                },
+                {
+                  "desc": "Manually trigger a Gmail response sync (wired to the Web UI's Sync-now button); delegates to Gmail Response Sync",
+                  "method": "POST",
+                  "path": "/api/gmail/responses/sync"
+                },
+                {
+                  "desc": "Non-terminal end of one per-channel agent session (feed|direct|dork). Refuses while that channel's coverage is short and the harness reports turns remaining (max 3 refusals). Appends the note to the run and never closes it.",
+                  "method": "MCP",
+                  "path": "finish_phase"
+                },
+                {
+                  "desc": "Optional turns_remaining argument supplied by the harness. While turns remain, a short or skipped coverage is refused repeatedly (max 3) instead of only once.",
+                  "method": "MCP",
+                  "path": "finish_run (turns_remaining)"
+                },
+                {
+                  "desc": "Per-stage (apply/screening/extract) LLM credentials for the Application Agent; requires the X-Agent-Token header.",
+                  "method": "GET",
+                  "path": "/api/agent/llm-routes"
+                },
+                {
+                  "desc": "Paginated pending Gmail response suggestions (limit default 20, max 100; offset) with total, newest first; gated like the sync route",
+                  "method": "GET",
+                  "path": "/api/gmail/suggestions"
+                },
+                {
+                  "desc": "Dismiss pending Gmail suggestions by id (1–200 ids); returns dismissed count and remaining pending total; gated like the sync route",
+                  "method": "POST",
+                  "path": "/api/gmail/suggestions/dismiss"
+                },
+                {
+                  "desc": "Accept a pending Gmail suggestion: apply its suggested status to the matched application (404 unknown, 409 not pending or no suggested status)",
+                  "method": "POST",
+                  "path": "/api/gmail/suggestions/{id}/accept"
+                },
+                {
+                  "desc": "One page of rejected screenings (agent- or operator-rejected, each with rejectedBy), newest first; limit (default 50, clamped 1..200), offset, category (default all); returns {items, total, limit, offset, categories}.",
+                  "method": "GET",
+                  "path": "/api/screenings/rejected"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1783591770368-2",
+            "title": "Wizard routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 90,
+            "y": 90
+          },
+          {
+            "data": {
+              "vars": [
+                {
+                  "desc": "Which provider implementation to use.",
+                  "example": "anthropic | openai | ollama",
+                  "key": "LLM_PROVIDER"
+                },
+                {
+                  "desc": "Model id (provider-specific).",
+                  "example": "claude-3-5-sonnet",
+                  "key": "LLM_MODEL"
+                },
+                {
+                  "desc": "BYO key, used when LLM_PROVIDER=anthropic.",
+                  "example": "sk-ant-...",
+                  "key": "ANTHROPIC_API_KEY"
+                },
+                {
+                  "desc": "BYO key, used when LLM_PROVIDER=openai.",
+                  "example": "sk-...",
+                  "key": "OPENAI_API_KEY"
+                },
+                {
+                  "desc": "Ollama endpoint, used when LLM_PROVIDER=ollama.",
+                  "example": "http://ollama:11434",
+                  "key": "OLLAMA_HOST"
+                },
+                {
+                  "desc": "Fernet master key (URL-safe base64, 32 bytes) that encrypts saved provider API keys in ./data/secrets.enc. Generate via `python -m truthcv.adapters.http.genkey`. Missing/invalid disables the secrets feature (falls back to env-var credentials).",
+                  "example": "aQ2mA0m3wF6b8xk2s9v0Xr7uY1zC4dN6pQ8rS0tU2w=",
+                  "key": "ENCRYPTION_KEY"
+                },
+                {
+                  "desc": "Directory of the built React bundle to serve.",
+                  "example": "truthcv/adapters/http/static",
+                  "key": "STATIC_DIR"
+                },
+                {
+                  "desc": "Comma-separated allowed CORS origins.",
+                  "example": "http://localhost:5173",
+                  "key": "CORS_ORIGINS"
+                },
+                {
+                  "desc": "Port the Uvicorn server binds to.",
+                  "example": "8000",
+                  "key": "PORT"
+                },
+                {
+                  "desc": "Path to the mounted data volume (truth.yaml, secrets.enc, profile.pdf).",
+                  "example": "./data",
+                  "key": "DATA_DIR"
+                },
+                {
+                  "desc": "Host-side port the compose stack publishes the UI on (docker-compose.yml ${APP_PORT:-5627}). Display only — the app still binds PORT (8080) inside the container. Read by truthcv.adapters.http.config.public_url() to print a reachable URL at startup. Unset in local dev, where it falls back to PORT.",
+                  "example": "8123",
+                  "key": "PUBLIC_PORT"
+                },
+                {
+                  "desc": "Google OAuth client id for the Gmail connection (browser redirect flow)",
+                  "example": "1234567890-abc.apps.googleusercontent.com",
+                  "key": "GOOGLE_OAUTH_CLIENT_ID"
+                },
+                {
+                  "desc": "Google OAuth client secret for the Gmail connection",
+                  "example": "",
+                  "key": "GOOGLE_OAUTH_CLIENT_SECRET"
+                },
+                {
+                  "desc": "Optional. Pins the Gmail OAuth redirect URI sent to Google, overriding the request-derived one. Required when serving behind a reverse proxy; must match the Google console entry exactly.",
+                  "example": "https://truthcv.home.arpa/api/auth/gmail/callback",
+                  "key": "GOOGLE_OAUTH_REDIRECT_URI"
+                }
+              ]
+            },
+            "h": 200,
+            "id": "widget-1783591787714-3",
+            "title": "Configuration & Environment",
+            "type": "config",
+            "w": 350,
+            "x": 120,
+            "y": 120
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "Provider settings status (encryptionAvailable, activeProvider, model, *KeySet booleans, ollamaHost). Never returns raw secrets.",
+                  "method": "GET",
+                  "path": "/api/settings"
+                },
+                {
+                  "desc": "Save provider selection + API key/model/host; encrypts to ./data/secrets.enc via ENCRYPTION_KEY. Empty apiKey leaves the stored key unchanged.",
+                  "method": "POST",
+                  "path": "/api/settings"
+                },
+                {
+                  "desc": "Test connection: a tiny live provider call with saved/submitted credentials. Returns {ok, detail}.",
+                  "method": "POST",
+                  "path": "/api/settings/test"
+                },
+                {
+                  "desc": "List available models for a provider (live model-list lookup).",
+                  "method": "POST",
+                  "path": "/api/models"
+                },
+                {
+                  "desc": "Read the Jev key status and screening toggle",
+                  "method": "GET",
+                  "path": "/api/settings/jev"
+                },
+                {
+                  "desc": "Update the Jev key and screening toggle",
+                  "method": "PUT",
+                  "path": "/api/settings/jev"
+                },
+                {
+                  "desc": "Test the configured Jev key",
+                  "method": "POST",
+                  "path": "/api/settings/jev/test"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1783598621851-5",
+            "title": "Settings routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 180,
+            "y": 180
+          },
+          {
+            "data": {
+              "text": "POST /api/render accepts optional approvals:{approvedClaimIds[],deniedClaimIds[]}. On a guardrail block it returns blockedClaims:[{claimId,experienceId,text,tokens[]}] — each a whole draft bullet that tripped the guardrail. Approving a claim makes its text allowed for THAT render only (merged into the matching scope's allowed set before truthcv.engines.guardrail.validate); denying drops the bullet from the rendered draft. Approvals must NOT be persisted to truth.yaml (write_confirmed is NOT used here) because the user generates many tailored CVs/cover letters from one immutable truth file. claimId is a deterministic hash of experienceId+text so the frontend can round-trip decisions."
+            },
+            "h": 200,
+            "id": "widget-1783610638800-5",
+            "title": "Render-scoped approvals (no truth write)",
+            "type": "note",
+            "w": 350,
+            "x": 180,
+            "y": 180
+          },
+          {
+            "data": {
+              "text": "POST /api/confirm-inferences accepts approved:[{id, claim, experienceId}] so a user-edited claim (and re-targeted experience) at Step 4 is what gets written as the user-confirmed bullet. approvedIds:[string] is still accepted as a deprecated fallback (writes the original draft claim). write_confirmed persists the supplied claim text verbatim."
+            },
+            "h": 200,
+            "id": "widget-1783613369039-6",
+            "title": "Editable inferences at Confirm",
+            "type": "note",
+            "w": 350,
+            "x": 210,
+            "y": 210
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "List all tracked job applications.",
+                  "method": "GET",
+                  "path": "/api/applications"
+                },
+                {
+                  "desc": "Create a new application record.",
+                  "method": "POST",
+                  "path": "/api/applications"
+                },
+                {
+                  "desc": "Update an application record (fields and status flags).",
+                  "method": "PUT",
+                  "path": "/api/applications/{id}"
+                },
+                {
+                  "desc": "Delete an application and its owned document files.",
+                  "method": "DELETE",
+                  "path": "/api/applications/{id}"
+                },
+                {
+                  "desc": "Save edited CV content for an application and re-render its pdf/docx (guardrail-checked).",
+                  "method": "PUT",
+                  "path": "/api/applications/{id}/cv"
+                },
+                {
+                  "desc": "Save edited cover-letter content for an application and re-render its pdf/docx.",
+                  "method": "PUT",
+                  "path": "/api/applications/{id}/cover-letter"
+                },
+                {
+                  "desc": "One page of applications, server-sorted and paginated. Query: limit (25), offset (0, negative clamped to 0), sort (date), direction (desc). Returns {applications, total, limit, offset, sort, direction}; 400 on an invalid sort/direction.",
+                  "method": "GET",
+                  "path": "/api/applications/page"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1783684105808-7",
+            "title": "Application routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 40,
+            "y": 40
+          },
+          {
+            "data": {
+              "text": "POST /api/render and POST /api/cover-letter accept an optional applicationId. When present, the rendered output is saved as the named application's owned CV/cover-letter document (per-application filenames, e.g. cv_<appId>.pdf) instead of overwriting the shared cv.pdf/cover_letter.pdf. Absent applicationId preserves today's behavior (scratch preview files). Applications may have no posting (General submissions)."
+            },
+            "h": 200,
+            "id": "widget-1783684115321-8",
+            "title": "Attach output to an application",
+            "type": "note",
+            "w": 350,
+            "x": 70,
+            "y": 70
+          },
+          {
+            "data": {
+              "text": "POST /api/render returns the rendered CV HTML as `html`, and POST /api/cover-letter returns the generated letter as `text`. These expose the generated content so the Web UI can pre-fill an editor; the user edits and saves it back via the guardrail-checked PUT /api/applications/{id}/cv (html) and .../cover-letter (text) routes."
+            },
+            "h": 200,
+            "id": "widget-1783685376757-9",
+            "title": "Editable generated source",
+            "type": "note",
+            "w": 350,
+            "x": 100,
+            "y": 100
+          },
+          {
+            "data": {
+              "text": "When attaching a document to an application (PUT /api/applications/{id}/cv, PUT /api/applications/{id}/cover-letter) or rendering to an application (POST /api/render, POST /api/cover-letter with applicationId), the guardrail runs first and the document SOURCE is saved before rendering. If WeasyPrint (PDF) and pandoc (DOCX) are both unavailable, no file is produced and download URLs are null — but the save still succeeds. Responses carry renderUnavailable:true in that case so the UI can report \"saved to the application, but its PDF/DOCX couldn't be generated in this environment (install the render backend / run the Docker image)\". Do NOT treat renderUnavailable as a save failure."
+            },
+            "h": 200,
+            "id": "widget-1784025108420-10",
+            "title": "renderUnavailable flag on saves",
+            "type": "note",
+            "w": 350,
+            "x": 130,
+            "y": 130
+          },
+          {
+            "data": {
+              "text": "POST /api/cover-letter accepts an optional approvals:{approvedClaimIds, deniedClaimIds}. Approved claim texts are added to the guardrail's allowed set for THIS generation only (no truth.yaml write); denied claims are dropped before rendering. When blocked, the response returns grouped blockedClaims:[{claimId, text, tokens}] (same shape as POST /api/render) so the UI can offer per-claim approve/decline and re-check, instead of only a flat unverifiable token list."
+            },
+            "h": 200,
+            "id": "widget-1784038212055-11",
+            "title": "Render-scoped approvals for cover letters (no truth write)",
+            "type": "note",
+            "w": 350,
+            "x": 160,
+            "y": 160
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "Streamable-HTTP JSON-RPC MCP tool surface (truthcv/adapters/mcp/mcp_app.py) used by the Application Agent container; in-network only.",
+                  "method": "POST",
+                  "path": "/mcp"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1787568233479-12",
+            "title": "Agent tool surface (MCP)",
+            "type": "endpoints",
+            "w": 440,
+            "x": 190,
+            "y": 190
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "Every screening record, most recent first; optional ?approval= narrows to the queue.",
+                  "method": "GET",
+                  "path": "/api/screenings"
+                },
+                {
+                  "desc": "Create a screening record from client-supplied fields.",
+                  "method": "POST",
+                  "path": "/api/screenings"
+                },
+                {
+                  "desc": "Apply one approval decision to many screenings; reports per-id outcomes.",
+                  "method": "PATCH",
+                  "path": "/api/screenings/approvals"
+                },
+                {
+                  "desc": "Set one screening's approval decision and/or posting URL (approval requires a drafted letter).",
+                  "method": "PATCH",
+                  "path": "/api/screenings/{screening_id}"
+                },
+                {
+                  "desc": "Delete a screening record.",
+                  "method": "DELETE",
+                  "path": "/api/screenings/{screening_id}"
+                },
+                {
+                  "desc": "The screening's current cover-letter draft.",
+                  "method": "GET",
+                  "path": "/api/screenings/{screening_id}/letter"
+                },
+                {
+                  "desc": "Draft the letter for one screening, guardrailed; 422 when blocked.",
+                  "method": "POST",
+                  "path": "/api/screenings/{screening_id}/letter"
+                },
+                {
+                  "desc": "Save the operator's own letter text verbatim and unvalidated (source=operator).",
+                  "method": "PUT",
+                  "path": "/api/screenings/{screening_id}/letter"
+                },
+                {
+                  "desc": "Whether a company (optionally narrowed by role) is currently in cooldown.",
+                  "method": "GET",
+                  "path": "/api/cooldown"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1787568321185-13",
+            "title": "Screening routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 220,
+            "y": 220
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "",
+                  "name": "jobBoards",
+                  "notes": "On GET/PUT /api/agent/config. Each entry: source, signinUrl, plus response-only domain, effectiveSigninUrl and isDefault resolved server-side. GET returns the resolved list, defaults first.",
+                  "type": "JobBoardModel[]"
+                },
+                {
+                  "flags": "",
+                  "name": "feedAlreadyScreened",
+                  "notes": "GET /agent/config?include_feed=true: count of feed postings omitted because the ledger already screened them",
+                  "type": "int"
+                }
+              ]
+            },
+            "h": 200,
+            "id": "widget-schema-api",
+            "title": "Schema",
+            "type": "schema",
+            "w": 350,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "One page of agent runs, newest first. `limit` (default 50; 0 or negative means no limit) and `offset` (default 0, clamped at 0, applied before the limit). Returns {runs, total, limit, offset}; `total` counts every run currently retained, which a capped page cannot report. An offset past the end is an empty page, not an error. Only the 200 most recent runs are retained (truthcv.domain.runs.store trims on write), so `total` is a count of what is kept, not of every run ever. Read in-process from truthcv.domain.runs.store on the data volume, not proxied to the supervisor.",
+                  "method": "GET",
+                  "path": "/api/runs"
+                },
+                {
+                  "desc": "One agent run record by id, read in-process from truthcv.domain.runs.store.get; 404 when unknown.",
+                  "method": "GET",
+                  "path": "/api/runs/{run_id}"
+                },
+                {
+                  "desc": "Stop a running run: cancels via the agent supervisor if it owns the run (outcome \"cancelling\"), otherwise closes the orphaned record as failed/orphaned. Returns RunStopResult {outcome, run}; 404 if unknown, 409 if not running.",
+                  "method": "POST",
+                  "path": "/api/runs/{run_id}/stop"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1787697555398-14",
+            "title": "Run routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 50,
+            "y": 50
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "List all prompt fragments (seeded + operator-defined)",
+                  "method": "GET",
+                  "path": "/api/prompt-fragments"
+                },
+                {
+                  "desc": "Create a prompt fragment; id derived from title if omitted (403 when clashing with a seeded fragment)",
+                  "method": "POST",
+                  "path": "/api/prompt-fragments"
+                },
+                {
+                  "desc": "Update a prompt fragment by id (403 for seeded fragments)",
+                  "method": "PUT",
+                  "path": "/api/prompt-fragments/{id}"
+                },
+                {
+                  "desc": "Delete a prompt fragment (204; 403 seeded, 404 unknown)",
+                  "method": "DELETE",
+                  "path": "/api/prompt-fragments/{id}"
+                },
+                {
+                  "desc": "List prompt presets",
+                  "method": "GET",
+                  "path": "/api/prompt-presets"
+                },
+                {
+                  "desc": "Create a prompt preset (422 with conflicts on incompatible fragments)",
+                  "method": "POST",
+                  "path": "/api/prompt-presets"
+                },
+                {
+                  "desc": "Update a prompt preset by id",
+                  "method": "PUT",
+                  "path": "/api/prompt-presets/{id}"
+                },
+                {
+                  "desc": "Delete a prompt preset (204; 403 default/seeded, 404 unknown)",
+                  "method": "DELETE",
+                  "path": "/api/prompt-presets/{id}"
+                },
+                {
+                  "desc": "Validate a fragment_ids selection; returns conflicts",
+                  "method": "POST",
+                  "path": "/api/prompt-presets/validate"
+                },
+                {
+                  "desc": "Mark a preset as the default",
+                  "method": "PUT",
+                  "path": "/api/prompt-presets/{id}/default"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1788519499667-16",
+            "title": "Prompt library routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 110,
+            "y": 110
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "List operator-editable writing-style presets",
+                  "method": "GET",
+                  "path": "/api/prompt-presets"
+                },
+                {
+                  "desc": "Create a preset (id, name, fragment_ids, is_default); 422 on fragment conflicts, 403 if seeded",
+                  "method": "POST",
+                  "path": "/api/prompt-presets"
+                },
+                {
+                  "desc": "Update a preset in place; 422 on fragment conflicts, 403 if seeded",
+                  "method": "PUT",
+                  "path": "/api/prompt-presets/{id}"
+                },
+                {
+                  "desc": "Delete a preset (204); 404 if unknown, seeded presets refused",
+                  "method": "DELETE",
+                  "path": "/api/prompt-presets/{id}"
+                },
+                {
+                  "desc": "Validate a fragment_ids set, returning conflicts without saving",
+                  "method": "POST",
+                  "path": "/api/prompt-presets/validate"
+                },
+                {
+                  "desc": "Mark a preset as the default; 404 if unknown",
+                  "method": "PUT",
+                  "path": "/api/prompt-presets/{id}/default"
+                },
+                {
+                  "desc": "Create a new prompt preset (truthcv/adapters/http/prompt_routes.py)",
+                  "method": "POST",
+                  "path": "/api/prompt-presets"
+                },
+                {
+                  "desc": "Update an existing prompt preset (body: PromptPresetIn; id taken from the path); returns PromptPresetOut",
+                  "method": "PUT",
+                  "path": "/api/prompt-presets/{id}"
+                },
+                {
+                  "desc": "Delete a user prompt preset (204); seeded presets rejected with 400, unknown id 404",
+                  "method": "DELETE",
+                  "path": "/api/prompt-presets/{id}"
+                },
+                {
+                  "desc": "Mark the given prompt preset as the default; returns the updated preset",
+                  "method": "PUT",
+                  "path": "/api/prompt-presets/{id}/default"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1788519500185-17",
+            "title": "Prompt preset routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 140,
+            "y": 140
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "Create an operator-authored prompt fragment (id derived from title via slugify when omitted); returns the saved PromptFragmentOut",
+                  "method": "POST",
+                  "path": "/api/prompt-fragments"
+                },
+                {
+                  "desc": "Update an existing prompt fragment (PromptFragmentIn body; returns PromptFragmentOut)",
+                  "method": "PUT",
+                  "path": "/api/prompt-fragments/{id}"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1788519502734-18",
+            "title": "Prompt fragment routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 170,
+            "y": 170
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "Delete a user prompt fragment by id; 204 on success, 404 if unknown, 400 if seeded/undeletable",
+                  "method": "DELETE",
+                  "path": "/api/prompt-fragments/{id}"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1788519511746-19",
+            "title": "Prompt routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 200,
+            "y": 200
+          },
+          {
+            "data": {
+              "routes": [
+                {
+                  "desc": "List every known background job with its current status",
+                  "method": "GET",
+                  "path": "/api/jobs"
+                },
+                {
+                  "desc": "Fetch one job's status/result by id (404 for unknown id)",
+                  "method": "GET",
+                  "path": "/api/jobs/{job_id}"
+                },
+                {
+                  "desc": "Start a background job (202 Accepted); kinds: gmail-sync (guarded by Gmail tracking gate), feed-refresh",
+                  "method": "POST",
+                  "path": "/api/jobs/{kind}"
+                },
+                {
+                  "desc": "List all known background jobs",
+                  "method": "GET",
+                  "path": "/api/jobs"
+                },
+                {
+                  "desc": "Poll one job's status/result",
+                  "method": "GET",
+                  "path": "/api/jobs/{job_id}"
+                },
+                {
+                  "desc": "Submit a background job of the given kind (202 Accepted)",
+                  "method": "POST",
+                  "path": "/api/jobs/{kind}"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1790091479559-20",
+            "title": "Job routes",
+            "type": "endpoints",
+            "w": 440,
+            "x": 30,
+            "y": 30
+          }
+        ]
+      }
+    },
+    {
+      "id": "truth-store",
+      "name": "Truth Store",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Owns truth.yaml, the single origin of all facts (truthcv/domain/truth/). Extracts text from an uploaded CV in any supported format — PDF (pypdf), DOCX (python-docx), TXT or Markdown — and builds, validates and persists the structured truth file (every role/company/date/bullet/skill tagged source:uploaded-cv with a stable id). The LLM step that turns that text into a truth file lives in the Services Layer (truthcv/services/truth_extract.py), so truthcv/domain/truth/ imports neither prompts nor providers. Legacy entries tagged linkedin-pdf remain valid. User-confirmed inferences are tagged user-confirmed."
+            },
+            "h": 180,
+            "id": "widget-1783591752580-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Python",
+                "pypdf",
+                "PyYAML",
+                "python-docx"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1783591752683-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "stable id",
+                  "name": "id",
+                  "notes": "Referenced by the tailor engine when selecting facts.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "kind",
+                  "notes": "role | company | date | bullet | skill",
+                  "type": "enum"
+                },
+                {
+                  "flags": "-",
+                  "name": "value",
+                  "notes": "The factual content.",
+                  "type": "string"
+                },
+                {
+                  "flags": "provenance",
+                  "name": "source",
+                  "notes": "linkedin-pdf | user-confirmed — the trust tag.",
+                  "type": "enum"
+                },
+                {
+                  "flags": "optional, default []",
+                  "name": "hobbies",
+                  "notes": "Hobby = {id, value, source}, same shape as Skill. Editable in the Truth File page; offered to the Cover Letter Engine only — never tailored or rendered into the CV.",
+                  "type": "list[Hobby]"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1783591788649-2",
+            "title": "truth.yaml entry",
+            "type": "schema",
+            "w": 440,
+            "x": 90,
+            "y": 90
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "-",
+                  "name": "name",
+                  "notes": "Full name — identity, guardrail-exempt.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "email",
+                  "notes": "Contact — identity, guardrail-exempt.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "phone",
+                  "notes": "Contact — identity, guardrail-exempt.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "location",
+                  "notes": "Contact — identity, guardrail-exempt.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "links",
+                  "notes": "Profile links — identity, guardrail-exempt.",
+                  "type": "array&lt;{label,url}&gt;"
+                },
+                {
+                  "flags": "-",
+                  "name": "summary",
+                  "notes": "Free-text description/headline — a CLAIM; validated by the guardrail against the truth/source.",
+                  "type": "string"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1783617928592-4",
+            "title": "profile header",
+            "type": "schema",
+            "w": 440,
+            "x": 150,
+            "y": 150
+          },
+          {
+            "data": {
+              "text": "TruthEntry.kind ∈ {role, company, date, bullet, skill, hobby}; TruthEntry.source ∈ {linkedin-pdf, user-confirmed, uploaded-cv}. The store enforces non-empty, unique id and valid kind/source. Persisted YAML is wrapped as { entries: [...] }, not a bare list. Hobbies (truthcv/domain/truth/model.py Hobby) are extracted from the uploaded CV as a standalone hobbies[] list, guardrail-validated like any other fact, and used by the Cover Letter Engine only — never rendered into the CV."
+            },
+            "h": 200,
+            "id": "widget-1788554941333-4",
+            "title": "Schema enums & envelope",
+            "type": "note",
+            "w": 350,
+            "x": 150,
+            "y": 150
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "required, unique",
+                  "name": "id",
+                  "notes": "make_id-derived stable id",
+                  "type": "string"
+                },
+                {
+                  "flags": "required",
+                  "name": "value",
+                  "notes": "the hobby/interest text as stated in the source CV",
+                  "type": "string"
+                },
+                {
+                  "flags": "default uploaded-cv",
+                  "name": "source",
+                  "notes": "provenance of the fact",
+                  "type": "enum"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1788554941458-5",
+            "title": "hobbies[] entry (Hobby)",
+            "type": "schema",
+            "w": 440,
+            "x": 180,
+            "y": 180
+          }
+        ]
+      },
+      "description": "Owns truth.yaml, the single origin of all facts (truthcv/domain/truth/). Extracts text from an uploaded CV in any supported format — PDF (pypdf), DOCX (python-docx), TXT or Markdown — and builds, validates and persists the structured truth file (every role/company/date/bullet/skill tagged source:uploaded-cv with a stable id). The LLM step that turns that text into a truth file lives in the Services Layer (truthcv/services/truth_extract.py), so truthcv/domain/truth/ imports neither prompts nor providers. Legacy entries tagged linkedin-pdf remain valid. User-confirmed inferences are tagged user-confirmed."
+    },
+    {
+      "id": "tailor-engine",
+      "name": "Tailor Engine",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Tailors a CV to a specific posting (truthcv/engines/tailor/). Extracts the posting's keywords/requirements via a provider, then selects, reorders, and rephrases ONLY entries referenced by id from truth.yaml. Detects any claim the LLM wants to add that is not already in the truth file and surfaces it as an approval checklist (confirm-inferences step); nothing unapproved reaches the CV."
+            },
+            "h": 180,
+            "id": "widget-1783591752782-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Python"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1783591752880-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          }
+        ]
+      }
+    },
+    {
+      "id": "guardrail-validator",
+      "name": "Guardrail Validator",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "The core truthfulness guardrail (truthcv/engines/guardrail/): a pure, deterministic, scoped token-diff of a draft against truth — no LLM. validate(scopes, global_values) returns ok plus BOTH a flat unverifiable[] token list (back-compat) and structured blocked_claims grouping untraceable tokens under the specific source text (bullet) and scope id they came from, so callers can present whole-claim approve/deny. A token is verifiable if it is a stopword or appears (post-tokenization) in its own scope's allowed set (or the caller-supplied global_values — global skills for CV renders; for cover letters the Cover Letter Engine passes every truth value, including hobbies and the profile header, since a letter weaves the whole career). Render-scoped approvals are passed in by merging an approved claim's text into that scope's allowed set for a single render — the guardrail itself never mutates truth."
+            },
+            "h": 180,
+            "id": "widget-1783591752977-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Python"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1783591753075-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          },
+          {
+            "data": {
+              "text": "The Profile summary is validated in its own Scope against the truth/source, exactly like a bullet — an edited summary that introduces tokens not in the Truth File is blocked at render. Profile identity fields (name, email, phone, location, links) are NOT claims and are exempt from validation; never tokenize them into a guardrail scope."
+            },
+            "h": 200,
+            "id": "widget-1783617928970-2",
+            "title": "Profile header scope",
+            "type": "note",
+            "w": 350,
+            "x": 90,
+            "y": 90
+          }
+        ]
+      }
+    },
+    {
+      "id": "renderer",
+      "name": "Renderer",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Renders the approved CV from one Jinja-templated ATS-safe HTML source (truthcv/engines/render/): PDF via WeasyPrint (pure-Python, single column, selectable text) and DOCX via pandoc. Runs an ATS linter before download that warns on multi-column layouts, tables, text-in-images, non-standard headings, missing contact block, and posting keywords absent from the CV. No LLM dependency."
+            },
+            "h": 180,
+            "id": "widget-1783591753179-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Python",
+                "Jinja2",
+                "WeasyPrint",
+                "pandoc"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1783591753276-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          }
+        ]
+      }
+    },
+    {
+      "id": "llm-provider-layer",
+      "name": "LLM Provider Layer",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Thin LLMProvider abstraction (truthcv/integrations/providers/) with three implementations — anthropic | openai | ollama — selected by the LLM_PROVIDER env var. Interface: complete(system, messages) → str and extract_json(system, messages, schema) → dict. Adding a provider later = one new file; no truthfulness logic depends on which provider is active."
+            },
+            "h": 180,
+            "id": "widget-1783591753395-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Python",
+                "anthropic SDK",
+                "openai SDK",
+                "Ollama",
+                "httpx (Codex Responses SSE transport)"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1783591753499-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          },
+          {
+            "data": {
+              "blocks": [
+                {
+                  "desc": "complete() / extract_json()",
+                  "id": "llmprovider-interface",
+                  "label": "LLMProvider (interface)",
+                  "x": 24,
+                  "y": 24
+                },
+                {
+                  "desc": "",
+                  "id": "anthropicprovider",
+                  "label": "AnthropicProvider",
+                  "x": 174,
+                  "y": 24
+                },
+                {
+                  "desc": "",
+                  "id": "openaiprovider",
+                  "label": "OpenAIProvider",
+                  "x": 324,
+                  "y": 24
+                },
+                {
+                  "desc": "",
+                  "id": "ollamaprovider",
+                  "label": "OllamaProvider",
+                  "x": 24,
+                  "y": 104
+                }
+              ],
+              "links": [
+                {
+                  "from": "llmprovider-interface",
+                  "to": "anthropicprovider"
+                },
+                {
+                  "from": "llmprovider-interface",
+                  "to": "openaiprovider"
+                },
+                {
+                  "from": "llmprovider-interface",
+                  "to": "ollamaprovider"
+                }
+              ]
+            },
+            "h": 200,
+            "id": "widget-1783591800027-2",
+            "title": "LLMProvider abstraction",
+            "type": "diagram",
+            "w": 350,
+            "x": 90,
+            "y": 90
+          }
+        ]
+      }
+    },
+    {
+      "id": "cover-letter-engine",
+      "name": "Cover Letter Engine",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Guardrailed cover-letter generation (truthcv/engines/coverletter/). build_letter() asks the LLM (via the provider layer) for a cover letter as tagged paragraphs, each declaring the factual claims it makes. Every claim is validated by the Guardrail Validator against the Truth Store; if any claim is unverifiable the letter is BLOCKED (returns {blocked: true, unverifiable, text: \"\"}). Otherwise the paragraph text is joined and handed to the Renderer for HTML/PDF/DOCX output. Serves /api/cover-letter together with truthcv/engines/render/."
+            },
+            "h": 180,
+            "id": "widget-1783605694390-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Python"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1783605694434-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          }
+        ]
+      }
+    },
+    {
+      "id": "secret-store",
+      "name": "Secret Store",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Neutral encrypted credential/secrets vault (truthcv/infra/secretstore/), extracted from the API to break the api↔providers import cycle. Resolves LLM credentials — reading data/secrets.enc (Fernet, gated on ENCRYPTION_KEY) and falling back to environment variables — and persists them via atomic tmp-rename. A leaf that uses Storage (truthcv.infra.storage data_dir) only for the data path. Depended on downward by both the API and the LLM Provider Layer."
+            },
+            "h": 180,
+            "id": "widget-1783612689915-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Python",
+                "cryptography (Fernet)"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1783612689947-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          }
+        ]
+      }
+    },
+    {
+      "id": "application-tracker",
+      "name": "Application Tracker",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Owns the user's job-application records (truthcv/domain/applications/) persisted as applications.json on the Truth Data Volume. Each Application tracks a submission (Company, Website, Application URL, Submitted, Submission Type, Reached Out, To Who, Response Received, Method) and OWNS its generated documents: an editable CV and cover letter saved per-application (so old outputs are retained and traceable to the application they went out with). Applications may exist WITHOUT a job posting (General/portal submissions). CRUD helpers use atomic writes mirroring truthcv/domain/truth/store.py; re-renders edited document content via the Renderer."
+            },
+            "h": 180,
+            "id": "widget-1783684073873-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Python",
+                "PyYAML/JSON"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1783684073930-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "Primary Key",
+                  "name": "id",
+                  "notes": "Stable application id (used in per-application filenames).",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "company",
+                  "notes": "-",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "website",
+                  "notes": "Company website URL.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "application_url",
+                  "notes": "Direct posting/portal URL, or N/A.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "submitted",
+                  "notes": "-",
+                  "type": "bool"
+                },
+                {
+                  "flags": "-",
+                  "name": "submission_type",
+                  "notes": "e.g. General (portal) or Tailored (to a posting).",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "reached_out",
+                  "notes": "-",
+                  "type": "bool"
+                },
+                {
+                  "flags": "-",
+                  "name": "to_who",
+                  "notes": "Contact person reached out to.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "response_received",
+                  "notes": "-",
+                  "type": "bool"
+                },
+                {
+                  "flags": "-",
+                  "name": "method",
+                  "notes": "Outreach method, e.g. LinkedIn, Email.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "cv_document",
+                  "notes": "Owned editable CV: saved HTML/text source + rendered pdf/docx filenames.",
+                  "type": "object"
+                },
+                {
+                  "flags": "-",
+                  "name": "cover_letter_document",
+                  "notes": "Owned editable cover letter: saved text source + rendered pdf/docx filenames.",
+                  "type": "object"
+                },
+                {
+                  "flags": "-",
+                  "name": "posting",
+                  "notes": "Optional linked job posting text (absent for General submissions).",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "created_at / updated_at",
+                  "notes": "ISO timestamps.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "application_date",
+                  "notes": "User-set date the application was submitted (ISO yyyy-mm-dd); distinct from the auto created_at/updated_at timestamps.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "notes",
+                  "notes": "Free-text notes the user attaches to the application record.",
+                  "type": "string"
+                },
+                {
+                  "flags": "",
+                  "name": "screening_id",
+                  "notes": "The approved screening this application was recorded against. The dedupe key: record_application creates-or-fetches by it under one lock, so a retried agent call updates the existing row instead of adding another.",
+                  "type": "string"
+                },
+                {
+                  "flags": "",
+                  "name": "fields_submitted",
+                  "notes": "Every form field the agent actually submitted, with its provenance (observed | canonical). Written only by the agent via MCP; read-only to the client.",
+                  "type": "list<{label,value,source}>"
+                },
+                {
+                  "flags": "",
+                  "name": "confirmation",
+                  "notes": "Verbatim success message proving the submission went through.",
+                  "type": "{text, confirmed_at, evidence}"
+                },
+                {
+                  "flags": "",
+                  "name": "attachments",
+                  "notes": "The files actually uploaded with the application.",
+                  "type": "list<{kind,path}>"
+                },
+                {
+                  "flags": "",
+                  "name": "screening",
+                  "notes": "The pre-application filter verdicts recorded against this application.",
+                  "type": "{entity, remote, salary, language, role_type, glassdoor}"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1783684073979-2",
+            "title": "Application record",
+            "type": "schema",
+            "w": 440,
+            "x": 90,
+            "y": 90
+          }
+        ]
+      }
+    },
+    {
+      "id": "gmail-api",
+      "name": "Gmail / Google OAuth API",
+      "type": "custom",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "External Google service used for the Gmail connection: the OAuth 2.0 browser flow (accounts.google.com authorize, oauth2.googleapis.com/token for the PKCE code exchange and refresh-token renewal) and the Gmail REST API (gmail.googleapis.com/gmail/v1/users/me/profile) read to identify the connected mailbox. Reached over HTTPS with httpx from truthcv/integrations/connections/auth/gmail.py; tokens are persisted via the Secret Store."
+            },
+            "h": 180,
+            "id": "widget-1787568269048-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Google OAuth 2.0 (PKCE, offline access)",
+                "Gmail REST API v1",
+                "httpx"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1787568272749-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          }
+        ]
+      }
+    },
+    {
+      "id": "connections",
+      "name": "Connections",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Provider connection layer (truthcv/integrations/connections/): a static catalog of connection cards plus per-vendor auth flows. Claude Pro/Max signs in with a PKCE paste-code flow; ChatGPT (OpenAI) signs in with an OAuth device-code flow; Gmail uses Google OAuth 2.0 PKCE. Tokens are persisted encrypted in the Secret Store and refreshed lazily on use."
+            },
+            "h": 180,
+            "id": "widget-1787568456174-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Python",
+                "httpx",
+                "Google OAuth 2.0 (PKCE)"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1787568457598-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          },
+          {
+            "data": {
+              "vars": [
+                {
+                  "desc": "Google OAuth client id; Gmail login/refresh fails with AuthError when unset.",
+                  "example": "1234567890-abc.apps.googleusercontent.com",
+                  "key": "GOOGLE_OAUTH_CLIENT_ID"
+                },
+                {
+                  "desc": "Google OAuth client secret used for the code exchange and refresh calls.",
+                  "example": "GOCSPX-…",
+                  "key": "GOOGLE_OAUTH_CLIENT_SECRET"
+                }
+              ]
+            },
+            "h": 200,
+            "id": "widget-1787568459083-2",
+            "title": "Configuration & Environment",
+            "type": "config",
+            "w": 350,
+            "x": 90,
+            "y": 90
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "-",
+                  "name": "accessToken",
+                  "notes": "Current Gmail access token; blanked when reconnect is required.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "refreshToken",
+                  "notes": "Offline refresh token; carried over when Google omits it on refresh.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "expiresAt",
+                  "notes": "Refreshed lazily once within 300s of expiry.",
+                  "type": "float (epoch seconds)"
+                },
+                {
+                  "flags": "-",
+                  "name": "scope",
+                  "notes": "Defaults to https://www.googleapis.com/auth/gmail.readonly.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "connectedAt",
+                  "notes": "Preserved across refreshes.",
+                  "type": "float (epoch seconds)"
+                },
+                {
+                  "flags": "-",
+                  "name": "email",
+                  "notes": "Account address read from the Gmail profile endpoint at login.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "reauthRequired",
+                  "notes": "Set by mark_reconnect_required when refresh is rejected.",
+                  "type": "bool"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1787568460579-3",
+            "title": "gmail connection record (secretstore \"gmail\".oauth)",
+            "type": "schema",
+            "w": 440,
+            "x": 120,
+            "y": 120
+          }
+        ]
+      }
+    },
+    {
+      "id": "agent-config",
+      "name": "Agent Config",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Owns the unattended agent's configuration (truthcv/domain/agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed, but any board (default or the operator's own) can be switched off, and a disabled board is not searched. Also composes the deterministic dork-style search queries handed to each run (titles, locations, remote terms and recency only; rejected role types are enforced by screening, not search), and supplies built-in search/posting URL presets for known direct boards."
+            },
+            "h": 200,
+            "id": "widget-text-agent-config",
+            "title": "Intent & Scope",
+            "type": "text",
+            "w": 350,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "",
+                  "name": "job_boards[].source",
+                  "notes": "A catalog key (linkedin, ashby, greenhouse, lever, personio, workday) or a raw domain.",
+                  "type": "string"
+                },
+                {
+                  "flags": "optional",
+                  "name": "job_boards[].signin_url",
+                  "notes": "Operator-supplied sign-in URL; blank for a known board, which resolves from the catalog.",
+                  "type": "string"
+                },
+                {
+                  "flags": "optional",
+                  "name": "job_boards[].mode",
+                  "notes": "dork | direct. User-settable only for custom boards (source not in the boards.py catalog). Catalog boards derive a fixed mode and ignore any stored value. Defaults to dork on load for backward compatibility, and to direct for a newly added custom board.",
+                  "type": "string"
+                },
+                {
+                  "flags": "optional",
+                  "name": "profiles[].title_keywords",
+                  "notes": "Job titles used to compose Google dork queries. When empty, titles are detected from keywords by title noun (Engineer, Developer, Analyst…), falling back to the raw keywords. Each dork is capped at 32 words and split into several queries per board when needed.",
+                  "type": "list[str]"
+                },
+                {
+                  "flags": "",
+                  "name": "job_boards",
+                  "notes": "The operator's OWN boards. The four default boards are unioned in at resolve time and are stored here only when carrying a signin_url override or when disabled.",
+                  "type": "list[JobBoard]"
+                },
+                {
+                  "flags": "optional",
+                  "name": "job_boards[].enabled",
+                  "notes": "Defaults to true. False keeps the board listed but excludes it from dorks, direct boards and API feeds. Applies to default boards too.",
+                  "type": "bool"
+                },
+                {
+                  "flags": "",
+                  "name": "dork_recency",
+                  "notes": "Recency as an after:YYYY-MM-DD operator in composed dork queries; default w (past week); camelCase dorkRecency",
+                  "type": "\"d\"|\"w\"|\"m\"|\"y\"|\"none\""
+                }
+              ]
+            },
+            "h": 200,
+            "id": "widget-schema-agent-config",
+            "title": "Schema",
+            "type": "schema",
+            "w": 350,
+            "x": 0,
+            "y": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "screening-engine",
+      "name": "Screening Engine",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Screens discovered postings against the active job profile's criteria and records the verdict. Owns the hard-criteria validators (truthcv/domain/screening/criteria.py): a posting's stated remote arrangement and any explicitly required working language are checked against the profile's remote_model / working_language, and the evidence is stored on the Screening record alongside the profile it was judged against."
+            },
+            "h": 200,
+            "id": "widget-text-screening-engine",
+            "title": "Intent & Scope",
+            "type": "text",
+            "w": 350,
+            "x": 0,
+            "y": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "onboarding-store",
+      "name": "Onboarding Store",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "First-run onboarding state (truthcv/domain/onboarding/): records which setup steps are complete, such as a provider being ready and a CV profile existing, and persists it on the Truth Data Volume through Storage. The API reads and updates it through truthcv/services/onboarding.py."
+            },
+            "h": 200,
+            "id": "widget-text-onboarding-store",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
+      }
+    },
+    {
+      "id": "company-research",
+      "name": "Company Research",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Company research findings (truthcv/domain/companyresearch/): structured claims about a company, each with a claim type and source class, keyed by the company identity key from the Identity Leaf. Tracks superseded claims and open contradictions, which screening consults. Persisted on the Truth Data Volume."
+            },
+            "h": 200,
+            "id": "widget-text-company-research",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
+      }
+    },
+    {
+      "id": "run-store",
+      "name": "Run Store",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Records of unattended agent runs (truthcv/domain/runs/): run lifecycle and status, counters, discovery coverage, and the per-run URL ledger with its channels and outcomes (truthcv/domain/runs/url_ledger.py). Persisted on the Truth Data Volume; only the most recent runs are retained. Run guards and the source funnel live in truthcv/services/runs.py and funnel.py."
+            },
+            "h": 200,
+            "id": "widget-text-run-store",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "derived on read",
+                  "name": "boardBreakdown",
+                  "notes": "Per job board (from screening URL host): postingsSeen, forReview, rejected",
+                  "type": "BoardBreakdown[]"
+                },
+                {
+                  "flags": "",
+                  "name": "discovery_coverage[].tier",
+                  "notes": "Which extraction tier produced the postings: api, harvest, llm, or empty when not applicable.",
+                  "type": "string"
+                },
+                {
+                  "flags": "",
+                  "name": "discovery_coverage[].status",
+                  "notes": "searched | empty | blocked | login_walled | skipped. 'blocked' means the page was unreadable (CAPTCHA/consent/bot wall), distinct from 'empty'.",
+                  "type": "string"
+                },
+                {
+                  "flags": "",
+                  "name": "finish_refused",
+                  "notes": "Set when finish_run was refused once for incomplete direct/dork discovery coverage; the second call always records.",
+                  "type": "bool"
+                }
+              ]
+            },
+            "h": 200,
+            "id": "widget-schema-run-store",
+            "title": "Schema",
+            "type": "schema",
+            "w": 350,
+            "x": 0,
+            "y": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "keyword-vocabulary",
+      "name": "Keyword Vocabulary",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Keyword vocabulary (truthcv/engines/vocabulary/): the shared keyword data used by tailoring, the guardrail and the renderer's ATS keyword check, persisted on the Truth Data Volume."
+            },
+            "h": 200,
+            "id": "widget-text-keyword-vocabulary",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
+      }
+    },
+    {
+      "id": "browser-service",
+      "name": "Browser Service",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "The containerised headful Chromium (browser/ container, served by @playwright/mcp). The Application Agent drives it over in-network HTTP MCP. The API reads, opens and closes the operator browser session through its session-control endpoint via truthcv/services/browser.py."
+            },
+            "h": 200,
+            "id": "widget-text-browser-service",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
+      }
+    },
+    {
+      "id": "storage-leaf",
+      "name": "Storage",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Lowest-level file storage (truthcv/infra/storage/): data_dir() resolution (DATA_DIR, default ./data) and atomic, locked file writes used by every store. Imports nothing first-party."
+            },
+            "h": 200,
+            "id": "widget-text-storage-leaf",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
+      }
+    },
+    {
+      "id": "services-layer",
+      "name": "Services Layer",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "All business logic (truthcv/services/). Both adapters, the HTTP API (truthcv/adapters/http/) and the MCP tool surface (truthcv/adapters/mcp/), parse input, call one service function, and translate its result or a services.errors exception into their wire format. Services never import the adapters or FastAPI, and receive the LLM provider (or a provider factory) from the caller. The layering is enforced by import-linter in pyproject.toml."
+            },
+            "h": 200,
+            "id": "widget-text-services-layer",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
+      }
+    },
+    {
+      "id": "jev-api",
+      "name": "Jev (TypeSafe System One) API",
+      "type": "custom",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "External third-party Jev (TypeSafe) service at https://api.typesafe.ai/v1/systemone. Screening posts job-posting text to it for hard-requirement cross-checks (truthcv/domain/screening/jev.py), invoked from the agent tool surface (_evaluate_jev_criteria) and the API's check_key route."
+            },
+            "h": 180,
+            "id": "widget-1790064185007-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "TypeSafe System One REST API",
+                "HTTPS"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1790064185040-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          }
+        ]
+      }
+    },
+    {
+      "id": "gmail-response-sync",
+      "name": "Gmail Response Sync",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Matches Gmail replies to tracked applications (truthcv/domain/gmailsync/): reads the connected mailbox through the Gmail connection, produces response suggestions, can cross-check them with Jev, and records accepted ones on the Application Tracker. Runs on demand or as a background task."
+            },
+            "h": 200,
+            "id": "widget-text-gmail-response-sync",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
+      }
+    },
+    {
+      "id": "job-runner",
+      "name": "Background Tasks",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Bounded background job executor (truthcv/infra/background_tasks/): a shared thread pool (MAX_WORKERS=4) plus an in-memory, thread-safe registry of Job records. Callers submit a zero-argument callable via submit(kind, fn); it runs on a worker thread and its outcome (result or exception) is recorded on the returned Job. get()/list_jobs() poll registry state. Registry is in-memory only - jobs are not persisted across restarts."
+            },
+            "h": 180,
+            "id": "widget-1790091508394-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Python",
+                "concurrent.futures ThreadPoolExecutor"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1790091508428-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "Primary Key",
+                  "name": "id",
+                  "notes": "-",
+                  "type": "UUID string"
+                },
+                {
+                  "flags": "-",
+                  "name": "kind",
+                  "notes": "caller-supplied job kind, e.g. gmail sync, feed refresh",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "status",
+                  "notes": "pending | running | done | failed",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "progress",
+                  "notes": "caller-defined 0..1 fraction, default 0.0",
+                  "type": "float"
+                },
+                {
+                  "flags": "-",
+                  "name": "result",
+                  "notes": "set only when status=done",
+                  "type": "Any"
+                },
+                {
+                  "flags": "-",
+                  "name": "error",
+                  "notes": "set only when status=failed",
+                  "type": "string | null"
+                },
+                {
+                  "flags": "-",
+                  "name": "created_at",
+                  "notes": "-",
+                  "type": "float (epoch)"
+                },
+                {
+                  "flags": "-",
+                  "name": "started_at",
+                  "notes": "-",
+                  "type": "float (epoch) | null"
+                },
+                {
+                  "flags": "-",
+                  "name": "finished_at",
+                  "notes": "-",
+                  "type": "float (epoch) | null"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1790091508465-2",
+            "title": "Job record",
+            "type": "schema",
+            "w": 440,
+            "x": 90,
+            "y": 90
+          }
+        ]
+      }
+    },
+    {
+      "id": "arbeitnow-api",
+      "name": "Arbeitnow Job Board API",
+      "type": "custom",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "External public Arbeitnow job-board API (https://www.arbeitnow.com/api/job-board-api). Job Feeds (truthcv/domain/jobfeeds/arbeitnow.py) fetches paginated postings from it on every feed refresh, because arbeitnow is a default, non-removable board (truthcv/domain/agentconfig/boards.py)."
+            },
+            "h": 180,
+            "id": "widget-1790600842460-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Arbeitnow public REST API",
+                "HTTPS"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1790600842536-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          }
+        ]
+      }
+    },
+    {
+      "id": "identity-leaf",
+      "name": "Identity Leaf",
+      "type": "backend",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Stdlib-only identity helpers shared by every layer (truthcv/infra/identity/): company identity keys and name validation (company.py) and posting-URL validation, normalisation and dedupe keys (url.py). Imports nothing first-party."
+            },
+            "h": 200,
+            "id": "widget-text-identity-leaf",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
+      }
+    },
+    {
+      "id": "mcpschema-leaf",
+      "name": "MCP Schema Leaf",
+      "type": "library",
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Stdlib-only MCP input-schema builder (truthcv/infra/mcpschema/): derives each MCP tool's JSON input schema from its Python signature. Used by the MCP tool surface and by the API's MCP endpoints. Imports nothing first-party."
+            },
+            "h": 200,
+            "id": "widget-text-mcpschema-leaf",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          }
+        ]
+      }
+    }
+  ],
+  "proposedBy": {
+    "actor": "human"
+  },
+  "harness": null,
+  "chapter": null,
+  "createdAt": "2026-11-10T11:32:37.438Z"
+}

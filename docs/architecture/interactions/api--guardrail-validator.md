@@ -1,8 +1,5 @@
 <!-- generated:start edge:api→guardrail-validator -->
-# Interaction: API → Guardrail Validator
-
-- **Participants:** `api` → `guardrail-validator`
-- **Transport:** `in-process`
+> **orphaned - edge removed from architecture.** This interaction no longer exists on the architecture canvas. Restore the connection, or resolve and delete this file.
 <!-- generated:end edge:api→guardrail-validator -->
 
 > _Drafted by Aether from source — not human-verified._

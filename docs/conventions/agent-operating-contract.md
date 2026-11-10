@@ -80,35 +80,21 @@ Use these exact names and ids when discussing the architecture.
 
 | Name | Id | Type |
 |---|---|---|
-| Agent Config | `agent-config` | backend |
 | API | `api` | backend |
 | Application Agent | `application-agent` | backend |
-| Application Tracker | `application-tracker` | backend |
+| Application Pipeline | `application-pipeline` | backend |
 | Arbeitnow Job Board API | `arbeitnow-api` | custom |
 | Browser Service | `browser-service` | backend |
-| Company Research | `company-research` | backend |
-| Connections | `connections` | backend |
-| Cover Letter Engine | `cover-letter-engine` | backend |
+| Document Generation | `document-generation` | backend |
 | Gmail / Google OAuth API | `gmail-api` | custom |
-| Gmail Response Sync | `gmail-response-sync` | backend |
 | Guardrail Validator | `guardrail-validator` | backend |
-| Identity Leaf | `identity-leaf` | backend |
+| Integrations | `integrations` | backend |
 | Jev (TypeSafe System One) API | `jev-api` | custom |
-| Job Feeds | `job-feeds` | backend |
-| Background Tasks | `job-runner` | backend |
-| Keyword Vocabulary | `keyword-vocabulary` | backend |
 | LLM Provider Layer | `llm-provider-layer` | backend |
 | LLM Provider Service | `llm-provider-service` | custom |
-| MCP Schema Leaf | `mcpschema-leaf` | backend |
-| Onboarding Store | `onboarding-store` | backend |
-| Prompt Store | `prompt-store` | backend |
-| Renderer | `renderer` | backend |
-| Run Store | `run-store` | backend |
-| Screening Engine | `screening-engine` | backend |
+| Orchestration | `orchestration` | backend |
 | Secret Store | `secret-store` | backend |
-| Services Layer | `services-layer` | backend |
-| Storage | `storage-leaf` | backend |
-| Tailor Engine | `tailor-engine` | backend |
+| Storage & Shared Leaves | `storage` | backend |
 | Truth Data Volume | `truth-data-volume` | storage |
 | Truth Store | `truth-store` | backend |
 | Web UI | `web-ui` | frontend |
@@ -117,5 +103,5 @@ Use these exact names and ids when discussing the architecture.
 <!-- generated:start cap:system-boundary -->
 ## System Boundary
 
-The declared system consists of 32 component(s) and 105 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
+The declared system consists of 18 component(s) and 36 connection(s) - see [the system map](../architecture/system-map.md). Anything not declared there is external to this system.
 <!-- generated:end cap:system-boundary -->
