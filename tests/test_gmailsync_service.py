@@ -18,13 +18,13 @@ import urllib.error
 
 import pytest
 
-import applications
-import secretstore
-from gmailsync import service
-from gmailsync.model import GmailSuggestion
-from gmailsync.store import load_suggestions, save_suggestions
-from screening import jev
-from truth.answers import Answers, save as save_answers
+import truthcv.domain.applications as applications
+import truthcv.infra.secretstore as secretstore
+from truthcv.domain.gmailsync import service
+from truthcv.domain.gmailsync.model import GmailSuggestion
+from truthcv.domain.gmailsync.store import load_suggestions, save_suggestions
+from truthcv.domain.screening import jev
+from truthcv.domain.truth.answers import Answers, save as save_answers
 
 FERNET_KEY = "h2oN5GQVeWVhciVjWNImtAmWFyPGlrWvDCq8vXuqfmo="
 
@@ -502,7 +502,7 @@ _RETENTION_S = 30 * 24 * 60 * 60
 
 
 def test_dismiss_stamps_dismissed_at(data_dir):
-    from gmailsync.store import dismiss_suggestions
+    from truthcv.domain.gmailsync.store import dismiss_suggestions
 
     save_suggestions([_suggestion("p1")])
 
@@ -512,7 +512,7 @@ def test_dismiss_stamps_dismissed_at(data_dir):
 
 
 def test_merge_prunes_expired_dismissed_keeps_recent(data_dir):
-    from gmailsync.store import merge_new_suggestions
+    from truthcv.domain.gmailsync.store import merge_new_suggestions
 
     old = GmailSuggestion(id="old", state="dismissed", dismissed_at=_NOW - _RETENTION_S - 1)
     recent = GmailSuggestion(id="recent", state="dismissed", dismissed_at=_NOW - _RETENTION_S + 1)
@@ -524,7 +524,7 @@ def test_merge_prunes_expired_dismissed_keeps_recent(data_dir):
 
 
 def test_merge_backfills_legacy_dismissed(data_dir):
-    from gmailsync.store import merge_new_suggestions
+    from truthcv.domain.gmailsync.store import merge_new_suggestions
 
     save_suggestions([GmailSuggestion(id="legacy", state="dismissed")])
 
@@ -535,7 +535,7 @@ def test_merge_backfills_legacy_dismissed(data_dir):
 
 
 def test_merge_never_prunes_pending_or_applied(data_dir):
-    from gmailsync.store import merge_new_suggestions
+    from truthcv.domain.gmailsync.store import merge_new_suggestions
 
     ancient = _NOW - 10 * _RETENTION_S
     save_suggestions(

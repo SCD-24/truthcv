@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 
-import api.diagnostics_mcp as diagnostics_mcp
-from screening.model import Screening
+import truthcv.adapters.http.diagnostics_mcp as diagnostics_mcp
+from truthcv.domain.screening.model import Screening
 
 
 def _seed(monkeypatch, records):

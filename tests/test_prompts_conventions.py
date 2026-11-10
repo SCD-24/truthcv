@@ -6,7 +6,7 @@ These tests guard both: the parser's behaviour, and that the string itself is
 untouched.
 """
 
-from prompts.conventions import CvConventions, DEFAULT_CONVENTIONS, page_target_pages
+from truthcv.engines.prompts.conventions import CvConventions, DEFAULT_CONVENTIONS, page_target_pages
 
 
 def test_default_conventions_parse_to_one_page():

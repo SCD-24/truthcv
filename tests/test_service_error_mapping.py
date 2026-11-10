@@ -4,9 +4,9 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from api.main import _service_error_handler
-from services import errors
-from services.errors import ServiceError
+from truthcv.adapters.http.main import _service_error_handler
+from truthcv.services import errors
+from truthcv.services.errors import ServiceError
 
 CASES = [
     ("not_found", errors.NotFound("Not Found"), HTTPException(404, "Not Found")),

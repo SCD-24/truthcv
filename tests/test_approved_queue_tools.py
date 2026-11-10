@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import pytest
 
-import applications.store as apps
-import screening.store as store
-from agenttools import tools_ledger
-from agenttools.tools_ledger import get_approved_applications, report_apply_failure
-from companyresearch import store as findings_store
+import truthcv.domain.applications.store as apps
+import truthcv.domain.screening.store as store
+from truthcv.adapters.mcp import tools_ledger
+from truthcv.adapters.mcp.tools_ledger import get_approved_applications, report_apply_failure
+from truthcv.domain.companyresearch import store as findings_store
 
 
 def _approved(company="Contoso Labs", url="https://contoso.example/jobs/1"):
@@ -112,7 +112,7 @@ def test_already_applied_outranks_contradictory_research(data_dir):
 def test_unsubmitted_ledger_row_does_not_block(data_dir):
     """The ledger also holds reconstructed placeholders for postings nobody
     applied to. Matching one hid a legitimately approved item from every run."""
-    import coverletter.store as letters
+    import truthcv.engines.coverletter.store as letters
 
     s = _approved(url="https://contoso.example/jobs/1")
     letters.save(s.id, letters.CoverLetterDraft(text="Dear team,"))
@@ -131,8 +131,8 @@ def test_unsubmitted_ledger_row_does_not_block(data_dir):
 def test_confirmation_text_counts_as_a_submission(data_dir):
     """Rows predating `record_application` naming `submitted` can carry False
     despite having gone out; a captured confirmation is the corroboration."""
-    import applications.store as apps_store
-    from applications.model import Confirmation
+    import truthcv.domain.applications.store as apps_store
+    from truthcv.domain.applications.model import Confirmation
 
     _approved(url="https://contoso.example/jobs/1")
     a = apps.create(
@@ -150,7 +150,7 @@ def test_confirmation_text_counts_as_a_submission(data_dir):
 def test_already_applied_outranks_cooldown(data_dir):
     """Both hazards can name the same item; already_applied is the one that
     says it must not go out at all rather than not yet."""
-    import agentconfig.store as agent_config_store
+    import truthcv.domain.agentconfig.store as agent_config_store
 
     s = _approved(url="https://contoso.example/jobs/1")
     apps.create(
@@ -171,7 +171,7 @@ def test_already_applied_outranks_cooldown(data_dir):
 def test_record_application_marks_the_row_submitted(data_dir):
     """The guard above keys on `submitted`; a row the agent records with it
     still False would hand the same posting back on the next run."""
-    from agenttools.tools_ledger import record_application
+    from truthcv.adapters.mcp.tools_ledger import record_application
 
     created = record_application(
         company="Contoso Labs", application_url="https://contoso.example/jobs/1"
@@ -180,7 +180,7 @@ def test_record_application_marks_the_row_submitted(data_dir):
 
 
 def test_record_application_can_record_an_unsubmitted_row(data_dir):
-    from agenttools.tools_ledger import record_application
+    from truthcv.adapters.mcp.tools_ledger import record_application
 
     created = record_application(company="Contoso Labs", submitted=False)
     assert created["submitted"] is False
@@ -208,7 +208,7 @@ def test_no_url_flagged_blocked_reason(data_dir):
 
 
 def test_url_present_no_cooldown_blocked_reason_empty(data_dir):
-    import coverletter.store as letters
+    import truthcv.engines.coverletter.store as letters
 
     s = _approved(url="https://contoso.example/jobs/1")
     letters.save(s.id, letters.CoverLetterDraft(text="Dear team,"))
@@ -219,7 +219,7 @@ def test_url_present_no_cooldown_blocked_reason_empty(data_dir):
 def test_approved_item_carries_the_stored_letter(data_dir):
     """The agent applies with the operator's text verbatim; regenerating would
     discard the edit, which is the whole point of semi-auto."""
-    import coverletter.store as letters
+    import truthcv.engines.coverletter.store as letters
 
     s = _approved()
     letters.save(s.id, letters.CoverLetterDraft(text="My own words.", source="operator"))
@@ -239,7 +239,7 @@ def test_approved_item_with_letter_deleted_after_approval_goes_out_letterless(da
     """The approval gate no longer checks the draft at approval time; a draft
     deleted after approval must still let the agent go out with an empty
     cover letter rather than blocking the item."""
-    import coverletter.store as letters
+    import truthcv.engines.coverletter.store as letters
 
     s = _approved()
     letters.save(s.id, letters.CoverLetterDraft(text="Dear team,"))
@@ -253,7 +253,7 @@ def test_approved_item_with_blank_letter_goes_out_letterless(data_dir):
     """A store-level blank draft (the route rejects this on save, but the guard
     here must hold regardless of how the draft went blank) goes out with an
     empty cover letter rather than being blocked."""
-    import coverletter.store as letters
+    import truthcv.engines.coverletter.store as letters
 
     s = _approved()
     letters.save(s.id, letters.CoverLetterDraft(text="   "))
@@ -265,7 +265,7 @@ def test_approved_item_with_blank_letter_goes_out_letterless(data_dir):
 
 
 def test_approved_item_with_a_real_letter_is_unblocked(data_dir):
-    import coverletter.store as letters
+    import truthcv.engines.coverletter.store as letters
 
     s = _approved()
     letters.save(s.id, letters.CoverLetterDraft(text="Dear team,"))
@@ -276,8 +276,8 @@ def test_approved_item_with_a_real_letter_is_unblocked(data_dir):
 def test_cooldown_takes_precedence_over_a_missing_letter(data_dir):
     """Both hazards apply to the same item; the report must name one reason,
     and cooldown is the more urgent of the two."""
-    import agentconfig.store as agent_config_store
-    import coverletter.store as letters
+    import truthcv.domain.agentconfig.store as agent_config_store
+    import truthcv.engines.coverletter.store as letters
 
     s = _approved()
     letters.delete(s.id)
@@ -358,7 +358,7 @@ def test_record_application_malformed_evidence_persists_nothing(data_dir):
 
 
 def _with_letter(company: str, url: str):
-    import coverletter.store as letters
+    import truthcv.engines.coverletter.store as letters
 
     s = _approved(company=company, url=url)
     letters.save(s.id, letters.CoverLetterDraft(text="Dear hiring manager,", source="generated"))
@@ -391,7 +391,7 @@ def test_cap_honoured_from_explicit_limit(data_dir):
 
 
 def test_cap_honoured_from_agent_config(data_dir):
-    import agentconfig.store as agent_config_store
+    import truthcv.domain.agentconfig.store as agent_config_store
 
     cfg = agent_config_store.load()
     cfg.max_applications_per_run = 1

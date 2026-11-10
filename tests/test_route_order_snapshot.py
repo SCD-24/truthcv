@@ -73,8 +73,8 @@ from fastapi.testclient import TestClient
 from starlette.convertors import CONVERTOR_TYPES
 from starlette.routing import PARAM_REGEX
 
-import services.gmail as gmail_service
-from api.main import app
+import truthcv.services.gmail as gmail_service
+from truthcv.adapters.http.main import app
 
 FIXTURE = Path(__file__).parent / "fixtures" / "route_order_snapshot.json"
 

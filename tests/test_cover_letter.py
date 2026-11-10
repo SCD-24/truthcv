@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from coverletter.generate import build_letter, load_letter_draft, save_letter_draft
-from providers.fake import FakeProvider
-from truth.answers import Answers
-from truth.model import Bullet, Experience, Hobby, Profile, Skill, Truth
+from truthcv.engines.coverletter.generate import build_letter, load_letter_draft, save_letter_draft
+from truthcv.integrations.providers.fake import FakeProvider
+from truthcv.domain.truth.answers import Answers
+from truthcv.domain.truth.model import Bullet, Experience, Hobby, Profile, Skill, Truth
 
 
 def _truth() -> Truth:
@@ -77,7 +77,7 @@ def test_blocked_letter_groups_claims_by_source_text(data_dir):
 def test_approving_blocked_claim_unblocks_without_truth_write(data_dir):
     """Approving the exact blocked claim text lets it pass for THIS generation
     (added to allowed), and it is never persisted to the truth file."""
-    from truth import load
+    from truthcv.domain.truth import load
 
     blocked = build_letter("A role", "Short", _truth(), FakeProvider(router=_router_lie))
     approved = {c.text for c in blocked["blocked_claims"]}
@@ -245,7 +245,7 @@ def test_legacy_bare_list_draft_is_treated_as_stale(data_dir):
     """A cover_letter_draft.json written before posting-binding (a bare JSON
     list, with no postingHash envelope) is stale and forces regeneration
     rather than being returned as-is."""
-    from coverletter.generate import _letter_draft_path
+    from truthcv.engines.coverletter.generate import _letter_draft_path
     import json
 
     p = _letter_draft_path()

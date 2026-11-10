@@ -5,9 +5,9 @@ from urllib.parse import parse_qs, unquote_plus, urlparse
 
 import pytest
 
-from agentconfig import boards as boards_module
-from agentconfig import dorks
-from agentconfig.store import JobBoard, JobProfile
+from truthcv.domain.agentconfig import boards as boards_module
+from truthcv.domain.agentconfig import dorks
+from truthcv.domain.agentconfig.store import JobBoard, JobProfile
 
 
 def test_every_keyword_is_quoted():

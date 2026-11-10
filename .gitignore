@@ -11,10 +11,10 @@ node_modules
 .env.backup-*
 .aether/debug/runs/*
 # The canonical CV is personal data. It lives on the shared data volume
-# (data/canonical_cv.pdf, registered via `python -m truth.answers <path>`),
+# (data/canonical_cv.pdf, registered via `python -m truthcv.domain.truth.answers <path>`),
 # never in git history. Anchored with a leading slash: an unanchored
 # `assets/` would match at any depth and swallow the built frontend bundle
-# in api/static/assets/.
+# in truthcv/adapters/http/static/assets/.
 /assets/
 # The operator's own screening answers and job-search queue. Both are personal
 # data (phone, address, salary band, target companies) and both have a tracked
@@ -29,7 +29,7 @@ node_modules
 # Build artifact: `npm run build` in web/ emits the hashed bundle here, and the
 # Docker image builds its own. Committing it means old hashed assets accumulate
 # and keep serving a stale frontend to any browser with a cached index.html.
-/api/static/
+/truthcv/adapters/http/static/
 
 # Build output from `tsc -p agent/tsconfig.json`; the image builds it at
 # build time and it must never be committed.

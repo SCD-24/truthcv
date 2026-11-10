@@ -3,11 +3,11 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-import modelrouting
-from services import agent_credentials
-from api.main import app
-from api.schemas import AgentLlmCredentials
-from modelrouting.store import routing_path
+import truthcv.integrations.modelrouting as modelrouting
+from truthcv.services import agent_credentials
+from truthcv.adapters.http.main import app
+from truthcv.adapters.http.schemas import AgentLlmCredentials
+from truthcv.integrations.modelrouting.store import routing_path
 
 
 @pytest.fixture()

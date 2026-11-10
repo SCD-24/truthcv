@@ -19,7 +19,8 @@ import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SERVICES_DIR = REPO_ROOT / "services"
+SERVICES_DIR = REPO_ROOT / "truthcv" / "services"
+HTTP_DIR = REPO_ROOT / "truthcv" / "adapters" / "http"
 
 # The Phase 4 split of api/routes.py: the code that used to live in routes.py is
 # moving, one resource at a time, into flat modules (plus shared helpers in
@@ -45,7 +46,7 @@ _PHASE4_ROUTE_FILE_NAMES = (
 
 
 def _phase4_route_files() -> list[Path]:
-    paths = [REPO_ROOT / "api" / name for name in _PHASE4_ROUTE_FILE_NAMES]
+    paths = [HTTP_DIR / name for name in _PHASE4_ROUTE_FILE_NAMES]
     missing = [p.name for p in paths if not p.exists()]
     assert not missing, f"listed Phase 4 route files do not exist: {missing}"
     return paths
@@ -147,12 +148,14 @@ def test_no_module_outside_storage_and_truth_imports_data_dir_from_truth_store()
     for path in _all_py_files(REPO_ROOT):
         rel = path.relative_to(REPO_ROOT)
         parts = rel.parts
-        if parts[0] in ("storage", "truth", "node_modules", ".git"):
+        if parts[0] in ("node_modules", ".git"):
+            continue
+        if parts[:3] in (("truthcv", "infra", "storage"), ("truthcv", "domain", "truth")):
             continue
         if "node_modules" in parts:
             continue
         text = path.read_text(encoding="utf-8")
-        if re.search(r"from\s+truth\.store\s+import[^\n]*\bdata_dir\b", text) or re.search(
+        if re.search(r"from\s+truthcv\.domain\.truth\.store\s+import[^\n]*\bdata_dir\b", text) or re.search(
             r"from\s+\.store\s+import[^\n]*\bdata_dir\b", text
         ):
             offenders.append(str(rel))

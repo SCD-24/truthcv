@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from screening.posting import (
+from truthcv.domain.screening.posting import (
     MIN_POSTING_TEXT_CHARS,
     normalize_posting_text,
     validate_posting_text,

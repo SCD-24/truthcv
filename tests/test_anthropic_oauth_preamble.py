@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from connections.auth.claude import CLAUDE_CODE_PREAMBLE
+from truthcv.integrations.connections.auth.claude import CLAUDE_CODE_PREAMBLE
 
 _ADAPTER = Path(__file__).resolve().parents[1] / "agent/harness/providers/anthropicMessages.ts"
 

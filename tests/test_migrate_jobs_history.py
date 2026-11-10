@@ -14,9 +14,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-import applications.store as app_store
-import screening.store as screening_store
-from screening.cooldown import cooldown
+import truthcv.domain.applications.store as app_store
+import truthcv.domain.screening.store as screening_store
+from truthcv.domain.screening.cooldown import cooldown
 from scripts.migrate_jobs_history import (
     MANIFEST_NAME,
     MIGRATION_SUBDIR,

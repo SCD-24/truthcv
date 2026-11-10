@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from applications.model import Application
-from runs.derive import board_breakdown_by_run, counters_by_run, derive_counters
-from runs.model import RunRecord
-from screening.model import Screening
+from truthcv.domain.applications.model import Application
+from truthcv.domain.runs.derive import board_breakdown_by_run, counters_by_run, derive_counters
+from truthcv.domain.runs.model import RunRecord
+from truthcv.domain.screening.model import Screening
 
 
 def _screening(run_id: str, **kwargs) -> Screening:

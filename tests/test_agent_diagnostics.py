@@ -9,8 +9,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from api import agent_diagnostics as diag
-from runs import store as runs_store
+from truthcv.adapters.http import agent_diagnostics as diag
+from truthcv.domain.runs import store as runs_store
 
 RUN_ID = "run_test1"
 AT = "2023-11-14T22:13:20.000Z"

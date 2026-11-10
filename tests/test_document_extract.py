@@ -6,8 +6,8 @@ import io
 
 import pytest
 
-from truth.document import extract_document_text
-from truth.pdf import DocumentExtractError
+from truthcv.domain.truth.document import extract_document_text
+from truthcv.domain.truth.pdf import DocumentExtractError
 
 
 def test_txt_returns_decoded_text():

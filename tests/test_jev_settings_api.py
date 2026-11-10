@@ -10,9 +10,9 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-import secretstore
-from api.main import app
-from screening import jev
+import truthcv.infra.secretstore as secretstore
+from truthcv.adapters.http.main import app
+from truthcv.domain.screening import jev
 
 FERNET_KEY = "h2oN5GQVeWVhciVjWNImtAmWFyPGlrWvDCq8vXuqfmo="
 

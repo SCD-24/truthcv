@@ -6,7 +6,7 @@ import io
 import pytest
 from fastapi.testclient import TestClient
 
-from providers.fake import FakeProvider
+from truthcv.integrations.providers.fake import FakeProvider
 
 
 def test_tailor_resolves_per_subtask(data_dir):
@@ -16,8 +16,8 @@ def test_tailor_resolves_per_subtask(data_dir):
         asked.append(task)
         return FakeProvider()
 
-    import tailor as tailor_engine
-    from truth.model import Truth
+    import truthcv.engines.tailor as tailor_engine
+    from truthcv.domain.truth.model import Truth
 
     tailor_engine.tailor("posting text", Truth(), provider_for)
     assert asked == ["keywords", "tailor", "infer"]
@@ -53,8 +53,8 @@ def test_extract_route_passes_task_name(data_dir, monkeypatch):
             }
         )
 
-    import api.truth_routes as routes
-    from api.main import app
+    import truthcv.adapters.http.truth_routes as routes
+    from truthcv.adapters.http.main import app
 
     monkeypatch.setattr(routes, "get_provider", fake_get_provider)
     client = TestClient(app)
@@ -82,10 +82,10 @@ def test_routes_pass_task_names(data_dir, monkeypatch):
             }
         )
 
-    import api.cv_routes as routes
-    from truth import save
-    from truth.model import Experience, Skill, Truth
-    from storage import data_dir as dd
+    import truthcv.adapters.http.cv_routes as routes
+    from truthcv.domain.truth import save
+    from truthcv.domain.truth.model import Experience, Skill, Truth
+    from truthcv.infra.storage import data_dir as dd
 
     monkeypatch.setattr(routes, "get_provider", fake_get_provider)
     save(
@@ -106,7 +106,7 @@ def test_routes_pass_task_names(data_dir, monkeypatch):
     )
     (dd() / "posting.txt").write_text("Python role at a startup")
 
-    from api.main import app
+    from truthcv.adapters.http.main import app
 
     client = TestClient(app)
     r = client.post("/api/cover-letter", json={"length": "Short"})

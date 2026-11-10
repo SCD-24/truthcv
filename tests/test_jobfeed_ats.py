@@ -9,8 +9,8 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 
-from companyboards.store import CompanyBoard
-from jobfeeds import ats
+from truthcv.domain.companyboards.store import CompanyBoard
+from truthcv.domain.jobfeeds import ats
 
 NOW = datetime(2026, 8, 27, 12, 0, 0, tzinfo=timezone.utc)
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import threading
 
-from runs import store
-from agenttools import tools_runs
+from truthcv.domain.runs import store
+from truthcv.adapters.mcp import tools_runs
 
 
 def test_start_bump_finish_lifecycle(data_dir):
@@ -625,7 +625,7 @@ def test_mark_finish_refused_persists(data_dir):
 
 
 def test_old_record_without_finish_refused_key_loads_as_false(data_dir):
-    from runs.model import RunRecord
+    from truthcv.domain.runs.model import RunRecord
 
     record = RunRecord.from_dict({"id": "run-fr-3", "status": "running"})
     assert record.finish_refused is False
@@ -641,7 +641,7 @@ def test_finish_refusals_defaults_zero(data_dir):
 
 
 def test_old_record_without_finish_refusals_key_loads_as_zero(data_dir):
-    from runs.model import RunRecord
+    from truthcv.domain.runs.model import RunRecord
 
     record = RunRecord.from_dict({"id": "run-frn-2", "status": "running"})
     assert record.finish_refusals == 0
@@ -674,7 +674,7 @@ def test_second_finish_without_item_fields_keeps_recorded_failures(data_dir):
 
 
 def test_old_record_without_item_fields_loads_as_defaults(data_dir):
-    from runs.model import RunRecord
+    from truthcv.domain.runs.model import RunRecord
 
     record = RunRecord.from_dict({"id": "run-if-3", "status": "running"})
     assert record.items_failed == 0

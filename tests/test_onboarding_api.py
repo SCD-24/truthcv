@@ -5,12 +5,12 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-import api.routes as routes
-from api.main import app
-from onboarding import store as onboarding_store
-from truth import pdf as truth_pdf
-from truth import store as truth_store
-from truth.model import Skill, Truth
+import truthcv.adapters.http.routes as routes
+from truthcv.adapters.http.main import app
+from truthcv.domain.onboarding import store as onboarding_store
+from truthcv.domain.truth import pdf as truth_pdf
+from truthcv.domain.truth import store as truth_store
+from truthcv.domain.truth.model import Skill, Truth
 
 
 @pytest.fixture()

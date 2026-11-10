@@ -7,8 +7,8 @@ opt-in again (its autouse=True is removed).
 import tempfile
 from pathlib import Path
 
-import companyboards.store as company_boards_store
-import storage
+import truthcv.domain.companyboards.store as company_boards_store
+import truthcv.infra.storage as storage
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _REAL_COMPANY_BOARDS_JSON = _REPO_ROOT / "data" / "company_boards.json"

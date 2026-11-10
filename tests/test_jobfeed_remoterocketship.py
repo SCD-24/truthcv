@@ -8,8 +8,8 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 
-from agentconfig.store import JobProfile
-from jobfeeds import remoterocketship as rr
+from truthcv.domain.agentconfig.store import JobProfile
+from truthcv.domain.jobfeeds import remoterocketship as rr
 
 NOW = datetime(2026, 8, 27, 12, 0, 0, tzinfo=timezone.utc)
 

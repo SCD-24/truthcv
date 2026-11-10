@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from providers.openai_provider import OpenAIProvider
+from truthcv.integrations.providers.openai_provider import OpenAIProvider
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 

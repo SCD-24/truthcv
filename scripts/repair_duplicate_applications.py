@@ -75,10 +75,10 @@ from typing import NamedTuple
 # not resolve. Add the root explicitly rather than constrain how it is invoked.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import applications.store as applications_store  # noqa: E402
-from applications.model import Application  # noqa: E402
-from identity.company import company_identity_key  # noqa: E402
-from identity.url import normalize_application_url  # noqa: E402
+import truthcv.domain.applications.store as applications_store  # noqa: E402
+from truthcv.domain.applications.model import Application  # noqa: E402
+from truthcv.infra.identity.company import company_identity_key  # noqa: E402
+from truthcv.infra.identity.url import normalize_application_url  # noqa: E402
 
 
 # --- "populated" / "non-empty" helpers ----------------------------------------

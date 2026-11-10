@@ -33,7 +33,7 @@ can never take the agent's own run loop down.
 ## The agent has no identity until you seed one
 
 `get_profile_answers` returns every field — name, email, phone, work
-authorisation, and the rest — as `""` on a fresh install. `truth/answers.py`
+authorisation, and the rest — as `""` on a fresh install. `truthcv/domain/truth/answers.py`
 ships with no personal defaults on purpose. Seed your own before the first
 run:
 
@@ -41,11 +41,11 @@ run:
 cp answers.example.yaml answers.local.yaml
 $EDITOR answers.local.yaml
 docker compose run --rm -v "$(pwd)/answers.local.yaml:/app/answers.local.yaml" app \
-  python -m truth.answers --answers /app/answers.local.yaml
+  python -m truthcv.domain.truth.answers --answers /app/answers.local.yaml
 ```
 
 The data volume is root-owned, so that has to run inside a container, not
-directly on the host — `python -m truth.answers` run on the host fails with
+directly on the host — `python -m truthcv.domain.truth.answers` run on the host fails with
 `PermissionError`. You can also fill these in from the web UI's Settings
 modal instead of the file.
 
@@ -105,7 +105,7 @@ under the operator's name. Watch it.
 | `RUN_ONCE` | unset | `1` = run immediately and exit. |
 | `TZ` | `UTC` (compose sets `TZ=${TZ:-UTC}`) | Container timezone. Also the second link in the schedule-zone fallback chain below, used only when the Agents page's `run_timezone` is unset or unreachable and `RUN_TIMEZONE` is unset. |
 | `RUN_TIMEZONE` | unset → falls back to `TZ`, then `UTC` | Fallback IANA zone the `RUN_AT` slots are wall-clock times in. Full chain: the app's stored `run_timezone` (Agents page) when the config API is reachable, else `RUN_TIMEZONE`, else `TZ`, else `UTC`. Not set by `docker-compose.yml`; the fallback is applied by `entrypoint.sh` and `supervisor.js` (`agent-config.js` only reports the app's stored value, empty if absent). |
-| `TRUTHCV_MCP_URL` | `http://app:8080/mcp` | The `app` service's MCP streamable-HTTP JSON-RPC tool surface (`POST /mcp`, `agenttools/mcp_app.py`). In-network only — not reachable from the host or the internet. |
+| `TRUTHCV_MCP_URL` | `http://app:8080/mcp` | The `app` service's MCP streamable-HTTP JSON-RPC tool surface (`POST /mcp`, `truthcv/adapters/mcp/mcp_app.py`). In-network only — not reachable from the host or the internet. |
 | `AGENT_BROWSER_DRIVER` | `browser` | Which browser driver the agent uses. `browser` (the containerised Chromium) is currently the only supported value — kept as a validating seam so a second driver can be added later without every call site needing to change. |
 | `BROWSER_MCP_URL` | `http://browser:8931/mcp` | In-network address of the `browser` compose service's MCP endpoint (see [`browser/README.md`](../browser/README.md)). Also in-network only. Used by the `browser` driver. |
 | `MAX_APPLICATIONS_PER_RUN` | empty | Fallback only: `maxApplicationsPerRun` on the Agents page takes precedence. Empty in both means **no cap**, matching RUNBOOK §1 ("there is no daily quota"). Not zero. Enforced server-side on the approved-queue path (`get_approved_applications` caps and leases what it hands out); on a posting the agent discovers itself in FULL AUTO it is prompt-level only. |
@@ -449,7 +449,7 @@ Discovery is code-driven (`agent/harness/pipeline/discover.ts`, run by
 runs three channels: API feed postings, direct boards (searched on-site), and
 Google dorks. One `record_discovery_coverage` is recorded per composed entry.
 
-**Dork construction** (`agentconfig/dorks.py`, `compose_queries`):
+**Dork construction** (`truthcv/domain/agentconfig/dorks.py`, `compose_queries`):
 
 - **Per title, not per keyword.** Queries are built from each enabled profile's
   job titles (`title_keywords`; else keywords ending in a title noun such as

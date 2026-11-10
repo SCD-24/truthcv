@@ -9,10 +9,10 @@ import logging
 import pytest
 from fastapi.testclient import TestClient
 
-import api.main as main_mod
-from api.main import app
-from coverletter import store as letters
-from screening import store
+import truthcv.adapters.http.main as main_mod
+from truthcv.adapters.http.main import app
+from truthcv.engines.coverletter import store as letters
+from truthcv.domain.screening import store
 
 MARKER = ".purge_unreadable_screenings.v1.done"
 BACKUP = "screenings.pre-unreadable-purge.bak.json"
@@ -105,7 +105,7 @@ def test_startup_survives_purge_failure(monkeypatch, caplog):
         with TestClient(app) as c:
             assert c.get("/api/profile").status_code == 200
     assert any(
-        r.name == "api.main" and r.levelno == logging.ERROR for r in caplog.records
+        r.name == "truthcv.adapters.http.main" and r.levelno == logging.ERROR for r in caplog.records
     )
 
 

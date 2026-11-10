@@ -7,7 +7,7 @@ traceable to its scope's allowed set is unverifiable — nothing fabricated pass
 
 from __future__ import annotations
 
-from guardrail import validate, Scope
+from truthcv.engines.guardrail import validate, Scope
 
 
 # One experience's truth facts, expressed as the values that scope may draw on.
@@ -92,7 +92,7 @@ def test_token_from_another_scope_is_unverifiable():
 
 def test_acronym_in_truth_expansion_in_draft_passes(data_dir):
     """Truth attests the acronym; a draft using the registered expansion passes."""
-    import vocabulary.synonyms as vs
+    import truthcv.engines.vocabulary.synonyms as vs
 
     vocab = data_dir / "vocabulary"
     vocab.mkdir()
@@ -118,7 +118,7 @@ def test_acronym_in_truth_expansion_in_draft_passes(data_dir):
 
 def test_expansion_in_truth_acronym_in_draft_passes(data_dir):
     """Reverse direction: truth attests the expansion; a draft acronym passes."""
-    import vocabulary.synonyms as vs
+    import truthcv.engines.vocabulary.synonyms as vs
 
     vocab = data_dir / "vocabulary"
     vocab.mkdir()
@@ -144,7 +144,7 @@ def test_expansion_in_truth_acronym_in_draft_passes(data_dir):
 
 def test_unattested_synonym_group_grants_no_permission(data_dir):
     """A group present in the file but attested by nothing in scope rescues nothing."""
-    import vocabulary.synonyms as vs
+    import truthcv.engines.vocabulary.synonyms as vs
 
     vocab = data_dir / "vocabulary"
     vocab.mkdir()
@@ -172,7 +172,7 @@ def test_unattested_synonym_group_grants_no_permission(data_dir):
 
 def test_synonym_expansion_is_per_scope(data_dir):
     """A form attested only in scope A does not unblock the phrase in scope B."""
-    import vocabulary.synonyms as vs
+    import truthcv.engines.vocabulary.synonyms as vs
 
     vocab = data_dir / "vocabulary"
     vocab.mkdir()
@@ -205,8 +205,8 @@ def test_synonym_expansion_is_per_scope(data_dir):
 
 def test_no_synonyms_file_leaves_verdicts_unchanged(data_dir):
     """Canary: with no synonyms file, verdicts match today's exact behaviour."""
-    import vocabulary.synonyms as vs
-    import guardrail.validate as gv
+    import truthcv.engines.vocabulary.synonyms as vs
+    import truthcv.engines.guardrail.validate as gv
 
     # No data/vocabulary/synonyms.txt written on this fresh volume.
     vs._synonyms_cache = None

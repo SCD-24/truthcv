@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from services import gmail as gmail_service
-from services import prompt_library
-from services.errors import BadRequest, Forbidden
+from truthcv.services import gmail as gmail_service
+from truthcv.services import prompt_library
+from truthcv.services.errors import BadRequest, Forbidden
 
 
 def test_remove_seeded_or_default_is_forbidden(monkeypatch):
@@ -53,7 +53,7 @@ def test_save_rejected_write_is_forbidden(monkeypatch):
 
 
 def test_dismiss_and_count_reads_pending_after_dismissal(monkeypatch):
-    from gmailsync import service as gs
+    from truthcv.domain.gmailsync import service as gs
 
     calls = []
     monkeypatch.setattr(gs, "dismiss", lambda ids: calls.append(("dismiss", ids)) or 2)
@@ -63,7 +63,7 @@ def test_dismiss_and_count_reads_pending_after_dismissal(monkeypatch):
 
 
 def test_accept_and_count_propagates_not_found(monkeypatch):
-    from gmailsync import service as gs
+    from truthcv.domain.gmailsync import service as gs
 
     def boom(_id):
         raise gs.SuggestionNotFound(_id)
@@ -74,7 +74,7 @@ def test_accept_and_count_propagates_not_found(monkeypatch):
 
 
 def test_accept_and_count_returns_accepted_and_pending(monkeypatch):
-    from gmailsync import service as gs
+    from truthcv.domain.gmailsync import service as gs
 
     monkeypatch.setattr(gs, "accept", lambda _id: "ACC")
     monkeypatch.setattr(gs, "list_pending", lambda limit, offset: ([], 3))

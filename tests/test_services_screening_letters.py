@@ -6,12 +6,12 @@ from __future__ import annotations
 
 import pytest
 
-import coverletter.store as letter_store
-import services.letters as letters
-import services.screening_letters as sl
-import services.screenings as svc
-from screening import store
-from services.errors import Conflict, NotFound, Refused
+import truthcv.engines.coverletter.store as letter_store
+import truthcv.services.letters as letters
+import truthcv.services.screening_letters as sl
+import truthcv.services.screenings as svc
+from truthcv.domain.screening import store
+from truthcv.services.errors import Conflict, NotFound, Refused
 
 URL = "https://acme.example/jobs/1"
 
@@ -74,8 +74,8 @@ def test_generate_blocked_raises_structured_refusal(monkeypatch):
                 "paragraphs": para}
 
     monkeypatch.setattr(letters, "generate_cover_letter_for_operator", fake)
-    from coverletter import LETTER_SCOPE_ID
-    from services.render_cv import _claim_id
+    from truthcv.engines.coverletter import LETTER_SCOPE_ID
+    from truthcv.services.render_cv import _claim_id
     cid = _claim_id(LETTER_SCOPE_ID, "Led X")
     with pytest.raises(Refused) as exc:
         _gen(s.id, approved_ids={cid}, denied_ids=set(), paragraphs=para)

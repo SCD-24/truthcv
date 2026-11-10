@@ -8,7 +8,7 @@ otherwise fall back to port().
 
 from __future__ import annotations
 
-from api.config import public_url
+from truthcv.adapters.http.config import public_url
 
 
 def test_public_port_wins_over_bound_port(monkeypatch):

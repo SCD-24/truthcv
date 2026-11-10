@@ -22,8 +22,8 @@ from pathlib import Path
 
 import pytest
 
-from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
-from agenttools.server import list_tools
+from truthcv.adapters.mcp.mcp_app import _TOOL_REGISTRY, _input_schema
+from truthcv.adapters.mcp.server import list_tools
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mcp_registry_snapshot.json"
 

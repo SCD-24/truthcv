@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 
-from agentconfig import store
-from agentconfig.store import AgentConfig
+from truthcv.domain.agentconfig import store
+from truthcv.domain.agentconfig.store import AgentConfig
 
 
 def test_mode_defaults_to_full():

@@ -48,8 +48,8 @@ from pathlib import Path
 # resolve. Add the root explicitly rather than constrain how it is invoked.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import screening.store as screening_store  # noqa: E402
-from screening.role import normalize_role_title, validate_role_title  # noqa: E402
+import truthcv.domain.screening.store as screening_store  # noqa: E402
+from truthcv.domain.screening.role import normalize_role_title, validate_role_title  # noqa: E402
 
 
 def classify(screenings: list) -> tuple[list, list, list]:

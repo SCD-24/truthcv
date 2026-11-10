@@ -6,7 +6,7 @@ fixture (tests/conftest.py) so nothing here ever touches the real ./data.
 
 from __future__ import annotations
 
-import screening.store as screening_store
+import truthcv.domain.screening.store as screening_store
 from scripts.repair_screening_roles import main
 
 

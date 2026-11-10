@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from api.main import app
+from truthcv.adapters.http.main import app
 
 FIXTURE = Path(__file__).parent / "fixtures" / "openapi_snapshot.json"
 UPDATE_ENV = "UPDATE_OPENAPI_SNAPSHOT"

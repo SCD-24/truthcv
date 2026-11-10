@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-import screening.store as store
-from api.main import app
+import truthcv.domain.screening.store as store
+from truthcv.adapters.http.main import app
 
 
 @pytest.fixture()
@@ -40,7 +40,7 @@ def test_wire_model_exposes_approval_fields(client):
 
 
 def test_patch_sets_approval(client):
-    import coverletter.store as letters
+    import truthcv.engines.coverletter.store as letters
 
     s = _deferred()
     letters.save(s.id, letters.CoverLetterDraft(text="Dear team,"))
@@ -69,7 +69,7 @@ def test_patch_sets_url_only(client):
 
 
 def test_patch_sets_url_and_approval(client):
-    import coverletter.store as letters
+    import truthcv.engines.coverletter.store as letters
 
     s = _deferred()
     letters.save(s.id, letters.CoverLetterDraft(text="Dear team,"))
@@ -135,7 +135,7 @@ def test_patch_role_unknown_id_404(client):
 
 
 def test_patch_role_and_approval_together(client):
-    import coverletter.store as letters
+    import truthcv.engines.coverletter.store as letters
 
     s = _deferred()
     letters.save(s.id, letters.CoverLetterDraft(text="Dear team,"))
@@ -161,7 +161,7 @@ def test_patch_url_unknown_id_404(client):
 
 
 def test_bulk_patch_reports_per_id(client):
-    import coverletter.store as letters
+    import truthcv.engines.coverletter.store as letters
 
     a, b = _deferred("Contoso Labs"), _deferred("Aperture")
     letters.save(a.id, letters.CoverLetterDraft(text="Dear team,"))
@@ -203,8 +203,8 @@ def test_no_agent_route_writes_approval(client):
     # No tool on the agent's surface can WRITE approval. Checked against the
     # store functions themselves rather than tool names: the surface legitimately
     # includes get_approved_applications, which only reads.
-    import screening.store as store_module
-    from agenttools.mcp_app import _TOOL_REGISTRY
+    import truthcv.domain.screening.store as store_module
+    from truthcv.adapters.mcp.mcp_app import _TOOL_REGISTRY
 
     writers = {store_module.set_approval, store_module.mark_applied}
     assert not (writers & {fn for fn, _ in _TOOL_REGISTRY.values()})
@@ -220,7 +220,7 @@ def test_approving_without_a_letter_succeeds(client):
 
 
 def test_approving_with_a_letter_succeeds(client):
-    import coverletter.store as letters
+    import truthcv.engines.coverletter.store as letters
 
     s = _deferred()
     letters.save(s.id, letters.CoverLetterDraft(text="Dear team,", source="operator"))
@@ -235,7 +235,7 @@ def test_rejecting_never_needs_a_letter(client):
 
 
 def test_bulk_approve_approves_a_draftless_item(client):
-    import coverletter.store as letters
+    import truthcv.engines.coverletter.store as letters
 
     a, b = _deferred("Contoso Labs"), _deferred("Aperture")
     letters.save(a.id, letters.CoverLetterDraft(text="Dear team,"))
@@ -304,7 +304,7 @@ class TestMarkScreeningApplied:
     def test_open_contradiction_gives_a_contradiction_specific_409(self, client, data_dir):
         """The 409 must not flatten a research contradiction into the
         already-applied wording — the operator needs to know which is true."""
-        from companyresearch import store as findings_store
+        from truthcv.domain.companyresearch import store as findings_store
 
         sid = self._screening(client)
         findings_store.record(
@@ -339,7 +339,7 @@ class TestMarkScreeningApplied:
         The test that carried this name passed a URL and asserted "Posting",
         so the General branch had no coverage at all.
         """
-        from screening import store as screening_store
+        from truthcv.domain.screening import store as screening_store
 
         created = screening_store.create(
             {"company": "No URL Co", "role": "Engineer", "verdict": "passed"}
@@ -356,7 +356,7 @@ class TestMarkScreeningApplied:
         """
         import threading
 
-        from screening import store as screening_store
+        from truthcv.domain.screening import store as screening_store
 
         sid = self._screening(client)
         winners = []

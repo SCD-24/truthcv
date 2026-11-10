@@ -7,9 +7,9 @@ import pytest
 import respx
 from httpx import Response
 
-from connections.auth import codex as codex_auth
-from providers.openai_provider import OpenAIProvider
-from providers import build_connection_provider
+from truthcv.integrations.connections.auth import codex as codex_auth
+from truthcv.integrations.providers.openai_provider import OpenAIProvider
+from truthcv.integrations.providers import build_connection_provider
 from cryptography.fernet import Fernet
 
 
@@ -26,7 +26,7 @@ def enc(data_dir, monkeypatch):
 @respx.mock
 def test_complete_via_responses_builds_correct_url_headers_and_body(monkeypatch):
     """URL, headers, and body are correct; store:false, stream:true, no max_output_tokens."""
-    from providers import codex_responses as cr
+    from truthcv.integrations.providers import codex_responses as cr
 
     route = respx.post(cr.DEFAULT_BASE_URL + "/responses").mock(
         return_value=Response(200, text='data: {"type":"response.completed","response":{"status":"completed","output":[]}}\ndata: [DONE]\n')
@@ -54,7 +54,7 @@ def test_complete_via_responses_builds_correct_url_headers_and_body(monkeypatch)
 @respx.mock
 def test_complete_via_responses_accumulates_deltas_and_stops_at_completed():
     """Multiple output_text.delta events are assembled; response.completed ends the stream."""
-    from providers import codex_responses as cr
+    from truthcv.integrations.providers import codex_responses as cr
 
     events = [
         'data: {"type":"response.output_text.delta","delta":"Hello"}\n',
@@ -72,7 +72,7 @@ def test_complete_via_responses_accumulates_deltas_and_stops_at_completed():
 @respx.mock
 def test_complete_via_responses_falls_back_to_output_when_no_deltas():
     """When no delta events arrive, text is assembled from response.output[] message parts."""
-    from providers import codex_responses as cr
+    from truthcv.integrations.providers import codex_responses as cr
 
     response_obj = {
         "status": "completed",
@@ -101,8 +101,8 @@ def test_complete_via_responses_falls_back_to_output_when_no_deltas():
 @respx.mock
 def test_complete_via_responses_error_event_raises_provider_error():
     """An SSE error event raises ProviderError with the server's code and message."""
-    from providers import codex_responses as cr
-    from providers.base import ProviderError
+    from truthcv.integrations.providers import codex_responses as cr
+    from truthcv.integrations.providers.base import ProviderError
 
     events = [
         'data: {"type":"error","error":{"code":"some_code","message":"something bad"}}\n',
@@ -122,8 +122,8 @@ def test_complete_via_responses_error_event_raises_provider_error():
 @respx.mock
 def test_complete_via_responses_flat_error_event_raises_provider_error():
     """A top-level flat error event (no nested `error` object) raises ProviderError."""
-    from providers import codex_responses as cr
-    from providers.base import ProviderError
+    from truthcv.integrations.providers import codex_responses as cr
+    from truthcv.integrations.providers.base import ProviderError
 
     events = [
         'data: {"type":"error","code":"x","message":"y"}\n',
@@ -142,8 +142,8 @@ def test_complete_via_responses_flat_error_event_raises_provider_error():
 @respx.mock
 def test_complete_via_responses_string_error_event_keeps_message():
     """An error event whose `error` is a plain string keeps that string in the ProviderError."""
-    from providers import codex_responses as cr
-    from providers.base import ProviderError
+    from truthcv.integrations.providers import codex_responses as cr
+    from truthcv.integrations.providers.base import ProviderError
 
     events = ['data: {"type":"error","error":"backend unavailable"}\n']
     respx.post(cr.DEFAULT_BASE_URL + "/responses").mock(
@@ -156,8 +156,8 @@ def test_complete_via_responses_string_error_event_keeps_message():
 @respx.mock
 def test_complete_via_responses_sse_usage_limit_error_raises_usage_message():
     """An SSE error event with a usage-limit code raises the usage-limit ProviderError."""
-    from providers import codex_responses as cr
-    from providers.base import ProviderError
+    from truthcv.integrations.providers import codex_responses as cr
+    from truthcv.integrations.providers.base import ProviderError
 
     events = [
         'data: {"type":"error","code":"usage_limit_reached","message":"limit","resets_at":42}\n',
@@ -176,8 +176,8 @@ def test_complete_via_responses_sse_usage_limit_error_raises_usage_message():
 @respx.mock
 def test_complete_via_responses_response_failed_raises():
     """An SSE response.failed event raises ProviderError."""
-    from providers import codex_responses as cr
-    from providers.base import ProviderError
+    from truthcv.integrations.providers import codex_responses as cr
+    from truthcv.integrations.providers.base import ProviderError
 
     events = [
         'data: {"type":"response.failed","response":{"error":{"code":"internal_error","message":"server fault"}}}\n',
@@ -195,8 +195,8 @@ def test_complete_via_responses_response_failed_raises():
 @respx.mock
 def test_complete_via_responses_incomplete_raises_with_reason():
     """An SSE response.incomplete event raises ProviderError naming the reason."""
-    from providers import codex_responses as cr
-    from providers.base import ProviderError
+    from truthcv.integrations.providers import codex_responses as cr
+    from truthcv.integrations.providers.base import ProviderError
 
     events = [
         'data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}\n',
@@ -214,8 +214,8 @@ def test_complete_via_responses_incomplete_raises_with_reason():
 @respx.mock
 def test_complete_via_responses_non_2xx_raises():
     """A non-2xx HTTP status raises ProviderError with the status code."""
-    from providers import codex_responses as cr
-    from providers.base import ProviderError
+    from truthcv.integrations.providers import codex_responses as cr
+    from truthcv.integrations.providers.base import ProviderError
 
     route = respx.post(cr.DEFAULT_BASE_URL + "/responses").mock(
         return_value=Response(500, json={"error": {"code": "server_error", "message": "boom"}})
@@ -232,8 +232,8 @@ def test_complete_via_responses_non_2xx_raises():
 @respx.mock
 def test_complete_via_responses_429_usage_limit_raises_with_resets_at():
     """HTTP 429 with usage_limit_reached raises a terminal ProviderError with resets_at."""
-    from providers import codex_responses as cr
-    from providers.base import ProviderError
+    from truthcv.integrations.providers import codex_responses as cr
+    from truthcv.integrations.providers.base import ProviderError
 
     route = respx.post(cr.DEFAULT_BASE_URL + "/responses").mock(
         return_value=Response(429, json={
@@ -251,8 +251,8 @@ def test_complete_via_responses_429_usage_limit_raises_with_resets_at():
 @respx.mock
 def test_complete_via_responses_incomplete_stream_raises():
     """A stream ending without response.completed raises ProviderError, not partial text."""
-    from providers import codex_responses as cr
-    from providers.base import ProviderError
+    from truthcv.integrations.providers import codex_responses as cr
+    from truthcv.integrations.providers.base import ProviderError
 
     events = [
         'data: {"type":"response.output_text.delta","delta":"partial"}\n',
@@ -295,7 +295,7 @@ def test_oauth_provider_constructs_without_openai_api_key(monkeypatch):
 
 def test_oauth_list_models_returns_static_allowlist():
     """list_models() in oauth mode returns the static CODEX_SUBSCRIPTION_MODELS allow-list."""
-    from providers.codex_responses import CODEX_SUBSCRIPTION_MODELS
+    from truthcv.integrations.providers.codex_responses import CODEX_SUBSCRIPTION_MODELS
 
     with patch.object(codex_auth, "account_id", return_value="acct-oauth"):
         provider = OpenAIProvider(model="gpt-5.4", oauth_token="tok-oauth")
@@ -310,8 +310,8 @@ def test_oauth_list_models_returns_static_allowlist():
 
 def test_build_connection_provider_selects_oauth_branch_for_subscription_codex(data_dir, monkeypatch, enc):
     """When authMode != 'apikey' and oauth record is present, the oauth branch is selected."""
-    from connections.auth.claude import AuthError
-    import secretstore
+    from truthcv.integrations.connections.auth.claude import AuthError
+    import truthcv.infra.secretstore as secretstore
 
     secretstore.set_connection("codex", {
         "oauth": {
@@ -332,7 +332,7 @@ def test_build_connection_provider_selects_oauth_branch_for_subscription_codex(d
 
 def test_build_connection_provider_selects_apikey_branch_when_authmode_is_apikey(data_dir, monkeypatch, enc):
     """Even when an oauth record is present, authMode='apikey' forces the api-key path."""
-    import secretstore
+    import truthcv.infra.secretstore as secretstore
 
     secretstore.set_connection("codex", {
         "oauth": {"accessToken": "tok-stale", "refreshToken": "rt", "expiresAt": time.time() + 3600, "scope": "", "connectedAt": 0},
@@ -351,8 +351,8 @@ def test_build_connection_provider_selects_apikey_branch_when_authmode_is_apikey
 
 def test_cache_returns_different_instance_after_auth_mode_changes(data_dir, monkeypatch, enc):
     """Switching the codex card's auth mode clears the cache for that card."""
-    import secretstore
-    from providers import _cache, reset_provider
+    import truthcv.infra.secretstore as secretstore
+    from truthcv.integrations.providers import _cache, reset_provider
 
     reset_provider()
 

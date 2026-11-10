@@ -10,7 +10,7 @@
 # change.
 fastapi==0.141.1
 uvicorn[standard]==0.52.4
-# Used directly by api/browser_stream.py as a WebSocket *client*, to relay the
+# Used directly by truthcv/adapters/http/browser_stream.py as a WebSocket *client*, to relay the
 # browser container's noVNC socket. uvicorn[standard] happens to pull this in
 # as a server transport, but relying on that would make a direct dependency
 # invisible.
@@ -30,7 +30,7 @@ mcp==2.3.0
 # --- Transitive dependencies -------------------------------------------
 # Pinned too, because pinning only the direct ones does not give a
 # reproducible install. Two of these are imported by our own code
-# (starlette in api/browser_stream.py, pydantic in api/schemas.py), and an
+# (starlette in truthcv/adapters/http/browser_stream.py, pydantic in api/schemas.py), and an
 # unpinned pydyf is what broke weasyprint. Regenerate this block with:
 #   pip install -r <the direct pins above> && pip freeze
 # Do not hand-edit a line here without re-running the suite.

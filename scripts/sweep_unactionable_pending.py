@@ -47,8 +47,8 @@ from pathlib import Path
 # not resolve. Add the root explicitly rather than constrain how it is invoked.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import coverletter.store as letter_store  # noqa: E402
-import screening.store as screening_store  # noqa: E402
+import truthcv.engines.coverletter.store as letter_store  # noqa: E402
+import truthcv.domain.screening.store as screening_store  # noqa: E402
 
 
 def _has_draft(screening_id: str) -> bool:

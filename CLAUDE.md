@@ -19,8 +19,8 @@ retired rather than deleted — its working tree may still exist, and deleting i
 is a user-gated step (see the audit) because it holds the only copy of some
 gitignored personal data. Nor is every mention of it stale. Comments citing it
 as the *origin* of ported code — for example the `BROWSER STRATEGY` block in [`agent/Dockerfile`](agent/Dockerfile),
-the ported comments in `agent/*.sh`, `applications/log_render.py` and
-`applications/model.py`, and the one-time importer
+the ported comments in `agent/*.sh`, `truthcv/domain/applications/log_render.py` and
+`truthcv/domain/applications/model.py`, and the one-time importer
 [`scripts/migrate_jobs_history.py`](scripts/migrate_jobs_history.py) — are
 deliberate history and must be left alone. A verbatim archive of the
 irreplaceable parts of the old tree (`applications/`, `scratchpad/` — the audit

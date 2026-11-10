@@ -27,8 +27,8 @@ from pathlib import Path
 # Add the repo root so the packages below resolve when run as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import screening.store as screening_store  # noqa: E402
-from screening.rejection_categories import normalize_failing_criterion  # noqa: E402
+import truthcv.domain.screening.store as screening_store  # noqa: E402
+from truthcv.domain.screening.rejection_categories import normalize_failing_criterion  # noqa: E402
 
 MAX_OTHER_SHOWN = 50
 

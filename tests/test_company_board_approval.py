@@ -7,7 +7,7 @@ watchlist means "unconfigured" and prunes nothing.
 
 from __future__ import annotations
 
-import companyboards.store as boards
+import truthcv.domain.companyboards.store as boards
 
 
 def test_prune_with_an_empty_watchlist_keeps_everything(data_dir):

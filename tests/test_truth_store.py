@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from providers.fake import FakeProvider
-from truth import (
+from truthcv.integrations.providers.fake import FakeProvider
+from truthcv.domain.truth import (
     Bullet,
     Experience,
     Hobby,
@@ -19,7 +19,7 @@ from truth import (
     save,
     validate,
 )
-from services import truth_extract as extract
+from truthcv.services import truth_extract as extract
 
 
 def _truth() -> Truth:
@@ -93,9 +93,9 @@ def test_profile_defaults_empty_when_absent(data_dir):
 
 def test_hobbies_missing_key_defaults_to_empty(data_dir):
     # Legacy doc with no "hobbies" key loads hobbies=[], not a crash.
-    from truth.store import truth_path
+    from truthcv.domain.truth.store import truth_path
 
-    from truth import save as save_truth
+    from truthcv.domain.truth import save as save_truth
 
     t = _truth()
     save_truth(t)
@@ -113,7 +113,7 @@ def test_load_empty_when_no_file(data_dir):
 
 
 def test_load_empty_on_pre_migration_flat_shape(data_dir, tmp_path):
-    from truth.store import truth_path
+    from truthcv.domain.truth.store import truth_path
 
     truth_path().write_text("entries:\n  - id: x\n", encoding="utf-8")
     assert load().is_empty()
@@ -289,7 +289,7 @@ def test_extract_new_source_reextracts(data_dir):
 
 
 def test_extract_text_garbage_raises_clean_error():
-    from truth.pdf import PdfExtractError, extract_text
+    from truthcv.domain.truth.pdf import PdfExtractError, extract_text
 
     with pytest.raises(PdfExtractError):
         extract_text(b"this is not a pdf at all")

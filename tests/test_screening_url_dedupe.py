@@ -12,10 +12,10 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from agenttools import tools_ledger
-from api.main import app
-from screening import store
-from identity.url import posting_dedupe_key
+from truthcv.adapters.mcp import tools_ledger
+from truthcv.adapters.http.main import app
+from truthcv.domain.screening import store
+from truthcv.infra.identity.url import posting_dedupe_key
 
 client = TestClient(app)
 
@@ -321,7 +321,7 @@ class TestUnreadPlaceholdersAreSuperseded:
         assert len(store.load_all()) == 1
 
     def test_agent_tool_reports_created_true_when_a_pass_supersedes(self):
-        import agentconfig.store as config_store
+        import truthcv.domain.agentconfig.store as config_store
 
         cfg = config_store.load()
         cfg.profiles = [config_store.JobProfile(name="default", enabled=True)]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import screening.store as screening_store
+import truthcv.domain.screening.store as screening_store
 from scripts.dedupe_screenings import group_by_posting, main, plan
 
 
@@ -12,7 +12,7 @@ def _write(records: list[dict]) -> list:
     The corpus this script exists to clean could not be produced through the
     store any more, so the fixture writes it the way the old code did.
     """
-    from screening.model import Screening
+    from truthcv.domain.screening.model import Screening
 
     screening_store._write_all([Screening.from_dict(r) for r in records])
     return screening_store.load_all()
@@ -135,8 +135,8 @@ def test_apply_is_idempotent():
 
 def test_apply_removes_the_duplicates_cover_letter_drafts():
     """delete_many carries the orphaned draft with the record it belonged to."""
-    from coverletter.store import CoverLetterDraft
-    from coverletter import store as letter_store
+    from truthcv.engines.coverletter.store import CoverLetterDraft
+    from truthcv.engines.coverletter import store as letter_store
 
     _write(
         [

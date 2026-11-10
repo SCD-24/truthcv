@@ -11,15 +11,15 @@ Nothing crafted this; a note quoting the log's own format would do it.
 
 import pytest
 
-from applications.log_render import RenderRefused, render_log, write_log
-from applications.model import (
+from truthcv.domain.applications.log_render import RenderRefused, render_log, write_log
+from truthcv.domain.applications.model import (
     Application,
     Attachment,
     Confirmation,
     FieldSubmitted,
     Screening,
 )
-from companyresearch.model import CompanyFinding
+from truthcv.domain.companyresearch.model import CompanyFinding
 
 MARKER = "<!-- record: aaa111aaa111 -->"
 
@@ -92,7 +92,7 @@ def test_the_escaped_text_is_still_present_and_readable():
 
 def test_a_genuinely_dropped_record_is_still_refused(tmp_path, monkeypatch):
     """Escaping must not weaken the guard it protects."""
-    import applications.log_render as module
+    import truthcv.domain.applications.log_render as module
 
     monkeypatch.setattr(module, "render_log", lambda apps, findings=None: module.HEADER)
     with pytest.raises(RenderRefused):

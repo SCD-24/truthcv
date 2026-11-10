@@ -6,9 +6,9 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
-from services.runs import reconcile_orphaned_runs
-from runs import store
+from truthcv.adapters.http.main import app
+from truthcv.services.runs import reconcile_orphaned_runs
+from truthcv.domain.runs import store
 
 
 @pytest.fixture()
@@ -109,8 +109,8 @@ def test_run_record_full_field_set_survives_the_wire(client):
     """postings_seen and over_cap_writes are agent-reported, stored, and survive
     store.bump verbatim; the four coverage counters are DERIVED on read from the
     run's real screening and application records, not from the stored record."""
-    from screening import store as screening_store
-    from applications import store as applications_store
+    from truthcv.domain.screening import store as screening_store
+    from truthcv.domain.applications import store as applications_store
 
     store.start("full-run", trigger="scheduled", apply_cap=7)
     store.bump("full-run", postings_seen=4, over_cap_writes=1)
@@ -179,7 +179,7 @@ def test_bumped_derived_counter_is_ignored_in_favour_of_the_records(client):
     """The key regression guard: a store.bump on a DERIVED counter must never
     reach the wire. The API recomputes screeningsRecorded from the records that
     exist, so a bumped 99 is discarded in favour of the single real screening."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     store.start("full-run", trigger="scheduled", apply_cap=0)
     screening_store.create(
@@ -215,7 +215,7 @@ def test_legacy_run_with_no_linked_records_reports_zero_counters(client):
 
 
 def test_agent_status_tolerates_supervisor_payload_missing_run_ids(client, monkeypatch):
-    import services.supervisor as supervisor_service
+    import truthcv.services.supervisor as supervisor_service
 
     def fake_forward(path, method="GET", **kwargs):
         return {
@@ -290,7 +290,7 @@ def test_finish_does_not_overwrite_the_agents_own_stopped_reason(client, agent_t
 def test_discovery_coverage_written_via_the_tool_survives_the_wire(client):
     """record_discovery_coverage entries land in the stored record and are
     served back as camelCase discoveryCoverage entries on GET /api/runs."""
-    from agenttools import tools_runs
+    from truthcv.adapters.mcp import tools_runs
 
     store.start("cov-run", trigger="scheduled", apply_cap=0)
     result = tools_runs.record_discovery_coverage(
@@ -320,7 +320,7 @@ def test_the_model_start_run_joins_the_host_created_record(client, agent_token):
     """runs.store.start is idempotent, so the agent's own start_run lands on the
     record the supervisor already created rather than resetting it — including
     the accurate trigger, which start_run could only ever guess."""
-    from agenttools import tools_runs
+    from truthcv.adapters.mcp import tools_runs
 
     client.post("/api/agent/runs/r2/start", json={"trigger": "manual", "applyCap": 4}, headers=agent_token)
     joined = tools_runs.start_run(run_id="r2", trigger="scheduled", apply_cap=999)
@@ -389,7 +389,7 @@ _FUNNEL_ROW = {
 
 def _funnel_run(run_id: str, urls: list[dict]) -> None:
     """Start a run and record a funnel + ledger for it."""
-    from agenttools.tools_funnel import record_source_funnel
+    from truthcv.adapters.mcp.tools_funnel import record_source_funnel
 
     store.start(run_id, trigger="manual", apply_cap=0)
     totals = {k: v for k, v in _FUNNEL_ROW.items() if k not in ("source", "channel")}
@@ -437,7 +437,7 @@ def test_run_urls_404_unknown_run_and_400_unknown_outcome(client):
 
 def test_board_breakdown_on_list_runs(client):
     """GET /api/runs returns boardBreakdown with per-board screening counts."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     store.start("bd-run", trigger="scheduled", apply_cap=0)
     screening_store.create(
@@ -471,7 +471,7 @@ def test_board_breakdown_on_list_runs(client):
 
 def test_board_breakdown_custom_host_fallback(client):
     """GET /api/runs returns custom hosts when not in the board catalog."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     store.start("bd-custom", trigger="scheduled", apply_cap=0)
     screening_store.create(
@@ -494,7 +494,7 @@ def test_board_breakdown_custom_host_fallback(client):
 
 def test_board_breakdown_on_get_run(client):
     """GET /api/runs/{id} returns boardBreakdown with per-board screening counts."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     store.start("bd-run-2", trigger="scheduled", apply_cap=0)
     screening_store.create(
@@ -542,7 +542,7 @@ def test_post_run_stop_409_on_completed_record(client):
 
 
 def test_post_run_stop_supervisor_owns_run(client, monkeypatch):
-    import services.supervisor as supervisor_service
+    import truthcv.services.supervisor as supervisor_service
 
     calls = []
 
@@ -569,7 +569,7 @@ def test_post_run_stop_supervisor_owns_run(client, monkeypatch):
 
 
 def test_post_run_stop_orphaned_record(client, monkeypatch):
-    import services.supervisor as supervisor_service
+    import truthcv.services.supervisor as supervisor_service
 
     def fake_forward(path, method="GET", **kwargs):
         if path == "/status":
@@ -595,8 +595,8 @@ def test_post_run_stop_orphaned_record(client, monkeypatch):
 
 
 def test_post_run_stop_supervisor_unreachable(client, monkeypatch):
-    import services.supervisor as supervisor_service
-    from services.errors import Unavailable
+    import truthcv.services.supervisor as supervisor_service
+    from truthcv.services.errors import Unavailable
 
     def fake_forward(path, method="GET", **kwargs):
         raise Unavailable("supervisor unreachable")
@@ -617,7 +617,7 @@ def test_post_run_stop_supervisor_unreachable(client, monkeypatch):
 
 
 def test_reconcile_orphaned_runs_with_supervisor_owning_run(client, monkeypatch):
-    import services.supervisor as supervisor_service
+    import truthcv.services.supervisor as supervisor_service
 
     def fake_forward(path, method="GET", **kwargs):
         return {"running": True, "currentRunId": "run-A"}
@@ -645,8 +645,8 @@ def test_reconcile_orphaned_runs_with_supervisor_owning_run(client, monkeypatch)
 
 
 def test_reconcile_orphaned_runs_with_supervisor_unreachable(client, monkeypatch):
-    import services.supervisor as supervisor_service
-    from services.errors import Unavailable
+    import truthcv.services.supervisor as supervisor_service
+    from truthcv.services.errors import Unavailable
 
     def fake_forward(path, method="GET", **kwargs):
         raise Unavailable("supervisor unreachable")

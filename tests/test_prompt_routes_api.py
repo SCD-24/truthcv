@@ -13,9 +13,9 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
-from prompts.fragments import SEEDED_FRAGMENTS, SEEDED_PRESETS
-from storage.paths import data_dir
+from truthcv.adapters.http.main import app
+from truthcv.engines.prompts.fragments import SEEDED_FRAGMENTS, SEEDED_PRESETS
+from truthcv.infra.storage.paths import data_dir
 
 
 @pytest.fixture()

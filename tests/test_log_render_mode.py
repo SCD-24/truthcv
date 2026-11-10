@@ -8,8 +8,8 @@ application that nobody outside the application can read.
 
 import stat
 
-from applications.log_render import write_log
-from applications.model import Application
+from truthcv.domain.applications.log_render import write_log
+from truthcv.domain.applications.model import Application
 
 
 def test_rendered_log_is_world_readable(tmp_path):

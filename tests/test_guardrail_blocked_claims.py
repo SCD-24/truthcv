@@ -7,7 +7,7 @@ from, so a whole claim can be approved or denied.
 
 from __future__ import annotations
 
-from guardrail import validate, Scope
+from truthcv.engines.guardrail import validate, Scope
 
 
 def test_blocked_claims_group_tokens_under_source_text():

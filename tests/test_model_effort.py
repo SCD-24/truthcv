@@ -14,11 +14,11 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-import modelrouting
-import secretstore
-from api.main import app
-from modelrouting import Route, Routing
-from providers.base import supports_effort_levels
+import truthcv.integrations.modelrouting as modelrouting
+import truthcv.infra.secretstore as secretstore
+from truthcv.adapters.http.main import app
+from truthcv.integrations.modelrouting import Route, Routing
+from truthcv.integrations.providers.base import supports_effort_levels
 
 FERNET_KEY = "h2oN5GQVeWVhciVjWNImtAmWFyPGlrWvDCq8vXuqfmo="
 
@@ -156,7 +156,7 @@ class TestModelListEffortAnnotation:
 
     def test_post_models_annotates_effort(self, client, monkeypatch):
         """Anthropic's list_models is stubbed; the route annotates effort levels."""
-        import providers.anthropic_provider as ap
+        import truthcv.integrations.providers.anthropic_provider as ap
 
         monkeypatch.setattr(
             ap.AnthropicProvider,
@@ -180,7 +180,7 @@ class TestModelListEffortAnnotation:
 
     def test_get_connection_models_annotates_effort(self, client, monkeypatch):
         """GET /auth/codex/models returns effortLevels from the capability map."""
-        import providers.openai_provider as op
+        import truthcv.integrations.providers.openai_provider as op
 
         monkeypatch.setattr(
             op.OpenAIProvider,

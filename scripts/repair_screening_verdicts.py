@@ -64,10 +64,10 @@ from pathlib import Path
 # not resolve. Add the root explicitly rather than constrain how it is invoked.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import screening.store as screening_store  # noqa: E402
-from agentconfig.store import load as agent_config_load  # noqa: E402
-from identity.company import validate_company_name  # noqa: E402
-from screening.model import validate_verdict  # noqa: E402
+import truthcv.domain.screening.store as screening_store  # noqa: E402
+from truthcv.domain.agentconfig.store import load as agent_config_load  # noqa: E402
+from truthcv.infra.identity.company import validate_company_name  # noqa: E402
+from truthcv.domain.screening.model import validate_verdict  # noqa: E402
 
 # The workaround block the agent wrote, e.g.
 #   [COMPANY: Bjak | VERDICT: rejected | MATCHED PROFILE: … ]

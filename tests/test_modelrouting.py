@@ -1,5 +1,5 @@
-import modelrouting
-from modelrouting import Route, Routing
+import truthcv.integrations.modelrouting as modelrouting
+from truthcv.integrations.modelrouting import Route, Routing
 
 
 def test_roundtrip(data_dir):

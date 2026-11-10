@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-import secretstore
-from agenttools.tools_gmail import check_gmail_responses
-from gmailsync.model import GmailSuggestion
+import truthcv.infra.secretstore as secretstore
+from truthcv.adapters.mcp.tools_gmail import check_gmail_responses
+from truthcv.domain.gmailsync.model import GmailSuggestion
 
 FERNET_KEY = "h2oN5GQVeWVhciVjWNImtAmWFyPGlrWvDCq8vXuqfmo="
 
@@ -49,7 +49,7 @@ def test_gate_closed_toggle_without_key_raises(data_dir):
 def test_gate_open_runs_sync_and_returns_summary(data_dir, monkeypatch):
     _open_gate()
     monkeypatch.setattr(
-        "gmailsync.service.run_sync",
+        "truthcv.domain.gmailsync.service.run_sync",
         lambda: {"skipped": False, "last_synced_at": 100.0, "processed": 3, "suggestions": 2},
     )
     # load_suggestions is called twice by check_gmail_responses (before and
@@ -63,7 +63,7 @@ def test_gate_open_runs_sync_and_returns_summary(data_dir, monkeypatch):
         GmailSuggestion(id="m4", state="pending"),
     ]
     snapshots = iter([before, after])
-    monkeypatch.setattr("gmailsync.store.load_suggestions", lambda: next(snapshots))
+    monkeypatch.setattr("truthcv.domain.gmailsync.store.load_suggestions", lambda: next(snapshots))
     result = check_gmail_responses()
     assert result == {"skipped": False, "processed": 3, "applied": 1, "pending": 2}
 
@@ -72,13 +72,13 @@ def test_gate_open_skipped_sync_passes_through(data_dir, monkeypatch):
     """A throttled sync's skipped=True must be reported unchanged, not discarded."""
     _open_gate()
     monkeypatch.setattr(
-        "gmailsync.service.run_sync",
+        "truthcv.domain.gmailsync.service.run_sync",
         lambda: {"skipped": True, "last_synced_at": 100.0, "processed": 0, "suggestions": 2},
     )
     suggestions = [
         GmailSuggestion(id="m1", state="applied"),
         GmailSuggestion(id="m2", state="pending"),
     ]
-    monkeypatch.setattr("gmailsync.store.load_suggestions", lambda: suggestions)
+    monkeypatch.setattr("truthcv.domain.gmailsync.store.load_suggestions", lambda: suggestions)
     result = check_gmail_responses()
     assert result == {"skipped": True, "processed": 0, "applied": 0, "pending": 1}

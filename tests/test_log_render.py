@@ -8,19 +8,19 @@ no log at all, because it reads as a complete account.
 
 import pytest
 
-from applications.log_render import (
+from truthcv.domain.applications.log_render import (
     RenderRefused,
     render_log,
     write_log,
 )
-from applications.model import (
+from truthcv.domain.applications.model import (
     Application,
     Attachment,
     Confirmation,
     FieldSubmitted,
     Screening,
 )
-from companyresearch.model import CompanyFinding
+from truthcv.domain.companyresearch.model import CompanyFinding
 
 
 def _app(app_id, company="Acme GmbH", **kwargs):
@@ -85,7 +85,7 @@ def test_an_unrendered_application_is_refused(tmp_path, monkeypatch):
     Simulates a renderer regression by rendering only the first application,
     which is exactly the failure the marker count exists to catch.
     """
-    import applications.log_render as module
+    import truthcv.domain.applications.log_render as module
 
     monkeypatch.setattr(module, "render_log", lambda apps, findings=None: module.HEADER)
     target = tmp_path / "APPLICATION_LOG.md"

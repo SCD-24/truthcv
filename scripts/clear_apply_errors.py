@@ -37,7 +37,7 @@ from pathlib import Path
 # resolve. Add the root explicitly rather than constrain how it is invoked.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import screening.store as screening_store  # noqa: E402
+import truthcv.domain.screening.store as screening_store  # noqa: E402
 
 
 def classify(ids: list[str]) -> tuple[list, list]:

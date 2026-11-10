@@ -4,10 +4,10 @@ import re
 
 import pytest
 
-from agentconfig import boards
-from agentconfig.direct_board_presets import DIRECT_BOARD_PRESETS, preset_for
-from agentconfig.dorks import compose_direct_boards
-from agentconfig.store import JobBoard, JobProfile
+from truthcv.domain.agentconfig import boards
+from truthcv.domain.agentconfig.direct_board_presets import DIRECT_BOARD_PRESETS, preset_for
+from truthcv.domain.agentconfig.dorks import compose_direct_boards
+from truthcv.domain.agentconfig.store import JobBoard, JobProfile
 
 
 def _glob_to_regexp(pattern):

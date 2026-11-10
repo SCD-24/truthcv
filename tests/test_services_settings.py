@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import pytest
 
-import modelrouting
-import secretstore
-from providers import ProviderError
-from services import settings
-from services.errors import BadGateway, BadRequest
+import truthcv.integrations.modelrouting as modelrouting
+import truthcv.infra.secretstore as secretstore
+from truthcv.integrations.providers import ProviderError
+from truthcv.services import settings
+from truthcv.services.errors import BadGateway, BadRequest
 
 FERNET_KEY = "h2oN5GQVeWVhciVjWNImtAmWFyPGlrWvDCq8vXuqfmo="
 
@@ -24,7 +24,7 @@ def encrypted(monkeypatch):
 @pytest.fixture()
 def resets(monkeypatch):
     calls = []
-    monkeypatch.setattr("providers.reset_provider", lambda: calls.append(1))
+    monkeypatch.setattr("truthcv.integrations.providers.reset_provider", lambda: calls.append(1))
     return calls
 
 
@@ -92,9 +92,9 @@ def test_test_v1_settings_success(encrypted, resets):
 
 def _classes(monkeypatch, list_models):
     """Patch each provider class on its own module, where list_v1_models looks it up."""
-    import providers.anthropic_provider as anthropic_mod
-    import providers.ollama_provider as ollama_mod
-    import providers.openai_provider as openai_mod
+    import truthcv.integrations.providers.anthropic_provider as anthropic_mod
+    import truthcv.integrations.providers.ollama_provider as ollama_mod
+    import truthcv.integrations.providers.openai_provider as openai_mod
 
     class Fake:
         def __init__(self, **kwargs):

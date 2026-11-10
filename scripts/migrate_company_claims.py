@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from companyresearch.claim_migration import _load_raw, apply_migration, build_report
+from truthcv.domain.companyresearch.claim_migration import _load_raw, apply_migration, build_report
 
 
 def main(argv: list[str] | None = None) -> int:

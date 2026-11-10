@@ -1,7 +1,7 @@
 import pytest
 
-from screening import store as screening_store
-from identity.url import is_posting_url, linkedin_job_id, posting_dedupe_key
+from truthcv.domain.screening import store as screening_store
+from truthcv.infra.identity.url import is_posting_url, linkedin_job_id, posting_dedupe_key
 
 CANON = "https://www.linkedin.com/jobs/view/123456"
 SPAM = [
@@ -45,7 +45,7 @@ def test_non_linkedin_unchanged():
 
 
 def test_record_screening_rejects_spam(data_dir):
-    from agenttools.tools_ledger import record_screening
+    from truthcv.adapters.mcp.tools_ledger import record_screening
 
     with pytest.raises(ValueError):
         record_screening(url=SPAM[0], company="Acme", role="Engineer", verdict="rejected")
@@ -53,7 +53,7 @@ def test_record_screening_rejects_spam(data_dir):
 
 
 def test_record_screening_accepts_job_view(data_dir):
-    from agenttools.tools_ledger import record_screening
+    from truthcv.adapters.mcp.tools_ledger import record_screening
 
     record_screening(
         url="https://uk.linkedin.com/jobs/view/123456",

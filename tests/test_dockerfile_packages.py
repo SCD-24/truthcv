@@ -52,20 +52,36 @@ def _web_stage_text() -> str:
 
 
 def _shipped_packages() -> set[str]:
-    """Packages/modules the Dockerfile app stage actually COPYs in."""
+    """Directories (repo-relative, '/'-separated) the Dockerfile app stage
+    actually COPYs in, e.g. 'truthcv' or a narrower 'truthcv/services'."""
     stage = _app_stage_text()
     shipped = set()
-    for name in re.findall(r"^COPY\s+(\S+)/\s+\./\1/\s*$", stage, flags=re.MULTILINE):
+    for name in re.findall(r"^COPY\s+([\w/]+?)/\s+\./\1/\s*$", stage, flags=re.MULTILINE):
         shipped.add(name)
     if re.search(r"^COPY\s+datafile\.py\s+\./\s*$", stage, flags=re.MULTILINE):
         shipped.add("datafile")
     return shipped
 
 
-def _imported_local_roots(package_dir: Path, local_packages: set[str]) -> set[str]:
-    """Root package/module names imported (at any indentation) by .py files
-    under package_dir, restricted to names that are local repo packages."""
-    roots = set()
+def _module_path(dotted: str) -> Path | None:
+    """The repo file a dotted name resolves to (its longest module prefix), or
+    None when no prefix of it is a module in this repo."""
+    parts = dotted.split(".")
+    for i in range(len(parts), 0, -1):
+        base = REPO_ROOT.joinpath(*parts[:i])
+        if base.with_suffix(".py").is_file():
+            return base.with_suffix(".py")
+        if (base / "__init__.py").is_file():
+            return base / "__init__.py"
+    return None
+
+
+def _imported_local_modules(package_dir: Path, local_packages: set[str]) -> set[str]:
+    """Dotted module names imported (at any indentation) by .py files under
+    package_dir, restricted to names rooted in a local repo package. For
+    `from pkg import name`, `pkg.name` is included too, so a submodule imported
+    that way resolves to its own file (a plain attribute resolves back to pkg)."""
+    modules = set()
     for py_file in package_dir.rglob("*.py"):
         try:
             tree = ast.parse(py_file.read_text(), filename=str(py_file))
@@ -74,17 +90,20 @@ def _imported_local_roots(package_dir: Path, local_packages: set[str]) -> set[st
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    root = alias.name.split(".")[0]
-                    if root in local_packages:
-                        roots.add(root)
+                    if alias.name.split(".")[0] in local_packages:
+                        modules.add(alias.name)
             elif isinstance(node, ast.ImportFrom):
                 if node.level and node.level > 0:
                     continue  # relative import within the same package
-                if node.module:
-                    root = node.module.split(".")[0]
-                    if root in local_packages:
-                        roots.add(root)
-    return roots
+                if node.module and node.module.split(".")[0] in local_packages:
+                    modules.add(node.module)
+                    modules.update(f"{node.module}.{alias.name}" for alias in node.names)
+    return modules
+
+
+def _is_shipped(path: Path, shipped: set[str]) -> bool:
+    rel = path.relative_to(REPO_ROOT).as_posix()
+    return any(rel.startswith(f"{name}/") for name in shipped)
 
 
 def test_dockerfile_ships_every_locally_imported_package():
@@ -98,14 +117,53 @@ def test_dockerfile_ships_every_locally_imported_package():
         package_dir = REPO_ROOT / name
         if not package_dir.is_dir():
             continue  # e.g. datafile — a single module, not scannable as a package dir
-        imported = _imported_local_roots(package_dir, local_packages)
-        unshipped = imported - shipped
+        unshipped = set()
+        for module in _imported_local_modules(package_dir, local_packages):
+            path = _module_path(module)
+            if path is None or not _is_shipped(path, shipped):
+                unshipped.add(module)
         if unshipped:
             missing[name] = unshipped
 
     assert not missing, (
-        "Shipped package(s) import local package(s) that the Dockerfile app "
+        "Shipped package(s) import local module(s) that the Dockerfile app "
         f"stage does not COPY: {missing}"
+    )
+
+
+def test_dockerfile_cmd_starts_a_shipped_module():
+    """The container's start command must name a module the app stage ships."""
+    match = re.search(
+        r'^CMD \["python", "-m", "([\w.]+)"\]\s*$', _app_stage_text(), flags=re.MULTILINE
+    )
+    assert match, "app stage has no CMD [\"python\", \"-m\", \"<module>\"] line"
+    module = match.group(1)
+    path = REPO_ROOT / (module.replace(".", "/") + ".py")
+    assert path.is_file(), f"CMD module {module!r} does not exist in the repo"
+    assert _is_shipped(path, _shipped_packages()), f"CMD module {module!r} is not COPYed into the image"
+
+
+def test_dockerfile_copies_web_bundle_to_the_static_dir_the_app_serves(monkeypatch):
+    """The built bundle must land where config.static_dir() looks for it, and
+    the web stage must copy it from where web/vite.config.ts builds it."""
+    from truthcv.adapters.http import config
+
+    monkeypatch.delenv("STATIC_DIR", raising=False)
+    static_rel = config.static_dir().resolve().relative_to(REPO_ROOT).as_posix()
+    match = re.search(r"^COPY --from=web /(\S+) \./(\S+)\s*$", _app_stage_text(), flags=re.MULTILINE)
+    assert match, "app stage has no 'COPY --from=web /<dir> ./<dir>' line"
+    assert match.group(2) == static_rel, (
+        f"bundle copied to ./{match.group(2)} but the app serves {static_rel}"
+    )
+    # The web stage's WORKDIR is /web, so vite's outDir resolves against it.
+    vite = (REPO_ROOT / "web" / "vite.config.ts").read_text()
+    out_dir = re.search(r'outDir:\s*"([^"]+)"', vite)
+    assert out_dir, "web/vite.config.ts has no build.outDir"
+    assert (REPO_ROOT / "web" / out_dir.group(1)).resolve() == REPO_ROOT / static_rel, (
+        f"vite outDir {out_dir.group(1)!r} does not resolve to {static_rel}"
+    )
+    assert match.group(1) == static_rel, (
+        f"bundle copied from /{match.group(1)} but vite builds into /{static_rel} in the web stage"
     )
 
 

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from gmailsync.matcher import _app_domains, _company_token, match_message
+from truthcv.domain.gmailsync.matcher import _app_domains, _company_token, match_message
 
 
 def _app(**overrides):

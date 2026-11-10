@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import screening.store as store
+import truthcv.domain.screening.store as store
 
 _SPEC = importlib.util.spec_from_file_location(
     "categorize_rejection_reasons",

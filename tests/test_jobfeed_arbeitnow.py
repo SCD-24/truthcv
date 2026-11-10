@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 
-from agentconfig.store import JobProfile
-from jobfeeds import arbeitnow as an
+from truthcv.domain.agentconfig.store import JobProfile
+from truthcv.domain.jobfeeds import arbeitnow as an
 
 NOW = datetime(2026, 8, 27, 12, 0, 0, tzinfo=timezone.utc)
 NOW_TS = int(NOW.timestamp())

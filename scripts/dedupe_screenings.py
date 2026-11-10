@@ -54,9 +54,9 @@ from pathlib import Path
 # the path rather than the repo root, so the packages below would not resolve.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import screening.store as screening_store  # noqa: E402
-import services.screenings as screenings_service  # noqa: E402
-from identity.url import posting_dedupe_key  # noqa: E402
+import truthcv.domain.screening.store as screening_store  # noqa: E402
+import truthcv.services.screenings as screenings_service  # noqa: E402
+from truthcv.infra.identity.url import posting_dedupe_key  # noqa: E402
 
 # Furthest-advanced decision wins. An unknown approval value sorts with "no
 # decision" rather than raising: a hand-edited file must not stop the cleanup,

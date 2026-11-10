@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
+from truthcv.adapters.http.main import app
 
 
 @pytest.fixture()
@@ -178,7 +178,7 @@ class TestDeleteSession:
 
     def test_accepted_close_with_closing_true_clears_matching_host_blockers(self, client, monkeypatch, data_dir):
         """When a session closes successfully, login blockers for matching hosts are cleared."""
-        import screening.store as store
+        import truthcv.domain.screening.store as store
 
         monkeypatch.setenv("AGENT_API_TOKEN", "t")
         
@@ -219,7 +219,7 @@ class TestDeleteSession:
 
     def test_accepted_close_with_closed_true_clears_matching_host_blockers(self, client, monkeypatch, data_dir):
         """When closed=true, blockers are also cleared."""
-        import screening.store as store
+        import truthcv.domain.screening.store as store
 
         monkeypatch.setenv("AGENT_API_TOKEN", "t")
         
@@ -251,7 +251,7 @@ class TestDeleteSession:
 
     def test_no_session_does_not_clear_blockers(self, client, monkeypatch, data_dir):
         """When no session exists (reserving=true), no blockers are cleared."""
-        import screening.store as store
+        import truthcv.domain.screening.store as store
 
         monkeypatch.setenv("AGENT_API_TOKEN", "t")
         
@@ -284,7 +284,7 @@ class TestDeleteSession:
 
     def test_different_host_blockers_are_not_cleared(self, client, monkeypatch, data_dir):
         """Blockers for a different host are left untouched."""
-        import screening.store as store
+        import truthcv.domain.screening.store as store
 
         monkeypatch.setenv("AGENT_API_TOKEN", "t")
         

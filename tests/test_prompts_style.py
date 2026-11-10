@@ -8,10 +8,10 @@ them. Guards against a future edit reintroducing a banned character.
 
 import re
 
-from truth.model import Bullet, Experience, Skill, Truth
-from prompts.tailor import select_system, select_truth_block
-from prompts.coverletter import cover_letter_system_for_preset, cover_letter_facts_block
-from prompts.style import (
+from truthcv.domain.truth.model import Bullet, Experience, Skill, Truth
+from truthcv.engines.prompts.tailor import select_system, select_truth_block
+from truthcv.engines.prompts.coverletter import cover_letter_system_for_preset, cover_letter_facts_block
+from truthcv.engines.prompts.style import (
     CV_STYLE,
     LETTER_STYLE,
     STRICT_TELL_WORDS,
@@ -20,8 +20,8 @@ from prompts.style import (
     cv_anti_slop,
     letter_anti_slop,
 )
-from prompts.conventions import DEFAULT_CONVENTIONS, DomainVocabulary
-from prompts.fragments import SEEDED_PRESETS
+from truthcv.engines.prompts.conventions import DEFAULT_CONVENTIONS, DomainVocabulary
+from truthcv.engines.prompts.fragments import SEEDED_PRESETS
 
 EM_DASH = "\u2014"
 EN_DASH = "\u2013"

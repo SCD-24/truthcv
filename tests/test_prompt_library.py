@@ -20,10 +20,10 @@ import json
 
 import pytest
 
-from prompts.assemble import GUARDRAIL_CONTRACT, assemble_system_prompt
-from prompts.coverletter import cover_letter_system_for_preset
-from prompts.conventions import CvConventions
-from prompts.fragments import (
+from truthcv.engines.prompts.assemble import GUARDRAIL_CONTRACT, assemble_system_prompt
+from truthcv.engines.prompts.coverletter import cover_letter_system_for_preset
+from truthcv.engines.prompts.conventions import CvConventions
+from truthcv.engines.prompts.fragments import (
     DEFAULT_CONVENTIONS,
     Fragment,
     Preset,
@@ -32,8 +32,8 @@ from prompts.fragments import (
     SLOTS,
     seeded_fragments,
 )
-from prompts.practitioner import PRACTITIONER_FRAGMENT_IDS
-from prompts.library import (
+from truthcv.engines.prompts.practitioner import PRACTITIONER_FRAGMENT_IDS
+from truthcv.engines.prompts.library import (
     PRESETS_FILE,
     default_preset,
     delete_fragment,
@@ -46,7 +46,7 @@ from prompts.library import (
     upsert_fragment,
     upsert_preset,
 )
-from storage.paths import data_dir
+from truthcv.infra.storage.paths import data_dir
 
 
 _FRAMING_STANDARD = (

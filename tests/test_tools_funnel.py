@@ -1,8 +1,8 @@
 import pytest
 
-import runs.store as runs_store
-import runs.url_ledger as url_ledger
-from agenttools.tools_funnel import record_source_funnel
+import truthcv.domain.runs.store as runs_store
+import truthcv.domain.runs.url_ledger as url_ledger
+from truthcv.adapters.mcp.tools_funnel import record_source_funnel
 
 ROW = {
     "source": "linkedin.com", "channel": "feed", "postings_seen": 7,

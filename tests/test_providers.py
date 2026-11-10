@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from providers import ProviderError, get_provider
-from providers.fake import FakeProvider
+from truthcv.integrations.providers import ProviderError, get_provider
+from truthcv.integrations.providers.fake import FakeProvider
 
 
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch):
-    from providers import reset_provider
+    from truthcv.integrations.providers import reset_provider
 
     reset_provider()
     yield
@@ -21,7 +21,7 @@ def test_get_provider_defaults_and_selects(data_dir, monkeypatch):
     # data_dir isolates the data volume so a developer's real secrets.enc
     # (which may pin activeProvider=anthropic) can't override LLM_PROVIDER here.
     monkeypatch.setenv("LLM_PROVIDER", "fake")
-    from providers import reset_provider
+    from truthcv.integrations.providers import reset_provider
 
     reset_provider()
     assert isinstance(get_provider(), FakeProvider)
@@ -34,7 +34,7 @@ def test_get_provider_unknown_raises(data_dir, monkeypatch):
     # load_store() reads/writes the real data/secrets.enc instead of a fake one.
     monkeypatch.delenv("ENCRYPTION_KEY", raising=False)
     monkeypatch.setenv("LLM_PROVIDER", "nope")
-    from providers import reset_provider
+    from truthcv.integrations.providers import reset_provider
 
     reset_provider()
     with pytest.raises(ProviderError):
@@ -46,10 +46,10 @@ def test_get_provider_uses_secrets_credentials(data_dir, monkeypatch):
     # resolution ladder), not a value the legacy secrets path maps to a card —
     # so this exercises the legacy-secrets fallback with a real provider name
     # instead, which is what "uses secrets credentials" is actually testing.
-    from providers import get_provider, reset_provider
+    from truthcv.integrations.providers import get_provider, reset_provider
 
     monkeypatch.setenv("ENCRYPTION_KEY", "h2oN5GQVeWVhciVjWNImtAmWFyPGlrWvDCq8vXuqfmo=")
-    from api import secrets as sec
+    from truthcv.adapters.http import secrets as sec
 
     sec.write_secrets({"activeProvider": "anthropic", "anthropicApiKey": "sk-ant-1"})
     reset_provider()
@@ -58,7 +58,7 @@ def test_get_provider_uses_secrets_credentials(data_dir, monkeypatch):
 
 
 def test_env_model_treats_empty_as_default(monkeypatch):
-    from providers.base import env_model
+    from truthcv.integrations.providers.base import env_model
 
     monkeypatch.setenv("LLM_MODEL", "")
     assert env_model("default-model") == "default-model"

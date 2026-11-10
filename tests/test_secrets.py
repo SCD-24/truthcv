@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from api import secrets as sec
+from truthcv.adapters.http import secrets as sec
 
 FERNET_KEY = "h2oN5GQVeWVhciVjWNImtAmWFyPGlrWvDCq8vXuqfmo="  # valid Fernet key
 
@@ -24,7 +24,7 @@ def test_round_trip_encrypted(data_dir, monkeypatch):
     got = sec.read_secrets()
     assert got["openaiApiKey"] == "sk-x"
     # file on disk is NOT plaintext
-    from api.config import secrets_path
+    from truthcv.adapters.http.config import secrets_path
 
     raw = secrets_path().read_bytes()
     assert b"sk-x" not in raw
@@ -33,7 +33,7 @@ def test_round_trip_encrypted(data_dir, monkeypatch):
 def test_resolve_prefers_secrets_then_env(data_dir, monkeypatch):
     """Same behavior the old resolve_credentials() covered, via the v2
     accessors it was replaced by: get_connection merges stored-over-env."""
-    from secretstore import get_connection
+    from truthcv.infra.secretstore import get_connection
 
     monkeypatch.setenv("ENCRYPTION_KEY", FERNET_KEY)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
@@ -52,10 +52,10 @@ def test_invalid_key_disables(data_dir, monkeypatch):
 def test_wrong_key_after_rotation_refuses_overwrite(data_dir, monkeypatch):
     """A rotated/wrong ENCRYPTION_KEY must refuse to overwrite secrets.enc and
     instead back it up, so still-encrypted credentials are never destroyed."""
-    import secretstore
+    import truthcv.infra.secretstore as secretstore
     from cryptography.fernet import Fernet
 
-    from api.config import secrets_path
+    from truthcv.adapters.http.config import secrets_path
 
     # A different, valid Fernet key to simulate rotation.
     fernet_key_b = Fernet.generate_key().decode("utf-8")

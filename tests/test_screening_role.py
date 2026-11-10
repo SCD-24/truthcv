@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from screening.role import normalize_role_title, validate_role_title
+from truthcv.domain.screening.role import normalize_role_title, validate_role_title
 
 
 def test_normalize_collapses_whitespace_runs_to_single_spaces():

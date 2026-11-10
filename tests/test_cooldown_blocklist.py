@@ -6,9 +6,9 @@ import yaml
 import pytest
 from fastapi.testclient import TestClient
 
-from agentconfig import store as agent_config_store
-from api.main import app
-from screening.cooldown import cooldown
+from truthcv.domain.agentconfig import store as agent_config_store
+from truthcv.adapters.http.main import app
+from truthcv.domain.screening.cooldown import cooldown
 
 
 @pytest.fixture()
@@ -52,7 +52,7 @@ def test_api_and_tool_carry_blocked_flag(client, data_dir):
         "blocked": True,
         "window": None,
     }
-    from agenttools.tools_ledger import check_cooldown
+    from truthcv.adapters.mcp.tools_ledger import check_cooldown
 
     assert check_cooldown("Acme GmbH") == {
         "in_cooldown": True,
@@ -71,7 +71,7 @@ def test_cooldown_days_from_agent_config(data_dir, monkeypatch):
     cfg.cooldown_days = 14
     agent_config_store.save(cfg)
     
-    from screening.cooldown import application_cooldown_days
+    from truthcv.domain.screening.cooldown import application_cooldown_days
     assert application_cooldown_days() == 14
 
 
@@ -84,7 +84,7 @@ def test_cooldown_days_from_env_when_config_unset(data_dir, monkeypatch):
     # Set env var
     monkeypatch.setenv("APPLICATION_COOLDOWN_DAYS", "21")
     
-    from screening.cooldown import application_cooldown_days
+    from truthcv.domain.screening.cooldown import application_cooldown_days
     assert application_cooldown_days() == 21
 
 
@@ -95,7 +95,7 @@ def test_cooldown_days_defaults_to_90(data_dir, monkeypatch):
     agent_config_store.save(cfg)
     monkeypatch.delenv("APPLICATION_COOLDOWN_DAYS", raising=False)
     
-    from screening.cooldown import application_cooldown_days
+    from truthcv.domain.screening.cooldown import application_cooldown_days
     assert application_cooldown_days() == 90
 
 
@@ -106,7 +106,7 @@ def _seed_application(data_dir, company, role, days_ago):
     """Persist one tracked application dated `days_ago` days before now."""
     from datetime import datetime, timedelta, timezone
 
-    from applications import store as apps_store
+    from truthcv.domain.applications import store as apps_store
 
     app_date = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
     apps_store.create(
@@ -175,7 +175,7 @@ def test_env_fallback_still_honoured_when_no_config(data_dir, monkeypatch):
     agent_config_store.save(cfg)
     monkeypatch.setenv("APPLICATION_COOLDOWN_DAYS", "3")
 
-    from screening.cooldown import application_cooldown_days, same_role_cooldown_days
+    from truthcv.domain.screening.cooldown import application_cooldown_days, same_role_cooldown_days
 
     assert application_cooldown_days() == 3
     assert same_role_cooldown_days() == 3
@@ -273,7 +273,7 @@ def test_blank_company_still_reports_no_cooldown_with_suffix_matching(data_dir):
 
 def test_non_str_record_company_still_skipped_with_suffix_matching(data_dir):
     """A record with a non-str company is still skipped by the identity-key match."""
-    from screening.cooldown import _matches
+    from truthcv.domain.screening.cooldown import _matches
 
     assert _matches("RobCo GmbH", None, None, "Engineer") is False
     assert _matches("RobCo GmbH", None, 12345, "Engineer") is False

@@ -534,7 +534,7 @@ yourself for every posting it screens — `rejected`, `deferred`, `passed`, or a
 blocker — exactly as this section and §9 already require, passing the
 verdict `screen_posting` returned straight through: its JSON keys already
 match `record_screening`'s own argument names, so no reshaping is needed. The
-approve/deny gate enforced in `screening/store.py` is unaffected either way:
+approve/deny gate enforced in `truthcv/domain/screening/store.py` is unaffected either way:
 it still runs on every `record_screening` call, regardless of which
 conversation reached the verdict.
 

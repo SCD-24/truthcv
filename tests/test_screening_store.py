@@ -8,15 +8,15 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-import applications
-from coverletter.store import CoverLetterDraft
-from coverletter.store import save as save_letter_draft
-from coverletter.store import draft_path as letter_draft_path
-from companyresearch import store as findings_store
-from screening.cooldown import cooldown
-from services.screenings import delete_screening, delete_screenings
-from screening.model import VERDICT_VALUES
-from screening.store import (
+import truthcv.domain.applications as applications
+from truthcv.engines.coverletter.store import CoverLetterDraft
+from truthcv.engines.coverletter.store import save as save_letter_draft
+from truthcv.engines.coverletter.store import draft_path as letter_draft_path
+from truthcv.domain.companyresearch import store as findings_store
+from truthcv.domain.screening.cooldown import cooldown
+from truthcv.services.screenings import delete_screening, delete_screenings
+from truthcv.domain.screening.model import VERDICT_VALUES
+from truthcv.domain.screening.store import (
     claim_for_apply,
     create,
     delete,
@@ -57,7 +57,7 @@ def test_create_normalizes_failing_criterion(data_dir):
 
 
 def test_update_normalizes_failing_criterion(data_dir):
-    from screening.store import update
+    from truthcv.domain.screening.store import update
 
     created = create({"company": "Acme", "role": "Engineer", "verdict": "rejected"})
     updated = update(created.id, {"failing_criterion": "Salary floor"})
@@ -74,7 +74,7 @@ def test_create_deferred_keeps_raw_failing_criterion(data_dir):
 
 
 def test_update_deferred_to_rejected_normalizes(data_dir):
-    from screening.store import update
+    from truthcv.domain.screening.store import update
 
     created = create(
         {"company": "Acme", "role": "Engineer", "verdict": "deferred",
@@ -273,7 +273,7 @@ def test_cooldown_matches_case_and_whitespace_insensitively(data_dir):
 
 def test_windows_independent_of_legacy_field(data_dir, monkeypatch):
     """Each new window overrides the legacy field independently."""
-    from agentconfig import store as agent_config_store
+    from truthcv.domain.agentconfig import store as agent_config_store
 
     monkeypatch.delenv("APPLICATION_COOLDOWN_DAYS", raising=False)
     cfg = agent_config_store.load()
@@ -302,7 +302,7 @@ def test_windows_independent_of_legacy_field(data_dir, monkeypatch):
 
 def test_same_role_window_blocks_when_it_is_the_longer_one(data_dir, monkeypatch):
     """A longer same-role window governs a role-matched lookup's verdict."""
-    from agentconfig import store as agent_config_store
+    from truthcv.domain.agentconfig import store as agent_config_store
 
     monkeypatch.delenv("APPLICATION_COOLDOWN_DAYS", raising=False)
     cfg = agent_config_store.load()
@@ -332,7 +332,7 @@ def test_same_role_window_blocks_when_it_is_the_longer_one(data_dir, monkeypatch
 
 
 def test_window_none_when_clear_or_blocklisted(data_dir):
-    from agentconfig import store as agent_config_store
+    from truthcv.domain.agentconfig import store as agent_config_store
 
     cfg = agent_config_store.load()
     cfg.blocked_companies = ["BlockCo"]
@@ -414,7 +414,7 @@ def test_concurrent_creates_lose_no_records(data_dir):
     """
     import threading
 
-    from screening import store
+    from truthcv.domain.screening import store
 
     for i in range(20):
         store.create({"company": f"Seed{i}", "role": "Engineer", "url": f"https://e.com/{i}"})
@@ -446,7 +446,7 @@ def test_a_concurrent_create_does_not_undo_a_concurrent_approval(data_dir):
     """
     import threading
 
-    from screening import store
+    from truthcv.domain.screening import store
 
     target = store.create(
         {"company": "Acme", "role": "Engineer", "url": "https://e.com/a", "verdict": "deferred"}
@@ -512,7 +512,7 @@ def test_claim_for_apply_and_mark_applied_succeed_once_contradiction_resolved(da
 def test_mark_applied_and_claim_for_apply_share_one_implementation():
     """The two names must not be able to fork: assert they delegate to the
     same underlying function rather than merely behaving alike today."""
-    import screening.store as store_module
+    import truthcv.domain.screening.store as store_module
 
     # Both call the same private helper under the hood.
     assert store_module.mark_applied.__code__.co_names == store_module.claim_for_apply.__code__.co_names
@@ -523,7 +523,7 @@ def test_mark_applied_and_claim_for_apply_share_one_implementation():
 def test_claim_for_run_contention(data_dir):
     """A live lease held by one run cannot be taken by a different run, but
     is reclaimable once it expires."""
-    import screening.store as store_module
+    import truthcv.domain.screening.store as store_module
 
     target = create({"company": "Gamma LLC", "role": "Engineer", "url": "https://e.com/g"})
     set_approval(target.id, "approved")
@@ -552,7 +552,7 @@ def test_claim_for_run_contention_under_threads(data_dir):
     run holds the live lease afterward."""
     import threading
 
-    import screening.store as store_module
+    import truthcv.domain.screening.store as store_module
 
     target = create({"company": "Delta Inc", "role": "Engineer", "url": "https://e.com/d"})
     set_approval(target.id, "approved")
@@ -577,7 +577,7 @@ def test_claim_for_run_contention_under_threads(data_dir):
 
 def test_mark_applied_clears_a_claim_on_retire(data_dir):
     """Retiring a screening releases any lease it was holding."""
-    import screening.store as store_module
+    import truthcv.domain.screening.store as store_module
 
     target = create({"company": "Epsilon Co", "role": "Engineer", "url": "https://e.com/eps"})
     set_approval(target.id, "approved")
@@ -593,7 +593,7 @@ def test_mark_applied_is_unconditional_about_claim_ownership(data_dir):
     """mark_applied must succeed for an item this run did not claim — it is
     called after the ledger row is already written, so a claim mismatch must
     never cause a refusal."""
-    import screening.store as store_module
+    import truthcv.domain.screening.store as store_module
 
     target = create({"company": "Zeta Co", "role": "Engineer", "url": "https://e.com/zeta"})
     set_approval(target.id, "approved")

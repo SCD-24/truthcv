@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from agentconfig.store import JobProfile
-from screening.criteria import (
+from truthcv.domain.agentconfig.store import JobProfile
+from truthcv.domain.screening.criteria import (
     EOR_STATED_VALUES,
     REMOTE_ARRANGEMENT_VALUES,
     country_compatible,

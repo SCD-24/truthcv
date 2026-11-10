@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from companyresearch.model import (
+from truthcv.domain.companyresearch.model import (
     CLAIM_TYPES,
     CompanyFinding,
     SOURCE_CLASSES,

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from datetime import date
 
-import applications
-from applications.store import (
+import truthcv.domain.applications as applications
+from truthcv.domain.applications.store import (
     applications_path,
     cover_letter_filenames,
     create_for_screening,
     cv_filenames,
 )
-from storage import data_dir
+from truthcv.infra.storage import data_dir
 
 
 def test_empty_when_no_file(data_dir):

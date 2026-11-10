@@ -12,8 +12,8 @@ import threading
 import pytest
 from fastapi.testclient import TestClient
 
-import api.job_routes as job_routes
-from api.main import app
+import truthcv.adapters.http.job_routes as job_routes
+from truthcv.adapters.http.main import app
 
 _POLL_TIMEOUT_S = 5.0
 _POLL_ROUNDS = 200

@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from companyresearch import store
+from truthcv.domain.companyresearch import store
 
 
 def test_load_all_missing_file_returns_empty(data_dir):

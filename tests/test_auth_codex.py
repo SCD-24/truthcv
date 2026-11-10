@@ -11,8 +11,8 @@ import respx
 from cryptography.fernet import Fernet
 from httpx import Response
 
-import secretstore
-from connections.auth import codex
+import truthcv.infra.secretstore as secretstore
+from truthcv.integrations.connections.auth import codex
 
 
 @pytest.fixture()

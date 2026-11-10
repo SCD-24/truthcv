@@ -12,9 +12,9 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-import secretstore
-from api.main import app
-from connections.auth import gmail as gmail_auth
+import truthcv.infra.secretstore as secretstore
+from truthcv.adapters.http.main import app
+from truthcv.integrations.connections.auth import gmail as gmail_auth
 
 FERNET_KEY = "h2oN5GQVeWVhciVjWNImtAmWFyPGlrWvDCq8vXuqfmo="
 
@@ -66,7 +66,7 @@ def test_gate_closed_when_key_set_but_toggle_off(client):
 def test_gate_open_start_returns_auth_url(client, monkeypatch):
     _open_gate()
     monkeypatch.setattr(
-        "connections.auth.gmail.start_login",
+        "truthcv.integrations.connections.auth.gmail.start_login",
         lambda redirect_uri: {"flow": "browser", "authUrl": "https://accounts.google.com/o/oauth2/v2/auth?state=s1"},
     )
     resp = client.post("/api/auth/gmail/start")
@@ -88,7 +88,7 @@ def test_gate_open_start_uses_redirect_uri_override(client, monkeypatch):
         received.append(redirect_uri)
         return {"flow": "browser", "authUrl": "https://accounts.google.com/o/oauth2/v2/auth?state=s1"}
 
-    monkeypatch.setattr("connections.auth.gmail.start_login", fake_start_login)
+    monkeypatch.setattr("truthcv.integrations.connections.auth.gmail.start_login", fake_start_login)
     resp = client.post("/api/auth/gmail/start")
     assert resp.status_code == 200
     assert received == [override]
@@ -109,7 +109,7 @@ def test_gate_open_start_uses_request_uri_when_override_unset(client, monkeypatc
         received.append(redirect_uri)
         return {"flow": "browser", "authUrl": "https://accounts.google.com/o/oauth2/v2/auth?state=s1"}
 
-    monkeypatch.setattr("connections.auth.gmail.start_login", fake_start_login)
+    monkeypatch.setattr("truthcv.integrations.connections.auth.gmail.start_login", fake_start_login)
     resp = client.post("/api/auth/gmail/start")
     assert resp.status_code == 200
     assert len(received) == 1
@@ -125,7 +125,7 @@ def test_gate_open_callback_completes_login(client, monkeypatch):
         calls.append((code, state))
         return {"email": "operator@example.com"}
 
-    monkeypatch.setattr("connections.auth.gmail.complete_login", fake_complete)
+    monkeypatch.setattr("truthcv.integrations.connections.auth.gmail.complete_login", fake_complete)
     resp = client.get(
         "/api/auth/gmail/callback",
         params={"code": "authcode", "state": "state1"},
@@ -164,7 +164,7 @@ def test_gate_open_callback_auth_error_redirects_with_error(client, monkeypatch)
     def fake_complete(code, state):
         raise gmail_auth.AuthError("exchange failed")
 
-    monkeypatch.setattr("connections.auth.gmail.complete_login", fake_complete)
+    monkeypatch.setattr("truthcv.integrations.connections.auth.gmail.complete_login", fake_complete)
     resp = client.get(
         "/api/auth/gmail/callback",
         params={"code": "authcode", "state": "state1"},
@@ -183,7 +183,7 @@ def test_gate_open_sync_returns_run_sync_summary(client, monkeypatch):
         calls.append(force)
         return summary
 
-    monkeypatch.setattr("gmailsync.service.run_sync", fake_run_sync)
+    monkeypatch.setattr("truthcv.domain.gmailsync.service.run_sync", fake_run_sync)
     resp = client.post("/api/gmail/responses/sync", json={})
     assert resp.status_code == 200
     assert resp.json() == summary
@@ -194,7 +194,7 @@ def test_gate_open_sync_passes_force_flag(client, monkeypatch):
     _open_gate()
     calls = []
     monkeypatch.setattr(
-        "gmailsync.service.run_sync",
+        "truthcv.domain.gmailsync.service.run_sync",
         lambda *, force=False: calls.append(force) or {"skipped": False, "last_synced_at": 1.0, "processed": 0, "suggestions": 0},
     )
     resp = client.post("/api/gmail/responses/sync", json={"force": True})

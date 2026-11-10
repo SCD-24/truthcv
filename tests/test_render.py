@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import pytest
 
-from render.html import render_html
-from render.cover_letter import render_letter_html
-from render.ats import lint
-from render import pdf as pdf_mod
-from render import docx as docx_mod
-from tailor.model import Draft, DraftEducation, DraftExperience
-import vocabulary.synonyms as vocab_synonyms
+from truthcv.engines.render.html import render_html
+from truthcv.engines.render.cover_letter import render_letter_html
+from truthcv.engines.render.ats import lint
+from truthcv.engines.render import pdf as pdf_mod
+from truthcv.engines.render import docx as docx_mod
+from truthcv.engines.tailor.model import Draft, DraftEducation, DraftExperience
+import truthcv.engines.vocabulary.synonyms as vocab_synonyms
 
 
 DRAFT = Draft(
@@ -290,12 +290,12 @@ def test_ats_does_not_read_an_unclosed_style_body_as_document_text():
 
 def test_render_cv_surfaces_style_dash_for_em_dash_in_bullet(monkeypatch, data_dir):
     """An em dash in a draft bullet reaches the caller as an advisory style-dash."""
-    from services import render_cv as render_cv_service
-    from render.pdf import RenderUnavailable
-    from truth import save
-    from truth.model import Experience, Skill, Truth
-    import tailor as te
-    from tailor.model import Draft, DraftExperience
+    from truthcv.services import render_cv as render_cv_service
+    from truthcv.engines.render.pdf import RenderUnavailable
+    from truthcv.domain.truth import save
+    from truthcv.domain.truth.model import Experience, Skill, Truth
+    import truthcv.engines.tailor as te
+    from truthcv.engines.tailor.model import Draft, DraftExperience
 
     save(
         Truth(

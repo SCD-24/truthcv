@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
-from screening import store
+from truthcv.adapters.http.main import app
+from truthcv.domain.screening import store
 
 
 @pytest.fixture()

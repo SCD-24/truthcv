@@ -9,9 +9,9 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from agentconfig import boards, dorks
-from agentconfig.store import JobProfile
-from api.main import app
+from truthcv.domain.agentconfig import boards, dorks
+from truthcv.domain.agentconfig.store import JobProfile
+from truthcv.adapters.http.main import app
 
 _REAL_CLIENT = httpx.Client
 
@@ -320,7 +320,7 @@ def test_an_already_screened_posting_is_omitted_and_counted(client, data_dir, mo
     posting the ledger already has a screening for is dropped from the feed,
     and the drop is reported so it is visible rather than a silently shorter
     feed."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     _configure(client, monkeypatch)
     screened_url = "https://acme.example/jobs/1"
@@ -350,7 +350,7 @@ def test_an_already_screened_posting_is_omitted_and_counted(client, data_dir, mo
 def test_a_posting_rejected_for_one_of_two_profiles_is_still_offered(client, data_dir, mock_http, monkeypatch):
     """Screened for only profile A of enabled A and B: still in the feed and
     not counted in feedAlreadyScreened."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     _configure(client, monkeypatch)
     client.put(
@@ -382,7 +382,7 @@ def test_an_unread_placeholder_screening_does_not_hide_its_posting(client, data_
     """A placeholder holds no judgement (see screened_dedupe_keys), so the
     posting it stands in for must still reach the agent to be screened for
     real."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     _configure(client, monkeypatch)
     placeholder_url = "https://acme.example/jobs/1"
@@ -445,7 +445,7 @@ def test_a_feed_failure_does_not_break_the_config_response(client, data_dir, moc
 def test_the_feed_fans_out_across_remote_rocketship_and_watchlist_ats_boards(client, data_dir, mock_http, monkeypatch):
     """Two independent sources, merged: Remote Rocketship (key-gated) and each
     watchlist company's own ATS API (gated only on a recognised ats, no key)."""
-    from companyboards import store as board_store
+    from truthcv.domain.companyboards import store as board_store
 
     _configure(client, monkeypatch)
     client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
@@ -472,7 +472,7 @@ def test_the_feed_fans_out_across_remote_rocketship_and_watchlist_ats_boards(cli
 
 def test_the_feed_dedupes_across_sources_by_url(client, data_dir, mock_http, monkeypatch):
     """The same URL surfaced by both sources appears once in the merged feed."""
-    from companyboards import store as board_store
+    from truthcv.domain.companyboards import store as board_store
 
     _configure(client, monkeypatch)
     client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
@@ -494,7 +494,7 @@ def test_the_feed_dedupes_across_sources_by_url(client, data_dir, mock_http, mon
 def test_one_sources_failure_does_not_drop_the_others_postings(client, data_dir, mock_http, monkeypatch):
     """Remote Rocketship failing must not empty out a working ATS fetch, and the
     failure is still surfaced in feed_error."""
-    from companyboards import store as board_store
+    from truthcv.domain.companyboards import store as board_store
 
     _configure(client, monkeypatch)
     client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
@@ -517,7 +517,7 @@ def test_one_sources_failure_does_not_drop_the_others_postings(client, data_dir,
 
 def test_an_ats_board_reaches_the_feed_with_no_key_configured(client, data_dir, mock_http, monkeypatch):
     """The ATS path needs no key at all — only a recognised company board."""
-    from companyboards import store as board_store
+    from truthcv.domain.companyboards import store as board_store
 
     monkeypatch.delenv("REMOTE_ROCKETSHIP_API_KEY", raising=False)
     client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
@@ -551,9 +551,9 @@ def test_the_combined_fetch_shares_one_deadline_between_both_sources(client, dat
     handed the exact same ``deadline`` object: this captures the ``deadline``
     kwarg each of the two underlying calls actually receives and checks they
     match, regardless of which one the scheduler happens to start first."""
-    from companyboards import store as board_store
-    from jobfeeds import ats as ats_module
-    from jobfeeds import remoterocketship as rr_module
+    from truthcv.domain.companyboards import store as board_store
+    from truthcv.domain.jobfeeds import ats as ats_module
+    from truthcv.domain.jobfeeds import remoterocketship as rr_module
 
     _configure(client, monkeypatch)
     client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})
@@ -589,7 +589,7 @@ def test_remote_rocketship_and_ats_are_fetched_concurrently_not_serially(client,
     serially an earlier one would be a lone party and time out waiting for
     partners that never arrive — this only completes, with sources' postings
     merged, because all three threads reach the barrier together."""
-    from companyboards import store as board_store
+    from truthcv.domain.companyboards import store as board_store
 
     _configure(client, monkeypatch)
     client.put("/api/agent/config", json={"targetCompanies": ["Acme"]})

@@ -15,8 +15,8 @@ drop them — see test_screening_from_dict_drops_legacy_entity_and_glassdoor.
 
 from __future__ import annotations
 
-import applications
-from applications.model import (
+import truthcv.domain.applications as applications
+from truthcv.domain.applications.model import (
     Application,
     Attachment,
     Confirmation,
@@ -24,7 +24,7 @@ from applications.model import (
     FieldSubmitted,
     Screening,
 )
-from applications.store import (
+from truthcv.domain.applications.store import (
     save_attachments,
     save_confirmation,
     save_fields_submitted,

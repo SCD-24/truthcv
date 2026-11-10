@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from screening import store
-from services.screenings import clear_login_blockers_for_host
+from truthcv.domain.screening import store
+from truthcv.services.screenings import clear_login_blockers_for_host
 
 
 def _blocked_approved(company: str, url: str, signin_url: str = "") -> str:

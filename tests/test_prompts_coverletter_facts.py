@@ -1,8 +1,8 @@
 """Test cover_letter_facts_block output with profile and answers."""
 
-from truth.answers import Answers
-from truth.model import Bullet, Experience, Hobby, Link, Profile, Skill, Truth
-from prompts.coverletter import cover_letter_facts_block
+from truthcv.domain.truth.answers import Answers
+from truthcv.domain.truth.model import Bullet, Experience, Hobby, Link, Profile, Skill, Truth
+from truthcv.engines.prompts.coverletter import cover_letter_facts_block
 
 EM_DASH = "\u2014"
 EN_DASH = "\u2013"

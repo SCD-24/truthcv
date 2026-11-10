@@ -1,7 +1,7 @@
 import importlib.util
 from pathlib import Path
 
-from screening import store as screening_store
+from truthcv.domain.screening import store as screening_store
 
 _PATH = Path(__file__).resolve().parent.parent / "scripts" / "purge_non_posting_screenings.py"
 _spec = importlib.util.spec_from_file_location("purge_non_posting_screenings", _PATH)

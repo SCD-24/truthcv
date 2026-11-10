@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import api.main as main
+import truthcv.adapters.http.main as main
 
 
 def _client(tmp_path, monkeypatch) -> TestClient:

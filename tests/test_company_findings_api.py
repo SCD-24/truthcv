@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
+from truthcv.adapters.http.main import app
 
 
 @pytest.fixture()
@@ -79,7 +79,7 @@ def test_create_other_without_label_is_400(client):
 
 
 def test_company_key_present_on_wire(client):
-    from identity.company import company_identity_key
+    from truthcv.infra.identity.company import company_identity_key
 
     body = _create(client, company="RobCo GmbH").json()
     assert body["companyKey"] == company_identity_key("RobCo GmbH")

@@ -8,9 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from services import runs as svc
-from services import supervisor as sup
-from services.errors import (
+from truthcv.services import runs as svc
+from truthcv.services import supervisor as sup
+from truthcv.services.errors import (
     BadGateway,
     BadRequest,
     Conflict,

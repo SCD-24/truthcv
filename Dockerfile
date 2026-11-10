@@ -10,10 +10,10 @@ RUN npm install
 # replace a directory with a file.
 COPY web/index.html web/tsconfig.json web/vite.config.ts ./
 COPY web/src/ ./src/
-# Vite builds to ../api/static per web/vite.config.ts; build in place then copy.
+# Vite builds to ../truthcv/adapters/http/static per web/vite.config.ts; build in place then copy.
 RUN npm run build
 
-# --- Stage 2: python runtime serving api/ + the built bundle ---
+# --- Stage 2: python runtime serving truthcv/ + the built bundle ---
 FROM python:3.11-slim AS app
 WORKDIR /app
 
@@ -29,39 +29,13 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir setuptools==84.2.1 wheel==0.48.0
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY storage/ ./storage/
-COPY services/ ./services/
-COPY secretstore/ ./secretstore/
-COPY prompts/ ./prompts/
-COPY providers/ ./providers/
-COPY truth/ ./truth/
-COPY tailor/ ./tailor/
-COPY guardrail/ ./guardrail/
-COPY vocabulary/ ./vocabulary/
-COPY render/ ./render/
-COPY coverletter/ ./coverletter/
-COPY applications/ ./applications/
-COPY screening/ ./screening/
-COPY identity/ ./identity/
-COPY mcpschema/ ./mcpschema/
-COPY runs/ ./runs/
-COPY agentconfig/ ./agentconfig/
-COPY jobfeeds/ ./jobfeeds/
-COPY jobs/ ./jobs/
-COPY companyboards/ ./companyboards/
-COPY companyresearch/ ./companyresearch/
-COPY connections/ ./connections/
-COPY modelrouting/ ./modelrouting/
-COPY agenttools/ ./agenttools/
-COPY onboarding/ ./onboarding/
-COPY gmailsync/ ./gmailsync/
-COPY api/ ./api/
+COPY truthcv/ ./truthcv/
 
 # Built frontend bundle from stage 1.
-COPY --from=web /api/static ./api/static
+COPY --from=web /truthcv/adapters/http/static ./truthcv/adapters/http/static
 
 ENV PORT=8080 DATA_DIR=/app/data
 VOLUME ["/app/data"]
 EXPOSE 8080
 
-CMD ["python", "-m", "api.main"]
+CMD ["python", "-m", "truthcv.adapters.http.main"]

@@ -9,7 +9,7 @@ real ./data, and `capsys` captures the printed report where its text is checked.
 
 from __future__ import annotations
 
-import applications.store as applications_store
+import truthcv.domain.applications.store as applications_store
 from scripts.repair_duplicate_applications import main
 
 
@@ -20,7 +20,7 @@ def _create_at(monkeypatch, ts, fields):
     not accept it as an editable field, so we pin ``_now`` to ``ts`` for this
     one call to make the earliest-created (canonical) row deterministic.
     """
-    monkeypatch.setattr("applications.store._now", lambda: ts)
+    monkeypatch.setattr("truthcv.domain.applications.store._now", lambda: ts)
     return applications_store.create(fields)
 
 

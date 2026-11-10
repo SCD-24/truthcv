@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import pytest
 
-from agentconfig.salary import clamp_ask, format_ask
-from agentconfig.store import AgentConfig, JobProfile
-from agentconfig.store import save as save_config
-from agenttools.tools_ledger import recommend_salary
+from truthcv.domain.agentconfig.salary import clamp_ask, format_ask
+from truthcv.domain.agentconfig.store import AgentConfig, JobProfile
+from truthcv.domain.agentconfig.store import save as save_config
+from truthcv.adapters.mcp.tools_ledger import recommend_salary
 
 _BAND_MIN = 95000
 _BAND_MAX = 110000
