@@ -15,16 +15,14 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from providers import ProviderError, get_provider
+from providers import ProviderError
 import services.screenings as screenings_service
 import services.agent_config as agent_config_service
 import services.agent_credentials as agent_credentials_service
 import services.supervisor as supervisor_service
 import services.gmail as gmail_service
-import services.job_boards as job_boards_service
 import services.browser as browser_service
 from api import guards
-import services.settings as settings_service
 import services.connections as connections_service
 
 import modelrouting
@@ -37,8 +35,10 @@ from runs import store as runs_store
 from .application_routes import router as application_router
 from .company_finding_routes import router as company_finding_router
 from .cv_routes import router as cv_router
+from .job_board_routes import router as job_board_router
 from .run_routes import router as run_router
 from .screening_routes import router as screening_router
+from .settings_routes import router as settings_router
 from .truth_routes import router as truth_router
 from .route_support import (
     _models_result,
@@ -62,16 +62,7 @@ from .schemas import (
     ConnectionTestRequest,
     GmailStatusModel,
     GmailSyncRequest,
-    JevSettingsStatus,
-    JevSettingsUpdate,
-    JobBoardKeyStatus,
-    JobBoardKeyUpdate,
     ModelList,
-    RouteModel,
-    RoutingModel,
-    RoutingUpdate,
-    SettingsStatus,
-    SettingsUpdate,
     SigninQueue,
     SigninQueueSite,
     BrowserSession,
@@ -93,51 +84,8 @@ router.include_router(company_finding_router)
 router.include_router(truth_router)
 router.include_router(cv_router)
 router.include_router(application_router)
-
-
-@router.get("/job-boards/{source}/key", response_model=JobBoardKeyStatus)
-def get_job_board_key(source: str) -> JobBoardKeyStatus:
-    """Whether an API-backed board has a key saved. The key itself is never returned."""
-    return JobBoardKeyStatus(**job_boards_service.key_status(source))
-
-
-@router.put("/job-boards/{source}/key", response_model=JobBoardKeyStatus)
-def put_job_board_key(source: str, body: JobBoardKeyUpdate) -> JobBoardKeyStatus:
-    """Save (or, with an empty string, clear) an API-backed board's key."""
-    return JobBoardKeyStatus(**job_boards_service.set_key(source, body.api_key))
-
-
-@router.post("/job-boards/{source}/key/test", response_model=TestResult)
-def test_job_board_key(source: str) -> TestResult:
-    """Verify the saved key with one live request against the board's API."""
-    ok, detail = job_boards_service.test_key(source)
-    return TestResult(ok=ok, detail=detail)
-
-
-@router.get("/settings/jev", response_model=JevSettingsStatus)
-def get_jev_settings() -> JevSettingsStatus:
-    """Whether Jev cross-checking is configured. The key itself is never returned."""
-    return JevSettingsStatus(**settings_service.jev_status())
-
-
-@router.put("/settings/jev", response_model=JevSettingsStatus)
-def put_jev_settings(body: JevSettingsUpdate) -> JevSettingsStatus:
-    """Save (or, with an empty string, clear) the Jev API key and/or the
-    useForScreening / useForEmailTracking toggles. Saving a non-empty key
-    requires encryption."""
-    status = settings_service.update_jev(
-        body.api_key, body.use_for_screening, body.use_for_email_tracking
-    )
-    return JevSettingsStatus(**status)
-
-
-@router.post("/settings/jev/test", response_model=TestResult)
-def test_jev_settings() -> TestResult:
-    """Verify the saved Jev key with one live request."""
-    from screening import jev
-
-    ok, detail = jev.check_key(secretstore.get_connection("jev").get("apiKey", ""))
-    return TestResult(ok=ok, detail=detail)
+router.include_router(job_board_router)
+router.include_router(settings_router)
 
 
 @router.post("/auth/gmail/start", response_model=StartLoginResult)
@@ -468,43 +416,6 @@ def delete_browser_session() -> BrowserSessionClosed:
     )
 
 
-@router.get("/settings", response_model=SettingsStatus)
-def get_settings() -> SettingsStatus:
-    return SettingsStatus(**settings_service.settings_status())
-
-
-@router.post("/settings", response_model=SettingsStatus)
-def post_settings(body: SettingsUpdate) -> SettingsStatus:
-    """Old single-provider POST shape, shimmed onto the v2 store: the key/host
-    lands in that provider's connection, and {connection, model} becomes the
-    routing default."""
-    status = settings_service.save_v1_settings(
-        body.active_provider, body.api_key, body.ollama_host, body.model
-    )
-    return SettingsStatus(**status)
-
-
-@router.post("/settings/test", response_model=TestResult)
-def test_settings(body: SettingsUpdate) -> TestResult:
-    ok, detail = settings_service.test_v1_settings(
-        body.active_provider,
-        body.api_key,
-        body.ollama_host,
-        body.model,
-        provider_factory=lambda: get_provider(refresh=True),
-    )
-    return TestResult(ok=ok, detail=detail)
-
-
-@router.post("/models", response_model=ModelList)
-def list_models(body: SettingsUpdate) -> ModelList:
-    """Live model list for the selected provider, pulled from its API/SDK."""
-    models, card = settings_service.list_v1_models(
-        body.active_provider, body.api_key, body.ollama_host
-    )
-    return _models_result(models, card)
-
-
 def _connection_status(card_key: str) -> ConnectionStatus:
     meta = catalog.card(card_key)
     conn = secretstore.get_connection(card_key)
@@ -608,42 +519,3 @@ def logout_connection(provider: str, mode: str | None = None) -> ConnectionStatu
     """
     connections_service.logout(provider, mode)
     return _connection_status(provider)
-
-
-@router.get("/routing", response_model=RoutingModel)
-def get_routing() -> RoutingModel:
-    """Get the current model routing configuration."""
-    return _routing_model(modelrouting.load())
-
-
-@router.put("/routing", response_model=RoutingModel)
-def put_routing(body: RoutingUpdate) -> RoutingModel:
-    """Merge only the fields the client sent onto the stored routing.
-
-    A field explicitly sent as null is not the same as an absent field: it
-    clears that route (`default`/`agent` sent as null, or a `tasks` entry
-    sent as null, removes it) instead of leaving the stored value untouched.
-    """
-    # Prepare update from body — exclude_unset only, so an explicit null
-    # survives into update_dict and is distinguishable from an absent field.
-    update_dict = body.model_dump(exclude_unset=True, by_alias=False)
-    return _routing_model(settings_service.update_routing(update_dict))
-
-
-def _routing_model(routing: modelrouting.Routing) -> RoutingModel:
-    """Convert a stored Routing to its API wire model."""
-    return RoutingModel(
-        tasks={k: _route_model(v) for k, v in routing.tasks.items()},
-        agent=_route_model(routing.agent) if routing.agent else None,
-        default=_route_model(routing.default) if routing.default else None,
-        agent_stages={k: _route_model(v) for k, v in routing.agent_stages.items()},
-    )
-
-
-def _route_model(route: modelrouting.Route) -> RouteModel:
-    """Convert a stored Route to its API wire model."""
-    return RouteModel(
-        connection=route.connection,
-        model=route.model,
-        effort=route.effort,
-    )
