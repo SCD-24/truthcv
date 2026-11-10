@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from applications.store import applications_path
-from companyresearch import store as findings_store
+from truthcv.domain.applications.store import applications_path
+from truthcv.domain.companyresearch import store as findings_store
 from scripts import migrate_company_findings as migrate
 
 

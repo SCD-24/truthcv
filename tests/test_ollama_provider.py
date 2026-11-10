@@ -5,7 +5,7 @@ from __future__ import annotations
 import respx
 from httpx import Response
 
-from providers.ollama_provider import OllamaProvider
+from truthcv.integrations.providers.ollama_provider import OllamaProvider
 
 
 @respx.mock

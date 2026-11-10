@@ -7,7 +7,7 @@ import dataclasses
 
 import pytest
 
-from truth.answers import (
+from truthcv.domain.truth.answers import (
     Answers,
     CanonicalCvAsset,
     _applicable_fields,
@@ -67,7 +67,7 @@ def test_save_writes_atomically_leaves_no_tmp(data_dir):
 
 def test_saving_answers_does_not_touch_truth_yaml(data_dir):
     """Saving answers never creates truth.yaml."""
-    from truth.store import truth_path
+    from truthcv.domain.truth.store import truth_path
 
     assert not truth_path().exists()
     save(Answers())
@@ -76,7 +76,7 @@ def test_saving_answers_does_not_touch_truth_yaml(data_dir):
 
 def test_saving_answers_does_not_modify_existing_truth_yaml(data_dir):
     """Saving answers leaves an existing truth.yaml byte-for-byte unchanged."""
-    from truth.store import truth_path
+    from truthcv.domain.truth.store import truth_path
 
     truth_path().write_text("experiences: []\n", encoding="utf-8")
     before = truth_path().read_bytes()

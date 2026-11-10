@@ -11,9 +11,9 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-import coverletter.store as letters
-import screening.store as store
-from api.main import app
+import truthcv.engines.coverletter.store as letters
+import truthcv.domain.screening.store as store
+from truthcv.adapters.http.main import app
 
 
 @pytest.fixture()
@@ -34,7 +34,7 @@ def _queued(posting_text="Staff AI Engineer, Germany (Remote). Python, LLMs."):
 
 class _StubProvider:
     """Returns one paragraph with an empty ``claims`` list. The guardrail only
-    validates a paragraph's self-tagged claims (coverletter/generate.py's
+    validates a paragraph's self-tagged claims (truthcv/engines/coverletter/generate.py's
     ``_letter_scope`` builds its Scope from ``claims``, never from ``text``),
     so an empty claims list clears validation regardless of the prose. Keeps
     these tests off the network."""
@@ -45,7 +45,7 @@ class _StubProvider:
 
 @pytest.fixture()
 def stub_provider(monkeypatch):
-    import api.screening_routes as letter_operator
+    import truthcv.adapters.http.screening_routes as letter_operator
 
     monkeypatch.setattr(letter_operator, "get_provider", lambda _name: _StubProvider())
     return _StubProvider()
@@ -135,7 +135,7 @@ def test_blocked_generation_writes_nothing_and_names_the_claims(client, monkeypa
     """The guardrail still binds on generation. A blocked letter must not be
     stored: a draft on disk is what unlocks Approve, so storing a blocked one
     would let an ungrounded claim through the one gate that catches it."""
-    import api.screening_routes as letter_operator
+    import truthcv.adapters.http.screening_routes as letter_operator
 
     class _Overclaiming:
         def extract_json(self, system, messages, schema=None):
@@ -157,11 +157,11 @@ def test_blocked_generation_writes_nothing_and_names_the_claims(client, monkeypa
 
 def test_generate_422_when_company_is_blocklisted(client, stub_provider):
     """The blocklist short-circuits before the model is ever called (see
-    agenttools/tools_letter.py's is_blocked check), returning the same
+    truthcv/adapters/mcp/tools_letter.py's is_blocked check), returning the same
     blocked=True shape as a guardrail rejection. That path is untested at
     the route layer even though it's safe by inspection, so exercise it
     directly: nothing should be written to the letter store either."""
-    import agentconfig.store as agent_config_store
+    import truthcv.domain.agentconfig.store as agent_config_store
 
     cfg = agent_config_store.load()
     cfg.blocked_companies = ["Contoso Labs"]
@@ -186,7 +186,7 @@ def test_blocked_generation_exposes_claim_ids_and_paragraphs(client, monkeypatch
     a stable claimId per blocked claim, its experienceId, text and tokens, and
     the paragraphs actually generated (so a retry can re-validate them without
     a second LLM call)."""
-    import api.screening_routes as letter_operator
+    import truthcv.adapters.http.screening_routes as letter_operator
 
     class _Overclaiming:
         def extract_json(self, system, messages, schema=None):
@@ -219,7 +219,7 @@ def test_blocked_generation_exposes_claim_ids_and_paragraphs(client, monkeypatch
 
 
 def _blocked_response(client, monkeypatch, call_counter):
-    import api.screening_routes as letter_operator
+    import truthcv.adapters.http.screening_routes as letter_operator
 
     class _Overclaiming:
         def extract_json(self, system, messages, schema=None):
@@ -260,7 +260,7 @@ def test_approving_the_blocked_claim_saves_and_does_not_call_the_provider_again(
 
 
 def test_approving_the_blocked_claim_writes_nothing_to_truth(client, monkeypatch):
-    from truth import load as load_truth
+    from truthcv.domain.truth import load as load_truth
 
     call_counter = {"n": 0}
     s, detail = _blocked_response(client, monkeypatch, call_counter)
@@ -296,13 +296,13 @@ def test_denying_the_blocked_claim_drops_it(client, monkeypatch):
 
 
 def test_generate_without_preset_id_uses_default_preset_prompt(client, monkeypatch):
-    """Omitting presetId must resolve through prompts.library.default_preset(),
+    """Omitting presetId must resolve through truthcv.engines.prompts.library.default_preset(),
     not silently fall back to some other preset (or error) — the system
     prompt the provider actually receives must match what that default
     preset produces."""
-    import api.screening_routes as letter_operator
-    from prompts import cover_letter_system_for_preset
-    from prompts.library import default_preset
+    import truthcv.adapters.http.screening_routes as letter_operator
+    from truthcv.engines.prompts import cover_letter_system_for_preset
+    from truthcv.engines.prompts.library import default_preset
 
     captured: dict = {}
 
@@ -322,9 +322,9 @@ def test_generate_with_explicit_preset_id_uses_that_presets_prompt(client, monke
     """A presetId in the request body selects that preset's prompt — one that
     is distinctly not the default preset's — proving the given id actually
     reaches prompt assembly rather than being ignored."""
-    import api.screening_routes as letter_operator
-    from prompts import cover_letter_system_for_preset
-    from prompts.library import default_preset
+    import truthcv.adapters.http.screening_routes as letter_operator
+    from truthcv.engines.prompts import cover_letter_system_for_preset
+    from truthcv.engines.prompts.library import default_preset
 
     captured: dict = {}
 
@@ -346,10 +346,10 @@ def test_unknown_preset_id_errors_instead_of_silently_falling_back(client, monke
     """An unknown presetId must surface to the caller as an error, never a
     silent fallback to the default preset's letter: no 200 is acceptable
     here, whatever the exact status code turns out to be."""
-    import api.cv_routes as routes
-    from providers.fake import FakeProvider
-    from truth import save
-    from truth.model import Experience, Skill, Truth
+    import truthcv.adapters.http.cv_routes as routes
+    from truthcv.integrations.providers.fake import FakeProvider
+    from truthcv.domain.truth import save
+    from truthcv.domain.truth.model import Experience, Skill, Truth
 
     def router(system, messages, schema):
         return {
@@ -375,7 +375,7 @@ def test_unknown_preset_id_errors_instead_of_silently_falling_back(client, monke
             skills=[Skill(id="s1", value="Python", source="linkedin-pdf")],
         )
     )
-    from storage import data_dir as dd
+    from truthcv.infra.storage import data_dir as dd
 
     (dd() / "posting.txt").write_text("Python role at a startup")
 
@@ -388,7 +388,7 @@ def test_unknown_preset_id_errors_instead_of_silently_falling_back(client, monke
 
 def test_company_blocked_letter_has_no_claims_and_blocked_reason(client):
     """The blocklist refusal keeps its distinct shape: no claims, a named reason."""
-    import agentconfig.store as agent_config_store
+    import truthcv.domain.agentconfig.store as agent_config_store
 
     cfg = agent_config_store.load()
     cfg.blocked_companies = ["Contoso Labs"]

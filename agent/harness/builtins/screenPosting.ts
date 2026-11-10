@@ -15,13 +15,13 @@
  * context; the reasoning that produced it never does.
  *
  * This tool does NOT replace `record_screening`. It has no access to the
- * screening ledger and writes nothing: `screening/store.py`'s `create()`
+ * screening ledger and writes nothing: `truthcv/domain/screening/store.py`'s `create()`
  * (via `create_or_get`) is the only path that persists a screening record,
  * and the agent must still call the MCP `record_screening` tool for every
  * posting, verdict included, exactly as `agent/RUNBOOK.md` requires. This
  * verdict is only ever an INPUT to that call, shaped to match what it
- * validates (see the field comments below, and `screening/model.py` /
- * `screening/criteria.py`, whose value sets are mirrored here so a verdict
+ * validates (see the field comments below, and `truthcv/domain/screening/model.py` /
+ * `truthcv/domain/screening/criteria.py`, whose value sets are mirrored here so a verdict
  * this tool returns is never rejected downstream for an unrecognised value).
  */
 
@@ -74,7 +74,7 @@ export interface ScreeningVerdict {
    * `BLOCKER_VALUES`. Mutually exclusive with a non-empty `verdict`. */
   screeningBlocker: string;
   /** Which criterion failed, when rejected; '' otherwise. Free text, e.g.
-   * `screening/criteria.py`'s `"remote_model"` / `"working_language"`, or a
+   * `truthcv/domain/screening/criteria.py`'s `"remote_model"` / `"working_language"`, or a
    * hard-filter name of this tool's own choosing. */
   failingCriterion: string;
   /** One-line human-readable explanation of the verdict. */
@@ -116,20 +116,20 @@ export interface ScreenPostingResult {
 }
 
 /**
- * `verdict` values `screening/model.py`'s `VERDICT_VALUES` recognises, plus
+ * `verdict` values `truthcv/domain/screening/model.py`'s `VERDICT_VALUES` recognises, plus
  * '' for "no verdict, a blocker instead". Duplicated here — this is a
  * separate TypeScript/Python boundary, not an import — so a value produced
- * here is never rejected by `screening.store.create` downstream.
+ * here is never rejected by `truthcv.domain.screening.store.create` downstream.
  */
 const VERDICT_VALUES = ['passed', 'rejected', 'deferred', ''] as const;
 
-/** Mirrors `screening/model.py`'s `BLOCKER_VALUES`. */
+/** Mirrors `truthcv/domain/screening/model.py`'s `BLOCKER_VALUES`. */
 const BLOCKER_VALUES = ['', 'login_required', 'unreadable', 'not_found', 'expired'] as const;
 
-/** Mirrors `screening/criteria.py`'s `REMOTE_ARRANGEMENT_VALUES`. */
+/** Mirrors `truthcv/domain/screening/criteria.py`'s `REMOTE_ARRANGEMENT_VALUES`. */
 const REMOTE_ARRANGEMENT_VALUES = ['', 'remote', 'hybrid', 'on_site', 'unstated'] as const;
 
-/** Mirrors `screening/criteria.py`'s `EOR_STATED_VALUES`. */
+/** Mirrors `truthcv/domain/screening/criteria.py`'s `EOR_STATED_VALUES`. */
 const EOR_STATED_VALUES = ['', 'yes', 'no', 'unstated'] as const;
 
 /** The provider-facing definition advertised to the main loop's model. */
@@ -307,7 +307,7 @@ function knownOrAbsent(value: unknown, known: readonly string[]): string | undef
  * Resolve an optional enumerated field to '' whenever it is absent OR an
  * unrecognised value — unlike {@link knownOrAbsent}, an unrecognised value
  * here does NOT invalidate the whole verdict. Used for `eorStated`:
- * `screening/criteria.py`'s `validate_eor_stated` RAISES on an unrecognised
+ * `truthcv/domain/screening/criteria.py`'s `validate_eor_stated` RAISES on an unrecognised
  * value, refusing the entire `record_screening` call — a screening model
  * answering e.g. 'probably' should silently lose that one field, not the
  * whole screening.
@@ -341,10 +341,10 @@ function extractJson(text: string): string {
  * {@link ScreeningVerdict}, or undefined when it is not a well-formed one.
  *
  * Every enumerated field is checked against its known value set (mirroring
- * `screening/model.py` and `screening/criteria.py`) so a malformed reply is
+ * `truthcv/domain/screening/model.py` and `truthcv/domain/screening/criteria.py`) so a malformed reply is
  * caught HERE rather than surfacing later as a rejected `record_screening`
  * call the caller cannot explain. `verdict` and `screeningBlocker` are
- * mutually exclusive, exactly as `screening/model.py`'s `validate_verdict`
+ * mutually exclusive, exactly as `truthcv/domain/screening/model.py`'s `validate_verdict`
  * requires — a reply with neither is invalid.
  */
 function parseVerdict(text: string): ScreeningVerdict | undefined {

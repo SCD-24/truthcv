@@ -1,4 +1,4 @@
-"""Unit tests for services.gmail (tracking/login/status), services.job_boards and services.browser."""
+"""Unit tests for truthcv.services.gmail (tracking/login/status), truthcv.services.job_boards and truthcv.services.browser."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import secretstore
-from services import browser, gmail, job_boards
-from services.errors import BadRequest, NotFound, Unavailable, UpstreamRefused
+import truthcv.infra.secretstore as secretstore
+from truthcv.services import browser, gmail, job_boards
+from truthcv.services.errors import BadRequest, NotFound, Unavailable, UpstreamRefused
 
 FERNET_KEY = "h2oN5GQVeWVhciVjWNImtAmWFyPGlrWvDCq8vXuqfmo="
 
@@ -42,12 +42,12 @@ def test_complete_login_ladder(data_dir):
     _open_gate()
     assert gmail.complete_login(None, None, "access_denied") == "access_denied"
     assert gmail.complete_login(None, "s", None) == "missing_code"
-    with patch("connections.auth.gmail.complete_login") as done:
+    with patch("truthcv.integrations.connections.auth.gmail.complete_login") as done:
         assert gmail.complete_login("c", "s", None) is None
         done.assert_called_once_with("c", "s")
-    from connections.auth import gmail as gmail_auth
+    from truthcv.integrations.connections.auth import gmail as gmail_auth
 
-    with patch("connections.auth.gmail.complete_login", side_effect=gmail_auth.AuthError("x")):
+    with patch("truthcv.integrations.connections.auth.gmail.complete_login", side_effect=gmail_auth.AuthError("x")):
         assert gmail.complete_login("c", "s", None) == "auth_failed"
 
 
@@ -89,7 +89,7 @@ def test_job_board_key_roundtrip(data_dir):
     }
     assert job_boards.set_key(src, "  abc  ")["key_set"] is True
     assert job_boards.set_key(src, "")["key_set"] is False
-    with patch("jobfeeds.remoterocketship.check_key", return_value=(True, "ok")) as chk:
+    with patch("truthcv.domain.jobfeeds.remoterocketship.check_key", return_value=(True, "ok")) as chk:
         assert job_boards.test_key(src) == (True, "ok")
         chk.assert_called_once()
 
@@ -142,7 +142,7 @@ def test_forward_refusal_and_unreachable():
 def test_close_session_clears_blockers_for_session_host():
     replies = [{"open": True, "url": "https://Jobs.Example.com/x"}, {"closed": True}]
     with patch.object(browser, "forward_to_session_server", side_effect=replies), \
-         patch("services.screenings.clear_login_blockers_for_host", return_value=2) as clear:
+         patch("truthcv.services.screenings.clear_login_blockers_for_host", return_value=2) as clear:
         assert browser.close_session() == {
             "closed": True, "closing": False, "reserving": False, "signins_cleared": 2,
         }
@@ -155,6 +155,6 @@ def test_close_session_skips_clearing_when_not_closed_or_no_url():
         [{}, {"closing": True}],
     ):
         with patch.object(browser, "forward_to_session_server", side_effect=replies), \
-             patch("services.screenings.clear_login_blockers_for_host") as clear:
+             patch("truthcv.services.screenings.clear_login_blockers_for_host") as clear:
             assert browser.close_session()["signins_cleared"] == 0
         clear.assert_not_called()

@@ -4,7 +4,7 @@ A Claude subscription (OAuth) token is rejected by the Messages API unless this
 exact string is the FIRST system block. The rejection is a 429
 ``rate_limit_error`` whose message is the bare word "Error", which reads as an
 exhausted quota and is not one — so a drift here costs a long diagnosis, not a
-quick one. The app sends it from ``connections/auth/claude.py``; the unattended
+quick one. The app sends it from ``truthcv/integrations/connections/auth/claude.py``; the unattended
 agent's harness is TypeScript and cannot import that, so it carries its own copy.
 """
 
@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from connections.auth.claude import CLAUDE_CODE_PREAMBLE
+from truthcv.integrations.connections.auth.claude import CLAUDE_CODE_PREAMBLE
 
 _ADAPTER = Path(__file__).resolve().parents[1] / "agent/harness/providers/anthropicMessages.ts"
 
@@ -37,6 +37,6 @@ def test_harness_sends_the_preamble_first_for_oauth():
 
 
 def test_harness_sends_the_oauth_beta_header():
-    """Matches providers/anthropic_provider.py's default_headers."""
+    """Matches truthcv/integrations/providers/anthropic_provider.py's default_headers."""
     source = _ADAPTER.read_text(encoding="utf-8")
     assert "'anthropic-beta'] = 'oauth-2025-04-20'" in source

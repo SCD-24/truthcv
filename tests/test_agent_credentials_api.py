@@ -4,10 +4,10 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-import modelrouting
-import secretstore
-from api.main import app
-from modelrouting import Route, Routing
+import truthcv.integrations.modelrouting as modelrouting
+import truthcv.infra.secretstore as secretstore
+from truthcv.adapters.http.main import app
+from truthcv.integrations.modelrouting import Route, Routing
 
 
 @pytest.fixture()
@@ -54,7 +54,7 @@ def test_oauth_path_uses_fresh_token(client, monkeypatch):
         "oauth": {"accessToken": "at", "refreshToken": "rt", "expiresAt": time.time() + 3600},
         "authMode": "subscription",
     })
-    monkeypatch.setattr("services.agent_credentials.get_valid_access_token", lambda: "fresh-tok")
+    monkeypatch.setattr("truthcv.services.agent_credentials.get_valid_access_token", lambda: "fresh-tok")
     body = client.get("/api/agent/llm-credentials", headers=_hdr()).json()
     assert body["authType"] == "oauth" and body["token"] == "fresh-tok"
 
@@ -66,11 +66,11 @@ def test_oauth_refresh_fails_503(client, monkeypatch):
     })
 
     def _raise():
-        from connections.auth.claude import AuthError
+        from truthcv.integrations.connections.auth.claude import AuthError
 
         raise AuthError("boom")
 
-    monkeypatch.setattr("services.agent_credentials.get_valid_access_token", _raise)
+    monkeypatch.setattr("truthcv.services.agent_credentials.get_valid_access_token", _raise)
     resp = client.get("/api/agent/llm-credentials", headers=_hdr())
     assert resp.status_code == 503
     assert "boom" not in resp.text

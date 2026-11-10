@@ -1,4 +1,4 @@
-from connections.catalog import CARDS, card, card_keys
+from truthcv.integrations.connections.catalog import CARDS, card, card_keys
 
 
 def test_stage1_cards_present():

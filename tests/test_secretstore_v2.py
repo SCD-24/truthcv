@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-import secretstore
+import truthcv.infra.secretstore as secretstore
 from cryptography.fernet import Fernet
 
 

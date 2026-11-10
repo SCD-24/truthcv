@@ -1,6 +1,6 @@
 """Agent config store: defaults, round-trip, atomicity, blocklist matching."""
 
-from agentconfig import store
+from truthcv.domain.agentconfig import store
 
 
 def test_defaults_when_missing(data_dir):
@@ -507,7 +507,7 @@ def test_enabled_boards_all_present_in_searched_boards():
 
 def test_board_for_url_catalog_exact_match():
     """Exact host match against a SOURCE_DOMAINS entry returns the catalog key."""
-    from agentconfig.boards import board_for_url
+    from truthcv.domain.agentconfig.boards import board_for_url
 
     assert board_for_url("https://linkedin.com/jobs/view/1") == "linkedin"
     assert board_for_url("linkedin.com/jobs") == "linkedin"
@@ -515,7 +515,7 @@ def test_board_for_url_catalog_exact_match():
 
 def test_board_for_url_catalog_subdomain_match():
     """Subdomain match (suffix) against a SOURCE_DOMAINS host returns the key."""
-    from agentconfig.boards import board_for_url
+    from truthcv.domain.agentconfig.boards import board_for_url
 
     assert board_for_url("https://jobs.lever.co/acme") == "lever"
     assert board_for_url("jobs.lever.co") == "lever"
@@ -524,7 +524,7 @@ def test_board_for_url_catalog_subdomain_match():
 
 def test_board_for_url_www_prefix_stripped():
     """Leading 'www.' is stripped before matching."""
-    from agentconfig.boards import board_for_url
+    from truthcv.domain.agentconfig.boards import board_for_url
 
     assert board_for_url("https://www.linkedin.com/jobs/view/1") == "linkedin"
     assert board_for_url("www.linkedin.com") == "linkedin"
@@ -532,7 +532,7 @@ def test_board_for_url_www_prefix_stripped():
 
 def test_board_for_url_custom_host_fallback():
     """No catalog match returns the bare host."""
-    from agentconfig.boards import board_for_url
+    from truthcv.domain.agentconfig.boards import board_for_url
 
     assert board_for_url("https://careers.example.com/jobs") == "careers.example.com"
     assert board_for_url("careers.example.com") == "careers.example.com"
@@ -541,14 +541,14 @@ def test_board_for_url_custom_host_fallback():
 
 def test_board_for_url_port_stripped():
     """Port numbers are stripped before matching."""
-    from agentconfig.boards import board_for_url
+    from truthcv.domain.agentconfig.boards import board_for_url
 
     assert board_for_url("https://linkedin.com:8080/jobs") == "linkedin"
     assert board_for_url("careers.example.com:9000") == "careers.example.com"
 
 
 def test_search_url_error_valid_and_empty():
-    from agentconfig.boards import search_url_error
+    from truthcv.domain.agentconfig.boards import search_url_error
 
     assert search_url_error("") is None
     assert search_url_error("https://jobs.acme.com/search?q={keywords}") is None
@@ -556,14 +556,14 @@ def test_search_url_error_valid_and_empty():
 
 
 def test_search_url_error_rejects_bad_scheme_and_missing_keywords():
-    from agentconfig.boards import search_url_error
+    from truthcv.domain.agentconfig.boards import search_url_error
 
     assert search_url_error("ftp://x/?q={keywords}") is not None
     assert search_url_error("https://x/?q=x") is not None
 
 
 def test_search_url_error_rejects_unknown_and_malformed_placeholders():
-    from agentconfig.boards import search_url_error
+    from truthcv.domain.agentconfig.boards import search_url_error
 
     assert search_url_error("https://x/s?q={keywords}&f={foo}") is not None
     assert search_url_error("https://x/s?q={keywords}&f={foo{location}}") is not None
@@ -571,7 +571,7 @@ def test_search_url_error_rejects_unknown_and_malformed_placeholders():
 
 
 def test_posting_url_pattern_error_valid_and_empty():
-    from agentconfig.boards import posting_url_pattern_error
+    from truthcv.domain.agentconfig.boards import posting_url_pattern_error
 
     assert posting_url_pattern_error("") is None
     assert posting_url_pattern_error("https://www.example.com/jobs/*") is None
@@ -579,7 +579,7 @@ def test_posting_url_pattern_error_valid_and_empty():
 
 
 def test_posting_url_pattern_error_rejects_bad_scheme_and_empty_host():
-    from agentconfig.boards import posting_url_pattern_error
+    from truthcv.domain.agentconfig.boards import posting_url_pattern_error
 
     assert posting_url_pattern_error("ftp://example.com/jobs/*") is not None
     assert posting_url_pattern_error("https:///jobs/*") is not None
@@ -587,7 +587,7 @@ def test_posting_url_pattern_error_rejects_bad_scheme_and_empty_host():
 
 
 def test_posting_url_pattern_error_rejects_whitespace_and_braces():
-    from agentconfig.boards import posting_url_pattern_error
+    from truthcv.domain.agentconfig.boards import posting_url_pattern_error
 
     assert posting_url_pattern_error("https://example.com/jobs/ *") is not None
     assert posting_url_pattern_error("https://example.com/{id}/jobs") is not None
@@ -595,7 +595,7 @@ def test_posting_url_pattern_error_rejects_whitespace_and_braces():
 
 def test_board_for_url_empty_or_unparseable():
     """Empty, None, or unparseable URLs return 'unknown'."""
-    from agentconfig.boards import board_for_url
+    from truthcv.domain.agentconfig.boards import board_for_url
 
     assert board_for_url("") == "unknown"
     assert board_for_url("   ") == "unknown"

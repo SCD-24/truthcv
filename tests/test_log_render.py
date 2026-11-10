@@ -8,19 +8,19 @@ no log at all, because it reads as a complete account.
 
 import pytest
 
-from applications.log_render import (
+from truthcv.domain.applications.log_render import (
     RenderRefused,
     render_log,
     write_log,
 )
-from applications.model import (
+from truthcv.domain.applications.model import (
     Application,
+    ApplicationScreening,
     Attachment,
     Confirmation,
     FieldSubmitted,
-    Screening,
 )
-from companyresearch.model import CompanyFinding
+from truthcv.domain.companyresearch.model import CompanyFinding
 
 
 def _app(app_id, company="Acme GmbH", **kwargs):
@@ -85,7 +85,7 @@ def test_an_unrendered_application_is_refused(tmp_path, monkeypatch):
     Simulates a renderer regression by rendering only the first application,
     which is exactly the failure the marker count exists to catch.
     """
-    import applications.log_render as module
+    import truthcv.domain.applications.log_render as module
 
     monkeypatch.setattr(module, "render_log", lambda apps, findings=None: module.HEADER)
     target = tmp_path / "APPLICATION_LOG.md"
@@ -142,7 +142,7 @@ def test_submitted_fields_render_with_their_provenance_and_escape_pipes():
 def test_screening_and_attachments_and_gaps_reach_the_log():
     """Everything the Jobs log carried per record still appears."""
     app = _app("999ddd999ddd", capture_method="reconstructed")
-    app.screening = Screening(remote="Fully remote")
+    app.screening = ApplicationScreening(remote="Fully remote")
     app.attachments = [Attachment(kind="cv", path="cv_999ddd999ddd.pdf")]
     app.gaps_disclosed = ["No Kubernetes production experience"]
 

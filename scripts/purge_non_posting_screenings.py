@@ -2,7 +2,7 @@
 
 LinkedIn search/listing pages (``linkedin.com`` URLs that are not
 ``/jobs/view/<id>``) were once recorded as if they were postings. This one-off
-script removes them via ``screening.store.delete_many`` (which also removes
+script removes them via ``truthcv.domain.screening.store.delete_many`` (which also removes
 each record's orphaned cover-letter draft).
 
 Records the operator has acted on (approval ``applied`` or ``approved``) are
@@ -34,9 +34,9 @@ from pathlib import Path
 # Run as a script, Python puts scripts/ on the path rather than the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import screening.store as screening_store  # noqa: E402
-import services.screenings as screenings_service  # noqa: E402
-from identity.url import is_posting_url  # noqa: E402
+import truthcv.domain.screening.store as screening_store  # noqa: E402
+import truthcv.services.screenings as screenings_service  # noqa: E402
+from truthcv.infra.identity.url import is_posting_url  # noqa: E402
 
 _PROTECTED_APPROVALS = frozenset({"applied", "approved"})
 

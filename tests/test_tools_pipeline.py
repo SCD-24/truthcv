@@ -1,7 +1,7 @@
-import runs.store as runs_store
-from agenttools import mcp_app
-from agenttools.tools_pipeline import filter_unscreened_urls, finish_application
-from screening import store as screening_store
+import truthcv.domain.runs.store as runs_store
+from truthcv.adapters.mcp import mcp_app
+from truthcv.adapters.mcp.tools_pipeline import filter_unscreened_urls, finish_application
+from truthcv.domain.screening import store as screening_store
 
 
 def test_filter_unscreened_urls(data_dir):
@@ -26,7 +26,7 @@ def test_filter_unscreened_urls(data_dir):
 
 
 def _enable_profiles(*names):
-    from agentconfig.store import AgentConfig, JobProfile, save
+    from truthcv.domain.agentconfig.store import AgentConfig, JobProfile, save
 
     save(AgentConfig(profiles=[JobProfile(name=n, enabled=True) for n in names]))
 
@@ -53,7 +53,7 @@ def test_filter_unscreened_urls_pass_under_one_profile_is_screened(data_dir):
 
 
 def test_filter_unscreened_urls_dedupes_on_posting_key(data_dir):
-    from agenttools.tools_pipeline import filter_unscreened_urls
+    from truthcv.adapters.mcp.tools_pipeline import filter_unscreened_urls
 
     got = filter_unscreened_urls(
         ["https://EXAMPLE.com/jobs/2/", "https://example.com/jobs/2"]

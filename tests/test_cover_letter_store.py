@@ -7,7 +7,7 @@ screenings.json is loaded in full on every screening read.
 
 from __future__ import annotations
 
-import coverletter.store as letters
+import truthcv.engines.coverletter.store as letters
 
 
 def _draft(text="Dear hiring team,", source="generated"):

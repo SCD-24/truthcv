@@ -16,8 +16,8 @@ in two — TruthCV generated the documents, a separate `Jobs` repo ran the
 applications — and that second repo has been retired and its capabilities
 folded in here. A live path, command or instruction pointing into a `Jobs`
 repository is stale. Comments citing it as the origin of ported code (in
-`agent/Dockerfile`, `agent/*.sh`, `applications/log_render.py`,
-`applications/model.py` and `scripts/migrate_jobs_history.py`) are deliberate
+`agent/Dockerfile`, `agent/*.sh`, `truthcv/domain/applications/log_render.py`,
+`truthcv/domain/applications/model.py` and `scripts/migrate_jobs_history.py`) are deliberate
 history, not stale; see `CLAUDE.md` "Repository scope". The only place that repository is described is
 [`docs/jobs-retirement-audit.md`](docs/jobs-retirement-audit.md), which records
 what was carried over.

@@ -1,6 +1,6 @@
 import pytest
 
-from screening.rejection_categories import (
+from truthcv.domain.screening.rejection_categories import (
     REJECTION_CATEGORIES,
     normalize_failing_criterion as norm,
 )

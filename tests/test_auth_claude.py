@@ -6,8 +6,8 @@ import respx
 from httpx import Response
 from cryptography.fernet import Fernet
 
-import secretstore
-from connections.auth import claude
+import truthcv.infra.secretstore as secretstore
+from truthcv.integrations.connections.auth import claude
 
 
 @pytest.fixture()

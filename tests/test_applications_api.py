@@ -9,11 +9,11 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-import api.cv_routes as cv_routes
-import render
-from api.main import app
-from providers.fake import FakeProvider
-from truth import Bullet, Experience, Skill, Truth, save
+import truthcv.adapters.http.cv_routes as cv_routes
+import truthcv.engines.render as render
+from truthcv.adapters.http.main import app
+from truthcv.integrations.providers.fake import FakeProvider
+from truthcv.domain.truth import Bullet, Experience, Skill, Truth, save
 
 
 def _seed_truth() -> None:
@@ -214,7 +214,7 @@ def test_rendered_cv_with_profile_header_resaves_and_attaches(client):
     ledger. Regression: the header was previously omitted from the allowed set,
     so a document TruthCV itself produced could never be re-saved.
     """
-    from truth import Link, Profile
+    from truthcv.domain.truth import Link, Profile
 
     save(
         Truth(
@@ -297,7 +297,7 @@ def test_edited_cv_persists_link_when_render_unavailable(client, monkeypatch):
     links for files that were never produced, so the CV link persists even when
     WeasyPrint/pandoc are both absent. This pins that best-effort contract.
     """
-    from render.pdf import RenderUnavailable
+    from truthcv.engines.render.pdf import RenderUnavailable
 
     def _unavailable(*_a, **_k):
         raise RenderUnavailable("no backend")
@@ -328,7 +328,7 @@ def test_edited_cv_persists_link_when_render_unavailable(client, monkeypatch):
 
 def test_edited_cover_letter_persists_link_when_render_unavailable(client, monkeypatch):
     """The same best-effort save contract for an edited cover letter."""
-    from render.pdf import RenderUnavailable
+    from truthcv.engines.render.pdf import RenderUnavailable
 
     def _unavailable(*_a, **_k):
         raise RenderUnavailable("no backend")
@@ -358,9 +358,9 @@ def test_export_returns_zip_with_csv_and_company_folders(client):
     import io
     import zipfile
 
-    from storage import data_dir
+    from truthcv.infra.storage import data_dir
 
-    import applications as app_store
+    import truthcv.domain.applications as app_store
 
     # Two applications; give the first a rendered CV file on the volume.
     with_docs = client.post(
@@ -401,11 +401,11 @@ def test_cover_letter_attaches_to_application(client, monkeypatch):
 
     # A posting must exist for /cover-letter; fake the letter build to a truthful
     # single claim so the guardrail passes deterministically.
-    from storage import data_dir
+    from truthcv.infra.storage import data_dir
 
     (data_dir() / "posting.txt").write_text("Senior Engineer", encoding="utf-8")
     monkeypatch.setattr(
-        "coverletter.build_letter",
+        "truthcv.engines.coverletter.build_letter",
         lambda *a, **k: {"blocked": False, "unverifiable": [], "text": "Built a payments API in Python."},
     )
 
@@ -420,7 +420,7 @@ def test_cover_letter_attaches_to_application(client, monkeypatch):
 
 def test_cover_letter_rejects_unknown_application_id(client, monkeypatch):
     """An unknown applicationId must 404 before any provider call is made."""
-    from storage import data_dir
+    from truthcv.infra.storage import data_dir
 
     _seed_truth()
     (data_dir() / "posting.txt").write_text("Senior Engineer", encoding="utf-8")
@@ -428,7 +428,7 @@ def test_cover_letter_rejects_unknown_application_id(client, monkeypatch):
     def _boom(*a, **k):
         raise AssertionError("build_letter must not be called for an unknown applicationId")
 
-    monkeypatch.setattr("coverletter.build_letter", _boom)
+    monkeypatch.setattr("truthcv.engines.coverletter.build_letter", _boom)
 
     r = client.post(
         "/api/cover-letter",
@@ -440,7 +440,7 @@ def test_cover_letter_rejects_unknown_application_id(client, monkeypatch):
 
 def test_render_rejects_unknown_application_id(client):
     """An unknown applicationId must 404 and write no files."""
-    from storage import data_dir
+    from truthcv.infra.storage import data_dir
 
     before = {p.name for p in data_dir().glob("cv.*")}
 
@@ -453,9 +453,9 @@ def test_render_rejects_unknown_application_id(client):
 
 
 def test_evidence_round_trips_on_list(client):
-    """Evidence the agent persisted via applications.store must surface on
+    """Evidence the agent persisted via truthcv.domain.applications.store must surface on
     GET /api/applications under its camelCase wire keys."""
-    import applications.store as app_store
+    import truthcv.domain.applications.store as app_store
 
     app_id = client.post("/api/applications", json={"company": "Acme"}).json()["id"]
 
@@ -481,7 +481,7 @@ def test_evidence_round_trips_on_list(client):
 def test_put_does_not_clobber_evidence(client):
     """A generic PUT of an editable field (notes) must leave agent-recorded
     evidence intact — evidence is not in Application.EDITABLE."""
-    import applications.store as app_store
+    import truthcv.domain.applications.store as app_store
 
     app_id = client.post("/api/applications", json={"company": "Acme"}).json()["id"]
     app_store.save_fields_submitted(

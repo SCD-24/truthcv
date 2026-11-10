@@ -1,6 +1,6 @@
-"""Tests for identity.company.company_identity_key."""
+"""Tests for truthcv.infra.identity.company.company_identity_key."""
 
-from identity.company import company_identity_key
+from truthcv.infra.identity.company import company_identity_key
 
 
 def test_robco_suffix_variants_collapse_to_same_key():

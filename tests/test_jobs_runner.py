@@ -1,11 +1,11 @@
-"""Tests for jobs.runner: submit/get/list_jobs against the bounded pool.
+"""Tests for truthcv.infra.background_tasks.runner: submit/get/list_jobs against the bounded pool.
 
 Synchronization is entirely threading.Event based (no sleeps). Several tests
 saturate the pool with MAX_WORKERS blocked jobs so a job of interest is
 provably still queued (pending), then release exactly one worker and confirm
 completion with a "sentinel" job: since only one worker is free, the
 sentinel can only start once the worker that ran the job of interest has
-fully returned from jobs.runner._run_job -- which is also where that job's
+fully returned from truthcv.infra.background_tasks.runner._run_job -- which is also where that job's
 final status is recorded -- giving a real happens-before via Event set/wait,
 not a timing guess.
 """
@@ -17,8 +17,8 @@ import time
 
 import pytest
 
-from jobs.model import STATUS_DONE, STATUS_FAILED, STATUS_PENDING, STATUS_RUNNING
-from jobs.runner import MAX_RETAINED_JOBS, MAX_WORKERS, get, list_jobs, submit
+from truthcv.infra.background_tasks.model import STATUS_DONE, STATUS_FAILED, STATUS_PENDING, STATUS_RUNNING
+from truthcv.infra.background_tasks.runner import MAX_RETAINED_JOBS, MAX_WORKERS, get, list_jobs, submit
 
 _WAIT_TIMEOUT_S = 5.0
 

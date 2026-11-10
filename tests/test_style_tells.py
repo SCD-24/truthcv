@@ -2,7 +2,7 @@
 
 import pytest
 
-from render.style_tells import MAX_SNIPPETS, check_style
+from truthcv.engines.render.style_tells import MAX_SNIPPETS, check_style
 
 EM = "—"
 EN = "–"

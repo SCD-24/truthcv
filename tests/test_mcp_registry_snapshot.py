@@ -3,9 +3,9 @@
 Guards MCP surface byte-identity during the Phase 3a services move. It pins
 two registries against a committed fixture:
 
-- ``agenttools.mcp_app._TOOL_REGISTRY``: each tool's name, description and the
+- ``truthcv.adapters.mcp.mcp_app._TOOL_REGISTRY``: each tool's name, description and the
   inputSchema that ``_input_schema(fn)`` derives from its signature.
-- ``agenttools.server.TOOLS`` as exposed by ``list_tools()``: each REST tool's
+- ``truthcv.adapters.mcp.server.TOOLS`` as exposed by ``list_tools()``: each REST tool's
   name and parameter names.
 
 A change to what the agent is advertised fails here. The fixture is generated
@@ -22,8 +22,8 @@ from pathlib import Path
 
 import pytest
 
-from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
-from agenttools.server import list_tools
+from truthcv.adapters.mcp.mcp_app import _TOOL_REGISTRY, _input_schema
+from truthcv.adapters.mcp.server import list_tools
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mcp_registry_snapshot.json"
 

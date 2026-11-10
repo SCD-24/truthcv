@@ -14,8 +14,8 @@ vi.mock("../api/client", () => ({
 }));
 
 /** Build a ScreeningRecord fixture shaped exactly like the ones the backend
- * emits (screening/model.py's Screening dataclass, serialised camelCase per
- * api/schemas.py). */
+ * emits (truthcv/domain/screening/model.py's Screening dataclass, serialised camelCase per
+ * truthcv/adapters/http/schemas/). */
 function makeScreening(overrides: Partial<ScreeningRecord> = {}): ScreeningRecord {
   return {
     id: "a1b2c3d4e5f6",

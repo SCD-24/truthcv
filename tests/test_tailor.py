@@ -7,13 +7,13 @@ import threading
 
 import yaml
 
-from providers.base import ProviderError
-from providers.fake import FakeProvider
-from truth.model import Bullet, Experience, Skill, Truth
-from tailor import tailor, claims_for_ids
-from tailor.keywords import extract_keywords, extract_keywords_with_aliases, _is_junk_token
-from tailor.infer import _uncovered_keywords, _infer_user_message
-from tailor.model import Draft
+from truthcv.integrations.providers.base import ProviderError
+from truthcv.integrations.providers.fake import FakeProvider
+from truthcv.domain.truth.model import Bullet, Experience, Skill, Truth
+from truthcv.engines.tailor import tailor, claims_for_ids
+from truthcv.engines.tailor.keywords import extract_keywords, extract_keywords_with_aliases, _is_junk_token
+from truthcv.engines.tailor.infer import _uncovered_keywords, _infer_user_message
+from truthcv.engines.tailor.model import Draft
 
 
 def _truth() -> Truth:
@@ -177,7 +177,7 @@ def test_infer_message_lists_keywords_and_falls_back_when_empty():
 
 def test_unicode_names_tokenize_as_single_tokens():
     """Accented names/companies tokenize as one token, not shattered ASCII."""
-    from guardrail.validate import _tokenize
+    from truthcv.engines.guardrail.validate import _tokenize
 
     assert "müller" in _tokenize("Klaus Müller")
     assert _tokenize("Klaus Müller") == ["klaus", "müller"]
@@ -186,7 +186,7 @@ def test_unicode_names_tokenize_as_single_tokens():
 
 def test_guardrail_matches_accented_company_name_in_truth_and_draft():
     """An accented company in the truth matches the same name in a draft."""
-    from guardrail.validate import Scope, validate
+    from truthcv.engines.guardrail.validate import Scope, validate
 
     truth_scope = Scope(id="job", texts=[], allowed=["Škoda Auto — Brno"])
     result = validate([truth_scope])
@@ -195,7 +195,7 @@ def test_guardrail_matches_accented_company_name_in_truth_and_draft():
 
 def test_legacy_answers_yaml_migrates_to_neutral_field(data_dir):
     """An answers.yaml written by an older build loses no stored answer."""
-    from truth.answers import load, save
+    from truthcv.domain.truth.answers import load, save
 
     raw = {"authorized_non_german_country": "Yes, EU blue card"}
     (data_dir / "answers.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
@@ -211,7 +211,7 @@ def test_legacy_answers_yaml_migrates_to_neutral_field(data_dir):
 
 def test_neutral_work_authorisation_note_wins_when_set():
     """Once the neutral field carries its own value it is never overwritten."""
-    from truth.answers import Answers
+    from truthcv.domain.truth.answers import Answers
 
     a = Answers.from_dict(
         {"authorized_non_german_country": "old", "work_authorisation_note": "new"}
@@ -221,7 +221,7 @@ def test_neutral_work_authorisation_note_wins_when_set():
 
 def test_seed_canonical_cv_without_asset_raises_clear_error(data_dir):
     """No argument + no bundled asset: an error naming what to supply."""
-    from truth.answers import seed_canonical_cv
+    from truthcv.domain.truth.answers import seed_canonical_cv
 
     try:
         seed_canonical_cv()
@@ -230,12 +230,12 @@ def test_seed_canonical_cv_without_asset_raises_clear_error(data_dir):
         raised = exc
     assert raised is not None
     assert "canonical_cv.pdf" in str(raised)
-    assert "python -m truth.answers" in str(raised)
+    assert "python -m truthcv.domain.truth.answers" in str(raised)
 
 
 def test_unicode_names_tokenize_as_single_tokens():
     """Accented names/companies tokenize as one token, not shattered ASCII."""
-    from guardrail.validate import _tokenize
+    from truthcv.engines.guardrail.validate import _tokenize
 
     assert _tokenize("Klaus Müller") == ["klaus", "müller"]
     assert _tokenize("Škoda Auto") == ["škoda", "auto"]
@@ -243,7 +243,7 @@ def test_unicode_names_tokenize_as_single_tokens():
 
 def test_guardrail_matches_accented_company_name_in_truth_and_draft():
     """An accented company in the truth matches the same name in a draft."""
-    from guardrail.validate import Scope, validate
+    from truthcv.engines.guardrail.validate import Scope, validate
 
     result = validate(
         [Scope(id="job", texts=["Škoda Auto"], allowed=["Škoda Auto", "senior", "engineer"])]
@@ -253,12 +253,12 @@ def test_guardrail_matches_accented_company_name_in_truth_and_draft():
 
 def test_operator_supplied_stopwords_stop_being_flagged(data_dir):
     """Words listed on the data volume are no longer unverifiable claims."""
-    # guardrail/__init__ re-exports the validate() function over the
+    # truthcv/engines/guardrail/__init__ re-exports the validate() function over the
     # submodule name, so reach the module through sys.modules.
     import sys
 
-    gv = sys.modules["guardrail.validate"]
-    from guardrail.validate import Scope, validate
+    gv = sys.modules["truthcv.engines.guardrail.validate"]
+    from truthcv.engines.guardrail.validate import Scope, validate
 
     # Without a file, a non-stopword word is flagged (existing behaviour).
     result = validate([Scope(id="j", texts=["Zwischen"], allowed=[])])
@@ -345,7 +345,7 @@ def test_uncovered_keywords_honours_alias_argument():
 
 def test_select_and_infer_run_concurrently(data_dir):
     """select_and_rephrase and detect_inferences each get their own provider
-    (tailor/infer) and run concurrently, not serially.
+    (truthcv/engines/tailor/infer) and run concurrently, not serially.
 
     A shared threading.Barrier(2) only releases once BOTH blocking providers'
     extract_json calls have reached it. If tailor() ran the two calls

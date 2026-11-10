@@ -5,10 +5,10 @@ from __future__ import annotations
 import pytest
 from cryptography.fernet import Fernet
 
-import modelrouting
-import secretstore
-from modelrouting import Route, Routing
-from providers import ProviderError, build_connection_provider, get_provider, reset_provider
+import truthcv.integrations.modelrouting as modelrouting
+import truthcv.infra.secretstore as secretstore
+from truthcv.integrations.modelrouting import Route, Routing
+from truthcv.integrations.providers import ProviderError, build_connection_provider, get_provider, reset_provider
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +23,7 @@ def clean(data_dir, monkeypatch):
 
 def test_fake_env_short_circuit(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "fake")
-    from providers.fake import FakeProvider
+    from truthcv.integrations.providers.fake import FakeProvider
     assert isinstance(get_provider(), FakeProvider)
 
 

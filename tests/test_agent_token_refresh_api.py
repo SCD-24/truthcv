@@ -4,10 +4,10 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-import secretstore
-from api.main import app
-from connections.auth import codex as codex_auth
-from connections.auth.claude import AuthError
+import truthcv.infra.secretstore as secretstore
+from truthcv.adapters.http.main import app
+from truthcv.integrations.connections.auth import codex as codex_auth
+from truthcv.integrations.connections.auth.claude import AuthError
 
 URL = "/api/agent/llm-token/refresh"
 SHA = "ab" * 32
@@ -66,7 +66,7 @@ def test_claude_forwards_sha(client, monkeypatch):
         seen.update(kw)
         return "new-tok"
 
-    monkeypatch.setattr("services.agent_credentials.get_valid_access_token", fake)
+    monkeypatch.setattr("truthcv.services.agent_credentials.get_valid_access_token", fake)
     resp = client.post(URL, json=_body(sha=SHA.upper()), headers=_hdr())
     assert resp.status_code == 200 and resp.json() == {"token": "new-tok"}
     assert seen == {"rejected_sha256": SHA}
@@ -92,7 +92,7 @@ def test_claude_auth_error_503(client, monkeypatch):
     def boom(**kw):
         raise AuthError("boom")
 
-    monkeypatch.setattr("services.agent_credentials.get_valid_access_token", boom)
+    monkeypatch.setattr("truthcv.services.agent_credentials.get_valid_access_token", boom)
     resp = client.post(URL, json=_body(), headers=_hdr())
     assert resp.status_code == 503
     assert resp.json()["detail"] == "Claude subscription needs reconnecting."

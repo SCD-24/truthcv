@@ -1,12 +1,12 @@
-"""Unit tests for the edited-document save workflows in services.applications."""
+"""Unit tests for the edited-document save workflows in truthcv.services.applications."""
 
 from types import SimpleNamespace
 
 import pytest
 
-import services.applications as svc
-from render.pdf import RenderUnavailable
-from services.errors import NotFound
+import truthcv.services.applications as svc
+from truthcv.engines.render.pdf import RenderUnavailable
+from truthcv.services.errors import NotFound
 
 
 def _boom(*_a, **_k):
@@ -66,7 +66,7 @@ def test_save_cover_letter_renders_letter_html(store, monkeypatch):
         seen.update(text=text, name=name, contact=contact)
         return "<html/>"
 
-    monkeypatch.setattr("render.cover_letter.render_letter_html", fake_letter)
+    monkeypatch.setattr("truthcv.engines.render.cover_letter.render_letter_html", fake_letter)
     assert svc.save_cover_letter("a1", "Dear") == ("APP", True)
     assert seen == {"text": "Dear", "name": "Your Name", "contact": "contact"}
     assert calls == [("cl", "a1", "Dear")]

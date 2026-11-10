@@ -15,12 +15,12 @@ from pathlib import Path
 
 import pytest
 
-import coverletter.store as letters
-import render.cover_letter as render_letter
-import screening.store as store
-import services.letters as letter_files
-from agenttools.tools_ledger import get_approved_applications
-from storage import data_dir as _data_dir
+import truthcv.engines.coverletter.store as letters
+import truthcv.engines.render.cover_letter as render_letter
+import truthcv.domain.screening.store as store
+import truthcv.services.letters as letter_files
+from truthcv.adapters.mcp.tools_ledger import get_approved_applications
+from truthcv.infra.storage import data_dir as _data_dir
 
 
 @pytest.fixture
@@ -59,8 +59,8 @@ def _approved_with_letter(text="Dear team, I am applying.", source="generated"):
 
 def _expected_name(screening_id, text):
     """The filename production would choose, header included."""
-    from services.render_cv import _contact_line
-    from truth.store import load as load_truth
+    from truthcv.services.render_cv import _contact_line
+    from truthcv.domain.truth.store import load as load_truth
 
     truth = load_truth()
     header = letter_files._header_digest(
@@ -98,10 +98,10 @@ def test_generated_letters_are_never_rendered(data_dir, fake_renderer):
     one: it also passes on any revision where nothing renders anywhere. What
     it pins is that adding a render here has to fail this test first.
     """
-    from agenttools import tools_letter
-    from providers.fake import FakeProvider
-    from truth.model import Bullet, Experience, Skill, Truth
-    from truth.store import save as save_truth
+    from truthcv.adapters.mcp import tools_letter
+    from truthcv.integrations.providers.fake import FakeProvider
+    from truthcv.domain.truth.model import Bullet, Experience, Skill, Truth
+    from truthcv.domain.truth.store import save as save_truth
 
     save_truth(
         Truth(
@@ -244,7 +244,7 @@ def test_letterless_item_still_produces_no_file(data_dir, fake_renderer):
 def test_genuinely_blocked_item_still_produces_no_file(data_dir, fake_renderer):
     """A real block (e.g. no_url) must still suppress any letter rendering —
     the render short-circuit is not the only thing being relied on."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     s = screening_store.create(
         {
@@ -265,7 +265,7 @@ def test_genuinely_blocked_item_still_produces_no_file(data_dir, fake_renderer):
 def test_no_rendering_backend_degrades_to_text_only(data_dir, monkeypatch):
     """WeasyPrint is optional. A missing backend means "no file to upload" —
     never a failed application."""
-    from render.pdf import RenderUnavailable
+    from truthcv.engines.render.pdf import RenderUnavailable
 
     def _unavailable(html, filename="cv.pdf"):
         raise RenderUnavailable("WeasyPrint not available")
@@ -290,7 +290,7 @@ def test_an_unreadable_truth_store_does_not_fail_the_queue(data_dir, fake_render
     def _boom():
         raise ValueError("Duplicate truth id: 's1'")
 
-    import services.letters as lf
+    import truthcv.services.letters as lf
 
     original = lf.load_truth
     lf.load_truth = _boom
@@ -316,7 +316,7 @@ def test_letter_file_is_never_written_outside_the_volume(data_dir, fake_renderer
 
 
 def test_two_concurrent_renders_both_produce_a_file(data_dir, monkeypatch):
-    """`storage/atomic.py` records what a shared staging name costs: whichever
+    """`truthcv/infra/storage/atomic.py` records what a shared staging name costs: whichever
     writer renames second finds the source already gone. A queue read with no
     run_id claims nothing, so two overlapping runs can render the same letter
     at the same moment — and a run that rendered successfully must not be told
@@ -349,11 +349,11 @@ def test_two_concurrent_renders_both_produce_a_file(data_dir, monkeypatch):
 
 
 def test_cover_letter_service_pdf_survives_a_failing_docx_render(data_dir, monkeypatch):
-    """services/cover_letter.py renders PDF and DOCX on two threads (mirroring
-    services/render_cv.py's two-thread render). A DOCX RenderUnavailable on its
+    """truthcv/services/cover_letter.py renders PDF and DOCX on two threads (mirroring
+    truthcv/services/render_cv.py's two-thread render). A DOCX RenderUnavailable on its
     own thread must not cost the PDF url."""
-    import services.cover_letter as cover_letter_svc
-    from providers.fake import FakeProvider
+    import truthcv.services.cover_letter as cover_letter_svc
+    from truthcv.integrations.providers.fake import FakeProvider
 
     provider = FakeProvider(
         json_responses=[
@@ -384,8 +384,8 @@ def test_cover_letter_service_pdf_survives_a_failing_docx_render(data_dir, monke
 def test_cover_letter_service_docx_survives_a_failing_pdf_render(data_dir, monkeypatch):
     """The symmetric case: a PDF RenderUnavailable on its own thread must not
     cost the DOCX url."""
-    import services.cover_letter as cover_letter_svc
-    from providers.fake import FakeProvider
+    import truthcv.services.cover_letter as cover_letter_svc
+    from truthcv.integrations.providers.fake import FakeProvider
 
     provider = FakeProvider(
         json_responses=[
@@ -418,8 +418,8 @@ def test_a_profile_edit_re_renders_the_letter(data_dir, fake_renderer):
     operator who corrects their email would otherwise send a CV carrying the
     new address beside a letter carrying the old one, with nothing in the
     system able to notice or replace that file."""
-    from truth.model import Profile, Truth
-    from truth.store import save as save_truth
+    from truthcv.domain.truth.model import Profile, Truth
+    from truthcv.domain.truth.store import save as save_truth
 
     save_truth(Truth(profile=Profile(name="Alice Old", email="old@example.com")))
     _approved_with_letter(text="Unchanged text.")

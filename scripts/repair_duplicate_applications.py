@@ -21,7 +21,7 @@ land together:
   ``confirmation`` carries any text/evidence) and only if its normalized URL is
   non-empty. Rows that are neither submitted nor confirmed, and rows whose URL
   normalizes to nothing, never group with anything by URL: they are left
-  strictly alone. The company identity key (``identity.company.company_identity_key``)
+  strictly alone. The company identity key (``truthcv.infra.identity.company.company_identity_key``)
   ignores a trailing legal-entity suffix, so e.g. "RobCo" and "RobCo GmbH" are
   treated as the same employer for grouping purposes.
 * A bucket holding a single row is UNCHANGED — never reported as a merge.
@@ -44,13 +44,13 @@ The other rows are folded into it:
   original row order, each as its own ``\n\n``-separated paragraph.
 
 Safety. Before deleting the non-canonical rows, each is checked for an owned
-``cv_document`` or ``cover_letter_document``: ``applications.store.delete`` also
+``cv_document`` or ``cover_letter_document``: ``truthcv.domain.applications.store.delete`` also
 unlinks a row's rendered files, so deleting a row that owns one would destroy
 evidence. Such rows are NOT deleted — they are reported as MANUAL-REPAIR for the
 operator to reconcile by hand. Only non-canonical rows owning neither document
 are deleted.
 
-This script goes through ``applications.store`` for every read and write; it
+This script goes through ``truthcv.domain.applications.store`` for every read and write; it
 never touches ``data/applications.json`` directly. It is idempotent: once the
 merge has run, each cluster's non-canonical rows are gone (or held back as
 manual-repair), so a second ``--apply`` finds only singleton buckets — or a
@@ -75,10 +75,10 @@ from typing import NamedTuple
 # not resolve. Add the root explicitly rather than constrain how it is invoked.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import applications.store as applications_store  # noqa: E402
-from applications.model import Application  # noqa: E402
-from identity.company import company_identity_key  # noqa: E402
-from identity.url import normalize_application_url  # noqa: E402
+import truthcv.domain.applications.store as applications_store  # noqa: E402
+from truthcv.domain.applications.model import Application  # noqa: E402
+from truthcv.infra.identity.company import company_identity_key  # noqa: E402
+from truthcv.infra.identity.url import normalize_application_url  # noqa: E402
 
 
 # --- "populated" / "non-empty" helpers ----------------------------------------
@@ -127,7 +127,7 @@ def _bucket_key(app: Application):
     ``(company identity key, normalized url)`` — but only when it looks like a
     real submission and its URL normalizes to something non-empty; anything else
     is left ungrouped (returns None). The company identity key
-    (``identity.company.company_identity_key``) ignores a trailing
+    (``truthcv.infra.identity.company.company_identity_key``) ignores a trailing
     legal-entity suffix, so "RobCo" and "RobCo GmbH" bucket together instead of
     a suffix manufacturing a second company.
     """

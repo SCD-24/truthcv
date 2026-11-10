@@ -3,8 +3,8 @@
 import json
 
 import pytest
-from companyboards import store
-from identity.company import company_identity_key
+from truthcv.domain.companyboards import store
+from truthcv.infra.identity.company import company_identity_key
 
 
 def test_record_and_load():

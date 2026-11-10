@@ -62,7 +62,7 @@ const runState = {
   lastCancelled: false,
   // The run id of the run in progress, threaded to the child via
   // TRUTHCV_RUN_ID so it can call start_run/finish_run with it. Durable
-  // accounting for the run lives in the run store (runs/store.py), reached
+  // accounting for the run lives in the run store (truthcv/domain/runs/store.py), reached
   // over the API — this is in-memory only, for the status route.
   currentRunId: null,
   // The run id of the most recently started run, kept after it ends so a
@@ -176,7 +176,7 @@ function tokenOk(given) {
 // ---------------------------------------------------------------------------
 // Run accounting
 // ---------------------------------------------------------------------------
-// The durable run record lives in the app (runs/store.py, on the app's data
+// The durable run record lives in the app (truthcv/domain/runs/store.py, on the app's data
 // volume, which this container deliberately cannot mount — see the volumes
 // note in docker-compose.yml). Until these calls existed, the record was only
 // ever created by the model calling the `start_run` MCP tool, so a run that
@@ -319,7 +319,7 @@ function doRun(trigger = "manual", onSettled) {
   // Create the run record before the child does anything, so a run that dies
   // in its preconditions or on its very first model call is still accounted
   // for. The child's own start_run lands on this same id and joins it
-  // (runs.store.start is idempotent).
+  // (truthcv.domain.runs.store.start is idempotent).
   //
   // Kept as a promise rather than awaited: doRun must return the child
   // synchronously for /run and RUN_ONCE. settle() awaits it before closing the

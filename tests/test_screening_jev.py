@@ -1,4 +1,4 @@
-"""screening.jev: question construction, threshold mapping, fail-open, enabled().
+"""truthcv.domain.screening.jev: question construction, threshold mapping, fail-open, enabled().
 
 The HTTP layer is always mocked here — this suite must never make a live
 call to Jev.
@@ -12,9 +12,9 @@ import urllib.error
 
 import pytest
 
-import secretstore
-from agentconfig.store import JobProfile
-from screening import jev
+import truthcv.infra.secretstore as secretstore
+from truthcv.domain.agentconfig.store import JobProfile
+from truthcv.domain.screening import jev
 
 FERNET_KEY = "h2oN5GQVeWVhciVjWNImtAmWFyPGlrWvDCq8vXuqfmo="
 

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from agenttools.tools_ledger import report_apply_failure
-from agenttools.mcp_app import _TOOL_REGISTRY
-from screening import store
+from truthcv.adapters.mcp.tools_ledger import report_apply_failure
+from truthcv.adapters.mcp.mcp_app import _TOOL_REGISTRY
+from truthcv.domain.screening import store
 
 
 def test_reports_a_login_wall_with_its_url(data_dir):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from identity.url import normalize_application_url, validate_posting_url
+from truthcv.infra.identity.url import normalize_application_url, validate_posting_url
 
 
 def test_valid_https_url_returned_stripped():

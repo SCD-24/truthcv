@@ -1,4 +1,4 @@
-"""Tests for companyresearch/claim_migration.py and scripts/migrate_company_claims.py.
+"""Tests for truthcv/domain/companyresearch/claim_migration.py and scripts/migrate_company_claims.py.
 
 The module holds the migration logic (incl. startup ``migrate_claims_if_needed``);
 the script is a thin CLI (dry run / --apply) over it.
@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 
-from companyresearch import store as findings_store
-from companyresearch.claim_migration import build_report, migrate_claims_if_needed
+from truthcv.domain.companyresearch import store as findings_store
+from truthcv.domain.companyresearch.claim_migration import build_report, migrate_claims_if_needed
 from scripts import migrate_company_claims as migrate
 
 

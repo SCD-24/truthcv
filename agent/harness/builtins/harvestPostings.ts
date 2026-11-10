@@ -7,7 +7,7 @@
  * Extraction is deterministic, never a hand-written CSS selector — boards
  * restyle constantly, but a posting URL on a given ATS has a STABLE shape.
  * This tool matches the accessibility tree `browser_snapshot` returns against
- * the four ATS URL shapes `agent/RUNBOOK.md` and `jobfeeds/ats.py` already
+ * the four ATS URL shapes `agent/RUNBOOK.md` and `truthcv/domain/jobfeeds/ats.py` already
  * name (Ashby, Greenhouse, Lever, Personio) and reports, per board, one of
  * three outcomes: `searched` (postings found), `empty` (the search ran and
  * genuinely matched nothing), or `blocked` (the page was reachable but

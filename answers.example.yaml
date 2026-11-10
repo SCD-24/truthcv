@@ -12,7 +12,7 @@
 #
 #     cp answers.example.yaml answers.local.yaml
 #     $EDITOR answers.local.yaml
-#     python -m truth.answers --answers answers.local.yaml
+#     python -m truthcv.domain.truth.answers --answers answers.local.yaml
 #
 # Seeding merges these keys over the stored answers.yaml: a key you leave
 # out keeps whatever value is already stored, and so does a key you leave
@@ -20,7 +20,7 @@
 # value alone", not "clear it". That also means it is safe to copy this file
 # wholesale and seed it filled in only partially: the fields you didn't touch
 # are left as they were, not wiped. canonical_cv_asset_id is set separately,
-# by `python -m truth.answers <cv.pdf>`, and is not listed here.
+# by `python -m truthcv.domain.truth.answers <cv.pdf>`, and is not listed here.
 #
 # To actually clear a field (set it back to blank), seeding cannot do it —
 # use the web UI under Settings instead, which writes through

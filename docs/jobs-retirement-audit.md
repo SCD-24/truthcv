@@ -115,8 +115,8 @@ was transcribed from the runbook during this plan set.
 | `bin/daily-apply.sh` | `agent/daily-apply.sh` |
 | `docker/smoke-test.sh` | `agent/smoke-test.sh` |
 | `docker/README.md` | `agent/README.md` |
-| `appreview/schema.py` | `applications/model.py` — the evidence-trail fields were absorbed into the TruthCV record |
-| `appreview/store.py` | `applications/store.py` |
+| `appreview/schema.py` | `truthcv/domain/applications/model.py` — the evidence-trail fields were absorbed into the TruthCV record |
+| `appreview/store.py` | `truthcv/domain/applications/store.py` |
 | `cv_v2.pdf` (the current CV export) | `data/canonical_cv.pdf` (byte-identical) — **but see B2** |
 | `tests/test_schema.py`, `test_store.py` | `tests/test_applications_model.py` and siblings |
 
@@ -166,7 +166,7 @@ was cancelled for this reason.
 ### B1 resolved — the log renderer is ported
 
 `appreview/render.py`'s renderer and its `RenderRefused` completeness guard now
-live in TruthCV as `applications/log_render.py`, driven by the tracker's own
+live in TruthCV as `truthcv/domain/applications/log_render.py`, driven by the tracker's own
 `Application` dataclass rather than Jobs' record dicts. `scripts/render_application_log.py`
 replaces `bin/render-log`.
 
@@ -211,7 +211,7 @@ them distinct.
 This audit stated that `data/answers.yaml` was not reconstructible. **That was
 wrong.** The file in the worktree held only empty strings plus a pointer to the
 CV. The canonical answers are hard-coded as dataclass defaults on `Answers` in
-`truth/answers.py`, which is version-controlled, and `load()` falls back to them
+`truthcv/domain/truth/answers.py`, which is version-controlled, and `load()` falls back to them
 when the file is absent. Nothing was ever at risk of being lost.
 
 **Superseded — the paragraph above is no longer true.** Those dataclass
@@ -240,11 +240,11 @@ asset is the durable copy; deleting the Jobs tree loses nothing.
 The CV is **not** version-controlled. It is personal data, so `assets/` is
 gitignored and a fresh clone will not contain it — the data volume is its only
 durable home. The copy under `assets/` in a working tree is a convenience, not
-a source of truth, and is expected to disappear with the tree. `truth/answers.py` no longer refers to a path inside the Jobs repo:
+a source of truth, and is expected to disappear with the tree. `truthcv/domain/truth/answers.py` no longer refers to a path inside the Jobs repo:
 `_JOBS_CANONICAL_CV` became `_LOCAL_CANONICAL_CV`, an un-versioned convenience
 default for seeding from a working tree that happens to hold the export, and
 `seed_canonical_cv_from_jobs` became `seed_canonical_cv`. Seeding elsewhere
-takes an explicit path: `python -m truth.answers <path-to-cv.pdf>`.
+takes an explicit path: `python -m truthcv.domain.truth.answers <path-to-cv.pdf>`.
 
 Registration was done through a throwaway container mounting the same volume
 (it is root-owned and not writable from the host), rather than by mutating the

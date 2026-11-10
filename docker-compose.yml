@@ -17,7 +17,7 @@ services:
       # network as http://app:8080/mcp — changing the left side cannot affect
       # it. Named APP_PORT, not PORT: PORT is the container-internal variable.
       # Loopback only. The app has NO user authentication — the sole guard in
-      # api/routes.py is AGENT_API_TOKEN, and it protects one agent-facing
+      # truthcv/adapters/http/routes.py is AGENT_API_TOKEN, and it protects one agent-facing
       # endpoint — and it now proxies a remote-control view of a browser
       # holding the operator's live sessions. Listening on every interface
       # would put both on the local network. The launcher opens localhost, so
@@ -30,7 +30,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
-      # Gmail OAuth client credentials (connections/auth/gmail.py) — unset
+      # Gmail OAuth client credentials (truthcv/integrations/connections/auth/gmail.py) — unset
       # leaves the Gmail connection reporting "Google OAuth is not
       # configured on the server."
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
@@ -38,7 +38,7 @@ services:
       - GOOGLE_OAUTH_REDIRECT_URI=${GOOGLE_OAUTH_REDIRECT_URI:-}
       - AGENT_API_TOKEN=${AGENT_API_TOKEN:-}
       # Bearer token guarding the read-only /mcp/diagnostics endpoint
-      # (api/diagnostics_mcp.py) — separate from AGENT_API_TOKEN and never
+      # (truthcv/adapters/http/diagnostics_mcp.py) — separate from AGENT_API_TOKEN and never
       # required by the operational /mcp surface. Unset/empty means the
       # endpoint accepts no token at all (404 on every request).
       - DIAGNOSTICS_MCP_TOKEN=${DIAGNOSTICS_MCP_TOKEN:-}
@@ -174,10 +174,10 @@ services:
       # refresh_schedule().
       - RUN_AT=${RUN_AT:-09:00,15:00}
       # In-network address of the `app` service's MCP streamable-HTTP JSON-RPC
-      # tool surface (POST /mcp, agenttools/mcp_app.py) — only reachable inside
+      # tool surface (POST /mcp, truthcv/adapters/mcp/mcp_app.py) — only reachable inside
       # the compose network, not from the host. The same service also serves the
       # REST tool routes GET /mcp/tools and POST /mcp/tools/{name}
-      # (agenttools/server.py).
+      # (truthcv/adapters/mcp/server.py).
       - TRUTHCV_MCP_URL=${TRUTHCV_MCP_URL:-http://app:8080/mcp}
       # In-network address of the `browser` service's MCP surface
       # (@playwright/mcp, browser/Dockerfile) — the agent's only way to apply.
@@ -193,7 +193,7 @@ services:
       # NOT the operational bound on how much a run does: that is
       # maxApplicationsPerRun on the Agents page, which get_approved_applications
       # enforces server-side by capping and leasing the items it hands out
-      # (agenttools/tools_ledger.py). At 40 this was the effective limit —
+      # (truthcv/adapters/mcp/tools_ledger.py). At 40 this was the effective limit —
       # driving one application form through the browser costs 15-25 turns, so
       # runs stopped mid-form. It is set high enough that reaching it means
       # something is looping, and the last turns are reserved for the model to
@@ -266,7 +266,7 @@ services:
       - agent-runs:/app/runs
       # Deliberately NOT mounting the app's data volume here: every
       # capability the agent has goes through the TruthCV MCP tool surface
-      # (agenttools/mcp_app.py POST /mcp JSON-RPC, or agenttools/server.py REST
+      # (truthcv/adapters/mcp/mcp_app.py POST /mcp JSON-RPC, or truthcv/adapters/mcp/server.py REST
       # routes), not the filesystem — agent/RUNBOOK.md says outright "There is no
       # file on disk to read any of this from — call the tool." Keep this surface
       # small; do not add ${DATA_DIR:-./data}:/app/data without a concrete, checked need.

@@ -1,7 +1,7 @@
 """One-shot migration: move legacy entity/glassdoor screening data into
 companyresearch.
 
-Invariant: applications.model.Screening no longer carries `entity` or
+Invariant: truthcv.domain.applications.model.ApplicationScreening no longer carries `entity` or
 `glassdoor` — those were company-level claims with no source or as-of date.
 This script moves whatever value each application's screening object still
 holds for those keys into the append-only companyresearch store, tagged
@@ -39,11 +39,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from applications.store import applications_path
-from companyresearch import store as findings_store
-from companyresearch.model import UNCITED
-from storage import atomic_write_text, locked
-from identity.company import validate_company_name
+from truthcv.domain.applications.store import applications_path
+from truthcv.domain.companyresearch import store as findings_store
+from truthcv.domain.companyresearch.model import UNCITED
+from truthcv.infra.storage import atomic_write_text, locked
+from truthcv.infra.identity.company import validate_company_name
 
 CLAIM_ENTITY = "employment_entity"
 CLAIM_RATING = "employer_rating"
@@ -164,7 +164,7 @@ def apply_fixes(plans: list[dict]) -> dict:
 def _strip_legacy_keys(apply_changes: bool) -> int:
     """Remove entity/glassdoor from every application's screening object.
 
-    Writes through applications.store's own locked/atomic path — never a
+    Writes through truthcv.domain.applications.store's own locked/atomic path — never a
     bare write. Returns the number of applications changed.
     """
     path = applications_path()

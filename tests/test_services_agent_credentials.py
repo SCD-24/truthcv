@@ -1,13 +1,13 @@
-"""Unit tests for services.agent_credentials: error branches and null stages."""
+"""Unit tests for truthcv.services.agent_credentials: error branches and null stages."""
 
 import pytest
 
-import modelrouting
-import services.agent_credentials as svc
-from api.schemas import AgentLlmCredentials
-from connections.auth.claude import AuthError
-from modelrouting import Route, Routing
-from services.errors import NotFound, Unavailable
+import truthcv.integrations.modelrouting as modelrouting
+import truthcv.services.agent_credentials as svc
+from truthcv.adapters.http.schemas import AgentLlmCredentials
+from truthcv.integrations.connections.auth.claude import AuthError
+from truthcv.integrations.modelrouting import Route, Routing
+from truthcv.services.errors import NotFound, Unavailable
 
 _SHA = "a" * 64
 

@@ -1,4 +1,4 @@
-"""api.config.public_url() across every combination of PUBLIC_PORT/PORT.
+"""truthcv.adapters.http.config.public_url() across every combination of PUBLIC_PORT/PORT.
 
 PUBLIC_PORT is the host-side port docker-compose publishes, used purely to
 log a reachable URL at startup; PORT is the port the process actually binds
@@ -8,7 +8,7 @@ otherwise fall back to port().
 
 from __future__ import annotations
 
-from api.config import public_url
+from truthcv.adapters.http.config import public_url
 
 
 def test_public_port_wins_over_bound_port(monkeypatch):

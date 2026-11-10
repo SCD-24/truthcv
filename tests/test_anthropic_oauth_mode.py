@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
-from connections.auth.claude import CLAUDE_CODE_PREAMBLE
-from providers.anthropic_provider import AnthropicProvider
+from truthcv.integrations.connections.auth.claude import CLAUDE_CODE_PREAMBLE
+from truthcv.integrations.providers.anthropic_provider import AnthropicProvider
 
 
 def _fake_anthropic(captured: dict):
@@ -20,7 +20,7 @@ def _fake_anthropic(captured: dict):
 
 def test_oauth_mode_uses_bearer_beta_and_preamble(monkeypatch):
     captured: dict = {}
-    with patch("connections.auth.claude.get_valid_access_token", return_value="tok-1"):
+    with patch("truthcv.integrations.connections.auth.claude.get_valid_access_token", return_value="tok-1"):
         provider = AnthropicProvider(model="claude-opus-4-8", oauth=True)
         provider._anthropic = _fake_anthropic(captured)
         assert provider.complete("do a thing", [{"role": "user", "content": "hi"}]) == "pong"

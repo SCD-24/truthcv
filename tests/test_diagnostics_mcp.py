@@ -1,5 +1,5 @@
 """Guard + behaviour tests for the read-only diagnostics MCP endpoint
-(/mcp/diagnostics, api/diagnostics_mcp.py).
+(/mcp/diagnostics, truthcv/adapters/http/diagnostics_mcp.py).
 
 These pin down the two things that matter about a second, bearer-token-only
 MCP surface: that it is unreachable without the right token (404, never a
@@ -8,11 +8,11 @@ twelve read-only diagnostics tools — never any tool from the operational
 registry that can write.
 
 The 404-gate tests use a bare ``TestClient(app)`` (no lifespan): the auth
-check in api.main's /mcp/diagnostics route runs and rejects the request
+check in truthcv.adapters.http.main's /mcp/diagnostics route runs and rejects the request
 *before* it ever reaches the MCP dispatch, so no active session manager is
 needed.
 
-The tools/list and tools/call tests exercise api.diagnostics_mcp's own
+The tools/list and tools/call tests exercise truthcv.adapters.http.diagnostics_mcp's own
 JSON-RPC handlers (`_handle_diag_list_tools` / `_handle_diag_call_tool`)
 directly rather than over real HTTP. This is deliberate, not a shortcut for
 its own sake: mcp.server.streamable_http's StreamableHTTPSessionManager.run()
@@ -37,14 +37,14 @@ from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
-from api.diagnostics_mcp import (
+from truthcv.adapters.http.diagnostics_mcp import (
     _DIAG_TOOL_REGISTRY,
     _clamp_limit,
     _handle_diag_call_tool,
     _handle_diag_list_tools,
 )
-from api.main import app
-from gmailsync.model import GmailSuggestion, GmailSyncState
+from truthcv.adapters.http.main import app
+from truthcv.domain.gmailsync.model import GmailSuggestion, GmailSyncState
 
 
 class _ToolCallParams:
@@ -61,7 +61,7 @@ class _ToolCallParams:
 
 
 def stub_agent_open(monkeypatch, open_url):
-    import api.agent_diagnostics as diag
+    import truthcv.adapters.http.agent_diagnostics as diag
 
     monkeypatch.setattr(diag.urllib.request, "build_opener",
                         lambda *handlers: SimpleNamespace(open=open_url))
@@ -200,7 +200,7 @@ def test_get_status_round_trips_through_the_call_tool_handler(data_dir):
 
 
 def test_get_gmail_sync_status_round_trips_through_the_call_tool_handler(data_dir):
-    import gmailsync.store as gmailsync_store
+    import truthcv.domain.gmailsync.store as gmailsync_store
 
     gmailsync_store.save_sync_state(
         GmailSyncState(last_synced_at=1700000000.0, processed_message_ids=["m1", "m2", "m3"])
@@ -219,7 +219,7 @@ def test_list_gmail_suggestions_round_trips_seeded_suggestions_newest_first(data
     """Seeds real RFC-2822 Gmail `Date` headers, chosen so a lexicographic
     string sort would order them wrongly ("Wed" > "Fri"): only parsing the
     dates puts the 2025 suggestion first."""
-    import gmailsync.store as gmailsync_store
+    import truthcv.domain.gmailsync.store as gmailsync_store
 
     gmailsync_store.save_suggestions(
         [
@@ -239,7 +239,7 @@ def test_list_gmail_suggestions_round_trips_seeded_suggestions_newest_first(data
 
 
 def test_list_runs_round_trips_a_seeded_run(data_dir):
-    import runs.store as runs_store
+    import truthcv.domain.runs.store as runs_store
 
     runs_store.start("diag-run-1", trigger="scheduled", apply_cap=0)
 
@@ -273,8 +273,8 @@ def test_list_screenings_sorts_by_created_at_falling_back_to_screened_date(monke
     no screened_date (e.g. freshly recorded via record_screening before this
     fix, or a caller that genuinely has none) must still sort by when it was
     actually created, not fall to the bottom for want of a screened_date."""
-    import api.diagnostics_mcp as diagnostics_mcp
-    from screening.model import Screening
+    import truthcv.adapters.http.diagnostics_mcp as diagnostics_mcp
+    from truthcv.domain.screening.model import Screening
 
     older_with_screened_date = Screening(
         id="s-old",
@@ -310,10 +310,10 @@ def test_list_runs_non_positive_limit_is_clamped_to_the_default_not_unbounded(
     """A limit<=0 must apply _DEFAULT_LIST_LIMIT, not be treated as
     "no limit" — proven by lowering the default below the seeded record
     count and checking the page is bounded accordingly."""
-    import api.diagnostics_mcp as diagnostics_mcp
-    import runs.store as runs_store
+    import truthcv.adapters.http.diagnostics_mcp as diagnostics_mcp
+    import truthcv.domain.runs.store as runs_store
 
-    import api.diagnostics_paging as diagnostics_paging
+    import truthcv.adapters.http.diagnostics_paging as diagnostics_paging
 
     monkeypatch.setattr(diagnostics_paging, "_DEFAULT_LIST_LIMIT", 2)
     for i in range(3):
@@ -334,10 +334,10 @@ def test_list_gmail_suggestions_non_positive_limit_is_clamped_to_the_default_not
     """Same guarantee as list_runs's clamp test, for list_gmail_suggestions:
     a limit<=0 must apply _DEFAULT_LIST_LIMIT, not be treated as "no
     limit"."""
-    import api.diagnostics_mcp as diagnostics_mcp
-    import gmailsync.store as gmailsync_store
+    import truthcv.adapters.http.diagnostics_mcp as diagnostics_mcp
+    import truthcv.domain.gmailsync.store as gmailsync_store
 
-    import api.diagnostics_paging as diagnostics_paging
+    import truthcv.adapters.http.diagnostics_paging as diagnostics_paging
 
     monkeypatch.setattr(diagnostics_paging, "_DEFAULT_LIST_LIMIT", 2)
     gmailsync_store.save_suggestions(
@@ -360,8 +360,8 @@ def test_producer_shaped_metadata_consumed_through_mcp(data_dir, monkeypatch):
     the producer's camelCase supervisor ownership alongside snake_case
     event metadata. Only the explicit metadata fields may be returned.
     """
-    import api.agent_diagnostics as diag
-    import runs.store as runs_store
+    import truthcv.adapters.http.agent_diagnostics as diag
+    import truthcv.domain.runs.store as runs_store
 
     run_id = "producer_run"
     runs_store.start(run_id, trigger="scheduled")
@@ -409,7 +409,7 @@ def test_producer_shaped_metadata_consumed_through_mcp(data_dir, monkeypatch):
 
 
 def test_untrusted_live_telemetry_round_trips_through_mcp(data_dir, monkeypatch):
-    import runs.store as runs_store
+    import truthcv.domain.runs.store as runs_store
 
     run_id = 'untrusted_run'
     runs_store.start(run_id, trigger='scheduled')
@@ -446,8 +446,8 @@ def test_run_events_discovery_schema():
 
 
 def test_run_logs_discovery_and_call(data_dir, monkeypatch):
-    import api.agent_run_logs as logs
-    import runs.store as runs_store
+    import truthcv.adapters.http.agent_run_logs as logs
+    import truthcv.domain.runs.store as runs_store
 
     run_id = "log_run"
     runs_store.start(run_id, trigger="scheduled")
@@ -509,7 +509,7 @@ def test_sync_tools_do_not_block_async_handler(monkeypatch):
 
 
 def test_agent_network_probe_does_not_block_async_handler(data_dir, monkeypatch):
-    import api.agent_diagnostics as diag
+    import truthcv.adapters.http.agent_diagnostics as diag
 
     entered, release = threading.Event(), threading.Event()
     def slow_probe(req, timeout):

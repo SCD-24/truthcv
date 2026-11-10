@@ -1,9 +1,9 @@
-"""Tests for applications/sorting.py, mirroring web/src/applications/sorting.test.ts."""
+"""Tests for truthcv/domain/applications/sorting.py, mirroring web/src/applications/sorting.test.ts."""
 
 import pytest
 from datetime import date
-import applications as app_store
-from applications.sorting import (
+import truthcv.domain.applications as app_store
+from truthcv.domain.applications.sorting import (
     sort_applications,
     status_rank,
     DEFAULT_SORT,

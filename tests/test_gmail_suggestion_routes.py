@@ -5,11 +5,11 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-import applications
-import secretstore
-from api.main import app
-from gmailsync.model import GmailSuggestion
-from gmailsync.store import save_suggestions
+import truthcv.domain.applications as applications
+import truthcv.infra.secretstore as secretstore
+from truthcv.adapters.http.main import app
+from truthcv.domain.gmailsync.model import GmailSuggestion
+from truthcv.domain.gmailsync.store import save_suggestions
 
 FERNET_KEY = "h2oN5GQVeWVhciVjWNImtAmWFyPGlrWvDCq8vXuqfmo="
 URL = "/api/gmail/suggestions"

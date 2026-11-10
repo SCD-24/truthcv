@@ -1,10 +1,10 @@
-"""identity.company: normalization and the rules that reject an unusable name."""
+"""truthcv.infra.identity.company: normalization and the rules that reject an unusable name."""
 
 from __future__ import annotations
 
 import pytest
 
-from identity.company import normalize_company_name, validate_company_name
+from truthcv.infra.identity.company import normalize_company_name, validate_company_name
 
 
 class TestNormalizeCompanyName:

@@ -11,7 +11,7 @@ import threading
 
 import pytest
 
-from storage import atomic_write_text, locked
+from truthcv.infra.storage import atomic_write_text, locked
 
 
 class TestAtomicWriteText:

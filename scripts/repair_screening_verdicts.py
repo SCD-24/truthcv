@@ -6,7 +6,7 @@ its inputSchema — they reached the store only through ``**kwargs``. A model
 that passed them from the RUNBOOK's instructions produced complete records; one
 that went by the schema alone produced records with both fields blank. Those
 records never entered the operator's approval queue, because
-``screening.store.create`` routes on the verdict.
+``truthcv.domain.screening.store.create`` routes on the verdict.
 
 The agent that hit this worked around it by writing the verdict into
 ``posting_text`` as a leading ``[COMPANY: … | VERDICT: … ]`` block. This
@@ -17,7 +17,7 @@ For each stored screening whose ``company`` or ``verdict`` is blank:
 * If the block is present and yields a company that passes
   ``validate_company_name`` and a verdict that passes ``validate_verdict``, the
   record is RECOVERABLE and -- under ``--apply`` -- rewritten through
-  ``screening.store.update``. ``failing_criterion`` and ``reason`` are carried
+  ``truthcv.domain.screening.store.update``. ``failing_criterion`` and ``reason`` are carried
   across too when the block names them and the stored field is empty.
 * Otherwise it is MANUAL-REPAIR and is **never** rewritten: the operator needs
   to see what the agent actually recorded.
@@ -34,7 +34,7 @@ Records that already carry both fields are left alone, which makes this script
 **idempotent**: a second ``--apply`` recovers nothing. The default is a dry run
 that writes nothing and only reports.
 
-This script goes through ``screening.store`` for every read and write; it never
+This script goes through ``truthcv.domain.screening.store`` for every read and write; it never
 touches ``data/screenings.json`` directly.
 
 **Stop the agent before running with ``--apply``.** This makes one write per
@@ -64,10 +64,10 @@ from pathlib import Path
 # not resolve. Add the root explicitly rather than constrain how it is invoked.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import screening.store as screening_store  # noqa: E402
-from agentconfig.store import load as agent_config_load  # noqa: E402
-from identity.company import validate_company_name  # noqa: E402
-from screening.model import validate_verdict  # noqa: E402
+import truthcv.domain.screening.store as screening_store  # noqa: E402
+from truthcv.domain.agentconfig.store import load as agent_config_load  # noqa: E402
+from truthcv.infra.identity.company import validate_company_name  # noqa: E402
+from truthcv.domain.screening.model import validate_verdict  # noqa: E402
 
 # The workaround block the agent wrote, e.g.
 #   [COMPANY: Bjak | VERDICT: rejected | MATCHED PROFILE: … ]
@@ -128,7 +128,7 @@ def needs_repair(screening) -> bool:
 def recover(screening) -> dict:
     """The fields recoverable from this record's posting_text block.
 
-    Returns a patch dict for ``screening.store.update``, or an empty dict when
+    Returns a patch dict for ``truthcv.domain.screening.store.update``, or an empty dict when
     the block yields no usable company/verdict pair. Only blank fields are
     filled: a value the record already holds always wins over the block.
     """
@@ -185,11 +185,11 @@ def classify(screenings: list) -> tuple[list, list, list]:
 def queues_for_approval(verdict: str, blocker: str = "") -> bool:
     """Whether ``store.create`` would have queued this verdict for the operator.
 
-    Mirrors the rule in ``screening.store.create`` deliberately: ``update`` does
+    Mirrors the rule in ``truthcv.domain.screening.store.create`` deliberately: ``update`` does
     not run it, so a record whose verdict is only being recovered now would keep
     an empty approval and stay invisible — which is the exact failure this
     script exists to undo. A ``blocker`` only queues when it is one of
-    ``screening.store.QUEUEING_BLOCKERS`` (login_required only) — a
+    ``truthcv.domain.screening.store.QUEUEING_BLOCKERS`` (login_required only) — a
     not_found/expired blocker describes a posting that no longer exists, an
     unreadable one is a placeholder a later screening supersedes, and
     the constant is imported rather than re-listed so the two rules cannot

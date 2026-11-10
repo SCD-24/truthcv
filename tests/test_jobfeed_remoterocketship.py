@@ -1,4 +1,4 @@
-"""jobfeeds/remoterocketship.py: profile→filters mapping, response parsing, failure handling."""
+"""truthcv/domain/jobfeeds/remoterocketship.py: profile→filters mapping, response parsing, failure handling."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 
-from agentconfig.store import JobProfile
-from jobfeeds import remoterocketship as rr
+from truthcv.domain.agentconfig.store import JobProfile
+from truthcv.domain.jobfeeds import remoterocketship as rr
 
 NOW = datetime(2026, 8, 27, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -321,7 +321,7 @@ def test_the_budget_is_below_the_agents_config_fetch_timeout():
 
 def test_an_explicit_deadline_overrides_the_default_budget(mock_http, monkeypatch):
     """A caller fanning this fetch out alongside another source (see
-    api/routes.py's _fetch_feed_postings) passes its own shared deadline; it
+    truthcv/adapters/http/routes.py's _fetch_feed_postings) passes its own shared deadline; it
     must be honored instead of a fresh BUDGET_SECONDS window."""
     monkeypatch.setattr(rr.time, "monotonic", lambda: 0.0)
     timeouts = []

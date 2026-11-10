@@ -6,9 +6,9 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from httpx import Response
 
-import secretstore
-from api.main import app
-from connections.auth import claude as claude_auth
+import truthcv.infra.secretstore as secretstore
+from truthcv.adapters.http.main import app
+from truthcv.integrations.connections.auth import claude as claude_auth
 
 
 @pytest.fixture()
@@ -16,7 +16,7 @@ def client(data_dir, monkeypatch):
     monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
     for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "LLM_PROVIDER"):
         monkeypatch.delenv(var, raising=False)
-    from providers import reset_provider
+    from truthcv.integrations.providers import reset_provider
     reset_provider()
     return TestClient(app)
 
@@ -44,12 +44,12 @@ def test_unknown_provider_404(client):
 
 
 def test_key_validation_failure_stores_nothing(client, monkeypatch):
-    from providers import ProviderError
+    from truthcv.integrations.providers import ProviderError
 
     def boom(card, body):
         raise ProviderError("bad key")
 
-    monkeypatch.setattr("services.connections.probe_key", boom)
+    monkeypatch.setattr("truthcv.services.connections.probe_key", boom)
     resp = client.post("/api/auth/codex/key", json={"apiKey": "sk-bad"})
     assert resp.status_code == 400
     assert "apiKey" not in secretstore.load_store().get("connections", {}).get("codex", {})
@@ -62,7 +62,7 @@ def test_key_probe_non_provider_error_maps_to_400_stores_nothing(client, monkeyp
     def boom(card, body):
         raise RuntimeError("invalid x-api-key")
 
-    monkeypatch.setattr("services.connections.probe_key", boom)
+    monkeypatch.setattr("truthcv.services.connections.probe_key", boom)
     resp = client.post("/api/auth/codex/key", json={"apiKey": "sk-bad"})
     assert resp.status_code == 400
     assert "invalid x-api-key" in resp.json()["detail"]
@@ -72,7 +72,7 @@ def test_key_probe_non_provider_error_maps_to_400_stores_nothing(client, monkeyp
 @respx.mock
 def test_complete_login_resets_cached_provider(client, monkeypatch):
     calls: list[bool] = []
-    monkeypatch.setattr("providers.reset_provider", lambda: calls.append(True))
+    monkeypatch.setattr("truthcv.integrations.providers.reset_provider", lambda: calls.append(True))
 
     start = client.post("/api/auth/claude/start").json()
     state = start["authUrl"].split("state=")[1].split("&")[0]
@@ -95,7 +95,7 @@ def test_key_probe_error_does_not_leak_submitted_key(client, monkeypatch):
     def boom(card, body):
         raise RuntimeError("invalid x-api-key")
 
-    monkeypatch.setattr("services.connections.probe_key", boom)
+    monkeypatch.setattr("truthcv.services.connections.probe_key", boom)
     resp = client.post("/api/auth/codex/key", json={"apiKey": "sk-super-secret-value"})
     assert resp.status_code == 400
     assert "sk-super-secret-value" not in resp.json()["detail"]
@@ -105,7 +105,7 @@ def test_key_revalidate_empty_body_keeps_subscription_auth_mode(client, monkeypa
     """A bare re-validate (empty body) on a subscription-connected claude
     connection must not flip authMode to "apikey" — that only happens when a
     new key was actually submitted."""
-    monkeypatch.setattr("services.connections.probe_key", lambda card, body: [])
+    monkeypatch.setattr("truthcv.services.connections.probe_key", lambda card, body: [])
     secretstore.set_connection("claude", {
         "oauth": {"accessToken": "t", "expiresAt": time.time() + 100},
         "authMode": "subscription",
@@ -118,7 +118,7 @@ def test_key_revalidate_empty_body_keeps_subscription_auth_mode(client, monkeypa
 def test_key_submitted_flips_auth_mode_to_apikey(client, monkeypatch):
     """Submitting an actual key still flips authMode, unlike the bare
     re-validate case above."""
-    monkeypatch.setattr("services.connections.probe_key", lambda card, body: [])
+    monkeypatch.setattr("truthcv.services.connections.probe_key", lambda card, body: [])
     secretstore.set_connection("claude", {
         "oauth": {"accessToken": "t", "expiresAt": time.time() + 100},
         "authMode": "subscription",

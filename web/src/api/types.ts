@@ -872,7 +872,7 @@ export type DorkRecency = "d" | "w" | "m" | "y" | "none";
 
 /** A partial patch of agent configuration; the PUT route merges only the
  * keys you send. Limited to what PUT /api/agent/config actually accepts
- * (api/schemas.py AgentConfigUpdate) — `enabled` is derived server-side and
+ * (truthcv/adapters/http/schemas/ AgentConfigUpdate) — `enabled` is derived server-side and
  * `companyBoards` is resolved server-side, so both 422 if sent. */
 export type AgentConfigUpdate = Partial<
   Pick<
@@ -897,7 +897,7 @@ export type AgentConfigUpdate = Partial<
 /** Provider identifier for connection status and routing. */
 export type CardKey = "claude" | "codex" | "openrouter" | "ollama";
 
-/** The mode literals the backend catalog emits (connections/catalog.py CARDS).
+/** The mode literals the backend catalog emits (truthcv/integrations/connections/catalog.py CARDS).
  * The single source of truth for what a mode string can be — fixtures and
  * checks derive from this rather than hand-typing "apikey"/"url" elsewhere. */
 export const CONNECTION_MODES = ["subscription", "apikey", "url"] as const;
@@ -962,7 +962,7 @@ export interface Routing {
 
 /** Partial PUT /api/routing body. A task entry (or `agent`/`default`) sent
  * explicitly as `null` clears that route rather than leaving it unchanged —
- * mirrors RoutingUpdate in api/schemas.py, which is why this isn't just
+ * mirrors RoutingUpdate in truthcv/adapters/http/schemas/, which is why this isn't just
  * `Partial<Routing>`: `Routing.tasks` values are never null. */
 export interface RoutingUpdate {
   tasks?: Record<string, RouteChoice | null>;

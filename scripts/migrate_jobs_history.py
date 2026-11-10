@@ -45,10 +45,10 @@ from pathlib import Path
 # not resolve. Add the root explicitly rather than constrain how it is invoked.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import applications.store as app_store  # noqa: E402
-from applications.model import flatten_notes  # noqa: E402
-import screening.store as screening_store  # noqa: E402
-from storage import data_dir  # noqa: E402
+import truthcv.domain.applications.store as app_store  # noqa: E402
+from truthcv.domain.applications.model import flatten_notes  # noqa: E402
+import truthcv.domain.screening.store as screening_store  # noqa: E402
+from truthcv.infra.storage import data_dir  # noqa: E402
 
 MANIFEST_NAME = "jobs_migration_manifest.json"
 

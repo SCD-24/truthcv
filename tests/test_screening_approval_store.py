@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-import screening.store as store
-from screening.model import APPROVAL_VALUES, Screening
+import truthcv.domain.screening.store as store
+from truthcv.domain.screening.model import APPROVAL_VALUES, Screening
 
 
 def test_approval_fields_default_to_empty():

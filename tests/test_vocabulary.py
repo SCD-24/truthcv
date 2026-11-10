@@ -1,21 +1,21 @@
 """Vocabulary layer invariants: synonym-file parsing and keyword matching.
 
-These pin the operator-editable synonym store (vocabulary/synonyms.py) and the
-token/phrase-aware matcher (vocabulary/match.py). Every test uses the data_dir
+These pin the operator-editable synonym store (truthcv/engines/vocabulary/synonyms.py) and the
+token/phrase-aware matcher (truthcv/engines/vocabulary/match.py). Every test uses the data_dir
 fixture so DATA_DIR is a tmp_path and the real ./data is never touched.
 """
 
 from __future__ import annotations
 
-import vocabulary.synonyms as vs
-from vocabulary.match import (
+import truthcv.engines.vocabulary.synonyms as vs
+from truthcv.engines.vocabulary.match import (
     ABSENT,
     ALIAS_ONLY,
     EXACT,
     INTERLEAVED,
     match_keyword,
 )
-from vocabulary.synonyms import equivalent_forms, synonym_groups
+from truthcv.engines.vocabulary.synonyms import equivalent_forms, synonym_groups
 
 
 def test_group_parsing_skips_comments_and_blanks(data_dir):

@@ -5,11 +5,11 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-import api.cv_routes as cv_routes
-from api.main import app
-from providers.fake import FakeProvider
-from truth import save
-from truth.model import Experience, Skill, Truth
+import truthcv.adapters.http.cv_routes as cv_routes
+from truthcv.adapters.http.main import app
+from truthcv.integrations.providers.fake import FakeProvider
+from truthcv.domain.truth import save
+from truthcv.domain.truth.model import Experience, Skill, Truth
 
 
 def _truth_with(skills, experiences=None) -> Truth:
@@ -41,7 +41,7 @@ def client(data_dir, monkeypatch):
             ],
         )
     )
-    from storage import data_dir as dd
+    from truthcv.infra.storage import data_dir as dd
 
     (dd() / "posting.txt").write_text("Python role at a startup")
     return TestClient(app)
@@ -70,7 +70,7 @@ def test_cover_letter_blocks_fabrication(data_dir, monkeypatch):
 
     monkeypatch.setattr(cv_routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
     save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
-    from storage import data_dir as dd
+    from truthcv.infra.storage import data_dir as dd
 
     (dd() / "posting.txt").write_text("a role")
     c = TestClient(app)
@@ -88,7 +88,7 @@ def _fabricating_client(data_dir, monkeypatch):
 
     monkeypatch.setattr(cv_routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
     save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
-    from storage import data_dir as dd
+    from truthcv.infra.storage import data_dir as dd
 
     (dd() / "posting.txt").write_text("a role")
     return TestClient(app)
@@ -126,7 +126,7 @@ def test_cover_letter_style_warnings_flag_chatbot_residue(data_dir, monkeypatch)
 def test_cover_letter_approve_claim_unblocks(data_dir, monkeypatch):
     """Approving the blocked claim's id re-validates the SAME letter and passes,
     without writing anything to the truth file."""
-    from truth import load
+    from truthcv.domain.truth import load
 
     c = _fabricating_client(data_dir, monkeypatch)
     blocked = c.post("/api/cover-letter", json={"length": "Short"}).json()
@@ -176,7 +176,7 @@ def _answer_claiming_client(data_dir, monkeypatch):
 
     monkeypatch.setattr(cv_routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
     save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
-    from storage import data_dir as dd
+    from truthcv.infra.storage import data_dir as dd
 
     (dd() / "posting.txt").write_text("a role")
     return TestClient(app)
@@ -185,8 +185,8 @@ def _answer_claiming_client(data_dir, monkeypatch):
 def test_route_threads_stored_answers_to_guardrail(data_dir, monkeypatch):
     """A claim that exists only in the stored profile answers (Agents page)
     passes: the route loads answers.yaml and hands it to build_letter."""
-    from truth.answers import load as load_answers, save as save_answers
-    from truth.answers import Answers
+    from truthcv.domain.truth.answers import load as load_answers, save as save_answers
+    from truthcv.domain.truth.answers import Answers
 
     save_answers(Answers(current_role="Staff Engineer"))
     assert load_answers().current_role == "Staff Engineer"
@@ -206,7 +206,7 @@ def test_route_threads_stored_answers_to_guardrail(data_dir, monkeypatch):
 def test_route_without_stored_answers_still_blocks_answer_claims(data_dir, monkeypatch):
     """With no stored answers (blank defaults), the same answer-only claim is
     blocked, proving the unblock came from the route-supplied answers."""
-    from truth.answers import load as load_answers
+    from truthcv.domain.truth.answers import load as load_answers
 
     assert load_answers().current_role == ""  # no answers.yaml written
 
@@ -235,7 +235,7 @@ def test_cover_letter_uses_body_posting_over_stale_file(data_dir, monkeypatch):
 
     monkeypatch.setattr(cv_routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
     save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
-    from storage import data_dir as dd
+    from truthcv.infra.storage import data_dir as dd
 
     (dd() / "posting.txt").write_text("STALE old posting about a bakery job")
     c = TestClient(app)

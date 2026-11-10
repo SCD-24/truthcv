@@ -506,7 +506,7 @@ function RecentRunsSection({ timeZone }: { timeZone?: string } = {}) {
   );
 
   // Only the newest RUNS_PAGE_SIZE * RUNS_MAX_PAGES runs are reachable here,
-  // and the store keeps only the newest 200 at all (runs.store trims on
+  // and the store keeps only the newest 200 at all (truthcv.domain.runs.store trims on
   // write) — so a run older than this window is not "elsewhere", it is either
   // unreachable from the product or already gone.
   const windowed = Math.min(result?.total ?? 0, RUNS_PAGE_SIZE * RUNS_MAX_PAGES);
@@ -1476,7 +1476,7 @@ function BlocklistSection({
 
 /**
  * Read-only canonical CV notice. The CV is registered out-of-band by
- * truth.answers.register_canonical_cv, not from this page. This section
+ * truthcv.domain.truth.answers.register_canonical_cv, not from this page. This section
  * simply surfaces what file (if any) the unattended agent will attach.
  */
 function CanonicalCvSection({ answers }: { answers: ProfileAnswers }) {

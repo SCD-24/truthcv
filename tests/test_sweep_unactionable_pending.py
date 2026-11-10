@@ -7,8 +7,8 @@ kept, and a second --apply is a no-op. Every test uses the `data_dir` fixture
 
 from __future__ import annotations
 
-import coverletter.store as letter_store
-import screening.store as screening_store
+import truthcv.engines.coverletter.store as letter_store
+import truthcv.domain.screening.store as screening_store
 from scripts.sweep_unactionable_pending import main
 
 

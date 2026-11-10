@@ -1,10 +1,10 @@
-"""Tests for onboarding/store.py."""
+"""Tests for truthcv/domain/onboarding/store.py."""
 
 from __future__ import annotations
 
-from onboarding import store as onboarding_store
-from truth import store as truth_store
-from truth.model import Skill, Truth
+from truthcv.domain.onboarding import store as onboarding_store
+from truthcv.domain.truth import store as truth_store
+from truthcv.domain.truth.model import Skill, Truth
 
 
 def test_load_defaults_when_no_file(data_dir):

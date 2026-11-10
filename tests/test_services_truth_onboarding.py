@@ -1,4 +1,4 @@
-"""Unit tests for services.truth, services.onboarding and services.tailor."""
+"""Unit tests for truthcv.services.truth, truthcv.services.onboarding and truthcv.services.tailor."""
 
 from __future__ import annotations
 
@@ -6,12 +6,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import services.onboarding as onboarding
-import services.tailor as tailor_svc
-import services.truth as truth_svc
-from providers.base import ProviderError
-from services.errors import BadGateway, BadRequest
-from truth.pdf import DocumentExtractError
+import truthcv.services.onboarding as onboarding
+import truthcv.services.tailor as tailor_svc
+import truthcv.services.truth as truth_svc
+from truthcv.integrations.providers.base import ProviderError
+from truthcv.services.errors import BadGateway, BadRequest
+from truthcv.domain.truth.pdf import DocumentExtractError
 
 
 def test_ingest_upload_persists_in_order(monkeypatch):
@@ -86,7 +86,7 @@ def test_extract_truth_returns_truth(monkeypatch):
 
 
 def test_update_answers_merges_only_sent(monkeypatch):
-    from truth.answers import Answers
+    from truthcv.domain.truth.answers import Answers
 
     saved = []
     monkeypatch.setattr(truth_svc._answers, "load", lambda: Answers(phone="1", name="n"))

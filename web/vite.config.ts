@@ -28,12 +28,12 @@ function novncNoRequireTla(): Plugin {
   };
 }
 
-// Build into ../api/static so the FastAPI `api` component serves the bundle
+// Build into ../truthcv/adapters/http/static so the FastAPI `api` component serves the bundle
 // directly. In dev, proxy /api to the backend so the wizard talks to real routes.
 export default defineConfig({
   plugins: [novncNoRequireTla(), react()],
   build: {
-    outDir: "../api/static",
+    outDir: "../truthcv/adapters/http/static",
     emptyOutDir: true,
     // @novnc/novnc's RFB (web/src/browser/BrowserSessionPage.tsx) uses
     // top-level await, which Vite's default baseline (chrome87/es2020/…)

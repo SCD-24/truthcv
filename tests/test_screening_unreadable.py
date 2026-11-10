@@ -1,14 +1,14 @@
 """A posting the agent could not read is recorded with a blocker, not a
-guessed verdict — screening/model.py + screening/store.py + the wire model."""
+guessed verdict — truthcv/domain/screening/model.py + truthcv/domain/screening/store.py + the wire model."""
 
 from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
-from screening import store
-from screening.model import validate_verdict
+from truthcv.adapters.http.main import app
+from truthcv.domain.screening import store
+from truthcv.domain.screening.model import validate_verdict
 
 
 @pytest.fixture()

@@ -5,10 +5,10 @@ Both concern what reaches an employer, and neither was covered before.
 
 from __future__ import annotations
 
-from coverletter.generate import _facts_block_lines, _placeholders, build_letter
-from guardrail import validate
-from coverletter.generate import _letter_scope
-from truth.model import Bullet, Experience, Profile, Truth
+from truthcv.engines.coverletter.generate import _facts_block_lines, _placeholders, build_letter
+from truthcv.engines.guardrail import validate
+from truthcv.engines.coverletter.generate import _letter_scope
+from truthcv.domain.truth.model import Bullet, Experience, Profile, Truth
 
 
 def _truth() -> Truth:
@@ -133,20 +133,20 @@ class TestSignOff:
     """
 
     def test_sign_off_is_appended(self):
-        from coverletter.generate import _with_sign_off
+        from truthcv.engines.coverletter.generate import _with_sign_off
 
         assert _with_sign_off("Body.", "Jane Rivera") == "Body.\n\nKind regards,\n\nJane Rivera"
 
     def test_blank_name_appends_nothing(self):
         """No name is better than an unsigned-looking placeholder."""
-        from coverletter.generate import _with_sign_off
+        from truthcv.engines.coverletter.generate import _with_sign_off
 
         assert _with_sign_off("Body.", "") == "Body."
         assert _with_sign_off("Body.", "   ") == "Body."
 
     def test_placeholder_name_appends_nothing(self):
         """"[Your Name]" must never ship to an employer as a signature."""
-        from coverletter.generate import _with_sign_off
+        from truthcv.engines.coverletter.generate import _with_sign_off
 
         assert _with_sign_off("Body.", "[Your Name]") == "Body."
 
@@ -157,7 +157,7 @@ class TestSignOff:
         template slot, shipped to an employer, which is exactly what the
         placeholder check exists to stop.
         """
-        from coverletter.generate import _with_sign_off
+        from truthcv.engines.coverletter.generate import _with_sign_off
 
         assert _with_sign_off("Body.", "[Your Name] Smith") == "Body."
         assert _with_sign_off("Body.", "Jane [Your Name]") == "Body."
@@ -167,27 +167,27 @@ class TestSignOff:
         """`answers.name` has no validator, and the sign-off lands AFTER the
         guardrail — so an unbounded value would smuggle an unverified claim
         into a guardrailed letter with nothing left to check it."""
-        from coverletter.generate import _with_sign_off
+        from truthcv.engines.coverletter.generate import _with_sign_off
 
         smuggled = "Dr. Jane Rivera, ex-Google Staff Engineer with 15 years at NASA"
         assert _with_sign_off("Body.", smuggled) == "Body."
 
     def test_a_long_but_genuine_name_still_signs(self):
         """The bound must not refuse real names with post-nominals."""
-        from coverletter.generate import _with_sign_off
+        from truthcv.engines.coverletter.generate import _with_sign_off
 
         name = "Jean-Luc Picard-Fauchelevent OBE PhD"
         assert _with_sign_off("Body.", name).endswith(name)
 
     def test_whitespace_in_name_is_normalized(self):
-        from coverletter.generate import _with_sign_off
+        from truthcv.engines.coverletter.generate import _with_sign_off
 
         assert _with_sign_off("Body.", "  Jane \n Rivera ").endswith("Jane Rivera")
 
     def test_sign_off_is_its_own_paragraph_block(self):
         """Consumers split on the blank line: the renderers to make paragraphs,
         the agent to paste into a form. A single newline would collapse."""
-        from coverletter.generate import _with_sign_off
+        from truthcv.engines.coverletter.generate import _with_sign_off
 
         blocks = _with_sign_off("Body.", "Jane Rivera").split("\n\n")
         assert blocks == ["Body.", "Kind regards,", "Jane Rivera"]

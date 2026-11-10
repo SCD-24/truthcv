@@ -61,7 +61,7 @@ def _strip_inline_comment(value: str) -> str:
 
 
 def generate_encryption_key() -> str:
-    """A Fernet key, identical in construction to `api.genkey`'s output."""
+    """A Fernet key, identical in construction to `truthcv.adapters.http.genkey`'s output."""
     return base64.urlsafe_b64encode(os.urandom(32)).decode()
 
 

@@ -1,6 +1,6 @@
 """Collapse the screening records that predate the one-posting-one-record rule.
 
-``screening.store.create`` used to append unconditionally, so every scheduled
+``truthcv.domain.screening.store.create`` used to append unconditionally, so every scheduled
 run re-screened postings it had already judged and filed a fresh record for
 each. The operator's decision lives in ``approval`` on ONE record, so the
 copies came back to the approval queue however many times they were rejected —
@@ -9,7 +9,7 @@ one Grafana Labs job accumulated ten records, nine of them rejected by hand.
 The store now refuses the second record (``create_or_get``). This one-off
 script cleans up what the old behaviour already wrote.
 
-Records are grouped by ``identity.url.posting_dedupe_key`` — the same key the
+Records are grouped by ``truthcv.infra.identity.url.posting_dedupe_key`` — the same key the
 store now enforces on — and each group keeps exactly one record. Records whose
 URL has no key (blank, or no http(s) scheme and host: the legacy importer is
 the one writer that can produce those) are never grouped and never deleted,
@@ -25,7 +25,7 @@ undecided ``pending`` copy over the ``rejected`` one the operator actually
 decided, which puts the posting straight back in the approval queue and leaves
 the reported symptom in place.
 
-Deletion goes through ``screening.store.delete_many``, so each removed record's
+Deletion goes through ``truthcv.domain.screening.store.delete_many``, so each removed record's
 orphaned cover-letter draft goes with it. This script never touches
 ``data/screenings.json`` directly.
 
@@ -54,9 +54,9 @@ from pathlib import Path
 # the path rather than the repo root, so the packages below would not resolve.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import screening.store as screening_store  # noqa: E402
-import services.screenings as screenings_service  # noqa: E402
-from identity.url import posting_dedupe_key  # noqa: E402
+import truthcv.domain.screening.store as screening_store  # noqa: E402
+import truthcv.services.screenings as screenings_service  # noqa: E402
+from truthcv.infra.identity.url import posting_dedupe_key  # noqa: E402
 
 # Furthest-advanced decision wins. An unknown approval value sorts with "no
 # decision" rather than raising: a hand-edited file must not stop the cleanup,

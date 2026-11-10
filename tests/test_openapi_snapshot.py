@@ -1,9 +1,9 @@
 """Golden snapshot of the generated OpenAPI document.
 
 Guards the Phase 3b refactor (moving business logic out of the route handlers
-into services/) against any HTTP surface change. URL paths, methods, parameter
+into truthcv/services/) against any HTTP surface change. URL paths, methods, parameter
 and body schemas, response models and status codes all appear in
-``api.main.app.openapi()``, so a diff here means the wire contract moved.
+``truthcv.adapters.http.main.app.openapi()``, so a diff here means the wire contract moved.
 
 The fixture is generated from the code, never hand-written. To regenerate
 after an intended HTTP change, run:
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from api.main import app
+from truthcv.adapters.http.main import app
 
 FIXTURE = Path(__file__).parent / "fixtures" / "openapi_snapshot.json"
 UPDATE_ENV = "UPDATE_OPENAPI_SNAPSHOT"
@@ -37,7 +37,7 @@ def _render(doc: dict) -> str:
 def _normalise(doc: dict) -> dict:
     """Blank operationIds that occur more than once in ``doc``.
 
-    /mcp and /mcp/diagnostics in api/main.py are registered with
+    /mcp and /mcp/diagnostics in truthcv/adapters/http/main.py are registered with
     ``@app.api_route`` over 8 methods, so FastAPI emits the same operationId for
     several operations and PYTHONHASHSEED decides which method's id survives.
     Only duplicated ids are blanked; every unique id is compared exactly.

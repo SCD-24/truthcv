@@ -4,7 +4,7 @@ import threading
 
 import pytest
 
-import secretstore
+import truthcv.infra.secretstore as secretstore
 from cryptography.fernet import Fernet
 
 
@@ -67,7 +67,7 @@ def test_read_paths_work_when_lock_sidecar_cannot_be_created(enc, monkeypatch):
     def boom(*a, **k):
         raise OSError("read-only filesystem")
 
-    monkeypatch.setattr("storage.atomic.locked", boom)
+    monkeypatch.setattr("truthcv.infra.storage.atomic.locked", boom)
 
     # No secrets.enc yet: pure reads must not touch the lock at all.
     assert secretstore.get_connection("claude") == {}

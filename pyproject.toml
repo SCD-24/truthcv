@@ -5,34 +5,8 @@ pythonpath = ["."]
 
 [tool.importlinter]
 root_packages = [
-    "agentconfig",
-    "agenttools",
-    "api",
-    "applications",
-    "companyboards",
-    "companyresearch",
-    "connections",
-    "coverletter",
-    "gmailsync",
-    "guardrail",
-    "identity",
-    "jobfeeds",
-    "jobs",
     "launcher",
-    "mcpschema",
-    "modelrouting",
-    "onboarding",
-    "prompts",
-    "providers",
-    "render",
-    "runs",
-    "screening",
-    "secretstore",
-    "services",
-    "storage",
-    "tailor",
-    "truth",
-    "vocabulary",
+    "truthcv",
 ]
 
 [[tool.importlinter.contracts]]
@@ -40,17 +14,17 @@ name = "Layered architecture"
 type = "layers"
 # Top to bottom. '|' = independent siblings, ':' = non-independent siblings.
 layers = [
-    "api | agenttools | launcher",
-    "services",
-    "tailor : coverletter : guardrail : render : prompts : vocabulary",
-    "truth : screening : applications : companyresearch : runs : agentconfig : companyboards : onboarding : gmailsync : jobfeeds",
-    "providers : connections : modelrouting",
-    "storage : secretstore : jobs : identity : mcpschema",
+    "truthcv.adapters.http | truthcv.adapters.mcp | launcher",
+    "truthcv.services",
+    "truthcv.engines.tailor : truthcv.engines.coverletter : truthcv.engines.guardrail : truthcv.engines.render : truthcv.engines.prompts : truthcv.engines.vocabulary",
+    "truthcv.domain.truth : truthcv.domain.screening : truthcv.domain.applications : truthcv.domain.companyresearch : truthcv.domain.runs : truthcv.domain.agentconfig : truthcv.domain.companyboards : truthcv.domain.onboarding : truthcv.domain.gmailsync : truthcv.domain.jobfeeds",
+    "truthcv.integrations.providers : truthcv.integrations.connections : truthcv.integrations.modelrouting",
+    "truthcv.infra.storage : truthcv.infra.secretstore : truthcv.infra.background_tasks : truthcv.infra.identity : truthcv.infra.mcpschema",
 ]
 # A stale ignore entry fails the check, so this list can only shrink.
 unmatched_ignore_imports_alerting = "error"
 ignore_imports = [
-    # Permanent: api/main.py is the composition root that mounts the MCP
-    # server; a named exception.
-    "api.main -> agenttools.server",
+    # Permanent: truthcv/adapters/http/main.py is the composition root that
+    # mounts the MCP server; a named exception.
+    "truthcv.adapters.http.main -> truthcv.adapters.mcp.server",
 ]

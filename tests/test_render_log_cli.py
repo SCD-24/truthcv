@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from applications.log_render import RenderRefused
+from truthcv.domain.applications.log_render import RenderRefused
 import scripts.render_application_log as cli
 
 

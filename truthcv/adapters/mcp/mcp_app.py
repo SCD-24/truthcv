@@ -1,0 +1,245 @@
+"""The agent tool registry and the JSON Schemas advertised for it.
+
+This module owns *what* the tools are; the MCP streamable-HTTP JSON-RPC
+endpoint that serves them is built and registered in ``truthcv/adapters/http/main.py``.
+"""
+
+from __future__ import annotations
+
+import inspect
+from typing import Any
+
+from truthcv.infra.mcpschema import (
+    INTERNAL_PARAMS,
+    JSON_TYPES,
+    input_schema,
+    json_type,
+)
+from truthcv.adapters.mcp.tools_boards import record_company_board as _record_company_board
+from truthcv.adapters.mcp.tools_gmail import check_gmail_responses as _check_gmail_responses
+from truthcv.adapters.mcp.tools_ledger import (
+    check_cooldown as _check_cooldown,
+    get_approved_applications as _get_approved_applications,
+    get_canonical_cv as _get_canonical_cv,
+    get_job_profiles as _get_job_profiles,
+    get_profile_answers as _get_profile_answers,
+    recommend_salary as _recommend_salary,
+    report_apply_failure as _report_apply_failure,
+    record_application as _record_application,
+    record_screening as _record_screening,
+)
+from truthcv.adapters.mcp.tools_funnel import record_source_funnel as _record_source_funnel
+from truthcv.adapters.mcp.tools_letter import generate_cover_letter as _generate_cover_letter
+from truthcv.adapters.mcp.tools_pipeline import (
+    filter_unscreened_urls as _filter_unscreened_urls,
+    finish_application as _finish_application,
+)
+from truthcv.adapters.mcp.tools_research import (
+    get_company_findings as _get_company_findings,
+    record_company_finding as _record_company_finding,
+)
+from truthcv.adapters.mcp.tools_runs import (
+    finish_phase as _finish_phase,
+    finish_run as _finish_run,
+    record_discovery_coverage as _record_discovery_coverage,
+    record_postings_seen as _record_postings_seen,
+    record_run_note as _record_run_note,
+    start_run as _start_run,
+)
+
+
+_TOOL_REGISTRY = {
+    "generate_cover_letter": (
+        _generate_cover_letter,
+        "Generates a guardrailed, per-role cover letter, as TEXT. A letter generated in-run is never a "
+        "file: paste it into the form. Only an operator-approved queue item carries a document to upload.",
+    ),
+    "record_application": (
+        _record_application,
+        "Records a submitted application and its evidence trail. Pass company and role, or a screening_id to inherit them from the approved queue item. "
+        "Pass your run_id (from start_run) on every call, so the application is attributed to your run and counted in its coverage numbers.",
+    ),
+    "record_screening": (
+        _record_screening,
+        "Records one screening verdict. company, role and url are ALL required and the call is rejected, storing nothing, without a usable value for each: "
+        "company is the employing entity (never a placeholder like \"Unknown\"), role is the job title as posted, url is the posting's own URL. "
+        "verdict is required and must be exactly rejected, passed or deferred — UNLESS the posting could not be read at all (403, login wall, dead link, expired listing), "
+        "in which case leave verdict empty and pass screening_blocker instead, set to one of: login_required, unreadable, not_found, expired. "
+        "Never guess a verdict for a posting you could not read — that fabricates an evaluation that never happened. "
+        "You must also pass posting_text — the posting exactly as you read it — because the operator will draft the cover letter from it days later, on a page the agent never sees. "
+        "A 'passed' or 'deferred' verdict is REJECTED, storing nothing, when it has no usable posting text (a real posting body, not a login wall or a 404 page). "
+        "A posting you could not read takes a screening_blocker instead. "
+        "For a passed or deferred verdict, also pass profile (the enabled JobProfile name you screened against), remote_arrangement (what the posting itself states — remote, hybrid, on_site, or unstated), "
+        "language_requirement (any language the posting explicitly requires, or '' for none), and the posting's own stated evidence for its other hard requirements: salary_stated (the posting's stated salary or range), "
+        "employment_country_stated (the posting's stated employment country), role_type_stated (the posting's stated role type, e.g. contract vs permanent), and eor_stated (yes, no, or unstated — whether the posting requires an EOR/PEO employer of record) — "
+        "profile and remote_arrangement are required and the call is rejected without them; the rest are optional and '' means the posting stated nothing on that point. "
+        "Evidence that contradicts ANY of the named profile's six hard requirements — remote model, working language, salary floor, employment country, rejected role types, or EOR — is stored as an automatic rejection (verdict downgraded to rejected), not an error to retry. "
+        "There is one record per posting per profile: a record without a profile, or any passed/deferred record, covers the posting for every profile; created:false means the posting is already covered, so count it as a skip. "
+        "Pass your run_id (from start_run) on EVERY call, so this screening is attributed to your run and the run's coverage counters reflect the work you actually did. "
+        "For a rejected verdict, pass failing_criterion as exactly one of remote_model, working_language, salary_floor, employment_country, rejected_role_types, eor_allowed, role_fit, posting_age, cooldown, other, and put the specifics in reason; other values are normalized server-side.",
+    ),
+    "check_cooldown": (
+        _check_cooldown,
+        "Checks whether a company/role is in cooldown.",
+    ),
+    "get_canonical_cv": (
+        _get_canonical_cv,
+        "Returns the stored canonical CV asset to attach.",
+    ),
+    "get_profile_answers": (
+        _get_profile_answers,
+        "Returns the operator's canonical screening answers from the answers store. Never assume or hard-code any of these — always call this tool. "
+        "Pass company — the employing entity for the application currently being filled in — so the returned email is the per-company tracking address for that employer. "
+        "Type the returned email verbatim; never construct, edit, or 'correct' an address yourself. "
+        "Omitting company returns the plain address, which is correct only when no specific application is being filled in.",
+    ),
+    "get_job_profiles": (
+        _get_job_profiles,
+        "Returns the configured job search profiles and their full criteria (salary band, remote model, employment country, and the rest).",
+    ),
+    "recommend_salary": (
+        _recommend_salary,
+        "Given the matched profile's name (and optionally a derived proposed figure), returns the operator's salary ask for that profile, clamped to its configured band.",
+    ),
+    "get_approved_applications": (
+        _get_approved_applications,
+        "Returns the postings the operator approved for this run to apply to. Pass your run_id "
+        "(from start_run) so the list is capped for this run and every returned item is claimed "
+        "by it — a shorter list than you expected means the per-run cap was reached, not that "
+        "work was lost; call it again on a later run for the rest. "
+        "An entry with a non-empty blocked_reason must NOT be applied to — report it instead, "
+        "and it never counts against the cap. "
+        "Every entry that is going out carries the operator's letter twice: cover_letter (the text, to be "
+        "submitted verbatim) and cover_letter_path (a PDF of that same text on the data volume, to upload "
+        "where the form has a place for a document). A null cover_letter_path means the letter exists only "
+        "as text — check it before passing it to an upload. cover_letter_asset_id is that file's bare "
+        "name, and cover_letter_download_url fetches it over HTTP for a client that cannot see the data "
+        "volume; the browser can see it, so the path is what you use. NEVER upload it through a control that already holds the CV unless the page visibly "
+        "accumulates files (a list of filenames, an 'Add another' affordance): a control showing one "
+        "filename will REPLACE the CV, and an application that arrives with the cover letter filed as the "
+        "resume and no CV is worse than one with no letter. When in doubt, keep the CV and paste the text.",
+    ),
+    "report_apply_failure": (
+        _report_apply_failure,
+        "Records why an approved application could not be completed. The item "
+        "stays queued: if the failure is login_required it is held until the "
+        "operator signs in to that host, otherwise it is retried on the next run. "
+        "When the form sat behind a sign-in or registration wall, also pass "
+        "blocker='login_required' and signin_url (the login page URL) — that is "
+        "what tells the operator which site to sign in to. Never create an "
+        "account yourself.",
+    ),
+    "record_company_board": (
+        _record_company_board,
+        "Records a target company's careers URL and ATS once verified on the employer's own site.",
+    ),
+    "record_company_finding": (
+        _record_company_finding,
+        "Records one sourced, dated company research finding (claim is one of employment_entity, "
+        "employer_rating, other — other requires claim_label). "
+        "Every field is required except as_of, note and claim_label. source_url must be the page the claim was actually "
+        "read from — a company-level claim must be traceable. source_class is one of the ranked classes, "
+        "strongest first: audited_accounts, regulatory_filing, listed_bond_price, company_statement, press, "
+        "review_site, unattributed — pick the strongest source actually available, not the first one found. "
+        "as_of is the date the SOURCE is dated and must be left empty when the source carries no date — "
+        "never inferred, never today's date.",
+    ),
+    "get_company_findings": (
+        _get_company_findings,
+        "Returns every finding recorded for a company and its open contradictions. A non-empty "
+        "open_contradictions means the company must NOT be applied to until the operator resolves it.",
+    ),
+    "check_gmail_responses": (
+        _check_gmail_responses,
+        "Runs a Gmail response-tracking sync and returns a summary: skipped (true when the sync was "
+        "throttled and did nothing this call), processed (messages processed this sync, 0 when "
+        "skipped), applied (status transitions auto-applied by THIS sync from Jev-confirmed employer "
+        "replies — not the lifetime total), and pending (suggestions currently awaiting operator "
+        "review). Call this once at the start of a scheduled run. Errors when Gmail response-tracking "
+        "isn't configured and opted in — that's expected when the operator hasn't enabled it, and not "
+        "a run failure.",
+    ),
+    "start_run": (
+        _start_run,
+        "Call this ONCE, at the very start of a run, with the run_id given in your prompt. "
+        "Keep passing that same run_id on every subsequent tool call that accepts one. "
+        "Safe to call again with the same run_id if you are unsure whether you already did — "
+        "it will not reset your coverage counters.",
+    ),
+    "finish_run": (
+        _finish_run,
+        "Call this before exiting — including when you are stopping EARLY, not only on a normal "
+        "finish. Pass an honest stopped_reason describing where you stopped (e.g. 'apply cap "
+        "reached', 'browser session died', 'no more postings found'). A run that ends without "
+        "calling this is indistinguishable from one that crashed.",
+    ),
+    "finish_phase": (
+        _finish_phase,
+        "Reports progress on one discovery channel (feed, direct or dork) mid-run, WITHOUT ending "
+        "the run — use this to check in or leave a note partway through, not just at the end. "
+        "May raise (and record nothing) when this channel's coverage looks short and, per "
+        "turns_remaining, there is still enough run left to act on it — the same discipline as "
+        "finish_run, but scoped to one channel and never terminal.",
+    ),
+    "record_run_note": (
+        _record_run_note,
+        "Leaves a free-text note on the run record for context that is not captured by the "
+        "run's coverage numbers — the postings-seen count you report with record_postings_seen, "
+        "or the screening and application records the rest is counted from.",
+    ),
+    "record_discovery_coverage": (
+        _record_discovery_coverage,
+        "Records one board or query's discovery coverage for this run: which channel (feed, "
+        "direct or dork), which board, and its status (searched, empty, login_walled, blocked, "
+        "extraction_failed, skipped or deferred), plus how many postings it found. 'extraction_failed' means "
+        "the board was reachable and not walled, but harvest could not extract or read its "
+        "results — never report it as 'empty' or 'blocked'. 'deferred' means not searched this run because of a deliberate pause (e.g. Google cooldown/rate-limit), queued for the next run. Call ONE TIME per board or query you "
+        "searched. A board you never call this for is read by the operator as 'not reached', "
+        "not as searched-and-empty — so an entry left uncalled is itself an honest coverage "
+        "gap, and a board you never reached must NOT be reported as empty. 'empty' means the "
+        "search ran and genuinely matched nothing; 'blocked' means the board or query was "
+        "reachable but the results could not be read (CAPTCHA, consent interstitial, bot wall) "
+        "— reporting a blocked board as empty hides a broken channel. Pass tier (api, harvest "
+        "or llm, or '' when not applicable) to record which extraction tier produced the "
+        "postings.",
+    ),
+    "filter_unscreened_urls": (
+        _filter_unscreened_urls,
+        "Given candidate posting URLs (urls), returns {unscreened: [...], dropped: [...]}: unscreened are those not already "
+        "screened, in input order, deduplicated, with URL fragments ignored. dropped lists every other "
+        "non-empty URL as {url, reason, duplicate_of?} with reason not_a_posting, duplicate (duplicate_of "
+        "is the earlier URL) or previously_screened, so unscreened + dropped accounts for every input. "
+        "Call before opening postings.",
+    ),
+    "record_source_funnel": (
+        _record_source_funnel,
+        "Reports this run's per-source funnel, REPLACING any earlier report (send the full picture each "
+        "time). run_id: your run. sources: one row per source {source, channel (feed, direct or dork), "
+        "postings_seen, previously_screened, not_a_posting, duplicate, failed, for_review, rejected, "
+        "blocked}; postings_seen must equal the sum of the seven outcome columns or the source is "
+        "reported back as a mismatch. totals: the same counts over UNIQUE URLs across all sources. "
+        "urls: the ledger [{url, outcome (one of the seven outcome columns), detail, sources: "
+        "[{source, channel}]}], capped at 1000 entries. Returns {recorded, mismatches, truncated}.",
+    ),
+    "finish_application": (
+        _finish_application,
+        "Notes the outcome of one application (url, outcome, note) on the run record. Non-terminal: "
+        "never ends the run or changes its status. Pass your run_id.",
+    ),
+    "record_postings_seen": (
+        _record_postings_seen,
+        "Reports how many job postings you have looked at — the ONE coverage number that cannot "
+        "be counted from the records you write, because a posting you skipped on cooldown, as a "
+        "duplicate, or because it was already screened leaves no record behind. Call it as you "
+        "go with the number seen since your last call: it ADDS to the run total, it does not set "
+        "it. Screenings recorded, blocked, queued for approval and applications submitted are "
+        "counted automatically from your records and must not be reported here.",
+    ),
+}
+
+
+# Private aliases kept so existing importers of these names keep working.
+_JSON_TYPES = JSON_TYPES
+_json_type = json_type
+_INTERNAL_PARAMS = INTERNAL_PARAMS
+_input_schema = input_schema

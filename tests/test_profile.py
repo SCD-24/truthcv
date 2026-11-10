@@ -7,7 +7,7 @@ import io
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
+from truthcv.adapters.http.main import app
 
 _PDF = (
     b"%PDF-1.4\n"
@@ -49,7 +49,7 @@ def test_profile_absent_then_present_for_non_pdf(client):
 
 
 def test_upload_records_source_hash(client):
-    from truth.store import loaded_source_hash
+    from truthcv.domain.truth.store import loaded_source_hash
 
     assert loaded_source_hash() is None
     client.post(

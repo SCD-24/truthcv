@@ -133,7 +133,7 @@ function RoleCell({
 
 /** Human wording for WHY a company is blocked, so the user can tell which
  * setting governs it: a blocklist entry vs a same-role vs a same-company
- * cooldown window. Mirrors screening/cooldown.py's CooldownStatus.window. */
+ * cooldown window. Mirrors truthcv/domain/screening/cooldown.py's CooldownStatus.window. */
 export function cooldownBlockLabel(window: "same_role" | "same_company" | null): string {
   if (window === "same_role") return "blocked: already applied to this role";
   if (window === "same_company") return "blocked: recently applied to this company";

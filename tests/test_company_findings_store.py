@@ -1,4 +1,4 @@
-"""Tests for companyresearch.store: append-only writes and contradictions."""
+"""Tests for truthcv.domain.companyresearch.store: append-only writes and contradictions."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from companyresearch import store
+from truthcv.domain.companyresearch import store
 
 
 def test_load_all_missing_file_returns_empty(data_dir):

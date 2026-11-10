@@ -19,15 +19,15 @@ from typing import Callable
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
-from applications.store import load_all as load_applications
-from agenttools import server as mcp_server
-from agenttools import tools_ledger, tools_letter, tools_boards, tools_gmail, tools_research
-from companyresearch import store as company_findings_store
-from providers.fake import FakeProvider
-from truth.answers import register_canonical_cv
-from truth.model import Bullet, Experience, Skill, Truth
-from truth.store import save as save_truth
+from truthcv.adapters.http.main import app
+from truthcv.domain.applications.store import load_all as load_applications
+from truthcv.adapters.mcp import server as mcp_server
+from truthcv.adapters.mcp import tools_ledger, tools_letter, tools_boards, tools_gmail, tools_research
+from truthcv.domain.companyresearch import store as company_findings_store
+from truthcv.integrations.providers.fake import FakeProvider
+from truthcv.domain.truth.answers import register_canonical_cv
+from truthcv.domain.truth.model import Bullet, Experience, Skill, Truth
+from truthcv.domain.truth.store import save as save_truth
 
 # Vocabulary a tool parameter must never match: anything that could let the
 # agent itself mark an unverifiable claim as approved/confirmed/accepted.
@@ -91,7 +91,7 @@ def test_the_tool_listing_route_exposes_no_approval_parameter():
 def test_no_tool_module_reaches_the_guardrail_allow_list():
     """No tool module may widen what the guardrail permits: none may fold
     into `approved_texts`, import `guardrail`, or call `validate(`/`Scope(`
-    directly. Only a human-driven route (api/routes.py) may do that. The
+    directly. Only a human-driven route (truthcv/adapters/http/routes.py) may do that. The
     module list is discovered from the registered tools' `__module__`, so a
     tool added in a new module is covered automatically."""
     module_names = {fn.__module__ for fn in mcp_server.TOOLS.values()}
@@ -108,8 +108,9 @@ def test_no_tool_module_reaches_the_guardrail_allow_list():
     for module_name in module_names:
         source = inspect.getsource(modules[module_name])
         assert "approved_texts" not in source, f"{module_name} references approved_texts"
-        assert "import guardrail" not in source, f"{module_name} imports guardrail"
-        assert "from guardrail" not in source, f"{module_name} imports guardrail"
+        assert "import truthcv.engines.guardrail" not in source, f"{module_name} imports guardrail"
+        assert "from truthcv.engines.guardrail" not in source, f"{module_name} imports guardrail"
+        assert "from truthcv.engines import guardrail" not in source, f"{module_name} imports guardrail"
         assert "validate(" not in source, f"{module_name} calls validate("
         assert "Scope(" not in source, f"{module_name} calls Scope("
 
@@ -311,7 +312,7 @@ def _enable_profile(name: str = "default", remote_model=None, working_language=N
     verdict with no matching enabled profile, so tests exercising the
     queueing path must first give it one to check evidence against.
     """
-    from agentconfig import store as agent_config_store
+    from truthcv.domain.agentconfig import store as agent_config_store
 
     cfg = agent_config_store.load()
     cfg.profiles = [
@@ -338,7 +339,7 @@ def _approve_screening(company: str, role: str, url: str) -> str:
         profile="default",
         remote_arrangement="remote",
     )
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     screening_store.set_approval(s["id"], "approved")
     return s["id"]
@@ -364,7 +365,7 @@ def test_record_application_backfills_identity_from_the_screening(data_dir):
     assert reloaded.application_url == "https://acme.example/job/1"
     assert reloaded.posting == _long_posting_text("Senior Engineer", "Acme Corp")
 
-    from screening.store import get as get_screening
+    from truthcv.domain.screening.store import get as get_screening
 
     assert get_screening(screening_id).approval == "applied"
 
@@ -405,7 +406,7 @@ def test_record_application_with_unknown_screening_id_still_creates(data_dir):
 
 
 def test_check_cooldown_agrees_with_the_http_route(data_dir):
-    """check_cooldown delegates to the same screening.cooldown.cooldown as
+    """check_cooldown delegates to the same truthcv.domain.screening.cooldown.cooldown as
     GET /api/cooldown, so the two surfaces must never disagree — proven here
     for both an in-cooldown company and one with no screening at all."""
     client = TestClient(app)
@@ -435,7 +436,7 @@ def test_record_screening_rejects_a_blank_url_and_persists_nothing(data_dir):
     """A posting URL is mandatory: record_screening with a blank url must
     raise and write no screening, so the agent cannot queue a verdict it has
     no way to act on."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     with pytest.raises(ValueError):
         tools_ledger.record_screening(
@@ -449,7 +450,7 @@ def test_record_screening_rejects_a_blank_role_and_persists_nothing(data_dir):
     """A job title is mandatory: record_screening with a blank role must
     raise and write no screening, so the operator never sees an unreadable
     verdict."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     with pytest.raises(ValueError):
         tools_ledger.record_screening(
@@ -465,7 +466,7 @@ def test_record_screening_rejects_a_blank_role_and_persists_nothing(data_dir):
 def test_record_screening_rejects_board_noise_role_and_persists_nothing(data_dir):
     """A placeholder like 'Apply now' is not a job title: record_screening
     must raise and write no screening rather than queue an unreadable verdict."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     with pytest.raises(ValueError):
         tools_ledger.record_screening(
@@ -493,7 +494,7 @@ def test_record_screening_stores_role_normalized(data_dir):
 def test_record_screening_schema_marks_url_required():
     """The tool schema the agent reads must advertise url as required, so a
     caller knows the posting URL cannot be omitted."""
-    from agenttools.mcp_app import _input_schema
+    from truthcv.adapters.mcp.mcp_app import _input_schema
 
     schema = _input_schema(tools_ledger.record_screening)
     assert "url" in schema["required"]
@@ -502,7 +503,7 @@ def test_record_screening_schema_marks_url_required():
 def test_record_screening_schema_marks_role_required():
     """The tool schema the agent reads must advertise role as required, so a
     caller knows the job title cannot be omitted."""
-    from agenttools.mcp_app import _input_schema
+    from truthcv.adapters.mcp.mcp_app import _input_schema
 
     schema = _input_schema(tools_ledger.record_screening)
     assert "role" in schema["required"]
@@ -516,8 +517,8 @@ def test_record_screening_schema_advertises_every_editable_field():
     does not rescue it. That is how live runs wrote screenings with an empty
     `verdict`, which silenced the operator's approval queue entirely.
     """
-    from agenttools.mcp_app import _input_schema
-    from screening.model import Screening
+    from truthcv.adapters.mcp.mcp_app import _input_schema
+    from truthcv.domain.screening.model import Screening
 
     properties = _input_schema(tools_ledger.record_screening)["properties"]
     missing = [f for f in Screening.EDITABLE if f not in properties]
@@ -527,7 +528,7 @@ def test_record_screening_schema_advertises_every_editable_field():
 def test_record_screening_persists_verdict_and_company(data_dir):
     """A verdict passed by name reaches the store, and a deferred one queues.
 
-    `screening.store.create` gates the approval queue on `verdict`, so a
+    `truthcv.domain.screening.store.create` gates the approval queue on `verdict`, so a
     dropped verdict means nothing ever reaches the operator.
     """
     _enable_profile()
@@ -550,7 +551,7 @@ def test_record_screening_persists_verdict_and_company(data_dir):
     assert s["source"] == "agent"
     assert s["approval"] == "pending"
 
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     reloaded = screening_store.get(s["id"])
     assert reloaded is not None
@@ -560,7 +561,7 @@ def test_record_screening_persists_verdict_and_company(data_dir):
 
 def _all_screenings():
     """Every stored screening — used to assert a rejected call persisted nothing."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     return screening_store.load_all()
 
@@ -617,7 +618,7 @@ def test_record_screening_rejects_an_unknown_verdict(data_dir):
 
 def test_record_screening_schema_marks_company_and_verdict_required(data_dir):
     """The agent reading the schema must see both as required, not optional."""
-    from agenttools.mcp_app import _input_schema
+    from truthcv.adapters.mcp.mcp_app import _input_schema
 
     required = _input_schema(tools_ledger.record_screening)["required"]
     assert "company" in required
@@ -658,7 +659,7 @@ def test_record_screening_without_screened_date_persists_todays_utc_date(data_di
     after = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     assert s["screened_date"] in {before, after}
 
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     reloaded = screening_store.get(s["id"])
     assert reloaded is not None
@@ -677,7 +678,7 @@ def test_record_screening_with_explicit_screened_date_keeps_it(data_dir):
     )
     assert s["screened_date"] == "2020-01-15"
 
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     reloaded = screening_store.get(s["id"])
     assert reloaded is not None
@@ -687,7 +688,7 @@ def test_record_screening_with_explicit_screened_date_keeps_it(data_dir):
 def test_record_screening_deferred_with_no_posting_text_persists_nothing(data_dir):
     """A deferred verdict is about to queue for the operator's decision, so it
     is rejected — and nothing is stored — without usable posting text."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     before = screening_store.load_all()
     with pytest.raises(ValueError):
@@ -703,7 +704,7 @@ def test_record_screening_deferred_with_no_posting_text_persists_nothing(data_di
 def test_record_screening_passed_with_login_wall_text_is_rejected(data_dir):
     """A short login-wall body is not a real posting: a passed verdict with
     one is rejected the same way a blank one is."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     before = screening_store.load_all()
     with pytest.raises(ValueError):
@@ -721,7 +722,7 @@ def test_record_screening_queueing_verdict_without_profile_is_refused(data_dir):
     """A queueing verdict with no profile is refused, and nothing is stored —
     the operator could not otherwise tell which profile's criteria this
     posting supposedly met."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     _enable_profile()
     before = screening_store.load_all()
@@ -740,7 +741,7 @@ def test_record_screening_queueing_verdict_without_profile_is_refused(data_dir):
 def test_record_screening_queueing_verdict_without_remote_arrangement_is_refused(data_dir):
     """A queueing verdict with no remote_arrangement is refused: an unchecked
     arrangement is how non-remote postings reached the queue."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     _enable_profile()
     before = screening_store.load_all()
@@ -961,7 +962,7 @@ def test_generate_cover_letter_refuses_blocked_company(data_dir):
     letter. Passing no provider= would normally trigger get_provider(); if
     the guard is placed after that call, this test errors trying to build a
     real provider instead of returning the refusal cleanly."""
-    from agentconfig import store as agent_config_store
+    from truthcv.domain.agentconfig import store as agent_config_store
 
     cfg = agent_config_store.load()
     cfg.blocked_companies = ["Acme GmbH"]
@@ -990,7 +991,7 @@ def test_record_company_board_persists_and_can_be_retrieved(data_dir):
     assert result["ats"] == "Lever"
 
     # Verify it was actually stored
-    from companyboards import store
+    from truthcv.domain.companyboards import store
     boards = store.load()
     assert "google" in boards
     assert boards["google"].careers_url == "https://careers.google.com"
@@ -1029,7 +1030,7 @@ def test_record_application_schema_advertises_the_fields_the_agent_must_send():
     Same defect class as the screening one above: a field reachable only via
     **kwargs is invisible to the agent reading the schema, so it goes unsent.
     """
-    from agenttools.mcp_app import _input_schema
+    from truthcv.adapters.mcp.mcp_app import _input_schema
 
     properties = _input_schema(tools_ledger.record_application)["properties"]
     for field in ("company", "role", "application_url", "screening_id", "applied_date"):
@@ -1040,7 +1041,7 @@ def test_record_application_schema_types_structured_evidence_params():
     """fields_submitted/attachments are lists, confirmation/screening are
     objects — promoting them out of **fields must produce a typed schema,
     not just a visible one."""
-    from agenttools.mcp_app import _input_schema
+    from truthcv.adapters.mcp.mcp_app import _input_schema
 
     properties = _input_schema(tools_ledger.record_application)["properties"]
     assert properties["fields_submitted"]["type"] == "array"
@@ -1053,7 +1054,7 @@ def test_record_application_schema_advertises_evidence_fields():
     """The evidence fields (fields_submitted, confirmation, screening,
     attachments) must be named parameters, not just reachable via **fields,
     or the agent reading the schema never learns the tool accepts them."""
-    from agenttools.mcp_app import _input_schema
+    from truthcv.adapters.mcp.mcp_app import _input_schema
 
     properties = _input_schema(tools_ledger.record_application)["properties"]
     for field in ("fields_submitted", "confirmation", "screening", "attachments"):
@@ -1073,7 +1074,7 @@ def test_record_application_still_backfills_when_identity_is_omitted(data_dir):
 def test_get_profile_answers_without_company_returns_stored_email_verbatim(data_dir):
     """Regression guard on the default: no `company` argument means the
     email is returned exactly as stored, unchanged from today's behaviour."""
-    from truth.answers import Answers, save as save_answers
+    from truthcv.domain.truth.answers import Answers, save as save_answers
 
     save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com"))
     result = tools_ledger.get_profile_answers()
@@ -1090,7 +1091,7 @@ def test_get_profile_answers_with_company_aliases_only_the_email(data_dir):
     spelling. See test_get_profile_answers_freezes_alias_to_existing_application
     for the case where a matching application row exists instead.
     """
-    from truth.answers import Answers, save as save_answers
+    from truthcv.domain.truth.answers import Answers, save as save_answers
 
     save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com", phone="+49 1"))
 
@@ -1107,7 +1108,7 @@ def test_get_profile_answers_with_company_aliases_only_the_email(data_dir):
 def test_get_profile_answers_with_company_does_not_mutate_stored_answers(data_dir):
     """The alias is a per-call transformation only; the persisted answers
     (and thus every other caller) must still see the real address."""
-    from truth.answers import Answers, load as load_answers, save as save_answers
+    from truthcv.domain.truth.answers import Answers, load as load_answers, save as save_answers
 
     save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com"))
 
@@ -1120,7 +1121,7 @@ def test_get_profile_answers_with_company_does_not_mutate_stored_answers(data_di
 def test_get_profile_answers_input_schema_advertises_optional_company():
     """The advertised inputSchema must include `company` as a string
     property, and it must not be required, since it has a default."""
-    from agenttools.mcp_app import _input_schema
+    from truthcv.adapters.mcp.mcp_app import _input_schema
 
     schema = _input_schema(tools_ledger.get_profile_answers)
     assert schema["properties"]["company"]["type"] == "string"
@@ -1130,16 +1131,16 @@ def test_get_profile_answers_input_schema_advertises_optional_company():
 def _create_application_at(monkeypatch, ts, fields):
     """Create an application with a controlled ``created_at`` (see
     tests/test_repair_duplicate_applications.py for the same pattern)."""
-    import applications.store as applications_store
+    import truthcv.domain.applications.store as applications_store
 
-    monkeypatch.setattr("applications.store._now", lambda: ts)
+    monkeypatch.setattr("truthcv.domain.applications.store._now", lambda: ts)
     return applications_store.create(fields)
 
 
 def test_get_profile_answers_freezes_alias_to_existing_application(data_dir, monkeypatch):
     """An existing application row freezes the alias to the address already
     submitted, even when this call spells the company differently."""
-    from truth.answers import Answers, save as save_answers
+    from truthcv.domain.truth.answers import Answers, save as save_answers
 
     save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com"))
     _create_application_at(
@@ -1156,7 +1157,7 @@ def test_get_profile_answers_freezes_alias_to_existing_application(data_dir, mon
 def test_get_profile_answers_new_company_normalizes_from_identity_key(data_dir):
     """With no existing application row, a brand-new company is aliased from
     its normalized identity key rather than its raw incoming spelling."""
-    from truth.answers import Answers, save as save_answers
+    from truthcv.domain.truth.answers import Answers, save as save_answers
 
     save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com"))
 
@@ -1168,7 +1169,7 @@ def test_get_profile_answers_new_company_normalizes_from_identity_key(data_dir):
 def test_get_profile_answers_alias_freeze_earliest_row_wins(data_dir, monkeypatch):
     """When two application rows are suffix-equivalent, the EARLIEST-created
     row's stored company string is the one the alias is frozen to."""
-    from truth.answers import Answers, save as save_answers
+    from truthcv.domain.truth.answers import Answers, save as save_answers
 
     save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com"))
     _create_application_at(
@@ -1192,7 +1193,7 @@ def test_get_profile_answers_alias_freeze_earliest_row_wins(data_dir, monkeypatc
 def test_get_profile_answers_alias_freeze_only_email_field_changes(data_dir, monkeypatch):
     """Alias freezing changes only `email`; every other field, and the
     persisted answers, stay exactly as the un-aliased call sees them."""
-    from truth.answers import Answers, load as load_answers, save as save_answers
+    from truthcv.domain.truth.answers import Answers, load as load_answers, save as save_answers
 
     save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com", phone="+49 1"))
     _create_application_at(
@@ -1218,14 +1219,14 @@ def test_get_profile_answers_alias_falls_back_when_applications_store_broken(
 ):
     """A broken/unreadable applications store falls back to the incoming
     company string rather than raising."""
-    from truth.answers import Answers, save as save_answers
+    from truthcv.domain.truth.answers import Answers, save as save_answers
 
     save_answers(Answers(name="Jane Rivera", email="jane.rivera@example.com"))
 
     def _broken_load_all():
         raise OSError("applications.json is unreadable")
 
-    monkeypatch.setattr("applications.store.load_all", _broken_load_all)
+    monkeypatch.setattr("truthcv.domain.applications.store.load_all", _broken_load_all)
 
     aliased = tools_ledger.get_profile_answers(company="RobCo GmbH")
 
@@ -1237,7 +1238,7 @@ def test_get_profile_answers_alias_falls_back_when_applications_store_broken(
 
 
 def test_company_research_tools_registered_with_full_input_schema(data_dir):
-    from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
+    from truthcv.adapters.mcp.mcp_app import _TOOL_REGISTRY, _input_schema
 
     assert "record_company_finding" in _TOOL_REGISTRY
     assert "get_company_findings" in _TOOL_REGISTRY
@@ -1299,8 +1300,8 @@ def test_operator_letter_approvals_not_reachable_by_the_agent():
     function itself must not be registered anywhere."""
     import inspect
 
-    import agenttools.mcp_app as mcp_app
-    import agenttools.tools_letter as tools_letter
+    import truthcv.adapters.mcp.mcp_app as mcp_app
+    import truthcv.adapters.mcp.tools_letter as tools_letter
 
     params = list(inspect.signature(tools_letter.generate_cover_letter).parameters)
     assert not any("approv" in p.lower() for p in params)
@@ -1324,7 +1325,7 @@ def test_record_screening_persists_the_run_id_it_was_given(data_dir):
     coverage counters can be derived from the records it produced. A verdict,
     url, role and company are all required, exactly as the other
     record_screening tests supply them."""
-    from screening import store as screening_store
+    from truthcv.domain.screening import store as screening_store
 
     created = tools_ledger.record_screening(
         url="https://jobs.example.com/postings/run-linked-1",
@@ -1343,7 +1344,7 @@ def test_record_postings_seen_is_registered_with_a_non_empty_input_schema():
     """The tools/list surface the agent reads must advertise record_postings_seen
     with a populated inputSchema — an empty property set would leave the agent
     unable to learn it takes run_id and count."""
-    from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
+    from truthcv.adapters.mcp.mcp_app import _TOOL_REGISTRY, _input_schema
 
     assert "record_postings_seen" in _TOOL_REGISTRY
 
@@ -1359,7 +1360,7 @@ def test_record_discovery_coverage_is_registered_with_a_non_empty_input_schema()
     """The tools/list surface the agent reads must advertise
     record_discovery_coverage with a populated inputSchema — an empty
     property set would leave the agent unable to learn its parameters."""
-    from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
+    from truthcv.adapters.mcp.mcp_app import _TOOL_REGISTRY, _input_schema
 
     assert "record_discovery_coverage" in _TOOL_REGISTRY
 
@@ -1375,8 +1376,8 @@ def test_record_postings_seen_accumulates_and_no_ops_on_bad_input(data_dir):
     """postings_seen is the one counter the agent reports directly, and it ADDS
     rather than sets: two calls of 3 and 2 leave the run at 5. An empty run_id
     or a non-positive count records nothing and leaves the total untouched."""
-    import runs.store as runs_store
-    from agenttools.tools_runs import record_postings_seen
+    import truthcv.domain.runs.store as runs_store
+    from truthcv.adapters.mcp.tools_runs import record_postings_seen
 
     runs_store.start("r1", trigger="scheduled", apply_cap=0)
 
@@ -1393,7 +1394,7 @@ def test_record_application_leaves_the_stored_counter_at_zero_but_derives_one(da
     """record_application must no longer bump applications_submitted: the stored
     counter stays 0, while the API derives the count from the application the
     call actually wrote against the run."""
-    import runs.store as runs_store
+    import truthcv.domain.runs.store as runs_store
 
     client = TestClient(app)
     runs_store.start("r2", trigger="scheduled", apply_cap=0)
@@ -1413,7 +1414,7 @@ def test_record_application_leaves_the_stored_counter_at_zero_but_derives_one(da
 
 def test_finish_phase_is_registered_with_a_non_empty_input_schema():
     """The tools/list surface the agent reads must advertise finish_phase."""
-    from agenttools.mcp_app import _TOOL_REGISTRY, _input_schema
+    from truthcv.adapters.mcp.mcp_app import _TOOL_REGISTRY, _input_schema
 
     assert "finish_phase" in _TOOL_REGISTRY
 
@@ -1427,8 +1428,8 @@ def test_finish_phase_is_registered_with_a_non_empty_input_schema():
 
 
 def test_finish_phase_refuses_dork_shortfall_up_to_three_times_then_records(monkeypatch, data_dir):
-    import agentconfig.dorks as dorks
-    from agenttools import tools_runs
+    import truthcv.domain.agentconfig.dorks as dorks
+    from truthcv.adapters.mcp import tools_runs
 
     monkeypatch.setattr(dorks, "compose_direct_boards", lambda *a, **k: [])
     monkeypatch.setattr(dorks, "compose_queries", lambda *a, **k: [{}] * 3)
@@ -1457,9 +1458,9 @@ def test_finish_phase_refuses_dork_shortfall_up_to_three_times_then_records(monk
 
 
 def test_finish_phase_never_sets_a_terminal_status(monkeypatch, data_dir):
-    import agentconfig.dorks as dorks
-    from agenttools import tools_runs
-    from runs import store as runs_store
+    import truthcv.domain.agentconfig.dorks as dorks
+    from truthcv.adapters.mcp import tools_runs
+    from truthcv.domain.runs import store as runs_store
 
     monkeypatch.setattr(dorks, "compose_direct_boards", lambda *a, **k: [])
     monkeypatch.setattr(dorks, "compose_queries", lambda *a, **k: [{}] * 3)
@@ -1475,7 +1476,7 @@ def test_finish_phase_never_sets_a_terminal_status(monkeypatch, data_dir):
 
 
 def test_finish_phase_rejects_an_invalid_channel(data_dir):
-    from agenttools import tools_runs
+    from truthcv.adapters.mcp import tools_runs
 
     tools_runs.start_run("run-phase-bad-channel")
 

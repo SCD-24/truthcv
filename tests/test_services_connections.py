@@ -1,12 +1,12 @@
-"""Unit tests for services.connections (error text and key-save policy)."""
+"""Unit tests for truthcv.services.connections (error text and key-save policy)."""
 
 from __future__ import annotations
 
 import pytest
 
-from providers import ProviderError
-from services import connections as svc
-from services.errors import BadRequest, NotFound
+from truthcv.integrations.providers import ProviderError
+from truthcv.services import connections as svc
+from truthcv.services.errors import BadRequest, NotFound
 
 
 @pytest.fixture

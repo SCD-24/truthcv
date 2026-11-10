@@ -1,12 +1,12 @@
 """Pin the numeric page-target parser and its non-interference with prose.
 
 page_target_pages() is a numeric helper layered over CvConventions.page_target,
-which prompts/style.py and prompts/coverletter.py still read as free-form prose.
+which truthcv/engines/prompts/style.py and truthcv/engines/prompts/coverletter.py still read as free-form prose.
 These tests guard both: the parser's behaviour, and that the string itself is
 untouched.
 """
 
-from prompts.conventions import CvConventions, DEFAULT_CONVENTIONS, page_target_pages
+from truthcv.engines.prompts.conventions import CvConventions, DEFAULT_CONVENTIONS, page_target_pages
 
 
 def test_default_conventions_parse_to_one_page():

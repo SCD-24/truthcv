@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from screening import store
-from screening.model import Screening
+from truthcv.domain.screening import store
+from truthcv.domain.screening.model import Screening
 
 
 def test_new_screening_defaults_to_no_blocker(data_dir):

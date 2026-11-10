@@ -137,7 +137,7 @@ de-duplicated by URL, plus whatever the agent harvests itself from any enabled
 search-type board.
 
 Documents are checked twice: the guardrail approves the *content* before
-rendering, and a separate verification pass (`render/verify.py`) extracts text
+rendering, and a separate verification pass (`truthcv/engines/render/verify.py`) extracts text
 back out of the *produced PDF* and compares it against what was meant to be
 there — a font/kerning defect that glues or drops words in the PDF surfaces as
 an ATS warning, even though the source HTML was fine.
@@ -180,7 +180,7 @@ fallback), not simply whichever account was connected last. Without
 
 Job boards and site sign-ins are on the **Job boards** page; the schedule and
 run history are on the **Agents** page. Target companies and search profiles
-live in the agent config (`companyboards/`, `agentconfig/`), not in a file you
+live in the agent config (`truthcv/domain/companyboards/`, `truthcv/domain/agentconfig/`), not in a file you
 edit by hand.
 
 It is a **separate container from the wizard, and the browser is a third**, so
@@ -243,7 +243,7 @@ Connect it from **Settings → Jev**, which saves the key into the same
 encrypted secret store as your other credentials. There's no `.env` variable
 for it in `.env.example` by design; the `JEV_API_KEY` environment variable is
 consulted as a fallback wherever the app would otherwise read the saved key
-(`secretstore/__init__.py`, `_ENV_KEY_FALLBACK`). `docker-compose.yml` does
+(`truthcv/infra/secretstore/__init__.py`, `_ENV_KEY_FALLBACK`). `docker-compose.yml` does
 not pass `JEV_API_KEY` into the `app` container, so that fallback only works
 when running outside Compose; under Compose, use **Settings → Jev**. The env
 var supplies only the key: the toggles below live in the settings store, so
@@ -381,7 +381,7 @@ this directly on the host fails with a `PermissionError`:
 cp answers.example.yaml answers.local.yaml
 $EDITOR answers.local.yaml
 docker compose run --rm -v "$(pwd)/answers.local.yaml:/app/answers.local.yaml" app \
-  python -m truth.answers --answers /app/answers.local.yaml
+  python -m truthcv.domain.truth.answers --answers /app/answers.local.yaml
 ```
 
 Until one route or the other has run, the agent has no identity to submit
@@ -425,10 +425,10 @@ To generate `ENCRYPTION_KEY` or `AGENT_API_TOKEN` by hand, see step 2 of
 | `APP_PORT` | Host port the app is published on (default `5627`); the launcher advances this automatically if it's taken. |
 | `ENCRYPTION_KEY` | Required — encrypts saved provider credentials at rest (`./data/secrets.enc`). The launcher generates it for you. |
 | `AGENT_API_TOKEN` | Required, non-empty — shared secret the agent, app and browser containers authenticate to each other with. The launcher generates it for you. The agent also uses it to fetch its model credentials from the app (Application agent route). |
-| `APPLICATION_COOLDOWN_DAYS` | Optional — application cooldown window in days (default `90`; blank or unparsable also gives `90`; `screening/cooldown.py`). Not passed through by `docker-compose.yml`. |
-| `CORS_ORIGINS` | Optional — allowed CORS origins for the API (default `http://localhost:5173`, the Vite dev server; `api/config.py`). Not passed through by `docker-compose.yml`. |
-| `BROWSER_STREAM_ALLOWED_HOSTS` | Optional — comma-separated extra hostnames accepted in the Origin check of the browser sign-in viewport relay (default: loopback only; `api/browser_stream.py`). Only for deployments that deliberately publish the app beyond loopback. Not passed through by `docker-compose.yml`. |
-| `BROWSER_STREAM_ALLOWED_PEERS` | Optional — comma-separated extra peer addresses allowed to use that relay (default: loopback plus the container's default gateway; `api/browser_stream.py`). Not passed through by `docker-compose.yml`. |
+| `APPLICATION_COOLDOWN_DAYS` | Optional — application cooldown window in days (default `90`; blank or unparsable also gives `90`; `truthcv/domain/screening/cooldown.py`). Not passed through by `docker-compose.yml`. |
+| `CORS_ORIGINS` | Optional — allowed CORS origins for the API (default `http://localhost:5173`, the Vite dev server; `truthcv/adapters/http/config.py`). Not passed through by `docker-compose.yml`. |
+| `BROWSER_STREAM_ALLOWED_HOSTS` | Optional — comma-separated extra hostnames accepted in the Origin check of the browser sign-in viewport relay (default: loopback only; `truthcv/adapters/http/browser_stream.py`). Only for deployments that deliberately publish the app beyond loopback. Not passed through by `docker-compose.yml`. |
+| `BROWSER_STREAM_ALLOWED_PEERS` | Optional — comma-separated extra peer addresses allowed to use that relay (default: loopback plus the container's default gateway; `truthcv/adapters/http/browser_stream.py`). Not passed through by `docker-compose.yml`. |
 | `AGENT_CONTROL_PORT` / `SESSION_SERVER_PORT` / `BROWSER_NOVNC_PORT` | Compose-internal ports (defaults `9099`, `8932`, `7900`) wired between the app, agent and browser containers by `docker-compose.yml`; none is published to the host. You normally never set these. |
 | `DATA_DIR` | Host path for persisted data (default `./data`). |
 | `LLM_PROVIDER` | `anthropic` \| `openai` \| `ollama` — provider fallback when neither a default/task route nor a migrated provider choice is saved (defaults to `anthropic` when unset); connecting an account alone does not override it. (`fake` is accepted for tests only.) |
@@ -543,7 +543,7 @@ Backend:
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env        # then set your provider + key, or connect one in Model routing
-python -m api.main          # serves on http://localhost:8080
+python -m truthcv.adapters.http.main          # serves on http://localhost:8080
 ```
 
 > Note: PDF/DOCX rendering shells out to system libraries that are **not** Python
@@ -570,7 +570,7 @@ npm install
 npm run dev        # http://localhost:5173, proxies /api to the backend on :8080
 ```
 
-Run the backend (above) alongside it. The Vite build outputs into `api/static`,
+Run the backend (above) alongside it. The Vite build outputs into `truthcv/adapters/http/static`,
 which the API serves in production.
 
 ## Tests
@@ -590,7 +590,7 @@ cd web && npm install && npm test
 
 ## How the guardrail works
 
-The guardrail (`guardrail/`) is pure, deterministic, and uses **no LLM**. It
+The guardrail (`truthcv/engines/guardrail/`) is pure, deterministic, and uses **no LLM**. It
 tokenizes each generated draft scope-by-scope and checks every token against the
 allowed set derived from your truth file (plus stopwords). Anything untraceable
 is grouped back under the exact bullet and section it came from, so you approve

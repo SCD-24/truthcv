@@ -12,16 +12,16 @@ import io
 import pytest
 from fastapi.testclient import TestClient
 
-import api.cv_routes as cv_routes
-import api.truth_routes as truth_routes
-import services.render_cv as render_cv
-import services.truth as truth_service
-import truth.document as truth_document
-import truth.pdf as truth_pdf
-import truth.store as truth_store
-from api.main import app
-from providers.base import ProviderError
-from providers.fake import FakeProvider
+import truthcv.adapters.http.cv_routes as cv_routes
+import truthcv.adapters.http.truth_routes as truth_routes
+import truthcv.services.render_cv as render_cv
+import truthcv.services.truth as truth_service
+import truthcv.domain.truth.document as truth_document
+import truthcv.domain.truth.pdf as truth_pdf
+import truthcv.domain.truth.store as truth_store
+from truthcv.adapters.http.main import app
+from truthcv.integrations.providers.base import ProviderError
+from truthcv.integrations.providers.fake import FakeProvider
 
 
 def _router(system, messages, schema):
@@ -302,10 +302,10 @@ def test_confirm_legacy_approved_ids_writes_original(client):
 
 def test_render_blocked_when_draft_has_non_truth_token(client):
     # Seed truth + a draft whose bullet references a fabricated token.
-    from truth import save
-    from truth.model import Experience, Skill, Truth
-    import tailor as te
-    from tailor.model import Draft, DraftExperience
+    from truthcv.domain.truth import save
+    from truthcv.domain.truth.model import Experience, Skill, Truth
+    import truthcv.engines.tailor as te
+    from truthcv.engines.tailor.model import Draft, DraftExperience
 
     save(
         Truth(
@@ -351,10 +351,10 @@ def test_render_blocked_when_draft_has_non_truth_token(client):
 def _seed_truth_with_summary(summary: str) -> None:
     """Truth with one experience/skill and a profile summary, plus a matching
     truth-only draft so /render exercises only the summary scope."""
-    from truth import save
-    from truth.model import Experience, Profile, Skill, Truth
-    import tailor as te
-    from tailor.model import Draft, DraftExperience
+    from truthcv.domain.truth import save
+    from truthcv.domain.truth.model import Experience, Profile, Skill, Truth
+    import truthcv.engines.tailor as te
+    from truthcv.engines.tailor.model import Draft, DraftExperience
 
     save(
         Truth(

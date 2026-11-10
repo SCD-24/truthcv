@@ -7,7 +7,7 @@ from urllib.parse import unquote_plus
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
+from truthcv.adapters.http.main import app
 
 
 @pytest.fixture()
@@ -195,7 +195,7 @@ def test_custom_board_returns_mode_locked_false(client, data_dir):
 
 
 def test_mode_set_via_put_survives_a_subsequent_get(client, data_dir):
-    """Regression: the services/agent_config.py merge used to drop mode on save."""
+    """Regression: the truthcv/services/agent_config.py merge used to drop mode on save."""
     client.put("/api/agent/config", json={"jobBoards": [{"source": "custom.example.com", "mode": "direct"}]})
     got = client.get("/api/agent/config").json()
     custom = next(b for b in got["jobBoards"] if b["source"] == "custom.example.com")
@@ -776,7 +776,7 @@ def test_put_accepts_glassdoor_min_in_range(client, data_dir):
 
 def test_get_returns_resolved_boards_for_target_companies(client, data_dir):
     """GET /api/agent/config includes resolved boards for watchlist companies."""
-    from companyboards import store as board_store
+    from truthcv.domain.companyboards import store as board_store
     
     # Configure target companies
     r = client.put("/api/agent/config", json={"targetCompanies": ["Google", "Apple"]})
@@ -800,10 +800,10 @@ def test_get_returns_resolved_boards_for_target_companies(client, data_dir):
 def test_get_returns_resolved_boards_for_suffix_equivalent_target_company(client, data_dir):
     """A target company matches a board recorded under a legal-entity-suffix variant.
 
-    The match is by identity key (identity.company.company_identity_key), so
+    The match is by identity key (truthcv.infra.identity.company.company_identity_key), so
     a target company "RobCo" also picks up a board recorded as "RobCo GmbH".
     """
-    from companyboards import store as board_store
+    from truthcv.domain.companyboards import store as board_store
 
     r = client.put("/api/agent/config", json={"targetCompanies": ["RobCo"]})
     assert r.status_code == 200
@@ -821,7 +821,7 @@ def test_get_returns_resolved_boards_for_suffix_equivalent_target_company(client
 
 def test_get_omits_boards_for_removed_target_companies(client, data_dir):
     """Boards for companies removed from watchlist are pruned."""
-    from companyboards import store as board_store
+    from truthcv.domain.companyboards import store as board_store
     
     # Set targets
     client.put("/api/agent/config", json={"targetCompanies": ["Google"]})
@@ -852,7 +852,7 @@ def test_put_rejects_unknown_fields_including_company_boards(client, data_dir):
     must never land in the stored config even if the reject-unknown-fields
     behavior above were ever loosened.
     """
-    from agentconfig import store as agent_config_store
+    from truthcv.domain.agentconfig import store as agent_config_store
 
     r = client.put(
         "/api/agent/config",
@@ -1072,8 +1072,8 @@ class TestMaxPostingAgeDays:
 
 def test_get_search_queries_carry_all_deduped_profiles(tmp_path, monkeypatch):
     """Two profiles composing the same dork URL both survive the GET response."""
-    from agentconfig.dorks import compose_queries
-    from agentconfig.store import JobProfile
+    from truthcv.domain.agentconfig.dorks import compose_queries
+    from truthcv.domain.agentconfig.store import JobProfile
 
     profiles = [
         JobProfile(name="a", keywords=["backend"], enabled=True),
@@ -1082,7 +1082,7 @@ def test_get_search_queries_carry_all_deduped_profiles(tmp_path, monkeypatch):
     queries = compose_queries(profiles, "d", ["ashby"])
     shared = [q for q in queries if q.get("profiles") == ["a", "b"]]
     assert shared, queries
-    from api.schemas import SearchQueryModel
+    from truthcv.adapters.http.schemas import SearchQueryModel
 
     dumped = SearchQueryModel.model_validate(shared[0]).model_dump(by_alias=True)
     assert dumped["profiles"] == ["a", "b"]
@@ -1123,7 +1123,7 @@ class TestDorkRecency:
 
     def test_defaults_to_w_for_stored_config_missing_the_key(self, client, data_dir):
         import json as _json
-        from agentconfig import store
+        from truthcv.domain.agentconfig import store
 
         store.config_path().write_text(_json.dumps({"mode": "full"}), encoding="utf-8")
         assert client.get("/api/agent/config").json()["dorkRecency"] == "w"

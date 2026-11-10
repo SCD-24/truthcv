@@ -1,17 +1,17 @@
-"""Error branches of services.screening_letters and the screening services
-extracted from api/routes.py: each raises the ServiceError the route's HTTP
+"""Error branches of truthcv.services.screening_letters and the screening services
+extracted from truthcv/adapters/http/routes.py: each raises the ServiceError the route's HTTP
 status maps to, with the route's exact detail text/payload."""
 
 from __future__ import annotations
 
 import pytest
 
-import coverletter.store as letter_store
-import services.letters as letters
-import services.screening_letters as sl
-import services.screenings as svc
-from screening import store
-from services.errors import Conflict, NotFound, Refused
+import truthcv.engines.coverletter.store as letter_store
+import truthcv.services.letters as letters
+import truthcv.services.screening_letters as sl
+import truthcv.services.screenings as svc
+from truthcv.domain.screening import store
+from truthcv.services.errors import Conflict, NotFound, Refused
 
 URL = "https://acme.example/jobs/1"
 
@@ -74,8 +74,8 @@ def test_generate_blocked_raises_structured_refusal(monkeypatch):
                 "paragraphs": para}
 
     monkeypatch.setattr(letters, "generate_cover_letter_for_operator", fake)
-    from coverletter import LETTER_SCOPE_ID
-    from services.render_cv import _claim_id
+    from truthcv.engines.coverletter import LETTER_SCOPE_ID
+    from truthcv.services.render_cv import _claim_id
     cid = _claim_id(LETTER_SCOPE_ID, "Led X")
     with pytest.raises(Refused) as exc:
         _gen(s.id, approved_ids={cid}, denied_ids=set(), paragraphs=para)
@@ -106,7 +106,7 @@ def test_save_operator_text_errors_and_keeps_paragraphs():
     assert (draft.text, draft.paragraphs, draft.source) == ("mine", [{"text": "g"}], "operator")
 
 
-# --- services.screenings ---------------------------------------------------
+# --- truthcv.services.screenings ---------------------------------------------------
 
 def test_bulk_set_approval_swallows_conflict_and_refuses_bad_value():
     a = _screening(profile="A", verdict="rejected")

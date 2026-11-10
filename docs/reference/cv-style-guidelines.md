@@ -94,13 +94,13 @@ invent a section the user has no facts for.
 
 ## AI-slop patterns to avoid
 
-Distilled from the no-ai-slop skill; `prompts/style.py` (`cv_anti_slop()` /
+Distilled from the no-ai-slop skill; `truthcv/engines/prompts/style.py` (`cv_anti_slop()` /
 `letter_anti_slop()`) is the executable copy of these bans, so change both
 together. Patterns marked "humanizer" are adapted from humanizer SKILL.md v3.1.0
 (MIT, github.com/blader/humanizer). The CV humanizer rules are rendered by
-`prompts/tailor.py` (`_cv_humanizer_rules()`); the letter humanizer rules are
-rendered by `prompts/style.py` (`_letter_humanizer_rules()`). The banned-word
-list in both comes from `STRICT_TELL_WORDS` in `prompts/style.py`. Every rule
+`truthcv/engines/prompts/tailor.py` (`_cv_humanizer_rules()`); the letter humanizer rules are
+rendered by `truthcv/engines/prompts/style.py` (`_letter_humanizer_rules()`). The banned-word
+list in both comes from `STRICT_TELL_WORDS` in `truthcv/engines/prompts/style.py`. Every rule
 below adds no facts; it changes style only.
 
 **Both surfaces**

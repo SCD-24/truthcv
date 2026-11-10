@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
+from truthcv.adapters.http.main import app
 
 
 @pytest.fixture()

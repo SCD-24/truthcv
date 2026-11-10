@@ -1,4 +1,4 @@
-"""Tests for connections/auth/codex.py — ChatGPT device-code OAuth flow."""
+"""Tests for truthcv/integrations/connections/auth/codex.py — ChatGPT device-code OAuth flow."""
 
 import base64
 import json as _json
@@ -11,8 +11,8 @@ import respx
 from cryptography.fernet import Fernet
 from httpx import Response
 
-import secretstore
-from connections.auth import codex
+import truthcv.infra.secretstore as secretstore
+from truthcv.integrations.connections.auth import codex
 
 
 @pytest.fixture()

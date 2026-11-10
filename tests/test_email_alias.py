@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from truth.emailalias import ALIAS_PREFIX, alias_email, company_slug
+from truthcv.domain.truth.emailalias import ALIAS_PREFIX, alias_email, company_slug
 
 
 def test_company_slug_basic():

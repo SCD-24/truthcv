@@ -11,9 +11,9 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-import api.browser_stream as browser_stream
-from api.browser_stream import origin_allowed, peer_allowed
-from api.main import app
+import truthcv.adapters.http.browser_stream as browser_stream
+from truthcv.adapters.http.browser_stream import origin_allowed, peer_allowed
+from truthcv.adapters.http.main import app
 
 
 @pytest.fixture()
@@ -138,7 +138,7 @@ class TestPeerAllowed:
         must be at least as visible as widening the (weaker) Origin allowlist."""
         monkeypatch.setattr(browser_stream, "_logged_extra_peers", False)
         monkeypatch.setenv("BROWSER_STREAM_ALLOWED_PEERS", "172.20.0.9")
-        with caplog.at_level("WARNING", logger="api.browser_stream"):
+        with caplog.at_level("WARNING", logger="truthcv.adapters.http.browser_stream"):
             peer_allowed("172.20.0.9")
         assert any(
             "BROWSER_STREAM_ALLOWED_PEERS" in record.getMessage() for record in caplog.records

@@ -103,7 +103,7 @@ def test_scheduler_polls_do_not_request_the_feed(server, field):
 
 def test_job_config_survives_a_response_slower_than_the_scheduler_poll_timeout():
     """job_config is the one field the app may spend time on — it pulls the
-    feed, bounded server-side at jobfeeds.remoterocketship.BUDGET_SECONDS. The
+    feed, bounded server-side at truthcv.domain.jobfeeds.remoterocketship.BUDGET_SECONDS. The
     5s the scheduler's polls use would time out on a slow-but-working feed, and
     daily-apply.sh aborts the whole run on a failed config fetch rather than
     losing only the feed. Driven with a real slow server, because the property

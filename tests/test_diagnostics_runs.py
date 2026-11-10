@@ -1,4 +1,4 @@
-"""Tests for the run summary / bounded detail tools (api/diagnostics_runs.py)."""
+"""Tests for the run summary / bounded detail tools (truthcv/adapters/http/diagnostics_runs.py)."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ import json
 
 import pytest
 
-import api.diagnostics_runs as dr
-from api.diagnostics_mcp import _handle_diag_call_tool, _handle_diag_list_tools
-from runs.model import RunRecord
+import truthcv.adapters.http.diagnostics_runs as dr
+from truthcv.adapters.http.diagnostics_mcp import _handle_diag_call_tool, _handle_diag_list_tools
+from truthcv.domain.runs.model import RunRecord
 
 RECOVERY = (
     "Stop acting on this posting, not the entire run; continue other work and "

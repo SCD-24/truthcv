@@ -1,6 +1,6 @@
 """Clear a stale apply failure from one or more screening records.
 
-``screening.store.record_apply_failure`` accumulates an operator-facing
+``truthcv.domain.screening.store.record_apply_failure`` accumulates an operator-facing
 ``apply_error`` (and, when structured, ``apply_blocker``/``signin_url``) every
 time an unattended run fails to submit an approved application. Most of the
 time that failure describes something true about the posting or the run and
@@ -10,14 +10,14 @@ rejecting ``get_canonical_cv``'s path — in which case the text is stale: the
 next run will succeed, but the ledger still shows the old failure until
 something clears it.
 
-``screening.store`` has no HTTP or MCP route for this on purpose (clearing an
+``truthcv.domain.screening.store`` has no HTTP or MCP route for this on purpose (clearing an
 error is an operator repair, not something the agent or the app UI does for
 itself), so this one-off script is the supported way to do it, calling
-``screening.store.clear_apply_failure`` for each id given. It touches nothing
+``truthcv.domain.screening.store.clear_apply_failure`` for each id given. It touches nothing
 else: ``approval``, ``apply_attempts``, and claim fields are left exactly as
 ``clear_apply_failure`` leaves them.
 
-This script goes through ``screening.store`` for every read and write; it
+This script goes through ``truthcv.domain.screening.store`` for every read and write; it
 never touches ``data/screenings.json`` directly.
 
 Usage::
@@ -37,14 +37,14 @@ from pathlib import Path
 # resolve. Add the root explicitly rather than constrain how it is invoked.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import screening.store as screening_store  # noqa: E402
+import truthcv.domain.screening.store as screening_store  # noqa: E402
 
 
 def classify(ids: list[str]) -> tuple[list, list]:
     """Split the requested ids into (found, missing) screening records.
 
     ``found`` holds the actual ``Screening`` objects (read via
-    ``screening.store.get``, before any write); ``missing`` holds the ids that
+    ``truthcv.domain.screening.store.get``, before any write); ``missing`` holds the ids that
     matched nothing.
     """
     found, missing = [], []

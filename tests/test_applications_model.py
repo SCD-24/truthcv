@@ -3,11 +3,11 @@
 The nested-evidence fixture preserves the exact shape of a real Jobs
 applications/records/*.json entry — the nesting, field population, and
 evidence sub-objects a migrated record actually has — so the evidence
-dataclasses (Confirmation, Screening, FieldSubmitted, Attachment) are
+dataclasses (Confirmation, ApplicationScreening, FieldSubmitted, Attachment) are
 exercised against a real production record shape, with all identifying values
 replaced by placeholders rather than invented from scratch.
 
-Screening no longer carries `entity`/`glassdoor`: those were company-level
+ApplicationScreening no longer carries `entity`/`glassdoor`: those were company-level
 claims with no source or date, and now live in `companyresearch` instead. A
 raw record still carrying those legacy keys must load cleanly and simply
 drop them — see test_screening_from_dict_drops_legacy_entity_and_glassdoor.
@@ -15,16 +15,16 @@ drop them — see test_screening_from_dict_drops_legacy_entity_and_glassdoor.
 
 from __future__ import annotations
 
-import applications
-from applications.model import (
+import truthcv.domain.applications as applications
+from truthcv.domain.applications.model import (
     Application,
+    ApplicationScreening,
     Attachment,
     Confirmation,
     Document,
     FieldSubmitted,
-    Screening,
 )
-from applications.store import (
+from truthcv.domain.applications.store import (
     save_attachments,
     save_confirmation,
     save_fields_submitted,
@@ -50,7 +50,7 @@ def test_confirmation_defaults():
 
 
 def test_screening_defaults():
-    screening = Screening.from_dict(None)
+    screening = ApplicationScreening.from_dict(None)
     assert screening.remote == ""
     assert screening.salary == ""
     assert screening.language == ""
@@ -60,7 +60,7 @@ def test_screening_defaults():
 def test_screening_from_dict_drops_legacy_entity_and_glassdoor():
     """A raw record still carrying the removed keys loads without raising and
     simply drops them — the back-compat contract for any un-migrated file."""
-    screening = Screening.from_dict(
+    screening = ApplicationScreening.from_dict(
         {
             "entity": "Some GmbH, read off the Impressum",
             "glassdoor": {"rating": 3.3, "reviews": 17, "waiver_applied": True},
@@ -98,7 +98,7 @@ def test_application_from_dict_legacy_record_defaults_nested_evidence():
     assert app.submitted is True
     assert app.fields_submitted == []
     assert app.confirmation == Confirmation()
-    assert app.screening == Screening()
+    assert app.screening == ApplicationScreening()
     assert app.attachments == []
     assert app.cv_document is None
     assert app.cover_letter_document is None
@@ -206,7 +206,7 @@ def test_full_nested_evidence_shape_exact_round_trip():
         "and the Application tab relabelled itself \"Application \u2014 Applied\"."
     )
 
-    # Screening's posting-level verdicts match the real record exactly.
+    # ApplicationScreening's posting-level verdicts match the real record exactly.
     assert app.screening.remote.startswith("Passes")
     assert app.screening.role_type.startswith("Target category")
 
@@ -243,7 +243,7 @@ def test_create_and_update_ignore_structured_fields(data_dir):
     assert app.company == "Northwind Health GmbH"
     assert app.status == "confirmed"
     assert app.confirmation == Confirmation()
-    assert app.screening == Screening()
+    assert app.screening == ApplicationScreening()
     assert app.fields_submitted == []
     assert app.attachments == []
 
@@ -257,12 +257,12 @@ def test_create_and_update_ignore_structured_fields(data_dir):
     )
     assert updated.notes == "Updated notes"
     assert updated.confirmation == Confirmation()
-    assert updated.screening == Screening()
+    assert updated.screening == ApplicationScreening()
 
     # Persisted, not just in-memory: reload shows the same refusal.
     reloaded = applications.get(app.id)
     assert reloaded.confirmation == Confirmation()
-    assert reloaded.screening == Screening()
+    assert reloaded.screening == ApplicationScreening()
 
 
 def test_dedicated_setters_persist_structured_fields(data_dir):

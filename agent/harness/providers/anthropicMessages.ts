@@ -49,8 +49,8 @@ const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
  * exactly like an exhausted quota and is not one: the same token, in the same
  * second, answers 200 when the block is present.
  *
- * Must stay byte-identical to CLAUDE_CODE_PREAMBLE in connections/auth/claude.py,
- * which is what the app's own provider (providers/anthropic_provider.py
+ * Must stay byte-identical to CLAUDE_CODE_PREAMBLE in truthcv/integrations/connections/auth/claude.py,
+ * which is what the app's own provider (truthcv/integrations/providers/anthropic_provider.py
  * _system_param) sends. tests/test_anthropic_oauth_preamble.py pins the two
  * together.
  */
@@ -70,7 +70,7 @@ function buildHeaders(opts: AnthropicMessagesOptions): Record<string, string> {
   };
   if (isOauth(opts)) {
     headers['authorization'] = `Bearer ${opts.oauthToken}`;
-    // Matches providers/anthropic_provider.py's default_headers. The preamble
+    // Matches truthcv/integrations/providers/anthropic_provider.py's default_headers. The preamble
     // is what the API actually gates on, but this is the shape the app already
     // sends successfully and the two should not diverge.
     headers['anthropic-beta'] = 'oauth-2025-04-20';

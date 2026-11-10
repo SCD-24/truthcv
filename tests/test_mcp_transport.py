@@ -16,7 +16,7 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app, _mcp_server
+from truthcv.adapters.http.main import app, _mcp_server
 
 
 @pytest.fixture(scope="module")

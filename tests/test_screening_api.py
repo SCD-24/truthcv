@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
+from truthcv.adapters.http.main import app
 
 
 @pytest.fixture()
@@ -18,7 +18,7 @@ def client(data_dir):
 
 
 def test_applied_route_409s_when_another_record_for_the_posting_is_applied(client):
-    from screening import store
+    from truthcv.domain.screening import store
 
     url = "https://acme.example/jobs/dup-applied"
     fields = {"company": "Acme", "role": "Engineer", "url": url, "verdict": "rejected"}
@@ -168,7 +168,7 @@ def test_get_screenings_returns_criteria_evidence_fields(client):
     """GET /api/screenings surfaces profile/remoteArrangement/
     languageRequirement for a record that carries them — the approval queue
     needs the evidence trail, not just the verdict."""
-    import screening.store as screening_store
+    import truthcv.domain.screening.store as screening_store
 
     screening_store.create(
         {
@@ -281,7 +281,7 @@ def _post_agent_rejection(client, company, criterion=""):
 
 
 def _store_operator_rejection(company):
-    from screening import store
+    from truthcv.domain.screening import store
 
     rec, _ = store.create_or_get({
         "company": company,
@@ -545,7 +545,7 @@ def test_cooldown_no_match_reports_not_in_cooldown(client):
 
 def test_cooldown_reports_blocking_window(client, data_dir, monkeypatch):
     """GET /api/cooldown names the window: role-matched vs company-only."""
-    from agentconfig import store as agent_config_store
+    from truthcv.domain.agentconfig import store as agent_config_store
 
     monkeypatch.delenv("APPLICATION_COOLDOWN_DAYS", raising=False)
     cfg = agent_config_store.load()
@@ -563,7 +563,7 @@ def test_cooldown_reports_blocking_window(client, data_dir, monkeypatch):
 
 
 def test_cooldown_window_none_when_clear_or_blocklisted(client, data_dir):
-    from agentconfig import store as agent_config_store
+    from truthcv.domain.agentconfig import store as agent_config_store
 
     cfg = agent_config_store.load()
     cfg.blocked_companies = ["BlockCo"]
@@ -672,7 +672,7 @@ def test_put_answers_partial_applies_empty_string_but_preserves_omitted_field(cl
 
 
 def _two_rejected_for_one_url():
-    from screening import store
+    from truthcv.domain.screening import store
 
     base = {"company": "Acme", "role": "Eng", "url": "https://acme.example/jobs/9",
             "verdict": "rejected"}

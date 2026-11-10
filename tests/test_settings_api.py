@@ -10,11 +10,11 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-import api.settings_routes as routes
-import modelrouting
-import secretstore
-from api.main import app
-from providers.fake import FakeProvider
+import truthcv.adapters.http.settings_routes as routes
+import truthcv.integrations.modelrouting as modelrouting
+import truthcv.infra.secretstore as secretstore
+from truthcv.adapters.http.main import app
+from truthcv.integrations.providers.fake import FakeProvider
 
 FERNET_KEY = "h2oN5GQVeWVhciVjWNImtAmWFyPGlrWvDCq8vXuqfmo="
 
@@ -142,7 +142,7 @@ def test_post_settings_unknown_provider_400_writes_nothing(client):
 def test_models_uses_typed_unsaved_key(client, monkeypatch):
     """/api/models constructs a provider directly from a submitted-but-unsaved
     key, per _provider_from_update, without persisting it."""
-    import providers.anthropic_provider as ap
+    import truthcv.integrations.providers.anthropic_provider as ap
 
     captured: dict = {}
 

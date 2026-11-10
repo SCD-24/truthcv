@@ -1,7 +1,7 @@
-"""Tests for render.verify.verify_pdf: does the produced PDF read back right?
+"""Tests for truthcv.engines.render.verify.verify_pdf: does the produced PDF read back right?
 
 Most cases drive the comparison deterministically by monkeypatching the
-private extraction seam `render.verify._extract_pypdf`, so no PDF backend is
+private extraction seam `truthcv.engines.render.verify._extract_pypdf`, so no PDF backend is
 required. One integration test at the end renders and verifies a real PDF,
 skipping cleanly when WeasyPrint is unavailable.
 """
@@ -12,11 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from render import verify as verify_mod
-from render.verify import verify_pdf
-from render.html import render_html
-from render import pdf as pdf_mod
-from tailor.model import Draft, DraftExperience
+from truthcv.engines.render import verify as verify_mod
+from truthcv.engines.render.verify import verify_pdf
+from truthcv.engines.render.html import render_html
+from truthcv.engines.render import pdf as pdf_mod
+from truthcv.engines.tailor.model import Draft, DraftExperience
 
 FAKE_PDF = Path("/fake/cv.pdf")
 

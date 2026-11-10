@@ -71,8 +71,8 @@ describe("isCooldownActive", () => {
 });
 
 /** Build a ScreeningRecord fixture shaped exactly like the ones the backend
- * emits (screening/model.py's Screening dataclass, serialised camelCase per
- * api/schemas.py), so these tests exercise realistic records rather than a
+ * emits (truthcv/domain/screening/model.py's Screening dataclass, serialised camelCase per
+ * truthcv/adapters/http/schemas/), so these tests exercise realistic records rather than a
  * loose partial cast. */
 function makeScreening(overrides: Partial<ScreeningRecord> = {}): ScreeningRecord {
   return {
