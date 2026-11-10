@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-import api.routes as routes
+import api.settings_routes as routes
 import modelrouting
 import secretstore
 from api.main import app

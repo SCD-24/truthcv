@@ -45,7 +45,7 @@ class _StubProvider:
 
 @pytest.fixture()
 def stub_provider(monkeypatch):
-    import api.routes as letter_operator
+    import api.screening_routes as letter_operator
 
     monkeypatch.setattr(letter_operator, "get_provider", lambda _name: _StubProvider())
     return _StubProvider()
@@ -135,7 +135,7 @@ def test_blocked_generation_writes_nothing_and_names_the_claims(client, monkeypa
     """The guardrail still binds on generation. A blocked letter must not be
     stored: a draft on disk is what unlocks Approve, so storing a blocked one
     would let an ungrounded claim through the one gate that catches it."""
-    import api.routes as letter_operator
+    import api.screening_routes as letter_operator
 
     class _Overclaiming:
         def extract_json(self, system, messages, schema=None):
@@ -186,7 +186,7 @@ def test_blocked_generation_exposes_claim_ids_and_paragraphs(client, monkeypatch
     a stable claimId per blocked claim, its experienceId, text and tokens, and
     the paragraphs actually generated (so a retry can re-validate them without
     a second LLM call)."""
-    import api.routes as letter_operator
+    import api.screening_routes as letter_operator
 
     class _Overclaiming:
         def extract_json(self, system, messages, schema=None):
@@ -219,7 +219,7 @@ def test_blocked_generation_exposes_claim_ids_and_paragraphs(client, monkeypatch
 
 
 def _blocked_response(client, monkeypatch, call_counter):
-    import api.routes as letter_operator
+    import api.screening_routes as letter_operator
 
     class _Overclaiming:
         def extract_json(self, system, messages, schema=None):
@@ -300,7 +300,7 @@ def test_generate_without_preset_id_uses_default_preset_prompt(client, monkeypat
     not silently fall back to some other preset (or error) — the system
     prompt the provider actually receives must match what that default
     preset produces."""
-    import api.routes as letter_operator
+    import api.screening_routes as letter_operator
     from prompts import cover_letter_system_for_preset
     from prompts.library import default_preset
 
@@ -322,7 +322,7 @@ def test_generate_with_explicit_preset_id_uses_that_presets_prompt(client, monke
     """A presetId in the request body selects that preset's prompt — one that
     is distinctly not the default preset's — proving the given id actually
     reaches prompt assembly rather than being ignored."""
-    import api.routes as letter_operator
+    import api.screening_routes as letter_operator
     from prompts import cover_letter_system_for_preset
     from prompts.library import default_preset
 
@@ -346,7 +346,7 @@ def test_unknown_preset_id_errors_instead_of_silently_falling_back(client, monke
     """An unknown presetId must surface to the caller as an error, never a
     silent fallback to the default preset's letter: no 200 is acceptable
     here, whatever the exact status code turns out to be."""
-    import api.routes as routes
+    import api.cv_routes as routes
     from providers.fake import FakeProvider
     from truth import save
     from truth.model import Experience, Skill, Truth
