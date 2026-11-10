@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-import api.routes as routes
+import api.cv_routes as cv_routes
 import render
 from api.main import app
 from providers.fake import FakeProvider
@@ -39,7 +39,7 @@ def _seed_truth() -> None:
 @pytest.fixture()
 def client(data_dir, monkeypatch):
     provider = FakeProvider(router=lambda *a, **k: {})
-    monkeypatch.setattr(routes, "get_provider", lambda *a, **k: provider)
+    monkeypatch.setattr(cv_routes, "get_provider", lambda *a, **k: provider)
     return TestClient(app)
 
 

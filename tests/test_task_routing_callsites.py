@@ -53,7 +53,7 @@ def test_extract_route_passes_task_name(data_dir, monkeypatch):
             }
         )
 
-    import api.routes as routes
+    import api.truth_routes as routes
     from api.main import app
 
     monkeypatch.setattr(routes, "get_provider", fake_get_provider)
@@ -82,7 +82,7 @@ def test_routes_pass_task_names(data_dir, monkeypatch):
             }
         )
 
-    import api.routes as routes
+    import api.cv_routes as routes
     from truth import save
     from truth.model import Experience, Skill, Truth
     from storage import data_dir as dd

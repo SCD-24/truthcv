@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-import api.routes as routes
+import api.cv_routes as cv_routes
 from api.main import app
 from providers.fake import FakeProvider
 from truth import save
@@ -25,7 +25,7 @@ def client(data_dir, monkeypatch):
             ]
         }
 
-    monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
+    monkeypatch.setattr(cv_routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
     save(
         _truth_with(
             skills=[Skill(id="s1", value="Python", source="linkedin-pdf")],
@@ -48,7 +48,7 @@ def client(data_dir, monkeypatch):
 
 
 def test_cover_letter_requires_posting(data_dir, monkeypatch):
-    monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider())
+    monkeypatch.setattr(cv_routes, "get_provider", lambda *a, **k: FakeProvider())
     c = TestClient(app)
     r = c.post("/api/cover-letter", json={"length": "Short"})
     assert r.status_code == 400
@@ -68,7 +68,7 @@ def test_cover_letter_blocks_fabrication(data_dir, monkeypatch):
     def router(system, messages, schema):
         return {"paragraphs": [{"text": "I led 500 people.", "claims": ["Led 500 people at NASA"]}]}
 
-    monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
+    monkeypatch.setattr(cv_routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
     save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
     from storage import data_dir as dd
 
@@ -86,7 +86,7 @@ def _fabricating_client(data_dir, monkeypatch):
     def router(system, messages, schema):
         return {"paragraphs": [{"text": "I led 500 people.", "claims": ["Led 500 people at NASA"]}]}
 
-    monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
+    monkeypatch.setattr(cv_routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
     save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
     from storage import data_dir as dd
 
@@ -113,7 +113,7 @@ def test_cover_letter_style_warnings_flag_chatbot_residue(data_dir, monkeypatch)
     def router(system, messages, schema):
         return {"paragraphs": [{"text": "I use Python daily. I hope this helps!", "claims": ["Python"]}]}
 
-    monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
+    monkeypatch.setattr(cv_routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
     save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
     c = TestClient(app)
     r = c.post("/api/cover-letter", json={"length": "Short", "posting": "A fresh role"})
@@ -174,7 +174,7 @@ def _answer_claiming_client(data_dir, monkeypatch):
             ]
         }
 
-    monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
+    monkeypatch.setattr(cv_routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
     save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
     from storage import data_dir as dd
 
@@ -233,7 +233,7 @@ def test_cover_letter_uses_body_posting_over_stale_file(data_dir, monkeypatch):
             ]
         }
 
-    monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
+    monkeypatch.setattr(cv_routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
     save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
     from storage import data_dir as dd
 
@@ -259,7 +259,7 @@ def test_cover_letter_body_posting_works_without_file(data_dir, monkeypatch):
     def router(system, messages, schema):
         return {"paragraphs": [{"text": "I use Python daily.", "claims": ["Python"]}]}
 
-    monkeypatch.setattr(routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
+    monkeypatch.setattr(cv_routes, "get_provider", lambda *a, **k: FakeProvider(router=router))
     save(_truth_with(skills=[Skill(id="s1", value="Python", source="linkedin-pdf")]))
     c = TestClient(app)
     r = c.post(

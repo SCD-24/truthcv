@@ -12,7 +12,8 @@ import io
 import pytest
 from fastapi.testclient import TestClient
 
-import api.routes as routes
+import api.cv_routes as cv_routes
+import api.truth_routes as truth_routes
 import services.render_cv as render_cv
 import services.truth as truth_service
 import truth.document as truth_document
@@ -60,7 +61,8 @@ def _router(system, messages, schema):
 @pytest.fixture()
 def client(data_dir, monkeypatch):
     provider = FakeProvider(router=_router)
-    monkeypatch.setattr(routes, "get_provider", lambda *a, **k: provider)
+    monkeypatch.setattr(truth_routes, "get_provider", lambda *a, **k: provider)
+    monkeypatch.setattr(cv_routes, "get_provider", lambda *a, **k: provider)
     return TestClient(app)
 
 
@@ -150,7 +152,7 @@ def test_upload_rejects_unsupported_extension(client):
 
 
 def test_upload_rejects_oversized_file(client):
-    oversized = b"a" * (routes.MAX_UPLOAD_BYTES + 1)
+    oversized = b"a" * (truth_routes.MAX_UPLOAD_BYTES + 1)
     r = client.post(
         "/api/upload",
         files={"file": ("cv.txt", io.BytesIO(oversized), "text/plain")},
@@ -223,7 +225,7 @@ def test_extract_without_cv_is_400_before_provider_lookup(data_dir, monkeypatch)
         calls.append(a)
         raise ProviderError("no routing default")
 
-    monkeypatch.setattr(routes, "get_provider", no_provider)
+    monkeypatch.setattr(truth_routes, "get_provider", no_provider)
     r = TestClient(app).post("/api/extract")
     assert r.status_code == 400
     assert r.json() == {"detail": "Upload your CV before extracting."}

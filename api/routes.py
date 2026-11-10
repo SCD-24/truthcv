@@ -7,19 +7,15 @@ the unverifiable tokens.
 
 from __future__ import annotations
 
-import asyncio
 import hmac
 import logging
 import os
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
 
 from providers import ProviderError, get_provider
-from truth import load, save
-from truth.answers import load as load_answers
-from services.inferences import confirm_inferences as confirm_inferences_service
 import services.screenings as screenings_service
 import services.agent_config as agent_config_service
 import services.agent_credentials as agent_credentials_service
@@ -30,30 +26,21 @@ import services.job_boards as job_boards_service
 import services.browser as browser_service
 from api import guards
 import services.settings as settings_service
-import services.truth as truth_service
-import services.onboarding as onboarding_service
-import services.tailor as tailor_service
 import services.connections as connections_service
-from truth.model import Truth
-from truth.pdf import has_profile
 
 import applications as app_store
 import modelrouting
 import secretstore
-from services.render_cv import (
-    DraftMissing,
-    _require_application,
-    render_cv,
-)
-from services.cover_letter import generate_cover_letter
 from connections import catalog
 from connections.auth import gmail as gmail_auth
 from providers import build_connection_provider
 from runs import store as runs_store
 
 from .company_finding_routes import router as company_finding_router
+from .cv_routes import router as cv_router
 from .run_routes import router as run_router
 from .screening_routes import router as screening_router
+from .truth_routes import router as truth_router
 from .route_support import (
     _application_model,
     _models_result,
@@ -70,21 +57,15 @@ from .schemas import (
     AgentRunResult,
     AgentRunStart,
     AgentStatus,
-    AnswersModel,
-    AnswersUpdate,
     ApiKeyRequest,
     ApplicationCreate,
     ApplicationListResponse,
     ApplicationModel,
     ApplicationUpdate,
-    AtsWarning,
     CompleteLoginRequest,
-    ConfirmInferencesRequest,
     ConnectionList,
     ConnectionStatus,
     ConnectionTestRequest,
-    CoverLetterRequest,
-    CoverLetterResult,
     GmailStatusModel,
     GmailSyncRequest,
     JevSettingsStatus,
@@ -92,12 +73,6 @@ from .schemas import (
     JobBoardKeyStatus,
     JobBoardKeyUpdate,
     ModelList,
-    BlockedClaimModel,
-    OnboardingState,
-    OnboardingUpdate,
-    ProfileStatus,
-    RenderRequest,
-    RenderResult,
     RouteModel,
     RoutingModel,
     RoutingUpdate,
@@ -113,10 +88,7 @@ from .schemas import (
     BrowserSessionRequest,
     PollLoginResult,
     StartLoginResult,
-    TailorRequest,
-    TailorResult,
     TestResult,
-    TruthDoc,
 )
 
 router = APIRouter(prefix="/api")
@@ -127,109 +99,8 @@ logger = logging.getLogger(__name__)
 router.include_router(screening_router)
 router.include_router(run_router)
 router.include_router(company_finding_router)
-
-
-def _truth_doc(truth: Truth) -> TruthDoc:
-    return TruthDoc.model_validate(truth.to_dict())
-
-
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MiB — a CV/cover-letter upload has no legitimate reason to exceed this
-
-@router.post("/upload", status_code=204)
-async def upload(file: UploadFile = File(...)) -> None:
-    # Read one byte past the cap so an oversized upload is detected without
-    # ever buffering the whole body into process memory.
-    data = await file.read(MAX_UPLOAD_BYTES + 1)
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413, detail="Upload exceeds the maximum allowed size."
-        )
-    await asyncio.to_thread(truth_service.ingest_upload, file.filename or "", data)
-
-
-@router.post("/extract", response_model=TruthDoc)
-def extract() -> TruthDoc:
-    return _truth_doc(
-        truth_service.extract_truth(lambda: get_provider("truth_extract"))
-    )
-
-
-@router.get("/truth", response_model=TruthDoc)
-def get_truth() -> TruthDoc:
-    return _truth_doc(load())
-
-
-@router.put("/truth", status_code=204)
-def put_truth(body: TruthDoc) -> None:
-    truth = Truth.from_dict(body.model_dump(by_alias=False))
-    try:
-        save(truth)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-
-@router.post("/tailor", response_model=TailorResult)
-def tailor_route(body: TailorRequest) -> TailorResult:
-    result = tailor_service.tailor_posting(body.posting, get_provider)
-    return TailorResult.model_validate(result)
-
-
-@router.post("/confirm-inferences", status_code=204)
-def confirm_inferences(body: ConfirmInferencesRequest) -> None:
-    confirm_inferences_service(body.approved, body.approved_ids)
-
-
-@router.post("/render", response_model=RenderResult)
-def render_route(body: RenderRequest | None = None) -> RenderResult:
-    # Thin marshalling: pull the request-derived arguments, run the framework-
-    # free render workflow, and translate its outcome (or its DraftMissing) into
-    # the HTTP response. All business logic — the guardrail, scope-building and
-    # approval-filtering — lives in services/render_cv.py.
-    app_id = body.application_id if body else None
-    approved: set[str] = set()
-    denied: set[str] = set()
-    if body and body.approvals:
-        approved = set(body.approvals.approved_claim_ids)
-        denied = set(body.approvals.denied_claim_ids)
-
-    try:
-        outcome = render_cv(application_id=app_id, approved=approved, denied=denied)
-    except DraftMissing:
-        raise HTTPException(
-            status_code=400, detail="Tailor a posting before rendering."
-        ) from None
-
-    if outcome.blocked:
-        blocked = [
-            BlockedClaimModel(
-                claim_id=c.claim_id,
-                experience_id=c.experience_id,
-                text=c.text,
-                tokens=c.tokens,
-            )
-            for c in outcome.blocked_claims
-        ]
-        return RenderResult(
-            blocked=True, unverifiable=outcome.unverifiable, blocked_claims=blocked
-        )
-
-    # A pure wizard preview (no application) has no saved document to fall back
-    # on, so an unavailable backend is still a hard error there. An attached
-    # render keeps its saved link even when nothing could be produced.
-    if outcome.pdf_url is None and outcome.docx_url is None and not app_id:
-        raise HTTPException(
-            status_code=500,
-            detail="Rendering backend unavailable (WeasyPrint/pandoc not installed).",
-        )
-
-    return RenderResult(
-        blocked=False,
-        ats_warnings=[AtsWarning(**w) for w in outcome.ats_warnings],
-        pdf_url=outcome.pdf_url,
-        docx_url=outcome.docx_url,
-        html=outcome.html,
-        render_unavailable=outcome.render_unavailable,
-    )
+router.include_router(truth_router)
+router.include_router(cv_router)
 
 
 @router.get("/applications", response_model=list[ApplicationModel])
@@ -348,41 +219,6 @@ def save_application_cover_letter(
         application=_application_model(app),
         render_unavailable=not produced,
     )
-
-
-@router.get("/profile", response_model=ProfileStatus)
-def profile() -> ProfileStatus:
-    return ProfileStatus(has_profile=has_profile())
-
-
-@router.get("/onboarding", response_model=OnboardingState)
-def onboarding() -> OnboardingState:
-    """First-run onboarding progress: provider setup, profile, CV review, tour."""
-    return OnboardingState(**onboarding_service.get_state())
-
-
-@router.put("/onboarding", response_model=OnboardingState)
-def put_onboarding(body: OnboardingUpdate) -> OnboardingState:
-    """Merge only the fields the client actually sent onto the stored state."""
-    sent = body.model_dump(exclude_unset=True, by_alias=False)
-    return OnboardingState(**onboarding_service.update_state(sent))
-
-
-@router.get("/profile/answers", response_model=AnswersModel)
-def get_profile_answers() -> AnswersModel:
-    return AnswersModel.model_validate(load_answers().to_dict())
-
-
-@router.put("/profile/answers", response_model=AnswersModel)
-def put_profile_answers(body: AnswersUpdate) -> AnswersModel:
-    """Merge only the fields the client actually sent onto the stored answers.
-
-    Omitted fields must survive untouched — the wizard's field-by-field save
-    flow means most PUTs carry a strict subset of the 21 fields, and treating
-    absence the same as "clear this" would silently blank the rest.
-    """
-    sent = body.model_dump(exclude_unset=True, by_alias=False)
-    return AnswersModel.model_validate(truth_service.update_answers(sent).to_dict())
 
 
 @router.get("/job-boards/{source}/key", response_model=JobBoardKeyStatus)
@@ -755,74 +591,6 @@ def delete_browser_session() -> BrowserSessionClosed:
         closing=data["closing"],
         reserving=data["reserving"],
         signins_cleared=data["signins_cleared"],
-    )
-
-
-@router.post("/cover-letter", response_model=CoverLetterResult)
-def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
-    # Thin marshalling: validate the id (404 on miss), run the framework-free
-    # cover-letter workflow, and translate its outcome — or its DraftMissing, or
-    # an LLM failure — into the HTTP response. All business logic (posting
-    # resolution, render-scoped approvals, the guardrail and best-effort render)
-    # lives in services/cover_letter.py.
-    _require_application(body.application_id)
-
-    approved_ids = set(body.approvals.approved_claim_ids) if body.approvals else set()
-    denied_ids = set(body.approvals.denied_claim_ids) if body.approvals else set()
-    app_id = body.application_id if body.application_id else None
-
-    try:
-        outcome = generate_cover_letter(
-            application_id=app_id,
-            posting=body.posting,
-            preset_id=body.preset_id,
-            length=body.length,
-            provider=get_provider("cover_letter"),
-            approved_ids=approved_ids,
-            denied_ids=denied_ids,
-        )
-    except DraftMissing:
-        raise HTTPException(
-            status_code=400, detail="Tailor a posting before generating a cover letter."
-        ) from None
-    except ProviderError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(
-            status_code=502,
-            detail=f"The language model call failed: {type(e).__name__}: {e}",
-        ) from e
-
-    if outcome.blocked:
-        blocked_claims = [
-            BlockedClaimModel(
-                claim_id=c.claim_id,
-                experience_id=c.experience_id,
-                text=c.text,
-                tokens=c.tokens,
-            )
-            for c in outcome.blocked_claims
-        ]
-        return CoverLetterResult(
-            blocked=True,
-            unverifiable=outcome.unverifiable,
-            blocked_claims=blocked_claims,
-        )
-
-    # Only a pure preview (no application) hard-errors on an unavailable backend;
-    # an attached save keeps its recorded link.
-    if outcome.pdf_url is None and outcome.docx_url is None and not app_id:
-        raise HTTPException(
-            status_code=500,
-            detail="Rendering backend unavailable (WeasyPrint/pandoc not installed).",
-        )
-    return CoverLetterResult(
-        blocked=False,
-        pdf_url=outcome.pdf_url,
-        docx_url=outcome.docx_url,
-        text=outcome.text,
-        render_unavailable=outcome.render_unavailable,
-        style_warnings=[AtsWarning(**w) for w in outcome.style_warnings],
     )
 
 
