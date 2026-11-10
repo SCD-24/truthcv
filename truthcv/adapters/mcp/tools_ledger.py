@@ -19,7 +19,12 @@ from __future__ import annotations
 import json
 
 import truthcv.domain.agentconfig.store as _agentconfig_store
-from truthcv.domain.applications.model import Attachment, Confirmation, FieldSubmitted, Screening
+from truthcv.domain.applications.model import (
+    ApplicationScreening,
+    Attachment,
+    Confirmation,
+    FieldSubmitted,
+)
 from truthcv.domain.screening.cooldown import cooldown as _cooldown
 from truthcv.services.screenings import record_screening_verdict as _record_screening_verdict
 import truthcv.services.agent_config as _agent_config_service
@@ -193,7 +198,7 @@ def record_application(
         if confirmation is not None else None
     )
     parsed_screening = (
-        Screening.from_dict(_as_dict(screening, "screening"))
+        ApplicationScreening.from_dict(_as_dict(screening, "screening"))
         if screening is not None else None
     )
     parsed_attachments = (

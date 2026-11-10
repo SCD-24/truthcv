@@ -14,8 +14,8 @@ from typing import Any, Callable
 
 from fastapi import APIRouter, HTTPException
 
-import truthcv.infra.jobs as jobs
-from truthcv.infra.jobs.model import Job
+import truthcv.infra.background_tasks as jobs
+from truthcv.infra.background_tasks.model import Job
 
 logger = logging.getLogger(__name__)
 

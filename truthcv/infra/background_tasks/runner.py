@@ -1,5 +1,5 @@
 """Bounded background job runner: a shared thread pool plus an in-memory,
-thread-safe registry of :class:`jobs.model.Job` records.
+thread-safe registry of :class:`background_tasks.model.Job` records.
 
 Callers submit a zero-argument callable via :func:`submit`; it runs on a
 worker thread and its outcome (result or exception) is recorded onto the

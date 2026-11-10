@@ -19,7 +19,7 @@ layers = [
     "truthcv.engines.tailor : truthcv.engines.coverletter : truthcv.engines.guardrail : truthcv.engines.render : truthcv.engines.prompts : truthcv.engines.vocabulary",
     "truthcv.domain.truth : truthcv.domain.screening : truthcv.domain.applications : truthcv.domain.companyresearch : truthcv.domain.runs : truthcv.domain.agentconfig : truthcv.domain.companyboards : truthcv.domain.onboarding : truthcv.domain.gmailsync : truthcv.domain.jobfeeds",
     "truthcv.integrations.providers : truthcv.integrations.connections : truthcv.integrations.modelrouting",
-    "truthcv.infra.storage : truthcv.infra.secretstore : truthcv.infra.jobs : truthcv.infra.identity : truthcv.infra.mcpschema",
+    "truthcv.infra.storage : truthcv.infra.secretstore : truthcv.infra.background_tasks : truthcv.infra.identity : truthcv.infra.mcpschema",
 ]
 # A stale ignore entry fails the check, so this list can only shrink.
 unmatched_ignore_imports_alerting = "error"

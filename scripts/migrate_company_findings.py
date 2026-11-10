@@ -1,7 +1,7 @@
 """One-shot migration: move legacy entity/glassdoor screening data into
 companyresearch.
 
-Invariant: applications.model.Screening no longer carries `entity` or
+Invariant: applications.model.ApplicationScreening no longer carries `entity` or
 `glassdoor` — those were company-level claims with no source or as-of date.
 This script moves whatever value each application's screening object still
 holds for those keys into the append-only companyresearch store, tagged

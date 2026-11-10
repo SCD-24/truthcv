@@ -340,7 +340,7 @@ def record_application(
     This is the agent's ``record_application`` workflow minus its input
     handling: the tool merges its named parameters into ``fields`` and parses
     the structured evidence into model objects (``FieldSubmitted``,
-    ``Confirmation``, ``Screening``, ``Attachment``) BEFORE calling this, so a
+    ``Confirmation``, ``ApplicationScreening``, ``Attachment``) BEFORE calling this, so a
     malformed payload is rejected before any store write happens here — the
     orphan-row fix. Each evidence argument is ``None`` when not provided.
 

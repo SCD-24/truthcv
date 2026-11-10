@@ -1,7 +1,7 @@
 """Background job runner: submit callables to a bounded thread pool and
 poll their status through an in-memory registry.
 
-See ``jobs.model`` for the ``Job`` record shape and ``jobs.runner`` for
+See ``background_tasks.model`` for the ``Job`` record shape and ``background_tasks.runner`` for
 ``submit``/``get``/``list_jobs``.
 """
 

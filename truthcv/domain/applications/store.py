@@ -18,11 +18,11 @@ from truthcv.infra.storage import data_dir
 
 from .model import (
     Application,
+    ApplicationScreening,
     Attachment,
     Confirmation,
     Document,
     FieldSubmitted,
-    Screening,
     new_id,
 )
 
@@ -263,7 +263,11 @@ def save_confirmation(app_id: str, confirmation) -> Application | None:
 
 def save_screening(app_id: str, screening) -> Application | None:
     """Replace the pre-application screening verdicts for an application."""
-    value = screening if isinstance(screening, Screening) else Screening.from_dict(screening)
+    value = (
+        screening
+        if isinstance(screening, ApplicationScreening)
+        else ApplicationScreening.from_dict(screening)
+    )
     return _persist_field(app_id, "screening", value)
 
 

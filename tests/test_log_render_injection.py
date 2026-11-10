@@ -14,10 +14,10 @@ import pytest
 from truthcv.domain.applications.log_render import RenderRefused, render_log, write_log
 from truthcv.domain.applications.model import (
     Application,
+    ApplicationScreening,
     Attachment,
     Confirmation,
     FieldSubmitted,
-    Screening,
 )
 from truthcv.domain.companyresearch.model import CompanyFinding
 
@@ -56,7 +56,7 @@ def test_nested_evidence_cannot_forge_a_marker():
     app.fields_submitted = [FieldSubmitted(label=MARKER, value=MARKER, source=MARKER)]
     app.attachments = [Attachment(kind="cv", path=f"cv{MARKER}.pdf")]
     app.gaps_disclosed = [f"gap {MARKER}"]
-    app.screening = Screening(remote=MARKER)
+    app.screening = ApplicationScreening(remote=MARKER)
     finding = CompanyFinding(
         id="f1",
         company="Acme GmbH",

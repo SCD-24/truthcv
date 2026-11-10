@@ -84,7 +84,7 @@ class Confirmation:
 
 
 @dataclass
-class Screening:
+class ApplicationScreening:
     """The pre-application filter verdicts, one field per filter.
 
     These are facts about a POSTING (its remote policy, salary, language and
@@ -101,7 +101,7 @@ class Screening:
     role_type: str = ""
 
     @classmethod
-    def from_dict(cls, raw: dict | None) -> "Screening":
+    def from_dict(cls, raw: dict | None) -> "ApplicationScreening":
         raw = raw or {}
         return cls(
             remote=raw.get("remote", ""),
@@ -172,7 +172,7 @@ class Application:
     gaps_disclosed: list[str] = field(default_factory=list)
     fields_submitted: list[FieldSubmitted] = field(default_factory=list)
     confirmation: Confirmation = field(default_factory=Confirmation)
-    screening: Screening = field(default_factory=Screening)
+    screening: ApplicationScreening = field(default_factory=ApplicationScreening)
     attachments: list[Attachment] = field(default_factory=list)
     cv_document: Document | None = None
     cover_letter_document: Document | None = None
@@ -240,7 +240,7 @@ class Application:
                 FieldSubmitted.from_dict(f) for f in raw.get("fields_submitted") or []
             ],
             confirmation=Confirmation.from_dict(raw.get("confirmation")),
-            screening=Screening.from_dict(raw.get("screening")),
+            screening=ApplicationScreening.from_dict(raw.get("screening")),
             attachments=[Attachment.from_dict(a) for a in raw.get("attachments") or []],
         )
 

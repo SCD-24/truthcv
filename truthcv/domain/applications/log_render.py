@@ -56,7 +56,7 @@ class RenderRefused(Exception):
 
 # Order in which screening verdicts are rendered, so the log is diff-friendly
 # rather than dependent on field declaration order. Company-level claims
-# (employing entity, employer-review figures) are no longer part of Screening
+# (employing entity, employer-review figures) are no longer part of ApplicationScreening
 # — they render via _findings_table instead, sourced and dated.
 _SCREENING_ORDER = ("remote", "salary", "language", "role_type")
 

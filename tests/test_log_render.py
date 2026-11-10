@@ -15,10 +15,10 @@ from truthcv.domain.applications.log_render import (
 )
 from truthcv.domain.applications.model import (
     Application,
+    ApplicationScreening,
     Attachment,
     Confirmation,
     FieldSubmitted,
-    Screening,
 )
 from truthcv.domain.companyresearch.model import CompanyFinding
 
@@ -142,7 +142,7 @@ def test_submitted_fields_render_with_their_provenance_and_escape_pipes():
 def test_screening_and_attachments_and_gaps_reach_the_log():
     """Everything the Jobs log carried per record still appears."""
     app = _app("999ddd999ddd", capture_method="reconstructed")
-    app.screening = Screening(remote="Fully remote")
+    app.screening = ApplicationScreening(remote="Fully remote")
     app.attachments = [Attachment(kind="cv", path="cv_999ddd999ddd.pdf")]
     app.gaps_disclosed = ["No Kubernetes production experience"]
 

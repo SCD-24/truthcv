@@ -17,8 +17,8 @@ import time
 
 import pytest
 
-from truthcv.infra.jobs.model import STATUS_DONE, STATUS_FAILED, STATUS_PENDING, STATUS_RUNNING
-from truthcv.infra.jobs.runner import MAX_RETAINED_JOBS, MAX_WORKERS, get, list_jobs, submit
+from truthcv.infra.background_tasks.model import STATUS_DONE, STATUS_FAILED, STATUS_PENDING, STATUS_RUNNING
+from truthcv.infra.background_tasks.runner import MAX_RETAINED_JOBS, MAX_WORKERS, get, list_jobs, submit
 
 _WAIT_TIMEOUT_S = 5.0
 

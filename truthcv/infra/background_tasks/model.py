@@ -1,4 +1,4 @@
-"""Data model for background jobs tracked by ``jobs.runner``."""
+"""Data model for background jobs tracked by ``background_tasks.runner``."""
 
 from __future__ import annotations
 
