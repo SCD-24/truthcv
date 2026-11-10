@@ -25,8 +25,7 @@ SERVICES_DIR = REPO_ROOT / "services"
 # moving, one resource at a time, into flat modules (plus shared helpers in
 # route_support.py). These are the files the routes.py invariants apply to.
 # Named explicitly, not globbed: prompt_routes, job_routes and
-# gmail_suggestion_routes were never under this invariant. Modules not yet
-# created are skipped.
+# gmail_suggestion_routes were never under this invariant.
 _PHASE4_ROUTE_FILE_NAMES = (
     "routes.py",
     "route_support.py",
@@ -46,8 +45,10 @@ _PHASE4_ROUTE_FILE_NAMES = (
 
 
 def _phase4_route_files() -> list[Path]:
-    paths = (REPO_ROOT / "api" / name for name in _PHASE4_ROUTE_FILE_NAMES)
-    return [p for p in paths if p.exists()]
+    paths = [REPO_ROOT / "api" / name for name in _PHASE4_ROUTE_FILE_NAMES]
+    missing = [p.name for p in paths if not p.exists()]
+    assert not missing, f"listed Phase 4 route files do not exist: {missing}"
+    return paths
 
 
 def _all_py_files(root: Path) -> list[Path]:

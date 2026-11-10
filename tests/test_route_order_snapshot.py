@@ -4,11 +4,16 @@ What is locked:
 
 * Check A: the set of leaf routes (class, full path, sorted methods, endpoint
   name) equals the fixture's exactly.
-* Check B: for every pair of routes that one concrete request could match,
-  the live app tries them in the same relative order as the fixture. The
+* Check B: the live app tries pairs of routes in the same relative order as
+  the fixture, for two pair sets. (1) Method-aware: every pair that one
+  concrete request could fully match (common method and unifying paths). The
   first full match wins, so that order decides which handler serves an
   overlapping path, e.g. ``/api/auth/gmail/...`` must stay ahead of
-  ``/api/auth/{provider}/...``.
+  ``/api/auth/{provider}/...``. (2) Path-only: every pair whose path
+  templates unify, whatever their methods. With disjoint methods neither
+  route fully matches, but both partially match, and Starlette's partial
+  match decides the 405 response and its ``Allow`` header (the first partial
+  match is the one used), so that order is observable too.
 
 Why the full order is not locked: Phase 4 splits ``api/routes.py`` into one
 ``APIRouter`` per resource module, and ``api/routes.py`` becomes an aggregator
@@ -25,9 +30,11 @@ compared exactly as recorded: Starlette ``Route`` adds HEAD to GET itself
 request matches a GET-only ``APIRoute`` only partially (405) and HEAD is not
 treated as implied by GET. Templates are split on ``/`` and unified segment by
 segment against the Starlette convertor regexes (``starlette/convertors.py``).
-Pairs whose methods are disjoint are not locked even when their paths unify:
-order there only picks which route's ``Allow`` header a 405 carries, never
-which handler runs.
+Pairs whose methods are disjoint are not in the method-aware set, because
+order there never changes which handler runs; they are locked by the separate
+path-only set (``_path_overlaps``, same unification, no method test, http
+scope required) because order there picks which route's ``Allow`` header a
+405 carries.
 
 Matcher source relied on (installed fastapi, venv site-packages):
 ``fastapi/routing.py`` ``APIRouter.app`` (~L2690-2735) iterates ``self.routes``
@@ -186,13 +193,22 @@ def _overlaps(a: dict, b: dict) -> bool:
     return _unify(_segments(_template(a)), _segments(_template(b)))
 
 
+def _path_overlaps(a: dict, b: dict) -> bool:
+    """True when the path templates unify and both routes serve a common
+    protocol, whatever their methods (a partial match, hence a 405, counts)."""
+    if not {proto for proto, _ in _accepts(a)} & {proto for proto, _ in _accepts(b)}:
+        return False
+    return _unify(_segments(_template(a)), _segments(_template(b)))
+
+
 def _key(entry: dict) -> tuple:
     methods = entry["methods"]
     return (entry["class"], entry["path"], tuple(methods) if methods is not None else None, entry["endpoint"])
 
 
-def _overlapping_pairs(entries: list[dict]) -> list[tuple[dict, dict]]:
-    return [(a, b) for a, b in combinations(entries, 2) if _overlaps(a, b)]
+def _overlapping_pairs(entries: list[dict], *, path_only: bool = False) -> list[tuple[dict, dict]]:
+    detect = _path_overlaps if path_only else _overlaps
+    return [(a, b) for a, b in combinations(entries, 2) if detect(a, b)]
 
 
 def _golden() -> list[dict]:
@@ -211,20 +227,31 @@ def test_route_set_matches_golden_snapshot():
     )
 
 
-def test_overlapping_routes_keep_golden_relative_order():
+def _order_failures(path_only: bool) -> list[str]:
     golden = _golden()
     keys = [_key(e) for e in golden]
     assert len(set(keys)) == len(keys), "fixture has duplicate leaf entries; order is ambiguous"
     live_index = {_key(e): i for i, e in enumerate(_route_order())}
     failures = []
-    for first, second in _overlapping_pairs(golden):
+    for first, second in _overlapping_pairs(golden, path_only=path_only):
         a, b = _key(first), _key(second)
         if a in live_index and b in live_index and live_index[a] > live_index[b]:
             failures.append(
                 f"{a!r} vs {b!r}: fixture tries {first['endpoint']} before {second['endpoint']}, "
                 f"live tries {second['endpoint']} before {first['endpoint']}"
             )
+    return failures
+
+
+def test_overlapping_routes_keep_golden_relative_order():
+    failures = _order_failures(path_only=False)
     assert not failures, "Overlapping routes changed relative order:\n" + "\n".join(failures)
+
+
+def test_path_overlapping_routes_keep_golden_relative_order():
+    # Includes disjoint-method pairs: their order decides the 405 Allow header.
+    failures = _order_failures(path_only=True)
+    assert not failures, "Path-overlapping routes changed relative order:\n" + "\n".join(failures)
 
 
 def _route(path: str, *methods: str, cls: str = "APIRoute") -> dict:
@@ -256,6 +283,23 @@ def _route(path: str, *methods: str, cls: str = "APIRoute") -> dict:
 def test_overlap_detector(a, b, expected):
     assert _overlaps(a, b) is expected
     assert _overlaps(b, a) is expected
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "method_aware", "path_only"),
+    [
+        (_route("/api/screenings/{screening_id}", "GET"), _route("/api/screenings/{screening_id}", "PATCH"), False, True),
+        (_route("/api/screenings/approvals", "GET"), _route("/api/screenings/{screening_id}", "PATCH"), False, True),
+        (_route("/api/auth/{provider}/start", "POST"), _route("/api/auth/{provider}/start", "POST"), True, True),
+        (_route("/api/runs", "GET"), _route("/api/screenings", "GET"), False, False),
+        (_route("/api/runs/{run_id:int}", "GET"), _route("/api/runs/latest", "POST"), False, False),
+        (_route("/api/browser/session/stream", cls="APIWebSocketRoute"), _route("/api/browser/session/stream", "GET"), False, False),
+    ],
+)
+def test_path_only_detector_flags_disjoint_method_pairs(a, b, method_aware, path_only):
+    for x, y in ((a, b), (b, a)):
+        assert _overlaps(x, y) is method_aware
+        assert _path_overlaps(x, y) is path_only
 
 
 def test_overlap_detector_finds_known_fixture_pairs():

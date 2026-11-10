@@ -346,7 +346,7 @@ def test_unknown_preset_id_errors_instead_of_silently_falling_back(client, monke
     """An unknown presetId must surface to the caller as an error, never a
     silent fallback to the default preset's letter: no 200 is acceptable
     here, whatever the exact status code turns out to be."""
-    import api.screening_routes as routes
+    import api.cv_routes as routes
     from providers.fake import FakeProvider
     from truth import save
     from truth.model import Experience, Skill, Truth
