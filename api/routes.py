@@ -13,13 +13,12 @@ import os
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import RedirectResponse
 
 from providers import ProviderError, get_provider
 import services.screenings as screenings_service
 import services.agent_config as agent_config_service
 import services.agent_credentials as agent_credentials_service
-import services.applications as applications_service
 import services.supervisor as supervisor_service
 import services.gmail as gmail_service
 import services.job_boards as job_boards_service
@@ -28,7 +27,6 @@ from api import guards
 import services.settings as settings_service
 import services.connections as connections_service
 
-import applications as app_store
 import modelrouting
 import secretstore
 from connections import catalog
@@ -36,13 +34,13 @@ from connections.auth import gmail as gmail_auth
 from providers import build_connection_provider
 from runs import store as runs_store
 
+from .application_routes import router as application_router
 from .company_finding_routes import router as company_finding_router
 from .cv_routes import router as cv_router
 from .run_routes import router as run_router
 from .screening_routes import router as screening_router
 from .truth_routes import router as truth_router
 from .route_support import (
-    _application_model,
     _models_result,
 )
 from .schemas import (
@@ -58,10 +56,6 @@ from .schemas import (
     AgentRunStart,
     AgentStatus,
     ApiKeyRequest,
-    ApplicationCreate,
-    ApplicationListResponse,
-    ApplicationModel,
-    ApplicationUpdate,
     CompleteLoginRequest,
     ConnectionList,
     ConnectionStatus,
@@ -76,9 +70,6 @@ from .schemas import (
     RouteModel,
     RoutingModel,
     RoutingUpdate,
-    SaveCoverLetterRequest,
-    SaveCvRequest,
-    SaveDocumentResult,
     SettingsStatus,
     SettingsUpdate,
     SigninQueue,
@@ -101,124 +92,7 @@ router.include_router(run_router)
 router.include_router(company_finding_router)
 router.include_router(truth_router)
 router.include_router(cv_router)
-
-
-@router.get("/applications", response_model=list[ApplicationModel])
-def list_applications(q: str = "") -> list[ApplicationModel]:
-    """Every tracked job application, most recent first.
-
-    q: case-insensitive substring filter over company, website, application URL,
-    notes, posting and role; empty returns everything
-    """
-    apps = applications_service.list_applications(q)
-    return [_application_model(a) for a in apps]
-
-
-@router.get("/applications/page", response_model=ApplicationListResponse)
-def list_applications_page(
-    limit: int = 25, offset: int = 0, sort: str = "date", direction: str = "desc", q: str = ""
-) -> ApplicationListResponse:
-    """One page of applications, server-sorted and paginated.
-
-    ``q`` is the same case-insensitive substring filter as GET /api/applications
-    (company, website, application URL, notes, posting, role); it is applied
-    before paging so ``total`` counts matches.
-
-    Reads the application store in-process and returns a paginated, sorted page
-    of applications with the total count across all records. Sort keys and
-    direction are passed through and echoed in the response.
-
-    A negative offset is clamped to 0 rather than rejected: it is a client that
-    paged past the start, and an empty first page is a worse answer than the
-    first page. An offset past the end yields an empty page — the total tells
-    the client it overshot.
-    """
-    offset = max(0, offset)
-    try:
-        apps, total = applications_service.list_applications_page(
-            limit=limit, offset=offset, sort=sort, direction=direction, q=q
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return ApplicationListResponse(
-        applications=[_application_model(a) for a in apps],
-        total=total,
-        limit=limit,
-        offset=offset,
-        sort=sort,
-        direction=direction,
-    )
-
-
-@router.get("/applications/export")
-def export_applications() -> StreamingResponse:
-    """Download every application as a CSV plus per-company document folders.
-
-    Bundled as one zip so a user gets an offline, portable record of the whole
-    tracker: the table as `applications.csv`, and each application's rendered
-    files grouped under a folder named for its company.
-    """
-    apps = applications_service.list_applications()
-    archive = applications_service.build_export_zip(apps)
-    headers = {"Content-Disposition": 'attachment; filename="applications.zip"'}
-    return StreamingResponse(archive, media_type="application/zip", headers=headers)
-
-
-@router.post("/applications", response_model=ApplicationModel, status_code=201)
-def create_application(body: ApplicationCreate) -> ApplicationModel:
-    """Create a new application record from client-supplied fields."""
-    app = applications_service.create_application_record(body.model_dump(by_alias=False))
-    return _application_model(app)
-
-
-@router.put("/applications/{app_id}", response_model=ApplicationModel)
-def update_application(app_id: str, body: ApplicationUpdate) -> ApplicationModel:
-    """Patch an application's editable fields (None fields are left unchanged)."""
-    patch = body.model_dump(by_alias=False, exclude_none=True)
-    app = applications_service.update_application_record(app_id, patch)
-    if app is None:
-        raise HTTPException(status_code=404, detail="Application not found.")
-    return _application_model(app)
-
-
-@router.delete("/applications/{app_id}", status_code=204)
-def delete_application(app_id: str) -> None:
-    """Delete an application and remove its owned document files."""
-    if not app_store.delete(app_id):
-        raise HTTPException(status_code=404, detail="Application not found.")
-
-
-@router.put("/applications/{app_id}/cv", response_model=SaveDocumentResult)
-def save_application_cv(app_id: str, body: SaveCvRequest) -> SaveDocumentResult:
-    """Render and save edited CV HTML onto an application.
-
-    A manual edit is a deliberate human decision, so it is trusted and saved
-    as-is — the truthfulness guardrail only gates the automatic AI generation
-    (/render, /tailor), not a document the user edited by hand.
-    """
-    app, produced = applications_service.save_cv(app_id, body.html)
-    return SaveDocumentResult(
-        blocked=False,
-        application=_application_model(app),
-        render_unavailable=not produced,
-    )
-
-
-@router.put("/applications/{app_id}/cover-letter", response_model=SaveDocumentResult)
-def save_application_cover_letter(
-    app_id: str, body: SaveCoverLetterRequest
-) -> SaveDocumentResult:
-    """Render and save edited cover-letter text on an app.
-
-    A manual edit is trusted and saved as-is; the truthfulness guardrail only
-    gates the automatic AI generation, not a hand-edited document.
-    """
-    app, produced = applications_service.save_cover_letter(app_id, body.text)
-    return SaveDocumentResult(
-        blocked=False,
-        application=_application_model(app),
-        render_unavailable=not produced,
-    )
+router.include_router(application_router)
 
 
 @router.get("/job-boards/{source}/key", response_model=JobBoardKeyStatus)
