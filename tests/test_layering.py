@@ -2,12 +2,15 @@
 they cannot silently regress.
 
 (a) No module under services/ imports fastapi.
-(b) api/routes.py makes no direct data_dir() or get_provider() call — both
-    are now reached through services/.
+(b) The route handlers named in _EXTRACTED_ROUTE_FUNCTIONS make no direct
+    data_dir() call, wherever the Phase 4 split of api/routes.py now defines
+    them (api/routes.py or one of its split-out modules) — file I/O is reached
+    through services/. Each name must be found in exactly one of those files.
 (c) No module outside storage/ and truth/ imports data_dir from truth.store
     (truth.store no longer defines data_dir at all; storage.paths is its only
     home now).
-(d) api/routes.py calls no underscore-prefixed function of any store module.
+(d) None of the files in the Phase 4 split of api/routes.py calls an
+    underscore-prefixed function of any store module.
 """
 
 from __future__ import annotations
@@ -17,7 +20,34 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SERVICES_DIR = REPO_ROOT / "services"
-ROUTES_PATH = REPO_ROOT / "api" / "routes.py"
+
+# The Phase 4 split of api/routes.py: the code that used to live in routes.py is
+# moving, one resource at a time, into flat modules (plus shared helpers in
+# route_support.py). These are the files the routes.py invariants apply to.
+# Named explicitly, not globbed: prompt_routes, job_routes and
+# gmail_suggestion_routes were never under this invariant. Modules not yet
+# created are skipped.
+_PHASE4_ROUTE_FILE_NAMES = (
+    "routes.py",
+    "route_support.py",
+    "screening_routes.py",
+    "run_routes.py",
+    "company_finding_routes.py",
+    "truth_routes.py",
+    "cv_routes.py",
+    "application_routes.py",
+    "settings_routes.py",
+    "job_board_routes.py",
+    "agent_routes.py",
+    "browser_routes.py",
+    "auth_routes.py",
+    "gmail_routes.py",
+)
+
+
+def _phase4_route_files() -> list[Path]:
+    paths = (REPO_ROOT / "api" / name for name in _PHASE4_ROUTE_FILE_NAMES)
+    return [p for p in paths if p.exists()]
 
 
 def _all_py_files(root: Path) -> list[Path]:
@@ -53,14 +83,15 @@ _EXTRACTED_ROUTE_FUNCTIONS = (
 )
 
 
-def _function_body(text: str, name: str) -> str:
+def _function_body(text: str, name: str) -> str | None:
     lines = text.splitlines()
     start = None
     for i, line in enumerate(lines):
         if re.match(rf"def {re.escape(name)}\s*\(", line):
             start = i
             break
-    assert start is not None, f"could not find `def {name}(` in api/routes.py"
+    if start is None:
+        return None
     body_lines = [lines[start]]
     for line in lines[start + 1 :]:
         if line and not line[0].isspace() and not line.startswith(("@", ")")):
@@ -76,16 +107,25 @@ def test_extracted_routes_do_not_call_data_dir_directly():
     # separately below). data_dir(), by contrast, must not appear in any of
     # these route bodies at all: file I/O for these six workflows is now
     # entirely the service's job.
-    text = ROUTES_PATH.read_text(encoding="utf-8")
+    texts = {p: p.read_text(encoding="utf-8") for p in _phase4_route_files()}
     offenders = {}
     for name in _EXTRACTED_ROUTE_FUNCTIONS:
-        body = _function_body(text, name)
+        found = [
+            (p, body)
+            for p, text in texts.items()
+            if (body := _function_body(text, name)) is not None
+        ]
+        assert len(found) == 1, (
+            f"`def {name}(` must be defined in exactly one Phase 4 route file, "
+            f"found in: {[str(p.relative_to(REPO_ROOT)) for p, _ in found]}"
+        )
+        path, body = found[0]
         hits = re.findall(r"(?<![.\w])data_dir\s*\(", body)
         if hits:
-            offenders[name] = hits
+            offenders[f"{path.relative_to(REPO_ROOT)}::{name}"] = hits
     assert offenders == {}, (
-        f"extracted route handler(s) still call data_dir() directly instead "
-        f"of going through services/: {offenders}"
+        f"extracted route handler(s) in the Phase 4 route files still call "
+        f"data_dir() directly instead of going through services/: {offenders}"
     )
 
 
@@ -119,6 +159,10 @@ def test_no_module_outside_storage_and_truth_imports_data_dir_from_truth_store()
 
 
 def test_routes_calls_no_underscore_prefixed_store_function():
-    text = ROUTES_PATH.read_text(encoding="utf-8")
-    offenders = re.findall(r"\b\w*_store\._[a-zA-Z]\w*\s*\(", text)
-    assert offenders == [], f"api/routes.py reaches into a private store function: {offenders}"
+    offenders = {}
+    for path in _phase4_route_files():
+        text = path.read_text(encoding="utf-8")
+        hits = re.findall(r"\b\w*_store\._[a-zA-Z]\w*\s*\(", text)
+        if hits:
+            offenders[str(path.relative_to(REPO_ROOT))] = hits
+    assert offenders == {}, f"Phase 4 route file(s) reach into a private store function: {offenders}"
