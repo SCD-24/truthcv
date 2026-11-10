@@ -1,7 +1,7 @@
 <!-- generated:start group:truthcv-container-single-docker-image -->
 # Logical Group: TruthCV Container (single Docker image)
 - **Identifier**: `truthcv-container-single-docker-image`
-- **Members**: 18
+- **Members**: 11
 
 > A logical grouping of components (deployment boundary, bounded context, or scope marker). Groups have no connections of their own.
 
@@ -9,22 +9,15 @@
 
 - **Web UI** (`web-ui`)
 - **API** (`api`)
-- **Truth Store** (`truth-store`)
+- **Orchestration** (`orchestration`)
+- **Document Generation** (`document-generation`)
 - **Guardrail Validator** (`guardrail-validator`)
-- **Renderer** (`renderer`)
 - **LLM Provider Layer** (`llm-provider-layer`)
-- **Cover Letter Engine** (`cover-letter-engine`)
-- **Prompt Store** (`prompt-store`)
-- **Application Tracker** (`application-tracker`)
-- **Agent Config** (`agent-config`)
-- **Company Research** (`company-research`)
-- **Run Store** (`run-store`)
-- **Keyword Vocabulary** (`keyword-vocabulary`)
-- **Storage** (`storage-leaf`)
-- **Services Layer** (`services-layer`)
-- **Job Feeds** (`job-feeds`)
-- **Gmail Response Sync** (`gmail-response-sync`)
-- **Background Tasks** (`job-runner`)
+- **Application Pipeline** (`application-pipeline`)
+- **Integrations** (`integrations`)
+- **Truth Store** (`truth-store`)
+- **Secret Store** (`secret-store`)
+- **Storage & Shared Leaves** (`storage`)
 
 *No specific widgets have been placed in this group yet. Define guidelines, stack tech, or schemas in the workspace.*
 <!-- generated:end group:truthcv-container-single-docker-image -->

@@ -1034,41 +1034,6 @@
         "widgets": [
           {
             "data": {
-              "text": "Tailors a CV to a specific posting (truthcv/engines/tailor/). Extracts the posting's keywords/requirements via a provider, then selects, reorders, and rephrases ONLY entries referenced by id from truth.yaml. Detects any claim the LLM wants to add that is not already in the truth file and surfaces it as an approval checklist (confirm-inferences step); nothing unapproved reaches the CV."
-            },
-            "h": 180,
-            "id": "widget-1783591752782-0",
-            "title": "Intent & Scope Description",
-            "type": "text",
-            "w": 350,
-            "x": 30,
-            "y": 30
-          },
-          {
-            "data": {
-              "techs": [
-                "Python"
-              ]
-            },
-            "h": 200,
-            "id": "widget-1783591752880-1",
-            "title": "Tech Stack Profiles",
-            "type": "techstack",
-            "w": 350,
-            "x": 60,
-            "y": 60
-          }
-        ]
-      },
-      "id": "tailor-engine",
-      "name": "Tailor Engine",
-      "type": "backend"
-    },
-    {
-      "canvas": {
-        "widgets": [
-          {
-            "data": {
               "text": "The core truthfulness guardrail (truthcv/engines/guardrail/): a pure, deterministic, scoped token-diff of a draft against truth — no LLM. validate(scopes, global_values) returns ok plus BOTH a flat unverifiable[] token list (back-compat) and structured blocked_claims grouping untraceable tokens under the specific source text (bullet) and scope id they came from, so callers can present whole-claim approve/deny. A token is verifiable if it is a stopword or appears (post-tokenization) in its own scope's allowed set (or the caller-supplied global_values — global skills for CV renders; for cover letters the Cover Letter Engine passes every truth value, including hobbies and the profile header, since a letter weaves the whole career). Render-scoped approvals are passed in by merging an approved claim's text into that scope's allowed set for a single render — the guardrail itself never mutates truth."
             },
             "h": 180,
@@ -1109,44 +1074,6 @@
       },
       "id": "guardrail-validator",
       "name": "Guardrail Validator",
-      "type": "backend"
-    },
-    {
-      "canvas": {
-        "widgets": [
-          {
-            "data": {
-              "text": "Renders the approved CV from one Jinja-templated ATS-safe HTML source (truthcv/engines/render/): PDF via WeasyPrint (pure-Python, single column, selectable text) and DOCX via pandoc. Runs an ATS linter before download that warns on multi-column layouts, tables, text-in-images, non-standard headings, missing contact block, and posting keywords absent from the CV. No LLM dependency."
-            },
-            "h": 180,
-            "id": "widget-1783591753179-0",
-            "title": "Intent & Scope Description",
-            "type": "text",
-            "w": 350,
-            "x": 30,
-            "y": 30
-          },
-          {
-            "data": {
-              "techs": [
-                "Python",
-                "Jinja2",
-                "WeasyPrint",
-                "pandoc"
-              ]
-            },
-            "h": 200,
-            "id": "widget-1783591753276-1",
-            "title": "Tech Stack Profiles",
-            "type": "techstack",
-            "w": 350,
-            "x": 60,
-            "y": 60
-          }
-        ]
-      },
-      "id": "renderer",
-      "name": "Renderer",
       "type": "backend"
     },
     {
@@ -1333,76 +1260,6 @@
         "widgets": [
           {
             "data": {
-              "text": "Guardrailed cover-letter generation (truthcv/engines/coverletter/). build_letter() asks the LLM (via the provider layer) for a cover letter as tagged paragraphs, each declaring the factual claims it makes. Every claim is validated by the Guardrail Validator against the Truth Store; if any claim is unverifiable the letter is BLOCKED (returns {blocked: true, unverifiable, text: \"\"}). Otherwise the paragraph text is joined and handed to the Renderer for HTML/PDF/DOCX output. Serves /api/cover-letter together with truthcv/engines/render/."
-            },
-            "h": 180,
-            "id": "widget-1783605694390-0",
-            "title": "Intent & Scope Description",
-            "type": "text",
-            "w": 350,
-            "x": 30,
-            "y": 30
-          },
-          {
-            "data": {
-              "techs": [
-                "Python"
-              ]
-            },
-            "h": 200,
-            "id": "widget-1783605694434-1",
-            "title": "Tech Stack Profiles",
-            "type": "techstack",
-            "w": 350,
-            "x": 60,
-            "y": 60
-          }
-        ]
-      },
-      "id": "cover-letter-engine",
-      "name": "Cover Letter Engine",
-      "type": "backend"
-    },
-    {
-      "canvas": {
-        "widgets": [
-          {
-            "data": {
-              "text": "Stores operator-editable prompt fragments and presets as JSON on the truth data volume, layered over seeded records defined in code. Fragments are atomic style blocks grouped into four display slots (voice, structure, opener, rules); any number may be combined in a preset. The default preset marker is stored separately so seeded records are never materialised on disk."
-            },
-            "h": 180,
-            "id": "widget-1783612689847-0",
-            "title": "Intent & Scope Description",
-            "type": "text",
-            "w": 350,
-            "x": 30,
-            "y": 30
-          },
-          {
-            "data": {
-              "techs": [
-                "Python"
-              ]
-            },
-            "h": 200,
-            "id": "widget-1783612689883-1",
-            "title": "Tech Stack Profiles",
-            "type": "techstack",
-            "w": 350,
-            "x": 60,
-            "y": 60
-          }
-        ]
-      },
-      "id": "prompt-store",
-      "name": "Prompt Store",
-      "type": "backend"
-    },
-    {
-      "canvas": {
-        "widgets": [
-          {
-            "data": {
               "text": "Neutral encrypted credential/secrets vault (truthcv/infra/secretstore/), extracted from the API to break the api↔providers import cycle. Resolves LLM credentials — reading data/secrets.enc (Fernet, gated on ENCRYPTION_KEY) and falling back to environment variables — and persists them via atomic tmp-rename. A leaf that uses Storage (truthcv.infra.storage data_dir) only for the data path. Depended on downward by both the API and the LLM Provider Layer."
             },
             "h": 180,
@@ -1432,181 +1289,6 @@
       },
       "id": "secret-store",
       "name": "Secret Store",
-      "type": "backend"
-    },
-    {
-      "canvas": {
-        "widgets": [
-          {
-            "data": {
-              "text": "Owns the user's job-application records (truthcv/domain/applications/) persisted as applications.json on the Truth Data Volume. Each Application tracks a submission (Company, Website, Application URL, Submitted, Submission Type, Reached Out, To Who, Response Received, Method) and OWNS its generated documents: an editable CV and cover letter saved per-application (so old outputs are retained and traceable to the application they went out with). Applications may exist WITHOUT a job posting (General/portal submissions). CRUD helpers use atomic writes mirroring truthcv/domain/truth/store.py; re-renders edited document content via the Renderer."
-            },
-            "h": 180,
-            "id": "widget-1783684073873-0",
-            "title": "Intent & Scope Description",
-            "type": "text",
-            "w": 350,
-            "x": 30,
-            "y": 30
-          },
-          {
-            "data": {
-              "techs": [
-                "Python",
-                "PyYAML/JSON"
-              ]
-            },
-            "h": 200,
-            "id": "widget-1783684073930-1",
-            "title": "Tech Stack Profiles",
-            "type": "techstack",
-            "w": 350,
-            "x": 60,
-            "y": 60
-          },
-          {
-            "data": {
-              "fields": [
-                {
-                  "flags": "Primary Key",
-                  "name": "id",
-                  "notes": "Stable application id (used in per-application filenames).",
-                  "type": "string"
-                },
-                {
-                  "flags": "-",
-                  "name": "company",
-                  "notes": "-",
-                  "type": "string"
-                },
-                {
-                  "flags": "-",
-                  "name": "website",
-                  "notes": "Company website URL.",
-                  "type": "string"
-                },
-                {
-                  "flags": "-",
-                  "name": "application_url",
-                  "notes": "Direct posting/portal URL, or N/A.",
-                  "type": "string"
-                },
-                {
-                  "flags": "-",
-                  "name": "submitted",
-                  "notes": "-",
-                  "type": "bool"
-                },
-                {
-                  "flags": "-",
-                  "name": "submission_type",
-                  "notes": "e.g. General (portal) or Tailored (to a posting).",
-                  "type": "string"
-                },
-                {
-                  "flags": "-",
-                  "name": "reached_out",
-                  "notes": "-",
-                  "type": "bool"
-                },
-                {
-                  "flags": "-",
-                  "name": "to_who",
-                  "notes": "Contact person reached out to.",
-                  "type": "string"
-                },
-                {
-                  "flags": "-",
-                  "name": "response_received",
-                  "notes": "-",
-                  "type": "bool"
-                },
-                {
-                  "flags": "-",
-                  "name": "method",
-                  "notes": "Outreach method, e.g. LinkedIn, Email.",
-                  "type": "string"
-                },
-                {
-                  "flags": "-",
-                  "name": "cv_document",
-                  "notes": "Owned editable CV: saved HTML/text source + rendered pdf/docx filenames.",
-                  "type": "object"
-                },
-                {
-                  "flags": "-",
-                  "name": "cover_letter_document",
-                  "notes": "Owned editable cover letter: saved text source + rendered pdf/docx filenames.",
-                  "type": "object"
-                },
-                {
-                  "flags": "-",
-                  "name": "posting",
-                  "notes": "Optional linked job posting text (absent for General submissions).",
-                  "type": "string"
-                },
-                {
-                  "flags": "-",
-                  "name": "created_at / updated_at",
-                  "notes": "ISO timestamps.",
-                  "type": "string"
-                },
-                {
-                  "flags": "-",
-                  "name": "application_date",
-                  "notes": "User-set date the application was submitted (ISO yyyy-mm-dd); distinct from the auto created_at/updated_at timestamps.",
-                  "type": "string"
-                },
-                {
-                  "flags": "-",
-                  "name": "notes",
-                  "notes": "Free-text notes the user attaches to the application record.",
-                  "type": "string"
-                },
-                {
-                  "flags": "",
-                  "name": "screening_id",
-                  "notes": "The approved screening this application was recorded against. The dedupe key: record_application creates-or-fetches by it under one lock, so a retried agent call updates the existing row instead of adding another.",
-                  "type": "string"
-                },
-                {
-                  "flags": "",
-                  "name": "fields_submitted",
-                  "notes": "Every form field the agent actually submitted, with its provenance (observed | canonical). Written only by the agent via MCP; read-only to the client.",
-                  "type": "list<{label,value,source}>"
-                },
-                {
-                  "flags": "",
-                  "name": "confirmation",
-                  "notes": "Verbatim success message proving the submission went through.",
-                  "type": "{text, confirmed_at, evidence}"
-                },
-                {
-                  "flags": "",
-                  "name": "attachments",
-                  "notes": "The files actually uploaded with the application.",
-                  "type": "list<{kind,path}>"
-                },
-                {
-                  "flags": "",
-                  "name": "screening",
-                  "notes": "The pre-application filter verdicts recorded against this application.",
-                  "type": "{entity, remote, salary, language, role_type, glassdoor}"
-                }
-              ]
-            },
-            "h": 240,
-            "id": "widget-1783684073979-2",
-            "title": "Application record",
-            "type": "schema",
-            "w": 440,
-            "x": 90,
-            "y": 90
-          }
-        ]
-      },
-      "id": "application-tracker",
-      "name": "Application Tracker",
       "type": "backend"
     },
     {
@@ -1864,339 +1546,6 @@
         "widgets": [
           {
             "data": {
-              "text": "Provider connection layer (truthcv/integrations/connections/): a static catalog of connection cards plus per-vendor auth flows. Claude Pro/Max signs in with a PKCE paste-code flow; ChatGPT (OpenAI) signs in with an OAuth device-code flow; Gmail uses Google OAuth 2.0 PKCE. Tokens are persisted encrypted in the Secret Store and refreshed lazily on use."
-            },
-            "h": 180,
-            "id": "widget-1787568456174-0",
-            "title": "Intent & Scope Description",
-            "type": "text",
-            "w": 350,
-            "x": 30,
-            "y": 30
-          },
-          {
-            "data": {
-              "techs": [
-                "Python",
-                "httpx",
-                "Google OAuth 2.0 (PKCE)"
-              ]
-            },
-            "h": 200,
-            "id": "widget-1787568457598-1",
-            "title": "Tech Stack Profiles",
-            "type": "techstack",
-            "w": 350,
-            "x": 60,
-            "y": 60
-          },
-          {
-            "data": {
-              "vars": [
-                {
-                  "desc": "Google OAuth client id; Gmail login/refresh fails with AuthError when unset.",
-                  "example": "1234567890-abc.apps.googleusercontent.com",
-                  "key": "GOOGLE_OAUTH_CLIENT_ID"
-                },
-                {
-                  "desc": "Google OAuth client secret used for the code exchange and refresh calls.",
-                  "example": "GOCSPX-…",
-                  "key": "GOOGLE_OAUTH_CLIENT_SECRET"
-                }
-              ]
-            },
-            "h": 200,
-            "id": "widget-1787568459083-2",
-            "title": "Configuration & Environment",
-            "type": "config",
-            "w": 350,
-            "x": 90,
-            "y": 90
-          },
-          {
-            "data": {
-              "fields": [
-                {
-                  "flags": "-",
-                  "name": "accessToken",
-                  "notes": "Current Gmail access token; blanked when reconnect is required.",
-                  "type": "string"
-                },
-                {
-                  "flags": "-",
-                  "name": "refreshToken",
-                  "notes": "Offline refresh token; carried over when Google omits it on refresh.",
-                  "type": "string"
-                },
-                {
-                  "flags": "-",
-                  "name": "expiresAt",
-                  "notes": "Refreshed lazily once within 300s of expiry.",
-                  "type": "float (epoch seconds)"
-                },
-                {
-                  "flags": "-",
-                  "name": "scope",
-                  "notes": "Defaults to https://www.googleapis.com/auth/gmail.readonly.",
-                  "type": "string"
-                },
-                {
-                  "flags": "-",
-                  "name": "connectedAt",
-                  "notes": "Preserved across refreshes.",
-                  "type": "float (epoch seconds)"
-                },
-                {
-                  "flags": "-",
-                  "name": "email",
-                  "notes": "Account address read from the Gmail profile endpoint at login.",
-                  "type": "string"
-                },
-                {
-                  "flags": "-",
-                  "name": "reauthRequired",
-                  "notes": "Set by mark_reconnect_required when refresh is rejected.",
-                  "type": "bool"
-                }
-              ]
-            },
-            "h": 240,
-            "id": "widget-1787568460579-3",
-            "title": "gmail connection record (secretstore \"gmail\".oauth)",
-            "type": "schema",
-            "w": 440,
-            "x": 120,
-            "y": 120
-          }
-        ]
-      },
-      "id": "connections",
-      "name": "Connections",
-      "type": "backend"
-    },
-    {
-      "canvas": {
-        "widgets": [
-          {
-            "data": {
-              "text": "Owns the unattended agent's configuration (truthcv/domain/agentconfig/): autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed, but any board (default or the operator's own) can be switched off, and a disabled board is not searched. Also composes the deterministic dork-style search queries handed to each run (titles, locations, remote terms and recency only; rejected role types are enforced by screening, not search), and supplies built-in search/posting URL presets for known direct boards."
-            },
-            "h": 200,
-            "id": "widget-text-agent-config",
-            "title": "Intent & Scope",
-            "type": "text",
-            "w": 350,
-            "x": 0,
-            "y": 0
-          },
-          {
-            "data": {
-              "fields": [
-                {
-                  "flags": "",
-                  "name": "job_boards[].source",
-                  "notes": "A catalog key (linkedin, ashby, greenhouse, lever, personio, workday) or a raw domain.",
-                  "type": "string"
-                },
-                {
-                  "flags": "optional",
-                  "name": "job_boards[].signin_url",
-                  "notes": "Operator-supplied sign-in URL; blank for a known board, which resolves from the catalog.",
-                  "type": "string"
-                },
-                {
-                  "flags": "optional",
-                  "name": "job_boards[].mode",
-                  "notes": "dork | direct. User-settable only for custom boards (source not in the boards.py catalog). Catalog boards derive a fixed mode and ignore any stored value. Defaults to dork on load for backward compatibility, and to direct for a newly added custom board.",
-                  "type": "string"
-                },
-                {
-                  "flags": "optional",
-                  "name": "profiles[].title_keywords",
-                  "notes": "Job titles used to compose Google dork queries. When empty, titles are detected from keywords by title noun (Engineer, Developer, Analyst…), falling back to the raw keywords. Each dork is capped at 32 words and split into several queries per board when needed.",
-                  "type": "list[str]"
-                },
-                {
-                  "flags": "",
-                  "name": "job_boards",
-                  "notes": "The operator's OWN boards. The four default boards are unioned in at resolve time and are stored here only when carrying a signin_url override or when disabled.",
-                  "type": "list[JobBoard]"
-                },
-                {
-                  "flags": "optional",
-                  "name": "job_boards[].enabled",
-                  "notes": "Defaults to true. False keeps the board listed but excludes it from dorks, direct boards and API feeds. Applies to default boards too.",
-                  "type": "bool"
-                },
-                {
-                  "flags": "",
-                  "name": "dork_recency",
-                  "notes": "Recency as an after:YYYY-MM-DD operator in composed dork queries; default w (past week); camelCase dorkRecency",
-                  "type": "\"d\"|\"w\"|\"m\"|\"y\"|\"none\""
-                }
-              ]
-            },
-            "h": 200,
-            "id": "widget-schema-agent-config",
-            "title": "Schema",
-            "type": "schema",
-            "w": 350,
-            "x": 0,
-            "y": 0
-          }
-        ]
-      },
-      "id": "agent-config",
-      "name": "Agent Config",
-      "type": "backend"
-    },
-    {
-      "canvas": {
-        "widgets": [
-          {
-            "data": {
-              "text": "Screens discovered postings against the active job profile's criteria and records the verdict. Owns the hard-criteria validators (truthcv/domain/screening/criteria.py): a posting's stated remote arrangement and any explicitly required working language are checked against the profile's remote_model / working_language, and the evidence is stored on the Screening record alongside the profile it was judged against."
-            },
-            "h": 200,
-            "id": "widget-text-screening-engine",
-            "title": "Intent & Scope",
-            "type": "text",
-            "w": 350,
-            "x": 0,
-            "y": 0
-          }
-        ]
-      },
-      "id": "screening-engine",
-      "name": "Screening Engine",
-      "type": "backend"
-    },
-    {
-      "canvas": {
-        "widgets": [
-          {
-            "data": {
-              "text": "First-run onboarding state (truthcv/domain/onboarding/): records which setup steps are complete, such as a provider being ready and a CV profile existing, and persists it on the Truth Data Volume through Storage. The API reads and updates it through truthcv/services/onboarding.py."
-            },
-            "h": 200,
-            "id": "widget-text-onboarding-store",
-            "title": "Intent & Scope Description",
-            "type": "text",
-            "w": 350,
-            "x": 30,
-            "y": 30
-          }
-        ]
-      },
-      "id": "onboarding-store",
-      "name": "Onboarding Store",
-      "type": "backend"
-    },
-    {
-      "canvas": {
-        "widgets": [
-          {
-            "data": {
-              "text": "Company research findings (truthcv/domain/companyresearch/): structured claims about a company, each with a claim type and source class, keyed by the company identity key from the Identity Leaf. Tracks superseded claims and open contradictions, which screening consults. Persisted on the Truth Data Volume."
-            },
-            "h": 200,
-            "id": "widget-text-company-research",
-            "title": "Intent & Scope Description",
-            "type": "text",
-            "w": 350,
-            "x": 30,
-            "y": 30
-          }
-        ]
-      },
-      "id": "company-research",
-      "name": "Company Research",
-      "type": "backend"
-    },
-    {
-      "canvas": {
-        "widgets": [
-          {
-            "data": {
-              "text": "Records of unattended agent runs (truthcv/domain/runs/): run lifecycle and status, counters, discovery coverage, and the per-run URL ledger with its channels and outcomes (truthcv/domain/runs/url_ledger.py). Persisted on the Truth Data Volume; only the most recent runs are retained. Run guards and the source funnel live in truthcv/services/runs.py and funnel.py."
-            },
-            "h": 200,
-            "id": "widget-text-run-store",
-            "title": "Intent & Scope Description",
-            "type": "text",
-            "w": 350,
-            "x": 30,
-            "y": 30
-          },
-          {
-            "data": {
-              "fields": [
-                {
-                  "flags": "derived on read",
-                  "name": "boardBreakdown",
-                  "notes": "Per job board (from screening URL host): postingsSeen, forReview, rejected",
-                  "type": "BoardBreakdown[]"
-                },
-                {
-                  "flags": "",
-                  "name": "discovery_coverage[].tier",
-                  "notes": "Which extraction tier produced the postings: api, harvest, llm, or empty when not applicable.",
-                  "type": "string"
-                },
-                {
-                  "flags": "",
-                  "name": "discovery_coverage[].status",
-                  "notes": "searched | empty | blocked | login_walled | skipped. 'blocked' means the page was unreadable (CAPTCHA/consent/bot wall), distinct from 'empty'.",
-                  "type": "string"
-                },
-                {
-                  "flags": "",
-                  "name": "finish_refused",
-                  "notes": "Set when finish_run was refused once for incomplete direct/dork discovery coverage; the second call always records.",
-                  "type": "bool"
-                }
-              ]
-            },
-            "h": 200,
-            "id": "widget-schema-run-store",
-            "title": "Schema",
-            "type": "schema",
-            "w": 350,
-            "x": 0,
-            "y": 0
-          }
-        ]
-      },
-      "id": "run-store",
-      "name": "Run Store",
-      "type": "backend"
-    },
-    {
-      "canvas": {
-        "widgets": [
-          {
-            "data": {
-              "text": "Keyword vocabulary (truthcv/engines/vocabulary/): the shared keyword data used by tailoring, the guardrail and the renderer's ATS keyword check, persisted on the Truth Data Volume."
-            },
-            "h": 200,
-            "id": "widget-text-keyword-vocabulary",
-            "title": "Intent & Scope Description",
-            "type": "text",
-            "w": 350,
-            "x": 30,
-            "y": 30
-          }
-        ]
-      },
-      "id": "keyword-vocabulary",
-      "name": "Keyword Vocabulary",
-      "type": "backend"
-    },
-    {
-      "canvas": {
-        "widgets": [
-          {
-            "data": {
               "text": "The containerised headful Chromium (browser/ container, served by @playwright/mcp). The Application Agent drives it over in-network HTTP MCP. The API reads, opens and closes the operator browser session through its session-control endpoint via truthcv/services/browser.py."
             },
             "h": 200,
@@ -2211,69 +1560,6 @@
       },
       "id": "browser-service",
       "name": "Browser Service",
-      "type": "backend"
-    },
-    {
-      "canvas": {
-        "widgets": [
-          {
-            "data": {
-              "text": "Lowest-level file storage (truthcv/infra/storage/): data_dir() resolution (DATA_DIR, default ./data) and atomic, locked file writes used by every store. Imports nothing first-party."
-            },
-            "h": 200,
-            "id": "widget-text-storage-leaf",
-            "title": "Intent & Scope Description",
-            "type": "text",
-            "w": 350,
-            "x": 30,
-            "y": 30
-          }
-        ]
-      },
-      "id": "storage-leaf",
-      "name": "Storage",
-      "type": "backend"
-    },
-    {
-      "canvas": {
-        "widgets": [
-          {
-            "data": {
-              "text": "All business logic (truthcv/services/). Both adapters, the HTTP API (truthcv/adapters/http/) and the MCP tool surface (truthcv/adapters/mcp/), parse input, call one service function, and translate its result or a services.errors exception into their wire format. Services never import the adapters or FastAPI, and receive the LLM provider (or a provider factory) from the caller. The layering is enforced by import-linter in pyproject.toml."
-            },
-            "h": 200,
-            "id": "widget-text-services-layer",
-            "title": "Intent & Scope Description",
-            "type": "text",
-            "w": 350,
-            "x": 30,
-            "y": 30
-          }
-        ]
-      },
-      "id": "services-layer",
-      "name": "Services Layer",
-      "type": "backend"
-    },
-    {
-      "canvas": {
-        "widgets": [
-          {
-            "data": {
-              "text": "API-backed job feeds pulled directly by TruthCV: Remote Rocketship (keyed, opt-in), Arbeitnow (keyless, a default board that is always searched), and per-company ATS APIs. Results are merged and de-duplicated by URL under one shared fetch deadline."
-            },
-            "h": 200,
-            "id": "widget-text-job-feeds",
-            "title": "Intent & Scope",
-            "type": "text",
-            "w": 350,
-            "x": 0,
-            "y": 0
-          }
-        ]
-      },
-      "id": "job-feeds",
-      "name": "Job Feeds",
       "type": "backend"
     },
     {
@@ -2317,31 +1603,46 @@
         "widgets": [
           {
             "data": {
-              "text": "Matches Gmail replies to tracked applications (truthcv/domain/gmailsync/): reads the connected mailbox through the Gmail connection, produces response suggestions, can cross-check them with Jev, and records accepted ones on the Application Tracker. Runs on demand or as a background task."
+              "text": "External public Arbeitnow job-board API (https://www.arbeitnow.com/api/job-board-api). Job Feeds (truthcv/domain/jobfeeds/arbeitnow.py) fetches paginated postings from it on every feed refresh, because arbeitnow is a default, non-removable board (truthcv/domain/agentconfig/boards.py)."
             },
-            "h": 200,
-            "id": "widget-text-gmail-response-sync",
+            "h": 180,
+            "id": "widget-1790600842460-0",
             "title": "Intent & Scope Description",
             "type": "text",
             "w": 350,
             "x": 30,
             "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Arbeitnow public REST API",
+                "HTTPS"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1790600842536-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
           }
         ]
       },
-      "id": "gmail-response-sync",
-      "name": "Gmail Response Sync",
-      "type": "backend"
+      "id": "arbeitnow-api",
+      "name": "Arbeitnow Job Board API",
+      "type": "custom"
     },
     {
       "canvas": {
         "widgets": [
           {
             "data": {
-              "text": "Bounded background job executor (truthcv/infra/background_tasks/): a shared thread pool (MAX_WORKERS=4) plus an in-memory, thread-safe registry of Job records. Callers submit a zero-argument callable via submit(kind, fn); it runs on a worker thread and its outcome (result or exception) is recorded on the returned Job. get()/list_jobs() poll registry state. Registry is in-memory only - jobs are not persisted across restarts."
+              "text": "All business logic plus the background executor that runs it off the request thread. Two parts:\n\nSERVICES LAYER (truthcv/services/): both adapters, the HTTP API (truthcv/adapters/http/) and the MCP tool surface (truthcv/adapters/mcp/), parse input, call one service function, and translate its result or a services.errors exception into their wire format. Services never import the adapters or FastAPI, and receive the LLM provider (or a provider factory) from the caller. The layering is enforced by import-linter in pyproject.toml.\n\nBACKGROUND TASKS (truthcv/infra/background_tasks/): a bounded background job executor - a shared thread pool (MAX_WORKERS=4) plus an in-memory, thread-safe registry of Job records. Callers submit a zero-argument callable via submit(kind, fn); it runs on a worker thread and its outcome (result or exception) is recorded on the returned Job. get()/list_jobs() poll registry state. The registry is in-memory only - jobs are not persisted across restarts. Used for Gmail sync and feed refresh."
             },
             "h": 180,
-            "id": "widget-1790091508394-0",
+            "id": "widget-1794311332864-0",
             "title": "Intent & Scope Description",
             "type": "text",
             "w": 350,
@@ -2352,11 +1653,12 @@
             "data": {
               "techs": [
                 "Python",
-                "concurrent.futures ThreadPoolExecutor"
+                "concurrent.futures ThreadPoolExecutor",
+                "import-linter"
               ]
             },
             "h": 200,
-            "id": "widget-1790091508428-1",
+            "id": "widget-1794311332864-1",
             "title": "Tech Stack Profiles",
             "type": "techstack",
             "w": 350,
@@ -2423,17 +1725,50 @@
               ]
             },
             "h": 240,
-            "id": "widget-1790091508465-2",
-            "title": "Job record",
+            "id": "widget-1794311364678-2",
+            "title": "Job record (Background Tasks)",
             "type": "schema",
             "w": 440,
             "x": 90,
             "y": 90
+          },
+          {
+            "data": {
+              "blocks": [
+                {
+                  "desc": "truthcv/services/ - all business logic",
+                  "id": "services-layer",
+                  "label": "Services Layer",
+                  "x": 24,
+                  "y": 24
+                },
+                {
+                  "desc": "thread pool + in-memory Job registry",
+                  "id": "background-tasks",
+                  "label": "Background Tasks",
+                  "x": 174,
+                  "y": 24
+                }
+              ],
+              "links": [
+                {
+                  "from": "services-layer",
+                  "to": "background-tasks"
+                }
+              ]
+            },
+            "h": 200,
+            "id": "widget-1794311365038-3",
+            "title": "Internal structure",
+            "type": "diagram",
+            "w": 350,
+            "x": 120,
+            "y": 120
           }
         ]
       },
-      "id": "job-runner",
-      "name": "Background Tasks",
+      "id": "orchestration",
+      "name": "Orchestration",
       "type": "backend"
     },
     {
@@ -2441,10 +1776,10 @@
         "widgets": [
           {
             "data": {
-              "text": "External public Arbeitnow job-board API (https://www.arbeitnow.com/api/job-board-api). Job Feeds (truthcv/domain/jobfeeds/arbeitnow.py) fetches paginated postings from it on every feed refresh, because arbeitnow is a default, non-removable board (truthcv/domain/agentconfig/boards.py)."
+              "text": "Produces the tailored CV and cover letter from the truth file. Four parts:\n\nTAILOR ENGINE (truthcv/engines/tailor/): tailors a CV to a specific posting. Extracts the posting's keywords/requirements via a provider, then selects, reorders, and rephrases ONLY entries referenced by id from truth.yaml. Detects any claim the LLM wants to add that is not already in the truth file and surfaces it as an approval checklist (confirm-inferences step); nothing unapproved reaches the CV.\n\nCOVER LETTER ENGINE (truthcv/engines/coverletter/): guardrailed cover-letter generation. build_letter() asks the LLM (via the provider layer) for a cover letter as tagged paragraphs, each declaring the factual claims it makes. Every claim is validated by the Guardrail Validator against the Truth Store; if any claim is unverifiable the letter is BLOCKED (returns {blocked: true, unverifiable, text: \"\"}). Otherwise the paragraph text is joined and handed to the Renderer for HTML/PDF/DOCX output. Serves /api/cover-letter together with truthcv/engines/render/.\n\nRENDERER (truthcv/engines/render/): renders the approved CV from one Jinja-templated ATS-safe HTML source: PDF via WeasyPrint (pure-Python, single column, selectable text) and DOCX via pandoc. Runs an ATS linter before download that warns on multi-column layouts, tables, text-in-images, non-standard headings, missing contact block, and posting keywords absent from the CV. No LLM dependency.\n\nPROMPT STORE: stores operator-editable prompt fragments and presets as JSON on the truth data volume, layered over seeded records defined in code. Fragments are atomic style blocks grouped into four display slots (voice, structure, opener, rules); any number may be combined in a preset. The default preset marker is stored separately so seeded records are never materialised on disk."
             },
             "h": 180,
-            "id": "widget-1790600842460-0",
+            "id": "widget-1794311332864-0",
             "title": "Intent & Scope Description",
             "type": "text",
             "w": 350,
@@ -2454,43 +1789,83 @@
           {
             "data": {
               "techs": [
-                "Arbeitnow public REST API",
-                "HTTPS"
+                "Python",
+                "Jinja2",
+                "WeasyPrint",
+                "pandoc"
               ]
             },
             "h": 200,
-            "id": "widget-1790600842536-1",
+            "id": "widget-1794311332864-1",
             "title": "Tech Stack Profiles",
             "type": "techstack",
             "w": 350,
             "x": 60,
             "y": 60
-          }
-        ]
-      },
-      "id": "arbeitnow-api",
-      "name": "Arbeitnow Job Board API",
-      "type": "custom"
-    },
-    {
-      "canvas": {
-        "widgets": [
+          },
           {
             "data": {
-              "text": "Stdlib-only identity helpers shared by every layer (truthcv/infra/identity/): company identity keys and name validation (company.py) and posting-URL validation, normalisation and dedupe keys (url.py). Imports nothing first-party."
+              "blocks": [
+                {
+                  "desc": "truthcv/engines/tailor/",
+                  "id": "tailor-engine",
+                  "label": "Tailor Engine",
+                  "x": 24,
+                  "y": 24
+                },
+                {
+                  "desc": "truthcv/engines/coverletter/",
+                  "id": "cover-letter-engine",
+                  "label": "Cover Letter Engine",
+                  "x": 174,
+                  "y": 24
+                },
+                {
+                  "desc": "truthcv/engines/render/ - PDF, DOCX, ATS lint",
+                  "id": "renderer",
+                  "label": "Renderer",
+                  "x": 324,
+                  "y": 24
+                },
+                {
+                  "desc": "prompt fragments and presets",
+                  "id": "prompt-store",
+                  "label": "Prompt Store",
+                  "x": 24,
+                  "y": 104
+                }
+              ],
+              "links": [
+                {
+                  "from": "tailor-engine",
+                  "to": "prompt-store"
+                },
+                {
+                  "from": "cover-letter-engine",
+                  "to": "prompt-store"
+                },
+                {
+                  "from": "cover-letter-engine",
+                  "to": "renderer"
+                },
+                {
+                  "from": "renderer",
+                  "to": "prompt-store"
+                }
+              ]
             },
             "h": 200,
-            "id": "widget-text-identity-leaf",
-            "title": "Intent & Scope Description",
-            "type": "text",
+            "id": "widget-1794311365170-2",
+            "title": "Internal structure",
+            "type": "diagram",
             "w": 350,
-            "x": 30,
-            "y": 30
+            "x": 90,
+            "y": 90
           }
         ]
       },
-      "id": "identity-leaf",
-      "name": "Identity Leaf",
+      "id": "document-generation",
+      "name": "Document Generation",
       "type": "backend"
     },
     {
@@ -2498,20 +1873,588 @@
         "widgets": [
           {
             "data": {
-              "text": "Stdlib-only MCP input-schema builder (truthcv/infra/mcpschema/): derives each MCP tool's JSON input schema from its Python signature. Used by the MCP tool surface and by the API's MCP endpoints. Imports nothing first-party."
+              "text": "Everything the unattended agent's work is recorded in and judged by: configuration, screening, runs, company research and the application ledger. Five parts:\n\nAPPLICATION TRACKER (truthcv/domain/applications/): owns the user's job-application records, persisted as applications.json on the Truth Data Volume. Each Application tracks a submission (Company, Website, Application URL, Submitted, Submission Type, Reached Out, To Who, Response Received, Method) and OWNS its generated documents: an editable CV and cover letter saved per-application (so old outputs are retained and traceable to the application they went out with). Applications may exist WITHOUT a job posting (General/portal submissions). CRUD helpers use atomic writes mirroring truthcv/domain/truth/store.py; re-renders edited document content via Document Generation's Renderer.\n\nSCREENING ENGINE (truthcv/domain/screening/): screens discovered postings against the active job profile's criteria and records the verdict. Owns the hard-criteria validators (criteria.py): a posting's stated remote arrangement and any explicitly required working language are checked against the profile's remote_model / working_language, and the evidence is stored on the Screening record alongside the profile it was judged against. Posts posting text to the Jev API for hard-requirement cross-checks (jev.py).\n\nRUN STORE (truthcv/domain/runs/): records of unattended agent runs - run lifecycle and status, counters, discovery coverage, and the per-run URL ledger with its channels and outcomes (url_ledger.py). Only the most recent runs are retained. Run guards and the source funnel live in truthcv/services/runs.py and funnel.py.\n\nAGENT CONFIG (truthcv/domain/agentconfig/): owns the unattended agent's configuration - autonomy mode, schedule, company blocklist and watchlist, cooldown windows, job search profiles, and the global list of job boards the agent searches. Four default boards are always part of that list and cannot be removed, but any board (default or the operator's own) can be switched off, and a disabled board is not searched. Also composes the deterministic dork-style search queries handed to each run (titles, locations, remote terms and recency only; rejected role types are enforced by screening, not search), and supplies built-in search/posting URL presets for known direct boards.\n\nCOMPANY RESEARCH (truthcv/domain/companyresearch/): structured claims about a company, each with a claim type and source class, keyed by the company identity key from the identity helpers. Tracks superseded claims and open contradictions, which screening consults."
             },
-            "h": 200,
-            "id": "widget-text-mcpschema-leaf",
+            "h": 180,
+            "id": "widget-1794311332864-0",
             "title": "Intent & Scope Description",
             "type": "text",
             "w": 350,
             "x": 30,
             "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Python",
+                "PyYAML/JSON"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1794311332864-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "Primary Key",
+                  "name": "id",
+                  "notes": "Stable application id (used in per-application filenames).",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "company",
+                  "notes": "-",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "website",
+                  "notes": "Company website URL.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "application_url",
+                  "notes": "Direct posting/portal URL, or N/A.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "submitted",
+                  "notes": "-",
+                  "type": "bool"
+                },
+                {
+                  "flags": "-",
+                  "name": "submission_type",
+                  "notes": "e.g. General (portal) or Tailored (to a posting).",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "reached_out",
+                  "notes": "-",
+                  "type": "bool"
+                },
+                {
+                  "flags": "-",
+                  "name": "to_who",
+                  "notes": "Contact person reached out to.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "response_received",
+                  "notes": "-",
+                  "type": "bool"
+                },
+                {
+                  "flags": "-",
+                  "name": "method",
+                  "notes": "Outreach method, e.g. LinkedIn, Email.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "cv_document",
+                  "notes": "Owned editable CV: saved HTML/text source + rendered pdf/docx filenames.",
+                  "type": "object"
+                },
+                {
+                  "flags": "-",
+                  "name": "cover_letter_document",
+                  "notes": "Owned editable cover letter: saved text source + rendered pdf/docx filenames.",
+                  "type": "object"
+                },
+                {
+                  "flags": "-",
+                  "name": "posting",
+                  "notes": "Optional linked job posting text (absent for General submissions).",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "created_at / updated_at",
+                  "notes": "ISO timestamps.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "application_date",
+                  "notes": "User-set date the application was submitted (ISO yyyy-mm-dd); distinct from the auto created_at/updated_at timestamps.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "notes",
+                  "notes": "Free-text notes the user attaches to the application record.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "screening_id",
+                  "notes": "The approved screening this application was recorded against. The dedupe key: record_application creates-or-fetches by it under one lock, so a retried agent call updates the existing row instead of adding another.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "fields_submitted",
+                  "notes": "Every form field the agent actually submitted, with its provenance (observed | canonical). Written only by the agent via MCP; read-only to the client.",
+                  "type": "list<{label,value,source}>"
+                },
+                {
+                  "flags": "-",
+                  "name": "confirmation",
+                  "notes": "Verbatim success message proving the submission went through.",
+                  "type": "{text, confirmed_at, evidence}"
+                },
+                {
+                  "flags": "-",
+                  "name": "attachments",
+                  "notes": "The files actually uploaded with the application.",
+                  "type": "list<{kind,path}>"
+                },
+                {
+                  "flags": "-",
+                  "name": "screening",
+                  "notes": "The pre-application filter verdicts recorded against this application.",
+                  "type": "{entity, remote, salary, language, role_type, glassdoor}"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1794311364758-2",
+            "title": "Application record (Application Tracker)",
+            "type": "schema",
+            "w": 440,
+            "x": 90,
+            "y": 90
+          },
+          {
+            "data": {
+              "blocks": [
+                {
+                  "desc": "truthcv/domain/runs/",
+                  "id": "run-store",
+                  "label": "Run Store",
+                  "x": 24,
+                  "y": 24
+                },
+                {
+                  "desc": "truthcv/domain/screening/",
+                  "id": "screening-engine",
+                  "label": "Screening Engine",
+                  "x": 174,
+                  "y": 24
+                },
+                {
+                  "desc": "truthcv/domain/applications/",
+                  "id": "application-tracker",
+                  "label": "Application Tracker",
+                  "x": 324,
+                  "y": 24
+                },
+                {
+                  "desc": "truthcv/domain/agentconfig/",
+                  "id": "agent-config",
+                  "label": "Agent Config",
+                  "x": 24,
+                  "y": 104
+                },
+                {
+                  "desc": "truthcv/domain/companyresearch/",
+                  "id": "company-research",
+                  "label": "Company Research",
+                  "x": 174,
+                  "y": 104
+                }
+              ],
+              "links": [
+                {
+                  "from": "run-store",
+                  "to": "screening-engine"
+                },
+                {
+                  "from": "run-store",
+                  "to": "application-tracker"
+                },
+                {
+                  "from": "screening-engine",
+                  "to": "application-tracker"
+                },
+                {
+                  "from": "screening-engine",
+                  "to": "agent-config"
+                },
+                {
+                  "from": "screening-engine",
+                  "to": "company-research"
+                },
+                {
+                  "from": "application-tracker",
+                  "to": "company-research"
+                }
+              ]
+            },
+            "h": 200,
+            "id": "widget-1794311365310-3",
+            "title": "Internal structure",
+            "type": "diagram",
+            "w": 350,
+            "x": 120,
+            "y": 120
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "-",
+                  "name": "job_boards[].source",
+                  "notes": "A catalog key (linkedin, ashby, greenhouse, lever, personio, workday) or a raw domain.",
+                  "type": "string"
+                },
+                {
+                  "flags": "optional",
+                  "name": "job_boards[].signin_url",
+                  "notes": "Operator-supplied sign-in URL; blank for a known board, which resolves from the catalog.",
+                  "type": "string"
+                },
+                {
+                  "flags": "optional",
+                  "name": "job_boards[].mode",
+                  "notes": "dork | direct. User-settable only for custom boards (source not in the boards.py catalog). Catalog boards derive a fixed mode and ignore any stored value. Defaults to dork on load for backward compatibility, and to direct for a newly added custom board.",
+                  "type": "string"
+                },
+                {
+                  "flags": "optional",
+                  "name": "profiles[].title_keywords",
+                  "notes": "Job titles used to compose Google dork queries. When empty, titles are detected from keywords by title noun (Engineer, Developer, Analyst…), falling back to the raw keywords. Each dork is capped at 32 words and split into several queries per board when needed.",
+                  "type": "list[str]"
+                },
+                {
+                  "flags": "-",
+                  "name": "job_boards",
+                  "notes": "The operator's OWN boards. The four default boards are unioned in at resolve time and are stored here only when carrying a signin_url override or when disabled.",
+                  "type": "list[JobBoard]"
+                },
+                {
+                  "flags": "optional",
+                  "name": "job_boards[].enabled",
+                  "notes": "Defaults to true. False keeps the board listed but excludes it from dorks, direct boards and API feeds. Applies to default boards too.",
+                  "type": "bool"
+                },
+                {
+                  "flags": "-",
+                  "name": "dork_recency",
+                  "notes": "Recency as an after:YYYY-MM-DD operator in composed dork queries; default w (past week); camelCase dorkRecency",
+                  "type": "\"d\"|\"w\"|\"m\"|\"y\"|\"none\""
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1794311379535-4",
+            "title": "Agent Config",
+            "type": "schema",
+            "w": 440,
+            "x": 150,
+            "y": 150
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "derived on read",
+                  "name": "boardBreakdown",
+                  "notes": "Per job board (from screening URL host): postingsSeen, forReview, rejected",
+                  "type": "BoardBreakdown[]"
+                },
+                {
+                  "flags": "-",
+                  "name": "discovery_coverage[].tier",
+                  "notes": "Which extraction tier produced the postings: api, harvest, llm, or empty when not applicable.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "discovery_coverage[].status",
+                  "notes": "searched | empty | blocked | login_walled | skipped. 'blocked' means the page was unreadable (CAPTCHA/consent/bot wall), distinct from 'empty'.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "finish_refused",
+                  "notes": "Set when finish_run was refused once for incomplete direct/dork discovery coverage; the second call always records.",
+                  "type": "bool"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1794311379572-5",
+            "title": "Run record (Run Store)",
+            "type": "schema",
+            "w": 440,
+            "x": 180,
+            "y": 180
           }
         ]
       },
-      "id": "mcpschema-leaf",
-      "name": "MCP Schema Leaf",
+      "id": "application-pipeline",
+      "name": "Application Pipeline",
+      "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "Everything that reaches a third-party service on the app's behalf, other than LLM completions. Three parts:\n\nCONNECTIONS (truthcv/integrations/connections/): the provider connection layer - a static catalog of connection cards plus per-vendor auth flows. Claude Pro/Max signs in with a PKCE paste-code flow; ChatGPT (OpenAI) signs in with an OAuth device-code flow; Gmail uses Google OAuth 2.0 PKCE. Tokens are persisted encrypted in the Secret Store and refreshed lazily on use.\n\nGMAIL RESPONSE SYNC (truthcv/domain/gmailsync/): matches Gmail replies to tracked applications - reads the connected mailbox through the Gmail connection, produces response suggestions, can cross-check them with Jev, and records accepted ones on the Application Pipeline's tracker. Runs on demand or as a background task.\n\nJOB FEEDS: API-backed job feeds pulled directly by TruthCV - Remote Rocketship (keyed, opt-in), Arbeitnow (keyless, a default board that is always searched), and per-company ATS APIs. Results are merged and de-duplicated by URL under one shared fetch deadline."
+            },
+            "h": 180,
+            "id": "widget-1794311332864-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Python",
+                "httpx",
+                "Google OAuth 2.0 (PKCE)"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1794311332864-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          },
+          {
+            "data": {
+              "fields": [
+                {
+                  "flags": "-",
+                  "name": "accessToken",
+                  "notes": "Current Gmail access token; blanked when reconnect is required.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "refreshToken",
+                  "notes": "Offline refresh token; carried over when Google omits it on refresh.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "expiresAt",
+                  "notes": "Refreshed lazily once within 300s of expiry.",
+                  "type": "float (epoch seconds)"
+                },
+                {
+                  "flags": "-",
+                  "name": "scope",
+                  "notes": "Defaults to https://www.googleapis.com/auth/gmail.readonly.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "connectedAt",
+                  "notes": "Preserved across refreshes.",
+                  "type": "float (epoch seconds)"
+                },
+                {
+                  "flags": "-",
+                  "name": "email",
+                  "notes": "Account address read from the Gmail profile endpoint at login.",
+                  "type": "string"
+                },
+                {
+                  "flags": "-",
+                  "name": "reauthRequired",
+                  "notes": "Set by mark_reconnect_required when refresh is rejected.",
+                  "type": "bool"
+                }
+              ]
+            },
+            "h": 240,
+            "id": "widget-1794311364822-2",
+            "title": "gmail connection record (secretstore \"gmail\".oauth)",
+            "type": "schema",
+            "w": 440,
+            "x": 90,
+            "y": 90
+          },
+          {
+            "data": {
+              "vars": [
+                {
+                  "desc": "Google OAuth client id; Gmail login/refresh fails with AuthError when unset.",
+                  "example": "1234567890-abc.apps.googleusercontent.com",
+                  "key": "GOOGLE_OAUTH_CLIENT_ID"
+                },
+                {
+                  "desc": "Google OAuth client secret used for the code exchange and refresh calls.",
+                  "example": "GOCSPX-…",
+                  "key": "GOOGLE_OAUTH_CLIENT_SECRET"
+                }
+              ]
+            },
+            "h": 200,
+            "id": "widget-1794311364875-3",
+            "title": "Configuration & Environment",
+            "type": "config",
+            "w": 350,
+            "x": 120,
+            "y": 120
+          },
+          {
+            "data": {
+              "blocks": [
+                {
+                  "desc": "truthcv/domain/gmailsync/",
+                  "id": "gmail-response-sync",
+                  "label": "Gmail Response Sync",
+                  "x": 24,
+                  "y": 24
+                },
+                {
+                  "desc": "truthcv/integrations/connections/ - OAuth flows",
+                  "id": "connections",
+                  "label": "Connections",
+                  "x": 174,
+                  "y": 24
+                },
+                {
+                  "desc": "Remote Rocketship, Arbeitnow, ATS APIs",
+                  "id": "job-feeds",
+                  "label": "Job Feeds",
+                  "x": 324,
+                  "y": 24
+                }
+              ],
+              "links": [
+                {
+                  "from": "gmail-response-sync",
+                  "to": "connections"
+                }
+              ]
+            },
+            "h": 200,
+            "id": "widget-1794311365477-4",
+            "title": "Internal structure",
+            "type": "diagram",
+            "w": 350,
+            "x": 150,
+            "y": 150
+          }
+        ]
+      },
+      "id": "integrations",
+      "name": "Integrations",
+      "type": "backend"
+    },
+    {
+      "canvas": {
+        "widgets": [
+          {
+            "data": {
+              "text": "The lowest layer: file storage and the small shared helpers every other component may depend on. Five parts:\n\nSTORAGE (truthcv/infra/storage/): lowest-level file storage - data_dir() resolution (DATA_DIR, default ./data) and atomic, locked file writes used by every store. Imports nothing first-party. The only component that touches the Truth Data Volume.\n\nONBOARDING STORE (truthcv/domain/onboarding/): first-run onboarding state - records which setup steps are complete, such as a provider being ready and a CV profile existing. The API reads and updates it through truthcv/services/onboarding.py.\n\nKEYWORD VOCABULARY (truthcv/engines/vocabulary/): the shared keyword data used by tailoring, the guardrail and the renderer's ATS keyword check.\n\nIDENTITY HELPERS (truthcv/infra/identity/): stdlib-only identity helpers shared by every layer - company identity keys and name validation (company.py) and posting-URL validation, normalisation and dedupe keys (url.py). Imports nothing first-party.\n\nMCP SCHEMA BUILDER (truthcv/infra/mcpschema/): stdlib-only MCP input-schema builder that derives each MCP tool's JSON input schema from its Python signature. Used by the MCP tool surface and by the API's MCP endpoints. Imports nothing first-party."
+            },
+            "h": 180,
+            "id": "widget-1794311332864-0",
+            "title": "Intent & Scope Description",
+            "type": "text",
+            "w": 350,
+            "x": 30,
+            "y": 30
+          },
+          {
+            "data": {
+              "techs": [
+                "Python (stdlib only for the infra leaves)"
+              ]
+            },
+            "h": 200,
+            "id": "widget-1794311332864-1",
+            "title": "Tech Stack Profiles",
+            "type": "techstack",
+            "w": 350,
+            "x": 60,
+            "y": 60
+          },
+          {
+            "data": {
+              "blocks": [
+                {
+                  "desc": "truthcv/infra/storage/ - atomic file writes",
+                  "id": "storage-leaf",
+                  "label": "Storage",
+                  "x": 24,
+                  "y": 24
+                },
+                {
+                  "desc": "truthcv/domain/onboarding/",
+                  "id": "onboarding-store",
+                  "label": "Onboarding Store",
+                  "x": 174,
+                  "y": 24
+                },
+                {
+                  "desc": "truthcv/engines/vocabulary/",
+                  "id": "keyword-vocabulary",
+                  "label": "Keyword Vocabulary",
+                  "x": 324,
+                  "y": 24
+                },
+                {
+                  "desc": "truthcv/infra/identity/",
+                  "id": "identity-helpers",
+                  "label": "Identity Helpers",
+                  "x": 24,
+                  "y": 104
+                },
+                {
+                  "desc": "truthcv/infra/mcpschema/",
+                  "id": "mcp-schema-builder",
+                  "label": "MCP Schema Builder",
+                  "x": 174,
+                  "y": 104
+                }
+              ],
+              "links": [
+                {
+                  "from": "onboarding-store",
+                  "to": "storage-leaf"
+                },
+                {
+                  "from": "keyword-vocabulary",
+                  "to": "storage-leaf"
+                }
+              ]
+            },
+            "h": 200,
+            "id": "widget-1794311365628-2",
+            "title": "Internal structure",
+            "type": "diagram",
+            "w": 350,
+            "x": 90,
+            "y": 90
+          }
+        ]
+      },
+      "id": "storage",
+      "name": "Storage & Shared Leaves",
       "type": "backend"
     }
   ],
@@ -2522,39 +2465,9 @@
       "to": "api"
     },
     {
-      "from": "api",
-      "protocol": "in-process",
-      "to": "truth-store"
-    },
-    {
-      "from": "api",
-      "protocol": "in-process",
-      "to": "guardrail-validator"
-    },
-    {
-      "from": "tailor-engine",
-      "protocol": "in-process",
-      "to": "llm-provider-layer"
-    },
-    {
-      "from": "tailor-engine",
-      "protocol": "in-process",
-      "to": "truth-store"
-    },
-    {
       "from": "guardrail-validator",
       "protocol": "in-process",
       "to": "truth-store"
-    },
-    {
-      "from": "truth-store",
-      "protocol": "file I/O",
-      "to": "truth-data-volume"
-    },
-    {
-      "from": "renderer",
-      "protocol": "file I/O",
-      "to": "truth-data-volume"
     },
     {
       "from": "llm-provider-layer",
@@ -2562,194 +2475,14 @@
       "to": "llm-provider-service"
     },
     {
-      "from": "api",
-      "protocol": "in-process",
-      "to": "cover-letter-engine"
-    },
-    {
-      "from": "cover-letter-engine",
-      "protocol": "in-process",
-      "to": "llm-provider-layer"
-    },
-    {
-      "from": "cover-letter-engine",
-      "protocol": "in-process",
-      "to": "guardrail-validator"
-    },
-    {
-      "from": "cover-letter-engine",
-      "protocol": "in-process",
-      "to": "truth-store"
-    },
-    {
-      "from": "cover-letter-engine",
-      "protocol": "in-process",
-      "to": "renderer"
-    },
-    {
-      "from": "tailor-engine",
-      "protocol": "in-process",
-      "to": "prompt-store"
-    },
-    {
-      "from": "cover-letter-engine",
-      "protocol": "in-process",
-      "to": "prompt-store"
-    },
-    {
-      "from": "api",
-      "protocol": "in-process",
-      "to": "secret-store"
-    },
-    {
       "from": "llm-provider-layer",
       "protocol": "in-process",
       "to": "secret-store"
     },
     {
-      "from": "secret-store",
-      "protocol": "file I/O",
-      "to": "truth-data-volume"
-    },
-    {
-      "from": "api",
-      "protocol": "in-process",
-      "to": "application-tracker"
-    },
-    {
-      "from": "application-tracker",
-      "protocol": "file I/O",
-      "to": "truth-data-volume"
-    },
-    {
-      "from": "application-tracker",
-      "protocol": "in-process",
-      "to": "renderer"
-    },
-    {
-      "from": "api",
-      "protocol": "HTTPS",
-      "to": "gmail-api"
-    },
-    {
       "from": "application-agent",
       "protocol": "HTTP/MCP (streamable HTTP JSON-RPC)",
       "to": "api"
-    },
-    {
-      "from": "api",
-      "protocol": "in-process",
-      "to": "connections"
-    },
-    {
-      "from": "connections",
-      "protocol": "in-process",
-      "to": "secret-store"
-    },
-    {
-      "from": "connections",
-      "protocol": "HTTPS",
-      "to": "gmail-api"
-    },
-    {
-      "from": "agent-config",
-      "protocol": "file I/O",
-      "to": "truth-data-volume"
-    },
-    {
-      "from": "screening-engine",
-      "protocol": "in-process",
-      "to": "agent-config"
-    },
-    {
-      "from": "screening-engine",
-      "protocol": "in-process",
-      "to": "application-tracker"
-    },
-    {
-      "from": "screening-engine",
-      "protocol": "file I/O",
-      "to": "truth-data-volume"
-    },
-    {
-      "from": "application-agent",
-      "protocol": "HTTP/REST",
-      "to": "agent-config"
-    },
-    {
-      "from": "api",
-      "protocol": "in-process",
-      "to": "screening-engine"
-    },
-    {
-      "from": "api",
-      "protocol": "in-process",
-      "to": "agent-config"
-    },
-    {
-      "from": "onboarding-store",
-      "protocol": "file I/O",
-      "to": "truth-data-volume"
-    },
-    {
-      "from": "renderer",
-      "protocol": "in-process",
-      "to": "prompt-store"
-    },
-    {
-      "from": "company-research",
-      "protocol": "file I/O",
-      "to": "truth-data-volume"
-    },
-    {
-      "from": "api",
-      "protocol": "in-process",
-      "to": "company-research"
-    },
-    {
-      "from": "application-tracker",
-      "protocol": "in-process",
-      "to": "company-research"
-    },
-    {
-      "from": "screening-engine",
-      "protocol": "in-process",
-      "to": "company-research"
-    },
-    {
-      "from": "run-store",
-      "protocol": "file I/O",
-      "to": "truth-data-volume"
-    },
-    {
-      "from": "keyword-vocabulary",
-      "protocol": "file I/O",
-      "to": "truth-data-volume"
-    },
-    {
-      "from": "api",
-      "protocol": "in-process",
-      "to": "run-store"
-    },
-    {
-      "from": "application-agent",
-      "protocol": "HTTP/MCP (streamable HTTP JSON-RPC)",
-      "to": "run-store"
-    },
-    {
-      "from": "tailor-engine",
-      "protocol": "in-process",
-      "to": "keyword-vocabulary"
-    },
-    {
-      "from": "guardrail-validator",
-      "protocol": "in-process",
-      "to": "keyword-vocabulary"
-    },
-    {
-      "from": "renderer",
-      "protocol": "in-process",
-      "to": "keyword-vocabulary"
     },
     {
       "from": "api",
@@ -2762,284 +2495,149 @@
       "to": "browser-service"
     },
     {
-      "from": "run-store",
-      "protocol": "in-process",
-      "to": "screening-engine"
-    },
-    {
-      "from": "run-store",
-      "protocol": "in-process",
-      "to": "application-tracker"
-    },
-    {
       "from": "application-agent",
       "protocol": "HTTPS",
       "to": "llm-provider-service"
     },
     {
-      "from": "storage-leaf",
-      "protocol": "file I/O",
-      "to": "truth-data-volume"
-    },
-    {
-      "from": "truth-store",
+      "from": "api",
       "protocol": "in-process",
-      "to": "storage-leaf"
+      "to": "orchestration"
     },
     {
-      "from": "guardrail-validator",
+      "from": "orchestration",
       "protocol": "in-process",
-      "to": "storage-leaf"
+      "to": "document-generation"
     },
     {
-      "from": "renderer",
-      "protocol": "in-process",
-      "to": "storage-leaf"
-    },
-    {
-      "from": "tailor-engine",
-      "protocol": "in-process",
-      "to": "storage-leaf"
-    },
-    {
-      "from": "application-tracker",
-      "protocol": "in-process",
-      "to": "storage-leaf"
-    },
-    {
-      "from": "screening-engine",
-      "protocol": "in-process",
-      "to": "storage-leaf"
-    },
-    {
-      "from": "agent-config",
-      "protocol": "in-process",
-      "to": "storage-leaf"
-    },
-    {
-      "from": "secret-store",
-      "protocol": "in-process",
-      "to": "storage-leaf"
-    },
-    {
-      "from": "cover-letter-engine",
-      "protocol": "in-process",
-      "to": "storage-leaf"
-    },
-    {
-      "from": "run-store",
-      "protocol": "in-process",
-      "to": "storage-leaf"
-    },
-    {
-      "from": "company-research",
-      "protocol": "in-process",
-      "to": "storage-leaf"
-    },
-    {
-      "from": "keyword-vocabulary",
-      "protocol": "in-process",
-      "to": "storage-leaf"
-    },
-    {
-      "from": "onboarding-store",
-      "protocol": "in-process",
-      "to": "storage-leaf"
-    },
-    {
-      "from": "services-layer",
-      "protocol": "in-process",
-      "to": "truth-store"
-    },
-    {
-      "from": "services-layer",
-      "protocol": "in-process",
-      "to": "tailor-engine"
-    },
-    {
-      "from": "services-layer",
+      "from": "orchestration",
       "protocol": "in-process",
       "to": "guardrail-validator"
     },
     {
-      "from": "services-layer",
-      "protocol": "in-process",
-      "to": "renderer"
-    },
-    {
-      "from": "services-layer",
-      "protocol": "in-process",
-      "to": "cover-letter-engine"
-    },
-    {
-      "from": "services-layer",
-      "protocol": "in-process",
-      "to": "application-tracker"
-    },
-    {
-      "from": "services-layer",
-      "protocol": "in-process",
-      "to": "screening-engine"
-    },
-    {
-      "from": "services-layer",
-      "protocol": "in-process",
-      "to": "agent-config"
-    },
-    {
-      "from": "services-layer",
+      "from": "orchestration",
       "protocol": "in-process",
       "to": "llm-provider-layer"
     },
     {
-      "from": "services-layer",
+      "from": "orchestration",
       "protocol": "in-process",
-      "to": "company-research"
+      "to": "application-pipeline"
     },
     {
-      "from": "api",
+      "from": "orchestration",
       "protocol": "in-process",
-      "to": "services-layer"
+      "to": "integrations"
     },
     {
-      "from": "api",
+      "from": "orchestration",
       "protocol": "in-process",
-      "to": "storage-leaf"
+      "to": "truth-store"
     },
     {
-      "from": "services-layer",
-      "protocol": "in-process",
-      "to": "storage-leaf"
-    },
-    {
-      "from": "prompt-store",
-      "protocol": "in-process",
-      "to": "storage-leaf"
-    },
-    {
-      "from": "api",
-      "protocol": "in-process",
-      "to": "prompt-store"
-    },
-    {
-      "from": "prompt-store",
-      "protocol": "file I/O",
-      "to": "truth-data-volume"
-    },
-    {
-      "from": "api",
-      "protocol": "HTTP/REST",
-      "to": "application-agent"
-    },
-    {
-      "from": "job-feeds",
+      "from": "orchestration",
       "protocol": "in-process",
       "to": "secret-store"
     },
     {
-      "from": "job-feeds",
+      "from": "orchestration",
       "protocol": "in-process",
-      "to": "company-research"
+      "to": "storage"
     },
     {
-      "from": "screening-engine",
-      "protocol": "HTTPS",
-      "to": "jev-api"
-    },
-    {
-      "from": "gmail-response-sync",
-      "protocol": "HTTPS",
-      "to": "gmail-api"
-    },
-    {
-      "from": "gmail-response-sync",
-      "protocol": "in-process",
-      "to": "application-tracker"
-    },
-    {
-      "from": "gmail-response-sync",
-      "protocol": "in-process",
-      "to": "connections"
-    },
-    {
-      "from": "gmail-response-sync",
-      "protocol": "file I/O",
-      "to": "truth-data-volume"
-    },
-    {
-      "from": "api",
-      "protocol": "in-process",
-      "to": "gmail-response-sync"
-    },
-    {
-      "from": "gmail-response-sync",
-      "protocol": "HTTPS",
-      "to": "jev-api"
-    },
-    {
-      "from": "api",
-      "protocol": "in-process",
-      "to": "job-runner"
-    },
-    {
-      "from": "job-runner",
-      "protocol": "in-process",
-      "to": "gmail-response-sync"
-    },
-    {
-      "from": "job-runner",
-      "protocol": "in-process",
-      "to": "job-feeds"
-    },
-    {
-      "from": "job-feeds",
-      "protocol": "HTTPS",
-      "to": "arbeitnow-api"
-    },
-    {
-      "from": "services-layer",
-      "protocol": "in-process",
-      "to": "prompt-store"
-    },
-    {
-      "from": "services-layer",
-      "protocol": "in-process",
-      "to": "run-store"
-    },
-    {
-      "from": "services-layer",
-      "protocol": "in-process",
-      "to": "secret-store"
-    },
-    {
-      "from": "services-layer",
-      "protocol": "in-process",
-      "to": "gmail-response-sync"
-    },
-    {
-      "from": "services-layer",
+      "from": "orchestration",
       "protocol": "HTTP/REST",
       "to": "application-agent"
     },
     {
-      "from": "services-layer",
+      "from": "orchestration",
       "protocol": "HTTP",
       "to": "browser-service"
     },
     {
-      "from": "services-layer",
+      "from": "document-generation",
       "protocol": "in-process",
-      "to": "connections"
+      "to": "llm-provider-layer"
     },
     {
-      "from": "services-layer",
+      "from": "document-generation",
       "protocol": "in-process",
-      "to": "onboarding-store"
+      "to": "guardrail-validator"
     },
     {
-      "from": "services-layer",
+      "from": "document-generation",
       "protocol": "in-process",
-      "to": "job-feeds"
+      "to": "truth-store"
+    },
+    {
+      "from": "document-generation",
+      "protocol": "in-process",
+      "to": "storage"
+    },
+    {
+      "from": "guardrail-validator",
+      "protocol": "in-process",
+      "to": "storage"
+    },
+    {
+      "from": "application-pipeline",
+      "protocol": "in-process",
+      "to": "document-generation"
+    },
+    {
+      "from": "application-pipeline",
+      "protocol": "in-process",
+      "to": "storage"
+    },
+    {
+      "from": "application-pipeline",
+      "protocol": "HTTPS",
+      "to": "jev-api"
+    },
+    {
+      "from": "integrations",
+      "protocol": "in-process",
+      "to": "application-pipeline"
+    },
+    {
+      "from": "integrations",
+      "protocol": "in-process",
+      "to": "secret-store"
+    },
+    {
+      "from": "integrations",
+      "protocol": "in-process",
+      "to": "storage"
+    },
+    {
+      "from": "integrations",
+      "protocol": "HTTPS",
+      "to": "gmail-api"
+    },
+    {
+      "from": "integrations",
+      "protocol": "HTTPS",
+      "to": "jev-api"
+    },
+    {
+      "from": "integrations",
+      "protocol": "HTTPS",
+      "to": "arbeitnow-api"
+    },
+    {
+      "from": "truth-store",
+      "protocol": "in-process",
+      "to": "storage"
+    },
+    {
+      "from": "secret-store",
+      "protocol": "in-process",
+      "to": "storage"
+    },
+    {
+      "from": "storage",
+      "protocol": "file I/O",
+      "to": "truth-data-volume"
     }
   ],
   "definitions": [
@@ -3310,38 +2908,63 @@
       "canvas": {
         "widgets": []
       },
-      "childGroups": [
-        "document-toolchain",
-        "external-services",
-        "screening-pipeline"
-      ],
+      "childGroups": [],
       "color": null,
-      "h": 387.05719237435005,
+      "h": 776,
       "id": "truthcv-container-single-docker-image",
       "members": [
         "web-ui",
         "api",
-        "truth-store",
+        "orchestration",
+        "document-generation",
         "guardrail-validator",
-        "renderer",
         "llm-provider-layer",
-        "cover-letter-engine",
-        "prompt-store",
-        "application-tracker",
-        "agent-config",
-        "company-research",
-        "run-store",
-        "keyword-vocabulary",
-        "storage-leaf",
-        "services-layer",
-        "job-feeds",
-        "gmail-response-sync",
-        "job-runner"
+        "application-pipeline",
+        "integrations",
+        "truth-store",
+        "secret-store",
+        "storage"
       ],
       "name": "TruthCV Container (single Docker image)",
-      "w": 1861.8301559792023,
-      "x": 10,
-      "y": 30
+      "w": 1240,
+      "x": 650,
+      "y": 60
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "childGroups": [],
+      "color": null,
+      "h": 316,
+      "id": "agent-runtime-sibling-containers",
+      "members": [
+        "application-agent",
+        "browser-service"
+      ],
+      "name": "Agent Runtime (sibling containers)",
+      "w": 280,
+      "x": 260,
+      "y": 260
+    },
+    {
+      "canvas": {
+        "widgets": []
+      },
+      "childGroups": [],
+      "color": null,
+      "h": 596,
+      "id": "external-services",
+      "members": [
+        "llm-provider-service",
+        "gmail-api",
+        "jev-api",
+        "arbeitnow-api"
+      ],
+      "name": "External Services",
+      "w": 280,
+      "x": 2060,
+      "y": 320
     }
   ],
   "layoutV2": {
@@ -5805,125 +5428,81 @@
   "repoId": "652384b2-fef2-4000-aaa2-95577cbd4cae",
   "systemIntent": "TruthCV is a self-hostable, single-user web application that generates ATS-passing, truthful CVs tailored to a specific job posting. Every fact originates exclusively from a per-user \"truth file\" (truth.yaml) derived from the user's LinkedIn profile; the app may reword and reorder those facts freely, but any new claim must be explicitly confirmed by the user before it can enter a CV — enforced mechanically by a deterministic guardrail that diffs every factual token against the truth file. It is bring-your-own-API-key, Docker-deployable (docker compose up → localhost:8080), needs no database or accounts, and renders both PDF and DOCX from one ATS-safe source.",
   "topologyLayout": {
-    "agent-config": {
-      "x": 540,
-      "y": 458
-    },
     "api": {
-      "x": 1317,
-      "y": 1263
+      "x": 1290,
+      "y": 100
     },
     "application-agent": {
-      "x": 288,
-      "y": 875
+      "x": 300,
+      "y": 300
     },
-    "application-tracker": {
-      "x": 622,
-      "y": 714
+    "application-pipeline": {
+      "x": 1410,
+      "y": 500
     },
     "arbeitnow-api": {
-      "x": 587,
-      "y": 1145
+      "x": 2100,
+      "y": 780
     },
     "browser-service": {
-      "x": 552,
-      "y": 1601
+      "x": 300,
+      "y": 440
     },
-    "company-research": {
-      "x": 854,
-      "y": 632
-    },
-    "connections": {
-      "x": 884,
-      "y": 1444
-    },
-    "cover-letter-engine": {
-      "x": 1581,
-      "y": 789
+    "document-generation": {
+      "x": 690,
+      "y": 500
     },
     "gmail-api": {
-      "x": 884,
-      "y": 1572
-    },
-    "gmail-response-sync": {
-      "x": 530,
-      "y": 1273
+      "x": 2100,
+      "y": 500
     },
     "guardrail-validator": {
-      "x": 1611,
-      "y": 936
+      "x": 930,
+      "y": 500
+    },
+    "integrations": {
+      "x": 1650,
+      "y": 500
     },
     "jev-api": {
-      "x": 56,
-      "y": 885
-    },
-    "job-feeds": {
-      "x": 884,
-      "y": 1131
-    },
-    "job-runner": {
-      "x": 884,
-      "y": 1316
+      "x": 2100,
+      "y": 640
     },
     "keyword-vocabulary": {
-      "x": 1331,
-      "y": 808
+      "x": 584,
+      "y": 700
     },
     "llm-provider-layer": {
-      "x": 884,
-      "y": 112
+      "x": 1170,
+      "y": 500
     },
     "llm-provider-service": {
-      "x": 507,
-      "y": 274
+      "x": 2100,
+      "y": 360
     },
-    "onboarding-store": {
-      "x": 1092,
-      "y": 736
-    },
-    "prompt-store": {
-      "x": 1379,
-      "y": 936
-    },
-    "renderer": {
-      "x": 1333,
-      "y": 1097
-    },
-    "run-store": {
-      "x": 390,
-      "y": 747
-    },
-    "screening-engine": {
-      "x": 517,
-      "y": 586
+    "orchestration": {
+      "x": 1170,
+      "y": 300
     },
     "secret-store": {
-      "x": 955,
-      "y": 888
+      "x": 1170,
+      "y": 700
     },
-    "services-layer": {
-      "x": 937,
-      "y": 240
-    },
-    "storage-leaf": {
-      "x": 1086,
-      "y": 608
-    },
-    "tailor-engine": {
-      "x": 1324,
-      "y": 680
+    "storage": {
+      "x": 1410,
+      "y": 700
     },
     "truth-data-volume": {
-      "x": 860,
-      "y": 760
+      "x": 1410,
+      "y": 940
     },
     "truth-store": {
-      "x": 1032,
-      "y": 384
+      "x": 930,
+      "y": 700
     },
     "web-ui": {
-      "x": 1284,
-      "y": 1391
+      "x": 1050,
+      "y": 100
     }
   },
   "version": "1.0.0"

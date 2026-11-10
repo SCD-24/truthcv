@@ -1,8 +1,5 @@
 <!-- generated:start edge:tailor-engine→llm-provider-layer -->
-# Interaction: Tailor Engine → LLM Provider Layer
-
-- **Participants:** `tailor-engine` → `llm-provider-layer`
-- **Transport:** `in-process`
+> **orphaned - edge removed from architecture.** This interaction no longer exists on the architecture canvas. Restore the connection, or resolve and delete this file.
 <!-- generated:end edge:tailor-engine→llm-provider-layer -->
 
 > _Drafted by Aether from source — not human-verified._

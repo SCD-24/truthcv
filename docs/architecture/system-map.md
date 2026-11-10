@@ -3,289 +3,125 @@
 
 ```mermaid
 graph TD
-    agent-config["Agent Config <br/> <small>(BACKEND)</small>"]
     api["API <br/> <small>(BACKEND)</small>"]
     application-agent["Application Agent <br/> <small>(BACKEND)</small>"]
-    application-tracker["Application Tracker <br/> <small>(BACKEND)</small>"]
+    application-pipeline["Application Pipeline <br/> <small>(BACKEND)</small>"]
     arbeitnow-api["Arbeitnow Job Board API <br/> <small>(CUSTOM)</small>"]
     browser-service["Browser Service <br/> <small>(BACKEND)</small>"]
-    company-research["Company Research <br/> <small>(BACKEND)</small>"]
-    connections["Connections <br/> <small>(BACKEND)</small>"]
-    cover-letter-engine["Cover Letter Engine <br/> <small>(BACKEND)</small>"]
+    document-generation["Document Generation <br/> <small>(BACKEND)</small>"]
     gmail-api["Gmail / Google OAuth API <br/> <small>(CUSTOM)</small>"]
-    gmail-response-sync["Gmail Response Sync <br/> <small>(BACKEND)</small>"]
     guardrail-validator["Guardrail Validator <br/> <small>(BACKEND)</small>"]
-    identity-leaf["Identity Leaf <br/> <small>(BACKEND)</small>"]
+    integrations["Integrations <br/> <small>(BACKEND)</small>"]
     jev-api["Jev (TypeSafe System One) API <br/> <small>(CUSTOM)</small>"]
-    job-feeds["Job Feeds <br/> <small>(BACKEND)</small>"]
-    job-runner["Background Tasks <br/> <small>(BACKEND)</small>"]
-    keyword-vocabulary["Keyword Vocabulary <br/> <small>(BACKEND)</small>"]
     llm-provider-layer["LLM Provider Layer <br/> <small>(BACKEND)</small>"]
     llm-provider-service["LLM Provider Service <br/> <small>(CUSTOM)</small>"]
-    mcpschema-leaf["MCP Schema Leaf <br/> <small>(BACKEND)</small>"]
-    onboarding-store["Onboarding Store <br/> <small>(BACKEND)</small>"]
-    prompt-store["Prompt Store <br/> <small>(BACKEND)</small>"]
-    renderer["Renderer <br/> <small>(BACKEND)</small>"]
-    run-store["Run Store <br/> <small>(BACKEND)</small>"]
-    screening-engine["Screening Engine <br/> <small>(BACKEND)</small>"]
+    orchestration["Orchestration <br/> <small>(BACKEND)</small>"]
     secret-store["Secret Store <br/> <small>(BACKEND)</small>"]
-    services-layer["Services Layer <br/> <small>(BACKEND)</small>"]
-    storage-leaf["Storage <br/> <small>(BACKEND)</small>"]
-    tailor-engine["Tailor Engine <br/> <small>(BACKEND)</small>"]
+    storage["Storage & Shared Leaves <br/> <small>(BACKEND)</small>"]
     truth-data-volume["Truth Data Volume <br/> <small>(STORAGE)</small>"]
     truth-store["Truth Store <br/> <small>(BACKEND)</small>"]
     web-ui["Web UI <br/> <small>(FRONTEND)</small>"]
-    agent-config -->|in-process| storage-leaf
-    agent-config -->|file I/O| truth-data-volume
-    api -->|in-process| agent-config
-    api -->|HTTP/REST| application-agent
-    api -->|in-process| application-tracker
     api -->|WebSocket (noVNC relay) + HTTP| browser-service
-    api -->|in-process| company-research
-    api -->|in-process| connections
-    api -->|in-process| cover-letter-engine
-    api -->|HTTPS| gmail-api
-    api -->|in-process| gmail-response-sync
-    api -->|in-process| guardrail-validator
-    api -->|in-process| job-runner
-    api -->|in-process| prompt-store
-    api -->|in-process| run-store
-    api -->|in-process| screening-engine
-    api -->|in-process| secret-store
-    api -->|in-process| services-layer
-    api -->|in-process| storage-leaf
-    api -->|in-process| truth-store
-    application-agent -->|HTTP/REST| agent-config
+    api -->|in-process| orchestration
     application-agent -->|HTTP/MCP (streamable HTTP JSON-RPC)| api
     application-agent -->|HTTP/MCP (streamable HTTP JSON-RPC)| browser-service
     application-agent -->|HTTPS| llm-provider-service
-    application-agent -->|HTTP/MCP (streamable HTTP JSON-RPC)| run-store
-    application-tracker -->|in-process| company-research
-    application-tracker -->|in-process| renderer
-    application-tracker -->|in-process| storage-leaf
-    application-tracker -->|file I/O| truth-data-volume
-    company-research -->|in-process| storage-leaf
-    company-research -->|file I/O| truth-data-volume
-    connections -->|HTTPS| gmail-api
-    connections -->|in-process| secret-store
-    cover-letter-engine -->|in-process| guardrail-validator
-    cover-letter-engine -->|in-process| llm-provider-layer
-    cover-letter-engine -->|in-process| prompt-store
-    cover-letter-engine -->|in-process| renderer
-    cover-letter-engine -->|in-process| storage-leaf
-    cover-letter-engine -->|in-process| truth-store
-    gmail-response-sync -->|in-process| application-tracker
-    gmail-response-sync -->|in-process| connections
-    gmail-response-sync -->|HTTPS| gmail-api
-    gmail-response-sync -->|HTTPS| jev-api
-    gmail-response-sync -->|file I/O| truth-data-volume
-    guardrail-validator -->|in-process| keyword-vocabulary
-    guardrail-validator -->|in-process| storage-leaf
+    application-pipeline -->|in-process| document-generation
+    application-pipeline -->|HTTPS| jev-api
+    application-pipeline -->|in-process| storage
+    document-generation -->|in-process| guardrail-validator
+    document-generation -->|in-process| llm-provider-layer
+    document-generation -->|in-process| storage
+    document-generation -->|in-process| truth-store
+    guardrail-validator -->|in-process| storage
     guardrail-validator -->|in-process| truth-store
-    job-feeds -->|HTTPS| arbeitnow-api
-    job-feeds -->|in-process| company-research
-    job-feeds -->|in-process| secret-store
-    job-runner -->|in-process| gmail-response-sync
-    job-runner -->|in-process| job-feeds
-    keyword-vocabulary -->|in-process| storage-leaf
-    keyword-vocabulary -->|file I/O| truth-data-volume
+    integrations -->|in-process| application-pipeline
+    integrations -->|HTTPS| arbeitnow-api
+    integrations -->|HTTPS| gmail-api
+    integrations -->|HTTPS| jev-api
+    integrations -->|in-process| secret-store
+    integrations -->|in-process| storage
     llm-provider-layer -->|HTTPS| llm-provider-service
     llm-provider-layer -->|in-process| secret-store
-    onboarding-store -->|in-process| storage-leaf
-    onboarding-store -->|file I/O| truth-data-volume
-    prompt-store -->|in-process| storage-leaf
-    prompt-store -->|file I/O| truth-data-volume
-    renderer -->|in-process| keyword-vocabulary
-    renderer -->|in-process| prompt-store
-    renderer -->|in-process| storage-leaf
-    renderer -->|file I/O| truth-data-volume
-    run-store -->|in-process| application-tracker
-    run-store -->|in-process| screening-engine
-    run-store -->|in-process| storage-leaf
-    run-store -->|file I/O| truth-data-volume
-    screening-engine -->|in-process| agent-config
-    screening-engine -->|in-process| application-tracker
-    screening-engine -->|in-process| company-research
-    screening-engine -->|HTTPS| jev-api
-    screening-engine -->|in-process| storage-leaf
-    screening-engine -->|file I/O| truth-data-volume
-    secret-store -->|in-process| storage-leaf
-    secret-store -->|file I/O| truth-data-volume
-    services-layer -->|in-process| agent-config
-    services-layer -->|HTTP/REST| application-agent
-    services-layer -->|in-process| application-tracker
-    services-layer -->|HTTP| browser-service
-    services-layer -->|in-process| company-research
-    services-layer -->|in-process| connections
-    services-layer -->|in-process| cover-letter-engine
-    services-layer -->|in-process| gmail-response-sync
-    services-layer -->|in-process| guardrail-validator
-    services-layer -->|in-process| job-feeds
-    services-layer -->|in-process| llm-provider-layer
-    services-layer -->|in-process| onboarding-store
-    services-layer -->|in-process| prompt-store
-    services-layer -->|in-process| renderer
-    services-layer -->|in-process| run-store
-    services-layer -->|in-process| screening-engine
-    services-layer -->|in-process| secret-store
-    services-layer -->|in-process| storage-leaf
-    services-layer -->|in-process| tailor-engine
-    services-layer -->|in-process| truth-store
-    storage-leaf -->|file I/O| truth-data-volume
-    tailor-engine -->|in-process| keyword-vocabulary
-    tailor-engine -->|in-process| llm-provider-layer
-    tailor-engine -->|in-process| prompt-store
-    tailor-engine -->|in-process| storage-leaf
-    tailor-engine -->|in-process| truth-store
-    truth-store -->|in-process| storage-leaf
-    truth-store -->|file I/O| truth-data-volume
+    orchestration -->|HTTP/REST| application-agent
+    orchestration -->|in-process| application-pipeline
+    orchestration -->|HTTP| browser-service
+    orchestration -->|in-process| document-generation
+    orchestration -->|in-process| guardrail-validator
+    orchestration -->|in-process| integrations
+    orchestration -->|in-process| llm-provider-layer
+    orchestration -->|in-process| secret-store
+    orchestration -->|in-process| storage
+    orchestration -->|in-process| truth-store
+    secret-store -->|in-process| storage
+    storage -->|file I/O| truth-data-volume
+    truth-store -->|in-process| storage
     web-ui -->|HTTP/REST| api
 ```
 
 ## Components
 
-- [Agent Config](overview.md) (`agent-config`, backend)
 - [API](overview.md) (`api`, backend)
 - [Application Agent](overview.md) (`application-agent`, backend)
-- [Application Tracker](overview.md) (`application-tracker`, backend)
+- [Application Pipeline](overview.md) (`application-pipeline`, backend)
 - [Arbeitnow Job Board API](overview.md) (`arbeitnow-api`, custom)
 - [Browser Service](overview.md) (`browser-service`, backend)
-- [Company Research](overview.md) (`company-research`, backend)
-- [Connections](overview.md) (`connections`, backend)
-- [Cover Letter Engine](overview.md) (`cover-letter-engine`, backend)
+- [Document Generation](overview.md) (`document-generation`, backend)
 - [Gmail / Google OAuth API](overview.md) (`gmail-api`, custom)
-- [Gmail Response Sync](overview.md) (`gmail-response-sync`, backend)
 - [Guardrail Validator](overview.md) (`guardrail-validator`, backend)
-- [Identity Leaf](overview.md) (`identity-leaf`, backend)
+- [Integrations](overview.md) (`integrations`, backend)
 - [Jev (TypeSafe System One) API](overview.md) (`jev-api`, custom)
-- [Job Feeds](overview.md) (`job-feeds`, backend)
-- [Background Tasks](overview.md) (`job-runner`, backend)
-- [Keyword Vocabulary](overview.md) (`keyword-vocabulary`, backend)
 - [LLM Provider Layer](overview.md) (`llm-provider-layer`, backend)
 - [LLM Provider Service](overview.md) (`llm-provider-service`, custom)
-- [MCP Schema Leaf](overview.md) (`mcpschema-leaf`, backend)
-- [Onboarding Store](overview.md) (`onboarding-store`, backend)
-- [Prompt Store](overview.md) (`prompt-store`, backend)
-- [Renderer](overview.md) (`renderer`, backend)
-- [Run Store](overview.md) (`run-store`, backend)
-- [Screening Engine](overview.md) (`screening-engine`, backend)
+- [Orchestration](overview.md) (`orchestration`, backend)
 - [Secret Store](overview.md) (`secret-store`, backend)
-- [Services Layer](overview.md) (`services-layer`, backend)
-- [Storage](overview.md) (`storage-leaf`, backend)
-- [Tailor Engine](overview.md) (`tailor-engine`, backend)
+- [Storage & Shared Leaves](overview.md) (`storage`, backend)
 - [Truth Data Volume](overview.md) (`truth-data-volume`, storage)
 - [Truth Store](overview.md) (`truth-store`, backend)
 - [Web UI](overview.md) (`web-ui`, frontend)
 
 ## Interactions
 
-- [agent-config → storage-leaf](interactions/agent-config--storage-leaf.md) via `in-process`
-- [agent-config → truth-data-volume](interactions/agent-config--truth-data-volume.md) via `file I/O`
-- [api → agent-config](interactions/api--agent-config.md) via `in-process`
-- [api → application-agent](interactions/api--application-agent.md) via `HTTP/REST`
-- [api → application-tracker](interactions/api--application-tracker.md) via `in-process`
 - [api → browser-service](interactions/api--browser-service.md) via `WebSocket (noVNC relay) + HTTP`
-- [api → company-research](interactions/api--company-research.md) via `in-process`
-- [api → connections](interactions/api--connections.md) via `in-process`
-- [api → cover-letter-engine](interactions/api--cover-letter-engine.md) via `in-process`
-- [api → gmail-api](interactions/api--gmail-api.md) via `HTTPS`
-- [api → gmail-response-sync](interactions/api--gmail-response-sync.md) via `in-process`
-- [api → guardrail-validator](interactions/api--guardrail-validator.md) via `in-process`
-- [api → job-runner](interactions/api--job-runner.md) via `in-process`
-- [api → prompt-store](interactions/api--prompt-store.md) via `in-process`
-- [api → run-store](interactions/api--run-store.md) via `in-process`
-- [api → screening-engine](interactions/api--screening-engine.md) via `in-process`
-- [api → secret-store](interactions/api--secret-store.md) via `in-process`
-- [api → services-layer](interactions/api--services-layer.md) via `in-process`
-- [api → storage-leaf](interactions/api--storage-leaf.md) via `in-process`
-- [api → truth-store](interactions/api--truth-store.md) via `in-process`
-- [application-agent → agent-config](interactions/application-agent--agent-config.md) via `HTTP/REST`
+- [api → orchestration](interactions/api--orchestration.md) via `in-process`
 - [application-agent → api](interactions/application-agent--api.md) via `HTTP/MCP (streamable HTTP JSON-RPC)`
 - [application-agent → browser-service](interactions/application-agent--browser-service.md) via `HTTP/MCP (streamable HTTP JSON-RPC)`
 - [application-agent → llm-provider-service](interactions/application-agent--llm-provider-service.md) via `HTTPS`
-- [application-agent → run-store](interactions/application-agent--run-store.md) via `HTTP/MCP (streamable HTTP JSON-RPC)`
-- [application-tracker → company-research](interactions/application-tracker--company-research.md) via `in-process`
-- [application-tracker → renderer](interactions/application-tracker--renderer.md) via `in-process`
-- [application-tracker → storage-leaf](interactions/application-tracker--storage-leaf.md) via `in-process`
-- [application-tracker → truth-data-volume](interactions/application-tracker--truth-data-volume.md) via `file I/O`
-- [company-research → storage-leaf](interactions/company-research--storage-leaf.md) via `in-process`
-- [company-research → truth-data-volume](interactions/company-research--truth-data-volume.md) via `file I/O`
-- [connections → gmail-api](interactions/connections--gmail-api.md) via `HTTPS`
-- [connections → secret-store](interactions/connections--secret-store.md) via `in-process`
-- [cover-letter-engine → guardrail-validator](interactions/cover-letter-engine--guardrail-validator.md) via `in-process`
-- [cover-letter-engine → llm-provider-layer](interactions/cover-letter-engine--llm-provider-layer.md) via `in-process`
-- [cover-letter-engine → prompt-store](interactions/cover-letter-engine--prompt-store.md) via `in-process`
-- [cover-letter-engine → renderer](interactions/cover-letter-engine--renderer.md) via `in-process`
-- [cover-letter-engine → storage-leaf](interactions/cover-letter-engine--storage-leaf.md) via `in-process`
-- [cover-letter-engine → truth-store](interactions/cover-letter-engine--truth-store.md) via `in-process`
-- [gmail-response-sync → application-tracker](interactions/gmail-response-sync--application-tracker.md) via `in-process`
-- [gmail-response-sync → connections](interactions/gmail-response-sync--connections.md) via `in-process`
-- [gmail-response-sync → gmail-api](interactions/gmail-response-sync--gmail-api.md) via `HTTPS`
-- [gmail-response-sync → jev-api](interactions/gmail-response-sync--jev-api.md) via `HTTPS`
-- [gmail-response-sync → truth-data-volume](interactions/gmail-response-sync--truth-data-volume.md) via `file I/O`
-- [guardrail-validator → keyword-vocabulary](interactions/guardrail-validator--keyword-vocabulary.md) via `in-process`
-- [guardrail-validator → storage-leaf](interactions/guardrail-validator--storage-leaf.md) via `in-process`
+- [application-pipeline → document-generation](interactions/application-pipeline--document-generation.md) via `in-process`
+- [application-pipeline → jev-api](interactions/application-pipeline--jev-api.md) via `HTTPS`
+- [application-pipeline → storage](interactions/application-pipeline--storage.md) via `in-process`
+- [document-generation → guardrail-validator](interactions/document-generation--guardrail-validator.md) via `in-process`
+- [document-generation → llm-provider-layer](interactions/document-generation--llm-provider-layer.md) via `in-process`
+- [document-generation → storage](interactions/document-generation--storage.md) via `in-process`
+- [document-generation → truth-store](interactions/document-generation--truth-store.md) via `in-process`
+- [guardrail-validator → storage](interactions/guardrail-validator--storage.md) via `in-process`
 - [guardrail-validator → truth-store](interactions/guardrail-validator--truth-store.md) via `in-process`
-- [job-feeds → arbeitnow-api](interactions/job-feeds--arbeitnow-api.md) via `HTTPS`
-- [job-feeds → company-research](interactions/job-feeds--company-research.md) via `in-process`
-- [job-feeds → secret-store](interactions/job-feeds--secret-store.md) via `in-process`
-- [job-runner → gmail-response-sync](interactions/job-runner--gmail-response-sync.md) via `in-process`
-- [job-runner → job-feeds](interactions/job-runner--job-feeds.md) via `in-process`
-- [keyword-vocabulary → storage-leaf](interactions/keyword-vocabulary--storage-leaf.md) via `in-process`
-- [keyword-vocabulary → truth-data-volume](interactions/keyword-vocabulary--truth-data-volume.md) via `file I/O`
+- [integrations → application-pipeline](interactions/integrations--application-pipeline.md) via `in-process`
+- [integrations → arbeitnow-api](interactions/integrations--arbeitnow-api.md) via `HTTPS`
+- [integrations → gmail-api](interactions/integrations--gmail-api.md) via `HTTPS`
+- [integrations → jev-api](interactions/integrations--jev-api.md) via `HTTPS`
+- [integrations → secret-store](interactions/integrations--secret-store.md) via `in-process`
+- [integrations → storage](interactions/integrations--storage.md) via `in-process`
 - [llm-provider-layer → llm-provider-service](interactions/llm-provider-layer--llm-provider-service.md) via `HTTPS`
 - [llm-provider-layer → secret-store](interactions/llm-provider-layer--secret-store.md) via `in-process`
-- [onboarding-store → storage-leaf](interactions/onboarding-store--storage-leaf.md) via `in-process`
-- [onboarding-store → truth-data-volume](interactions/onboarding-store--truth-data-volume.md) via `file I/O`
-- [prompt-store → storage-leaf](interactions/prompt-store--storage-leaf.md) via `in-process`
-- [prompt-store → truth-data-volume](interactions/prompt-store--truth-data-volume.md) via `file I/O`
-- [renderer → keyword-vocabulary](interactions/renderer--keyword-vocabulary.md) via `in-process`
-- [renderer → prompt-store](interactions/renderer--prompt-store.md) via `in-process`
-- [renderer → storage-leaf](interactions/renderer--storage-leaf.md) via `in-process`
-- [renderer → truth-data-volume](interactions/renderer--truth-data-volume.md) via `file I/O`
-- [run-store → application-tracker](interactions/run-store--application-tracker.md) via `in-process`
-- [run-store → screening-engine](interactions/run-store--screening-engine.md) via `in-process`
-- [run-store → storage-leaf](interactions/run-store--storage-leaf.md) via `in-process`
-- [run-store → truth-data-volume](interactions/run-store--truth-data-volume.md) via `file I/O`
-- [screening-engine → agent-config](interactions/screening-engine--agent-config.md) via `in-process`
-- [screening-engine → application-tracker](interactions/screening-engine--application-tracker.md) via `in-process`
-- [screening-engine → company-research](interactions/screening-engine--company-research.md) via `in-process`
-- [screening-engine → jev-api](interactions/screening-engine--jev-api.md) via `HTTPS`
-- [screening-engine → storage-leaf](interactions/screening-engine--storage-leaf.md) via `in-process`
-- [screening-engine → truth-data-volume](interactions/screening-engine--truth-data-volume.md) via `file I/O`
-- [secret-store → storage-leaf](interactions/secret-store--storage-leaf.md) via `in-process`
-- [secret-store → truth-data-volume](interactions/secret-store--truth-data-volume.md) via `file I/O`
-- [services-layer → agent-config](interactions/services-layer--agent-config.md) via `in-process`
-- [services-layer → application-agent](interactions/services-layer--application-agent.md) via `HTTP/REST`
-- [services-layer → application-tracker](interactions/services-layer--application-tracker.md) via `in-process`
-- [services-layer → browser-service](interactions/services-layer--browser-service.md) via `HTTP`
-- [services-layer → company-research](interactions/services-layer--company-research.md) via `in-process`
-- [services-layer → connections](interactions/services-layer--connections.md) via `in-process`
-- [services-layer → cover-letter-engine](interactions/services-layer--cover-letter-engine.md) via `in-process`
-- [services-layer → gmail-response-sync](interactions/services-layer--gmail-response-sync.md) via `in-process`
-- [services-layer → guardrail-validator](interactions/services-layer--guardrail-validator.md) via `in-process`
-- [services-layer → job-feeds](interactions/services-layer--job-feeds.md) via `in-process`
-- [services-layer → llm-provider-layer](interactions/services-layer--llm-provider-layer.md) via `in-process`
-- [services-layer → onboarding-store](interactions/services-layer--onboarding-store.md) via `in-process`
-- [services-layer → prompt-store](interactions/services-layer--prompt-store.md) via `in-process`
-- [services-layer → renderer](interactions/services-layer--renderer.md) via `in-process`
-- [services-layer → run-store](interactions/services-layer--run-store.md) via `in-process`
-- [services-layer → screening-engine](interactions/services-layer--screening-engine.md) via `in-process`
-- [services-layer → secret-store](interactions/services-layer--secret-store.md) via `in-process`
-- [services-layer → storage-leaf](interactions/services-layer--storage-leaf.md) via `in-process`
-- [services-layer → tailor-engine](interactions/services-layer--tailor-engine.md) via `in-process`
-- [services-layer → truth-store](interactions/services-layer--truth-store.md) via `in-process`
-- [storage-leaf → truth-data-volume](interactions/storage-leaf--truth-data-volume.md) via `file I/O`
-- [tailor-engine → keyword-vocabulary](interactions/tailor-engine--keyword-vocabulary.md) via `in-process`
-- [tailor-engine → llm-provider-layer](interactions/tailor-engine--llm-provider-layer.md) via `in-process`
-- [tailor-engine → prompt-store](interactions/tailor-engine--prompt-store.md) via `in-process`
-- [tailor-engine → storage-leaf](interactions/tailor-engine--storage-leaf.md) via `in-process`
-- [tailor-engine → truth-store](interactions/tailor-engine--truth-store.md) via `in-process`
-- [truth-store → storage-leaf](interactions/truth-store--storage-leaf.md) via `in-process`
-- [truth-store → truth-data-volume](interactions/truth-store--truth-data-volume.md) via `file I/O`
+- [orchestration → application-agent](interactions/orchestration--application-agent.md) via `HTTP/REST`
+- [orchestration → application-pipeline](interactions/orchestration--application-pipeline.md) via `in-process`
+- [orchestration → browser-service](interactions/orchestration--browser-service.md) via `HTTP`
+- [orchestration → document-generation](interactions/orchestration--document-generation.md) via `in-process`
+- [orchestration → guardrail-validator](interactions/orchestration--guardrail-validator.md) via `in-process`
+- [orchestration → integrations](interactions/orchestration--integrations.md) via `in-process`
+- [orchestration → llm-provider-layer](interactions/orchestration--llm-provider-layer.md) via `in-process`
+- [orchestration → secret-store](interactions/orchestration--secret-store.md) via `in-process`
+- [orchestration → storage](interactions/orchestration--storage.md) via `in-process`
+- [orchestration → truth-store](interactions/orchestration--truth-store.md) via `in-process`
+- [secret-store → storage](interactions/secret-store--storage.md) via `in-process`
+- [storage → truth-data-volume](interactions/storage--truth-data-volume.md) via `file I/O`
+- [truth-store → storage](interactions/truth-store--storage.md) via `in-process`
 - [web-ui → api](interactions/web-ui--api.md) via `HTTP/REST`
 
 ## Groups
 
-- [TruthCV Container (single Docker image)](groups/truthcv-container-single-docker-image.md) (`truthcv-container-single-docker-image`, 18 member(s))
+- [Agent Runtime (sibling containers)](groups/agent-runtime-sibling-containers.md) (`agent-runtime-sibling-containers`, 2 member(s))
+- [External Services](groups/external-services.md) (`external-services`, 4 member(s))
+- [TruthCV Container (single Docker image)](groups/truthcv-container-single-docker-image.md) (`truthcv-container-single-docker-image`, 11 member(s))
 <!-- generated:end file:system-map -->
