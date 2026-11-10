@@ -51,7 +51,6 @@ from services.cover_letter import generate_cover_letter
 from connections import catalog
 from connections.auth import gmail as gmail_auth
 from providers import build_connection_provider
-from providers.base import supports_effort_levels
 from companyresearch import store as company_findings_store
 from screening import store as screening_store
 from runs import store as runs_store
@@ -61,6 +60,10 @@ from screening.model import Screening
 
 import coverletter.store as letter_store
 
+from .route_support import (
+    _application_model,
+    _models_result,
+)
 from .schemas import (
     AgentConfigModel,
     ApprovalUpdate,
@@ -85,7 +88,6 @@ from .schemas import (
     AnswersUpdate,
     ApiKeyRequest,
     ApplicationCreate,
-    ApplicationDocument,
     ApplicationListResponse,
     ApplicationModel,
     ApplicationUpdate,
@@ -108,7 +110,6 @@ from .schemas import (
     JevSettingsUpdate,
     JobBoardKeyStatus,
     JobBoardKeyUpdate,
-    ModelInfo,
     ModelList,
     BlockedClaimModel,
     OnboardingState,
@@ -633,48 +634,6 @@ def render_route(body: RenderRequest | None = None) -> RenderResult:
         docx_url=outcome.docx_url,
         html=outcome.html,
         render_unavailable=outcome.render_unavailable,
-    )
-
-
-def _download_url(name: str) -> str | None:
-    """Download URL for a rendered file, or None if it isn't on the volume.
-
-    Why check existence: a file may be recorded on the application but missing in
-    an environment where WeasyPrint/pandoc wasn't available at save time.
-    """
-    if not name:
-        return None
-    from storage import data_dir
-
-    return f"/api/download/{name}" if (data_dir() / name).exists() else None
-
-
-def _document_model(doc) -> ApplicationDocument | None:
-    """Map a stored Document to its wire model (filenames -> download URLs)."""
-    if doc is None:
-        return None
-    return ApplicationDocument(
-        source=doc.source,
-        pdf_url=_download_url(doc.pdf_filename),
-        docx_url=_download_url(doc.docx_filename),
-        updated_at=doc.updated_at,
-    )
-
-
-def _application_model(app) -> ApplicationModel:
-    """Map a stored Application to its wire model."""
-    data = {f: getattr(app, f) for f in app.EDITABLE}
-    return ApplicationModel(
-        id=app.id,
-        created_at=app.created_at,
-        updated_at=app.updated_at,
-        cv_document=_document_model(app.cv_document),
-        cover_letter_document=_document_model(app.cover_letter_document),
-        fields_submitted=[f.to_dict() for f in app.fields_submitted],
-        confirmation=app.confirmation.to_dict(),
-        screening=app.screening.to_dict(),
-        attachments=[a.to_dict() for a in app.attachments],
-        **data,
     )
 
 
@@ -1323,20 +1282,6 @@ def _connection_status(card_key: str) -> ConnectionStatus:
         auth_mode=conn.get("authMode", ""),
         expires_at=oauth.get("expiresAt"),
         connected_at=oauth.get("connectedAt"),
-    )
-
-
-def _models_result(models: list[dict], provider_key: str = "") -> ModelList:
-    """Build a ModelList, annotating each entry with its supported effort levels."""
-    return ModelList(
-        models=[
-            ModelInfo(
-                id=m["id"],
-                label=m.get("label") or m["id"],
-                effort_levels=supports_effort_levels(provider_key, m["id"]),
-            )
-            for m in models
-        ]
     )
 
 
