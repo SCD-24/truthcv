@@ -49,7 +49,7 @@ def test_key_validation_failure_stores_nothing(client, monkeypatch):
     def boom(card, body):
         raise ProviderError("bad key")
 
-    monkeypatch.setattr("api.routes._probe_key", boom)
+    monkeypatch.setattr("services.connections.probe_key", boom)
     resp = client.post("/api/auth/codex/key", json={"apiKey": "sk-bad"})
     assert resp.status_code == 400
     assert "apiKey" not in secretstore.load_store().get("connections", {}).get("codex", {})
@@ -62,7 +62,7 @@ def test_key_probe_non_provider_error_maps_to_400_stores_nothing(client, monkeyp
     def boom(card, body):
         raise RuntimeError("invalid x-api-key")
 
-    monkeypatch.setattr("api.routes._probe_key", boom)
+    monkeypatch.setattr("services.connections.probe_key", boom)
     resp = client.post("/api/auth/codex/key", json={"apiKey": "sk-bad"})
     assert resp.status_code == 400
     assert "invalid x-api-key" in resp.json()["detail"]
@@ -72,7 +72,7 @@ def test_key_probe_non_provider_error_maps_to_400_stores_nothing(client, monkeyp
 @respx.mock
 def test_complete_login_resets_cached_provider(client, monkeypatch):
     calls: list[bool] = []
-    monkeypatch.setattr("api.routes.reset_provider", lambda: calls.append(True))
+    monkeypatch.setattr("providers.reset_provider", lambda: calls.append(True))
 
     start = client.post("/api/auth/claude/start").json()
     state = start["authUrl"].split("state=")[1].split("&")[0]
@@ -95,7 +95,7 @@ def test_key_probe_error_does_not_leak_submitted_key(client, monkeypatch):
     def boom(card, body):
         raise RuntimeError("invalid x-api-key")
 
-    monkeypatch.setattr("api.routes._probe_key", boom)
+    monkeypatch.setattr("services.connections.probe_key", boom)
     resp = client.post("/api/auth/codex/key", json={"apiKey": "sk-super-secret-value"})
     assert resp.status_code == 400
     assert "sk-super-secret-value" not in resp.json()["detail"]
@@ -105,7 +105,7 @@ def test_key_revalidate_empty_body_keeps_subscription_auth_mode(client, monkeypa
     """A bare re-validate (empty body) on a subscription-connected claude
     connection must not flip authMode to "apikey" — that only happens when a
     new key was actually submitted."""
-    monkeypatch.setattr("api.routes._probe_key", lambda card, body: [])
+    monkeypatch.setattr("services.connections.probe_key", lambda card, body: [])
     secretstore.set_connection("claude", {
         "oauth": {"accessToken": "t", "expiresAt": time.time() + 100},
         "authMode": "subscription",
@@ -118,7 +118,7 @@ def test_key_revalidate_empty_body_keeps_subscription_auth_mode(client, monkeypa
 def test_key_submitted_flips_auth_mode_to_apikey(client, monkeypatch):
     """Submitting an actual key still flips authMode, unlike the bare
     re-validate case above."""
-    monkeypatch.setattr("api.routes._probe_key", lambda card, body: [])
+    monkeypatch.setattr("services.connections.probe_key", lambda card, body: [])
     secretstore.set_connection("claude", {
         "oauth": {"accessToken": "t", "expiresAt": time.time() + 100},
         "authMode": "subscription",

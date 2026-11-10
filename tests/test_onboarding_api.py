@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 
 import api.routes as routes
 from api.main import app
+from onboarding import store as onboarding_store
+from truth import pdf as truth_pdf
 from truth import store as truth_store
 from truth.model import Skill, Truth
 
@@ -42,8 +44,8 @@ def test_put_tour_seen_does_not_clear_cv_reviewed(client):
 
 
 def test_complete_requires_provider_profile_and_cv_reviewed(client, monkeypatch):
-    monkeypatch.setattr(routes.onboarding_store, "provider_ready", lambda: True)
-    monkeypatch.setattr(routes, "has_profile", lambda: True)
+    monkeypatch.setattr(onboarding_store, "provider_ready", lambda: True)
+    monkeypatch.setattr(truth_pdf, "has_profile", lambda: True)
     assert client.get("/api/onboarding").json()["complete"] is False
 
     client.put("/api/onboarding", json={"cvReviewedAt": "2024-01-01T00:00:00+00:00"})
@@ -58,8 +60,8 @@ def test_get_onboarding_backfills_preexisting_user_as_complete(client, monkeypat
     truth_store.save(
         Truth(skills=[Skill(id="s1", value="Python", source="user-confirmed")])
     )
-    monkeypatch.setattr(routes.onboarding_store, "provider_ready", lambda: True)
-    monkeypatch.setattr(routes, "has_profile", lambda: True)
+    monkeypatch.setattr(onboarding_store, "provider_ready", lambda: True)
+    monkeypatch.setattr(truth_pdf, "has_profile", lambda: True)
 
     body = client.get("/api/onboarding").json()
     assert body["cvReviewedAt"] is not None

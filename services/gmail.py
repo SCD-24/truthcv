@@ -10,19 +10,32 @@ from __future__ import annotations
 import secretstore
 
 
+def tracking_enabled() -> bool:
+    """Whether Gmail response-tracking is configured and opted in.
+
+    Exists so the HTTP guard, the OAuth redirect ladder, the status report and
+    the MCP gate all share one predicate. Gated on the secretstore "jev" record
+    (the same one Jev screening cross-checks use): a non-empty apiKey AND
+    useForEmailTracking set to True. Gmail sync auto-applies Jev-confirmed
+    transitions, so it must never run on a bare Gmail connection without this
+    explicit opt-in.
+    """
+    conn = secretstore.get_connection("jev")
+    return bool(conn.get("apiKey")) and conn.get("useForEmailTracking") is True
+
+
 def require_tracking_enabled() -> None:
     """Raise ValueError unless Gmail response-tracking is configured and opted in.
 
     Exists as a service function so every caller that runs a Gmail sync gates
     the same way, not only the agent tool.
 
-    Mirrors api.routes.require_gmail_tracking_enabled's gate exactly: the
+    Mirrors api.guards.require_gmail_tracking_enabled's gate exactly: the
     secretstore "jev" connection must have a non-empty apiKey AND
     useForEmailTracking set to True. Gmail sync auto-applies Jev-confirmed
     status transitions, so it must never run without this explicit opt-in.
     """
-    conn = secretstore.get_connection("jev")
-    if not conn.get("apiKey") or conn.get("useForEmailTracking") is not True:
+    if not tracking_enabled():
         raise ValueError(
             "Gmail response-tracking requires a saved Jev API key and useForEmailTracking enabled."
         )
@@ -69,3 +82,71 @@ def check_responses() -> dict:
         "applied": applied_this_sync,
         "pending": pending,
     }
+
+
+def complete_login(code: str | None, state: str | None, error: str | None) -> str | None:
+    """Finish the Gmail OAuth callback and return the ``gmailError`` code, or None on success.
+
+    Exists so the redirect-policy ladder lives outside the HTTP handler, which
+    only turns the result into a RedirectResponse. The callback is a browser
+    redirect target with nowhere to show a JSON error, so every failure is a
+    code rather than an exception: ``not_enabled`` (feature gate closed
+    mid-flow), Google's own ``error`` or ``missing_code`` (denied consent, no
+    code/state), and ``auth_failed`` (token exchange failed).
+    """
+    # Looked up through the module at call time so patches on
+    # connections.auth.gmail keep intercepting.
+    from connections.auth import gmail as gmail_auth
+
+    if not tracking_enabled():
+        return "not_enabled"
+    if error or not code or not state:
+        return error or "missing_code"
+    try:
+        gmail_auth.complete_login(code, state)
+    except gmail_auth.AuthError:
+        return "auth_failed"
+    return None
+
+
+def status() -> dict:
+    """Gmail connection status for the Settings page.
+
+    Exists so the status route only shapes the response. It never refuses: it
+    reports the tracking gate's own state (tracking_enabled) so the UI can
+    explain why Gmail is unavailable. Keys: connected, email, reauth_required,
+    tracking_enabled.
+    """
+    oauth = secretstore.get_connection("gmail").get("oauth") or {}
+    return {
+        "connected": bool(oauth.get("email")),
+        "email": oauth.get("email") or None,
+        "reauth_required": oauth.get("reauthRequired") is True,
+        "tracking_enabled": tracking_enabled(),
+    }
+
+
+def dismiss_and_count(ids: list[str]) -> tuple[int, int]:
+    """Dismiss the given suggestions and return (dismissed, pending remaining).
+
+    Exists so the route makes one call; the pending total is read after the
+    dismissal so it reflects the new state.
+    """
+    from gmailsync import service as gmailsync_service
+
+    dismissed = gmailsync_service.dismiss(ids)
+    _, pending = gmailsync_service.list_pending(1, 0)
+    return dismissed, pending
+
+
+def accept_and_count(suggestion_id: str):
+    """Accept one suggestion and return (accepted, pending remaining).
+
+    SuggestionNotFound / SuggestionNotAcceptable from gmailsync propagate for
+    the route to map to 404 / 409.
+    """
+    from gmailsync import service as gmailsync_service
+
+    accepted = gmailsync_service.accept(suggestion_id)
+    _, pending = gmailsync_service.list_pending(1, 0)
+    return accepted, pending

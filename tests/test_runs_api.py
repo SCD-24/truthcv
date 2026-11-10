@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
-from api.routes import reconcile_orphaned_runs
+from services.runs import reconcile_orphaned_runs
 from runs import store
 
 
@@ -215,7 +215,7 @@ def test_legacy_run_with_no_linked_records_reports_zero_counters(client):
 
 
 def test_agent_status_tolerates_supervisor_payload_missing_run_ids(client, monkeypatch):
-    import api.routes as routes
+    import services.supervisor as supervisor_service
 
     def fake_forward(path, method="GET", **kwargs):
         return {
@@ -227,7 +227,7 @@ def test_agent_status_tolerates_supervisor_payload_missing_run_ids(client, monke
             "lastCancelled": False,
         }
 
-    monkeypatch.setattr(routes, "_forward_to_supervisor", fake_forward)
+    monkeypatch.setattr(supervisor_service, "forward_to_supervisor", fake_forward)
     r = client.get("/api/agent/status")
     assert r.status_code == 200
     body = r.json()
@@ -542,7 +542,7 @@ def test_post_run_stop_409_on_completed_record(client):
 
 
 def test_post_run_stop_supervisor_owns_run(client, monkeypatch):
-    import api.routes as routes
+    import services.supervisor as supervisor_service
 
     calls = []
 
@@ -554,7 +554,7 @@ def test_post_run_stop_supervisor_owns_run(client, monkeypatch):
             return {"cancelled": True}
         return {}
 
-    monkeypatch.setattr(routes, "_forward_to_supervisor", fake_forward)
+    monkeypatch.setattr(supervisor_service, "forward_to_supervisor", fake_forward)
 
     store.start("owned-run", trigger="manual", apply_cap=0)
 
@@ -569,14 +569,14 @@ def test_post_run_stop_supervisor_owns_run(client, monkeypatch):
 
 
 def test_post_run_stop_orphaned_record(client, monkeypatch):
-    import api.routes as routes
+    import services.supervisor as supervisor_service
 
     def fake_forward(path, method="GET", **kwargs):
         if path == "/status":
             return {"running": False}
         raise Exception("should not reach supervisor")
 
-    monkeypatch.setattr(routes, "_forward_to_supervisor", fake_forward)
+    monkeypatch.setattr(supervisor_service, "forward_to_supervisor", fake_forward)
 
     store.start("running-A", trigger="manual", apply_cap=0)
     store.start("running-B", trigger="manual", apply_cap=0)
@@ -595,13 +595,13 @@ def test_post_run_stop_orphaned_record(client, monkeypatch):
 
 
 def test_post_run_stop_supervisor_unreachable(client, monkeypatch):
-    import api.routes as routes
-    from fastapi import HTTPException
+    import services.supervisor as supervisor_service
+    from services.errors import Unavailable
 
     def fake_forward(path, method="GET", **kwargs):
-        raise HTTPException(status_code=503, detail="supervisor unreachable")
+        raise Unavailable("supervisor unreachable")
 
-    monkeypatch.setattr(routes, "_forward_to_supervisor", fake_forward)
+    monkeypatch.setattr(supervisor_service, "forward_to_supervisor", fake_forward)
 
     store.start("unreachable-run", trigger="manual", apply_cap=0)
 
@@ -617,12 +617,12 @@ def test_post_run_stop_supervisor_unreachable(client, monkeypatch):
 
 
 def test_reconcile_orphaned_runs_with_supervisor_owning_run(client, monkeypatch):
-    import api.routes as routes
+    import services.supervisor as supervisor_service
 
     def fake_forward(path, method="GET", **kwargs):
         return {"running": True, "currentRunId": "run-A"}
 
-    monkeypatch.setattr(routes, "_forward_to_supervisor", fake_forward)
+    monkeypatch.setattr(supervisor_service, "forward_to_supervisor", fake_forward)
 
     store.start("run-A", trigger="manual", apply_cap=0)
     store.start("run-B", trigger="manual", apply_cap=0)
@@ -645,13 +645,13 @@ def test_reconcile_orphaned_runs_with_supervisor_owning_run(client, monkeypatch)
 
 
 def test_reconcile_orphaned_runs_with_supervisor_unreachable(client, monkeypatch):
-    import api.routes as routes
-    from fastapi import HTTPException
+    import services.supervisor as supervisor_service
+    from services.errors import Unavailable
 
     def fake_forward(path, method="GET", **kwargs):
-        raise HTTPException(status_code=503, detail="supervisor unreachable")
+        raise Unavailable("supervisor unreachable")
 
-    monkeypatch.setattr(routes, "_forward_to_supervisor", fake_forward)
+    monkeypatch.setattr(supervisor_service, "forward_to_supervisor", fake_forward)
 
     store.start("run-A", trigger="manual", apply_cap=0)
     store.start("run-B", trigger="manual", apply_cap=0)

@@ -32,8 +32,8 @@ TIMEOUT_SECONDS = 8.0
 
 # Wall-clock ceiling on a whole fetch when no shared deadline is given by the
 # caller. Mirrors remoterocketship.BUDGET_SECONDS: the config route gives the
-# combined feed fetch one shared budget (see api/routes.py's
-# ``_fetch_feed_postings``), and this default only applies when this fetcher
+# combined feed fetch one shared budget (see services.agent_config's
+# ``fetch_feed_postings``), and this default only applies when this fetcher
 # is exercised on its own (e.g. in tests).
 BUDGET_SECONDS = 20.0
 
@@ -234,8 +234,8 @@ def fetch_postings(
     de-duplicated per profile by URL and capped fetch-wide at MAX_POSTINGS.
 
     ``deadline`` is an optional shared ``time.monotonic()`` ceiling (see
-    remoterocketship.fetch_postings and api/routes.py's
-    ``_fetch_feed_postings``): when given, it is used as-is instead of a
+    remoterocketship.fetch_postings and services.agent_config's
+    ``fetch_feed_postings``): when given, it is used as-is instead of a
     fresh BUDGET_SECONDS window.
     """
     eligible = [p for p in profiles if p.enabled and p.keywords]

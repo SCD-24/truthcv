@@ -121,7 +121,7 @@ try { u = new URL(base.replace(/\/mcp\/?$/, "") + "/api/agent/config" + wantsFee
 const http = u.protocol === "https:" ? nodeHttps : nodeHttp;
 // job_config is the one field the app may spend time on: it pulls postings
 // from two API-backed job feeds fanned out under ONE shared wall-clock
-// ceiling (api/routes.py's FEED_FETCH_BUDGET_SECONDS = 25s bounds the PAIR
+// ceiling (services/agent_config.py's FEED_FETCH_BUDGET_SECONDS = 25s bounds the PAIR
 // combined, not each), leaving only 5s of headroom under this 30s socket
 // timeout. 5s here would time out on a slow-but-working feed and the run
 // would abort on "config fetch failed" — the exact outcome the feed's own

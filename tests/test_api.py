@@ -14,7 +14,12 @@ from fastapi.testclient import TestClient
 
 import api.routes as routes
 import services.render_cv as render_cv
+import services.truth as truth_service
+import truth.document as truth_document
+import truth.pdf as truth_pdf
+import truth.store as truth_store
 from api.main import app
+from providers.base import ProviderError
 from providers.fake import FakeProvider
 
 
@@ -163,7 +168,7 @@ def test_upload_accepts_at_size_limit(client):
 
 
 def test_extract_and_persist_upload_serializes_concurrent_calls(monkeypatch):
-    """Two threads racing through _extract_and_persist_upload must not interleave
+    """Two threads racing through ingest_upload must not interleave
     their persist_source_text/persist_source_hash/persist_profile calls."""
     import threading
     import time
@@ -185,15 +190,15 @@ def test_extract_and_persist_upload_serializes_concurrent_calls(monkeypatch):
     def fake_persist_profile(data, ext):
         calls.append(("profile", data.decode()))
 
-    monkeypatch.setattr(routes, "extract_document_text", fake_extract)
-    monkeypatch.setattr(routes, "extension_for", lambda filename: ".txt")
-    monkeypatch.setattr(routes, "persist_source_text", fake_persist_text)
-    monkeypatch.setattr(routes, "persist_source_hash", fake_persist_hash)
-    monkeypatch.setattr(routes, "persist_profile", fake_persist_profile)
+    monkeypatch.setattr(truth_document, "extract_document_text", fake_extract)
+    monkeypatch.setattr(truth_document, "extension_for", lambda filename: ".txt")
+    monkeypatch.setattr(truth_pdf, "persist_source_text", fake_persist_text)
+    monkeypatch.setattr(truth_store, "persist_source_hash", fake_persist_hash)
+    monkeypatch.setattr(truth_pdf, "persist_profile", fake_persist_profile)
 
     threads = [
         threading.Thread(
-            target=routes._extract_and_persist_upload, args=(f"cv{i}.txt", str(i).encode())
+            target=truth_service.ingest_upload, args=(f"cv{i}.txt", str(i).encode())
         )
         for i in range(2)
     ]
@@ -208,6 +213,21 @@ def test_extract_and_persist_upload_serializes_concurrent_calls(monkeypatch):
     for idx, (kind, value) in enumerate(calls):
         if kind == "text":
             assert calls[idx + 1] == ("text-done", value)
+
+
+def test_extract_without_cv_is_400_before_provider_lookup(data_dir, monkeypatch):
+    """No uploaded CV must win over a missing provider: 400, never 502."""
+    calls = []
+
+    def no_provider(*a, **k):
+        calls.append(a)
+        raise ProviderError("no routing default")
+
+    monkeypatch.setattr(routes, "get_provider", no_provider)
+    r = TestClient(app).post("/api/extract")
+    assert r.status_code == 400
+    assert r.json() == {"detail": "Upload your CV before extracting."}
+    assert calls == []
 
 
 def test_confirm_writes_edited_claim(client):

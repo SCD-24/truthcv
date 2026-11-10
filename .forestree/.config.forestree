@@ -2400,17 +2400,7 @@
     {
       "from": "api",
       "protocol": "in-process",
-      "to": "tailor-engine"
-    },
-    {
-      "from": "api",
-      "protocol": "in-process",
       "to": "guardrail-validator"
-    },
-    {
-      "from": "api",
-      "protocol": "in-process",
-      "to": "renderer"
     },
     {
       "from": "tailor-engine",
@@ -2571,11 +2561,6 @@
       "from": "onboarding-store",
       "protocol": "file I/O",
       "to": "truth-data-volume"
-    },
-    {
-      "from": "api",
-      "protocol": "in-process",
-      "to": "onboarding-store"
     },
     {
       "from": "renderer",
@@ -2828,11 +2813,6 @@
       "to": "company-research"
     },
     {
-      "from": "api",
-      "protocol": "in-process",
-      "to": "job-feeds"
-    },
-    {
       "from": "screening-engine",
       "protocol": "HTTPS",
       "to": "jev-api"
@@ -2906,6 +2886,31 @@
       "from": "services-layer",
       "protocol": "in-process",
       "to": "gmail-response-sync"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "HTTP/REST",
+      "to": "application-agent"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "HTTP",
+      "to": "browser-service"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "connections"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "onboarding-store"
+    },
+    {
+      "from": "services-layer",
+      "protocol": "in-process",
+      "to": "job-feeds"
     }
   ],
   "definitions": [

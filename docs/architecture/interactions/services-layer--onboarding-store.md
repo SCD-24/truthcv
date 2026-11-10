@@ -1,9 +1,9 @@
-<!-- generated:start edge:api→onboarding-store -->
-# Interaction: API → Onboarding Store
+<!-- generated:start edge:services-layer→onboarding-store -->
+# Interaction: Services Layer → Onboarding Store
 
-- **Participants:** `api` → `onboarding-store`
+- **Participants:** `services-layer` → `onboarding-store`
 - **Transport:** `in-process`
-<!-- generated:end edge:api→onboarding-store -->
+<!-- generated:end edge:services-layer→onboarding-store -->
 
 ## Contract
 

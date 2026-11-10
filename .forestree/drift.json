@@ -26,7 +26,16 @@
     "d8a5567e",
     "5ea53b90",
     "9bc21752",
-    "82c93172"
+    "82c93172",
+    "f5f57872",
+    "69e42896",
+    "4c2d11f8",
+    "33244dcc",
+    "f12679d0",
+    "89dd22f3",
+    "cc7d741c",
+    "676bca22",
+    "ba9777d4"
   ],
   "dismissals": [],
   "acceptances": [
@@ -182,6 +191,143 @@
           "protocol": "in-process"
         }
       }
+    },
+    {
+      "id": "f5f57872",
+      "title": "Services Layer calls the agent supervisor over HTTP",
+      "target": {
+        "type": "connection",
+        "from": "services-layer",
+        "to": "application-agent"
+      },
+      "suggestion": {
+        "action": "set_connection",
+        "args": {
+          "from": "services-layer",
+          "to": "application-agent",
+          "protocol": "HTTP/REST"
+        }
+      }
+    },
+    {
+      "id": "69e42896",
+      "title": "Services Layer forwards browser-session calls over HTTP",
+      "target": {
+        "type": "connection",
+        "from": "services-layer",
+        "to": "browser-service"
+      },
+      "suggestion": {
+        "action": "set_connection",
+        "args": {
+          "from": "services-layer",
+          "to": "browser-service",
+          "protocol": "HTTP"
+        }
+      }
+    },
+    {
+      "id": "4c2d11f8",
+      "title": "Services Layer uses the Connections package",
+      "target": {
+        "type": "connection",
+        "from": "services-layer",
+        "to": "connections"
+      },
+      "suggestion": {
+        "action": "set_connection",
+        "args": {
+          "from": "services-layer",
+          "to": "connections",
+          "protocol": "in-process"
+        }
+      }
+    },
+    {
+      "id": "33244dcc",
+      "title": "Services Layer uses the Onboarding Store",
+      "target": {
+        "type": "connection",
+        "from": "services-layer",
+        "to": "onboarding-store"
+      },
+      "suggestion": {
+        "action": "set_connection",
+        "args": {
+          "from": "services-layer",
+          "to": "onboarding-store",
+          "protocol": "in-process"
+        }
+      }
+    },
+    {
+      "id": "f12679d0",
+      "title": "Services Layer fetches job feeds",
+      "target": {
+        "type": "connection",
+        "from": "services-layer",
+        "to": "job-feeds"
+      },
+      "suggestion": {
+        "action": "set_connection",
+        "args": {
+          "from": "services-layer",
+          "to": "job-feeds",
+          "protocol": "in-process"
+        }
+      }
+    },
+    {
+      "id": "89dd22f3",
+      "title": "API no longer calls the Tailor Engine directly",
+      "target": {
+        "type": "connection",
+        "from": "api",
+        "to": "tailor-engine"
+      },
+      "suggestion": {
+        "action": "none",
+        "args": {}
+      }
+    },
+    {
+      "id": "cc7d741c",
+      "title": "API no longer calls the Renderer directly",
+      "target": {
+        "type": "connection",
+        "from": "api",
+        "to": "renderer"
+      },
+      "suggestion": {
+        "action": "none",
+        "args": {}
+      }
+    },
+    {
+      "id": "676bca22",
+      "title": "API no longer calls the Onboarding Store directly",
+      "target": {
+        "type": "connection",
+        "from": "api",
+        "to": "onboarding-store"
+      },
+      "suggestion": {
+        "action": "none",
+        "args": {}
+      }
+    },
+    {
+      "id": "ba9777d4",
+      "title": "API no longer fetches job feeds directly",
+      "target": {
+        "type": "connection",
+        "from": "api",
+        "to": "job-feeds"
+      },
+      "suggestion": {
+        "action": "none",
+        "args": {}
+      }
     }
   ],
   "decisions": [
@@ -292,6 +438,105 @@
         "actor": "external-agent",
         "via": "chat",
         "at": "2026-11-09T16:20:44.708Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "f5f57872",
+      "title": "Services Layer calls the agent supervisor over HTTP",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T19:02:26.411Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "69e42896",
+      "title": "Services Layer forwards browser-session calls over HTTP",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T19:02:27.426Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "4c2d11f8",
+      "title": "Services Layer uses the Connections package",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T19:02:28.265Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "33244dcc",
+      "title": "Services Layer uses the Onboarding Store",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T19:02:29.566Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "f12679d0",
+      "title": "Services Layer fetches job feeds",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T19:02:30.684Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "89dd22f3",
+      "title": "API no longer calls the Tailor Engine directly",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T19:02:31.803Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "cc7d741c",
+      "title": "API no longer calls the Renderer directly",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T19:02:32.872Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "676bca22",
+      "title": "API no longer calls the Onboarding Store directly",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T19:02:34.600Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "ba9777d4",
+      "title": "API no longer fetches job feeds directly",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-09T19:02:35.070Z",
         "verified": false
       }
     }

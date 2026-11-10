@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from urllib.parse import urlparse
 
+import applications as app_store
 import screening.jev as _jev
 import screening.store as screening_store
 from coverletter import store as _coverletter_store
@@ -43,6 +45,7 @@ from screening.posting import validate_posting_text as _validate_posting_text
 from screening.role import validate_role_title as _validate_role_title
 from screening.store import Screening
 from services.agent_config import load_enabled_profile as _load_enabled_profile
+from services.errors import Conflict, NotFound, Refused
 
 logger = logging.getLogger(__name__)
 
@@ -101,22 +104,10 @@ def clear_login_blockers_for_host(host: str) -> int:
     apply_blocker. Preserve apply_attempts and other fields.
 
     Host comparison parses each record URL with urlparse and casefolded netloc,
-    matching the same logic as api/routes.py's _host_of.
+    via host_of below.
 
     Return the count of items cleared.
     """
-    from urllib.parse import urlparse
-
-    def _host_of_local(url: str) -> str:
-        """The full host of an absolute http(s) URL, or "" if it is not one."""
-        try:
-            parsed = urlparse(url or "")
-        except ValueError:
-            return ""
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            return ""
-        return parsed.netloc.casefold()
-
     target_host = host.casefold() if host else ""
     count = 0
     for s in screening_store.load_all():
@@ -126,7 +117,7 @@ def clear_login_blockers_for_host(host: str) -> int:
             continue
         # Use signin_url if available, otherwise fall back to the posting url
         url_to_check = s.signin_url or s.url
-        if _host_of_local(url_to_check) == target_host:
+        if host_of(url_to_check) == target_host:
             screening_store.clear_apply_failure(s.id)
             count += 1
     return count
@@ -443,3 +434,227 @@ def record_screening_verdict(
         "eor_stated": eor_stated,
     }
     return _finalize_screening(fields, named)
+
+
+def list_screenings(approval: str | None = None) -> list[Screening]:
+    """Every screening record, most recent first; `approval` narrows to the queue.
+
+    Lives here so the HTTP list route only maps records to its wire model.
+    """
+    screenings = sorted(
+        screening_store.load_all(), key=lambda s: s.created_at, reverse=True
+    )
+    if approval is not None:
+        screenings = [s for s in screenings if s.approval == approval]
+    return screenings
+
+
+@dataclass
+class RejectedPage:
+    """One page of rejected screenings plus the effective (clamped) bounds."""
+
+    rows: list
+    total: int
+    counts: list
+    limit: int
+    offset: int
+
+
+def rejected_page(limit: int, offset: int, category: str) -> RejectedPage:
+    """One page of rejected screenings, newest first, with category counts.
+
+    Owns the clamp policy so the route only echoes it: limit is clamped into
+    the store's bounds and a negative offset to 0; the effective values are
+    returned for the caller to echo back.
+    """
+    limit = min(
+        max(limit, screening_store.REJECTED_PAGE_MIN_LIMIT),
+        screening_store.REJECTED_PAGE_MAX_LIMIT,
+    )
+    offset = max(0, offset)
+    rows, total, counts = screening_store.rejected_page(limit, offset, category)
+    return RejectedPage(rows=rows, total=total, counts=counts, limit=limit, offset=offset)
+
+
+def bulk_set_approval(ids: list[str], approval: str) -> list[dict]:
+    """Apply one approval decision to many screenings.
+
+    Reports per-id outcomes rather than failing wholesale, so a partial failure
+    is visible instead of silently dropping some ids. A draftless id is approved
+    the same way as any other — the agent applies with whatever cover letter is
+    stored, or none. An invalid approval value raises ``Refused`` (422).
+    """
+    try:
+        results = []
+        for sid in ids:
+            try:
+                ok = screening_store.set_approval(sid, approval) is not None
+            except screening_store.ApprovalConflict:
+                ok = False
+            results.append({"id": sid, "ok": ok})
+    except ValueError as e:
+        raise Refused(str(e)) from e
+    return results
+
+
+def _refuse_apply_claim(result: ApplyClaimResult) -> None:
+    """Raise the 409 for a refused apply claim, with the route's exact text."""
+    if result.reason == "contradictory_research":
+        refused = result.refused_screening
+        msg = (
+            f"{refused.company} has an open company-research contradiction — "
+            "resolve it at /api/company-findings/contradictions before applying."
+        )
+        raise Conflict(msg, payload=msg)
+    msg = "This screening has already been applied to."
+    raise Conflict(msg, payload=msg)
+
+
+def mark_applied(screening_id: str) -> app_store.Application:
+    """Record that the operator applied to this posting by hand.
+
+    Creates the Applications row from what the screening already knows and
+    retires the queue item, so a manual application is tracked the same way an
+    agent-submitted one is. `submitted` is true and `capture_method` says the
+    operator did it, which is the only thing distinguishing the two afterwards.
+
+    Raises ``NotFound`` for an unknown id and ``Conflict`` rather than a second
+    row when the screening has already been applied: a double click must not
+    create a duplicate application.
+    """
+    if screening_store.get(screening_id) is None:
+        raise NotFound("Screening not found.")
+
+    # Retire FIRST, atomically, and create the row only if this call is the one
+    # that won the claim. Checking then creating then retiring let two requests
+    # both pass the check and create two Applications rows for one posting —
+    # two tabs, or one slow response and a second click, was enough. Ordering
+    # it this way also means a crash between the two writes leaves a retired
+    # screening with no row (visible, fixable) rather than a duplicate row.
+    result = claim_screening_for_apply(screening_id)
+    if result.refused:
+        _refuse_apply_claim(result)
+    screening = result.screening
+
+    return app_store.create(
+        {
+            "company": screening.company,
+            "role": screening.role,
+            "application_url": screening.url,
+            "posting": screening.posting_text,
+            "submission_type": "Posting" if screening.url else "General",
+            "submitted": True,
+            "status": "Applied",
+            "application_date": date.today().isoformat(),
+            "capture_method": "manual",
+            "screening_id": screening_id,
+        }
+    )
+
+
+def _update_field(screening_id: str, patch: dict) -> Screening:
+    """One conditional write of ``update_screening``; 404 for an unknown id."""
+    screening = screening_store.update(screening_id, patch)
+    if screening is None:
+        raise NotFound("Screening not found.")
+    return screening
+
+
+def _set_one_approval(screening_id: str, approval: str) -> Screening:
+    """The approval write of ``update_screening``, mapped to service errors."""
+    # Existence wins over the unknown-id check: an unknown id is 404
+    # regardless of approval value, matching the url-only branch above.
+    try:
+        screening = screening_store.set_approval(screening_id, approval)
+    except screening_store.ApprovalConflict as e:
+        raise Conflict(str(e), payload=str(e)) from e
+    except ValueError as e:
+        raise Refused(str(e)) from e
+    if screening is None:
+        raise NotFound("Screening not found.")
+    return screening
+
+
+def update_screening(
+    screening_id: str,
+    *,
+    role: str | None = None,
+    url: str | None = None,
+    posting_text: str | None = None,
+    approval: str | None = None,
+) -> Screening | None:
+    """The operator's approval decision and/or role, URL or posting text.
+
+    Applies each supplied field as its own sequential write, in the route's
+    order (role, url, posting_text, approval), and returns the last written
+    record. The caller rejects a request supplying none of them.
+    """
+    screening = None
+    if role is not None:
+        screening = _update_field(screening_id, {"role": role})
+    if url is not None:
+        screening = _update_field(screening_id, {"url": url})
+    if posting_text is not None:
+        screening = _update_field(screening_id, {"posting_text": posting_text})
+    if approval is not None:
+        screening = _set_one_approval(screening_id, approval)
+    return screening
+
+
+def host_of(url: str) -> str:
+    """The full host of an absolute http(s) URL, or "" if it is not one.
+
+    Anything without a scheme and a netloc is not addressable, so it cannot be
+    a sign-in destination — returning "" drops it rather than grouping several
+    unrelated records under a blank host.
+
+    Public because it is the one host rule shared by the sign-in queue, the
+    login-blocker clear, the browser session close and the session-open URL
+    check; one copy keeps them grouping and matching hosts identically.
+    """
+    try:
+        parsed = urlparse(url or "")
+    except ValueError:
+        return ""
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return ""
+    return parsed.netloc.casefold()
+
+
+def _signin_entry(grouped: dict, s: Screening) -> None:
+    """Fold one screening into its host's sign-in queue entry, if it has one."""
+    url = s.signin_url or s.url
+    host = host_of(url)
+    if not host:
+        return
+    entry = grouped.setdefault(
+        host,
+        {"host": host, "signin_url": url, "waiting": 0, "last_blocked_at": "", "companies": []},
+    )
+    entry["waiting"] += 1
+    if s.updated_at > entry["last_blocked_at"]:
+        entry["last_blocked_at"] = s.updated_at
+    if s.company and s.company not in entry["companies"]:
+        entry["companies"].append(s.company)
+
+
+def signin_queue() -> list[dict]:
+    """Sites the agent hit a sign-in wall on, grouped by host.
+
+    Derived from the screening store on every call rather than kept as its own
+    state: the agent's experience is the only source of truth here, so an entry
+    exists exactly as long as a posting is still waiting behind that sign-in.
+    Sorted most-waiting first, then by host.
+    """
+    grouped: dict[str, dict] = {}
+    for s in screening_store.load_all():
+        if s.apply_blocker != "login_required":
+            continue
+        # Only items still queued to be applied to. Applied or rejected means
+        # nothing is waiting on this sign-in any more.
+        if s.approval not in ("pending", "approved"):
+            continue
+        _signin_entry(grouped, s)
+    sites = list(grouped.values())
+    sites.sort(key=lambda e: (-e["waiting"], e["host"]))
+    return sites

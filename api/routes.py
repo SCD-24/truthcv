@@ -9,79 +9,57 @@ from __future__ import annotations
 
 import asyncio
 import hmac
-import json
 import logging
 import os
-import threading
-from datetime import date
-import urllib.error
-import urllib.request
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, StreamingResponse
 
-import tailor as tailor_engine
 from providers import ProviderError, get_provider
-from render import render_docx, render_pdf
-from render.pdf import RenderUnavailable
-from truth import load, persist_source_hash, save
-from truth.answers import Answers
+from truth import load, save
 from truth.answers import load as load_answers
-from truth.answers import save as save_answers
-from truth.document import extract_document_text, extension_for
-from services.truth_extract import build_truth_from_text
 from services.inferences import confirm_inferences as confirm_inferences_service
 import services.screenings as screenings_service
+import services.screening_letters as screening_letters_service
 import services.agent_config as agent_config_service
+import services.agent_credentials as agent_credentials_service
 import services.applications as applications_service
+import services.runs as runs_service
+import services.supervisor as supervisor_service
+import services.gmail as gmail_service
+import services.job_boards as job_boards_service
+import services.browser as browser_service
+from api import guards
+import services.settings as settings_service
+import services.truth as truth_service
+import services.onboarding as onboarding_service
+import services.tailor as tailor_service
+import services.connections as connections_service
 from truth.model import Truth
-from truth.pdf import (
-    DocumentExtractError,
-    has_profile,
-    load_source_text,
-    persist_profile,
-    persist_source_text,
-)
+from truth.pdf import has_profile
 
 import applications as app_store
 import modelrouting
 import secretstore
 from services.render_cv import (
     DraftMissing,
-    _claim_id,
-    _contact_line,
     _require_application,
     render_cv,
 )
 from services.cover_letter import generate_cover_letter
-from onboarding import store as onboarding_store
-from agentconfig import store as agent_config_store
 from connections import catalog
-from connections.auth.claude import AuthError, get_valid_access_token
-from connections.auth import claude as claude_auth
-from connections.auth import codex as codex_auth
 from connections.auth import gmail as gmail_auth
-from providers import (
-    ANTHROPIC_COMPAT_OPENROUTER_BASE_URL,
-    OPENROUTER_BASE_URL,
-    build_connection_provider,
-    reset_provider,
-)
+from providers import build_connection_provider
 from providers.base import supports_effort_levels
 from companyresearch import store as company_findings_store
 from screening import store as screening_store
 from runs import store as runs_store
-from runs.url_ledger import OUTCOMES as _FUNNEL_OUTCOMES
-from runs import url_ledger as _url_ledger
-from runs.derive import board_breakdown_by_run, counters_by_run
 from identity.company import company_identity_key
 from screening.cooldown import cooldown as check_cooldown
 from screening.model import Screening
-from identity.url import posting_dedupe_key
 
 import coverletter.store as letter_store
-from services.letters import generate_cover_letter_for_operator as _generate_letter_for_operator
 
 from .schemas import (
     AgentConfigModel,
@@ -121,7 +99,6 @@ from .schemas import (
     CompanyFindingModel,
     CompanyFindingResolve,
     ContradictionGroupModel,
-    CoverLetterApprovals,
     CoverLetterRequest,
     CooldownResult,
     CoverLetterResult,
@@ -197,12 +174,7 @@ def _screening_model(screening: Screening) -> ScreeningModel:
 @router.get("/screenings", response_model=list[ScreeningModel])
 def list_screenings(approval: str | None = None) -> list[ScreeningModel]:
     """Every screening record, most recent first; `approval` narrows to the queue."""
-    screenings = sorted(
-        screening_store.load_all(), key=lambda s: s.created_at, reverse=True
-    )
-    if approval is not None:
-        screenings = [s for s in screenings if s.approval == approval]
-    return [_screening_model(s) for s in screenings]
+    return [_screening_model(s) for s in screenings_service.list_screenings(approval)]
 
 
 # Default page size for GET /screenings/rejected; the store clamps the bounds.
@@ -228,58 +200,14 @@ def list_rejected_screenings(
     never read as an id. limit is clamped into the store's bounds and a
     negative offset to 0; the effective values are echoed back.
     """
-    limit = min(
-        max(limit, screening_store.REJECTED_PAGE_MIN_LIMIT),
-        screening_store.REJECTED_PAGE_MAX_LIMIT,
-    )
-    offset = max(0, offset)
-    rows, total, counts = screening_store.rejected_page(limit, offset, category)
+    page = screenings_service.rejected_page(limit, offset, category)
     return RejectedScreeningsResponse(
-        items=[_rejected_model(r) for r in rows],
-        total=total,
-        limit=limit,
-        offset=offset,
-        categories=[CategoryCountModel(key=k, count=c) for k, c in counts],
+        items=[_rejected_model(r) for r in page.rows],
+        total=page.total,
+        limit=page.limit,
+        offset=page.offset,
+        categories=[CategoryCountModel(key=k, count=c) for k, c in page.counts],
     )
-
-
-def _run_models(records: list) -> list[RunModel]:
-    """Wire models for run records, with their coverage counters DERIVED.
-
-    screenings_recorded, blocked_count, queued_for_approval and
-    applications_submitted are recomputed from the records each run actually
-    produced and OVERRIDE whatever is stored on the run record; postings_seen,
-    over_cap_writes, stopped_reason, note, status and the timestamps are read
-    from the stored record unchanged. board_breakdown is derived from screenings
-    per board. Both run routes go through here so the two surfaces cannot
-    disagree — the same reasoning check_cooldown gives for sharing one function.
-
-    Each store is loaded ONCE for the whole list, not once per run. A run still
-    "running" derives live counts, which is intended: the numbers describe the
-    records that exist right now.
-
-    Derivation is best-effort, in the spirit of the rest of this subsystem: if
-    a store cannot be loaded, the stored values are served rather than failing
-    the request. Only the load is guarded, not the response build.
-    """
-    try:
-        screenings = screening_store.load_all()
-        applications = app_store.load_all()
-    except Exception:
-        return [RunModel(**r.to_dict()) for r in records]
-    counters = counters_by_run([r.id for r in records], screenings, applications)
-    breakdown = board_breakdown_by_run(records, screenings)
-    return [
-        RunModel(
-            **{
-                **r.to_dict(),
-                **counters.get(r.id, {}),
-                "board_breakdown": breakdown[r.id]["rows"],
-                "board_breakdown_total": breakdown[r.id]["total"],
-            }
-        )
-        for r in records
-    ]
 
 
 @router.get("/runs", response_model=RunListResponse)
@@ -300,9 +228,9 @@ def list_runs(limit: int = 50, offset: int = 0) -> RunListResponse:
     otherwise be reported as an older run that had gone missing.
     """
     offset = max(0, offset)
-    records, total = runs_store.list_page(limit=limit, offset=offset)
+    runs, total = runs_service.list_runs_page(limit, offset)
     return RunListResponse(
-        runs=_run_models(records),
+        runs=[RunModel(**r) for r in runs],
         total=total,
         limit=limit,
         offset=offset,
@@ -312,15 +240,12 @@ def list_runs(limit: int = 50, offset: int = 0) -> RunListResponse:
 @router.get("/runs/{run_id}", response_model=RunModel)
 def get_run(run_id: str) -> RunModel:
     """A single run record, or 404 if no run with this id has been recorded."""
-    record = runs_store.get(run_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="run not found")
-    return _run_models([record])[0]
+    return RunModel(**runs_service.get_run(run_id))
 
 
 # Page size bounds for GET /runs/{run_id}/urls.
-URL_LEDGER_DEFAULT_LIMIT = 50
-URL_LEDGER_MAX_LIMIT = 200
+URL_LEDGER_DEFAULT_LIMIT = runs_service.URL_LEDGER_DEFAULT_LIMIT
+URL_LEDGER_MAX_LIMIT = runs_service.URL_LEDGER_MAX_LIMIT
 
 
 @router.get("/runs/{run_id}/urls", response_model=UrlLedgerResponse)
@@ -335,30 +260,10 @@ def get_run_urls(
     """One page of the run's URL ledger, optionally filtered by source and
     outcome. 404 for an unknown run, 400 for an unknown outcome; limit is
     clamped to 1..URL_LEDGER_MAX_LIMIT and a negative offset to 0."""
-    if runs_store.get(run_id) is None:
-        raise HTTPException(status_code=404, detail="run not found")
-    if outcome and outcome not in _FUNNEL_OUTCOMES:
-        raise HTTPException(status_code=400, detail="unknown outcome")
-    if channel and channel not in ("feed", "direct", "dork"):
-        raise HTTPException(status_code=400, detail="unknown channel")
-    limit = min(max(1, limit), URL_LEDGER_MAX_LIMIT)
-    entries, total = _url_ledger.read(run_id, source, outcome, limit, max(0, offset), channel)
+    entries, total = runs_service.url_ledger_page(
+        run_id, source, outcome, limit, offset, channel
+    )
     return UrlLedgerResponse(entries=entries, total=total)
-
-
-def _supervisor_owns_run(run_id: str) -> bool:
-    """Whether the supervisor is the one currently watching this run.
-
-    The supervisor tracks only what it currently owns, in memory: if its
-    status does not name this run as the one it is running, nothing will ever
-    call finish_run for it — the run is orphaned and we close it ourselves.
-    """
-    try:
-        data = _forward_to_supervisor("/status")
-    except HTTPException as exc:
-        logger.warning("could not reach supervisor to check run ownership: %s", exc.detail)
-        return False
-    return data.get("running") is True and data.get("currentRunId") == run_id
 
 
 @router.post("/runs/{run_id}/stop", response_model=RunStopResult)
@@ -366,46 +271,8 @@ def post_run_stop(run_id: str) -> RunStopResult:
     """Stop a run: cancel it through the supervisor if it owns the run, or
     close an orphaned record as failed/orphaned otherwise.
     """
-    record = runs_store.get(run_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="run not found")
-    if record.status != "running":
-        raise HTTPException(status_code=409, detail="run is not running")
-
-    if _supervisor_owns_run(run_id):
-        _forward_to_supervisor("/cancel", method="POST")
-        return RunStopResult(outcome="cancelling", run=_run_models([record])[0])
-
-    closed = runs_store.finish_if_running(run_id, "failed", stopped_reason="orphaned")
-    if closed is None:
-        closed = runs_store.get(run_id)
-    return RunStopResult(outcome="closed", run=_run_models([closed])[0])
-
-
-def reconcile_orphaned_runs() -> list:
-    """Reconcile orphaned runs at API startup.
-
-    Checks which run (if any) the supervisor currently owns, then closes
-    every other "running" record as orphaned — those have nothing left that
-    could ever close them, since the supervisor keeps run state in memory.
-    """
-    live_run_id = None
-    try:
-        data = _forward_to_supervisor("/status")
-        if data.get("running") is True:
-            live_run_id = data.get("currentRunId")
-    except HTTPException:
-        logger.warning(
-            "Supervisor was unreachable during startup reconciliation; "
-            "all running records will be treated as orphaned"
-        )
-
-    closed = runs_store.close_orphaned(except_run_id=live_run_id)
-    logger.info(
-        "reconciled orphaned runs at startup",
-        extra={"count": len(closed), "closed_run_ids": [r.id for r in closed]},
-    )
-    return closed
+    outcome, run = runs_service.stop_run(run_id)
+    return RunStopResult(outcome=outcome, run=RunModel(**run))
 
 
 @router.post("/screenings", response_model=ScreeningModel, status_code=201)
@@ -447,16 +314,7 @@ def bulk_set_approval(body: BulkApprovalUpdate) -> BulkApprovalResult:
     the same way as any other — the agent applies with whatever cover letter is
     stored, or none.
     """
-    try:
-        results = []
-        for sid in body.ids:
-            try:
-                ok = screening_store.set_approval(sid, body.approval) is not None
-            except screening_store.ApprovalConflict:
-                ok = False
-            results.append({"id": sid, "ok": ok})
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
+    results = screenings_service.bulk_set_approval(body.ids, body.approval)
     return BulkApprovalResult(results=results)
 
 
@@ -472,46 +330,7 @@ def mark_screening_applied(screening_id: str) -> ApplicationModel:
     409 rather than a second row when the screening has already been applied:
     a double click must not create a duplicate application.
     """
-    if screening_store.get(screening_id) is None:
-        raise HTTPException(status_code=404, detail="Screening not found.")
-
-    # Retire FIRST, atomically, and create the row only if this call is the one
-    # that won the claim. Checking then creating then retiring let two requests
-    # both pass the check and create two Applications rows for one posting —
-    # two tabs, or one slow response and a second click, was enough. Ordering
-    # it this way also means a crash between the two writes leaves a retired
-    # screening with no row (visible, fixable) rather than a duplicate row.
-    result = screenings_service.claim_screening_for_apply(screening_id)
-    if result.refused:
-        if result.reason == "contradictory_research":
-            refused = result.refused_screening
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"{refused.company} has an open company-research contradiction — "
-                    "resolve it at /api/company-findings/contradictions before applying."
-                ),
-            )
-        raise HTTPException(
-            status_code=409, detail="This screening has already been applied to."
-        )
-    screening = result.screening
-
-    app = app_store.create(
-        {
-            "company": screening.company,
-            "role": screening.role,
-            "application_url": screening.url,
-            "posting": screening.posting_text,
-            "submission_type": "Posting" if screening.url else "General",
-            "submitted": True,
-            "status": "Applied",
-            "application_date": date.today().isoformat(),
-            "capture_method": "manual",
-            "screening_id": screening_id,
-        }
-    )
-    return _application_model(app)
+    return _application_model(screenings_service.mark_applied(screening_id))
 
 
 # Declared BEFORE /screenings/{screening_id}: otherwise the router binds
@@ -543,36 +362,13 @@ def set_screening_approval(screening_id: str, body: ApprovalUpdate) -> Screening
             status_code=422, detail="Provide approval, role, url or postingText."
         )
 
-    screening = None
-    if body.role is not None:
-        screening = screening_store.update(screening_id, {"role": body.role})
-        if screening is None:
-            raise HTTPException(status_code=404, detail="Screening not found.")
-
-    if body.url is not None:
-        screening = screening_store.update(screening_id, {"url": body.url})
-        if screening is None:
-            raise HTTPException(status_code=404, detail="Screening not found.")
-
-    if body.posting_text is not None:
-        screening = screening_store.update(
-            screening_id, {"posting_text": body.posting_text}
-        )
-        if screening is None:
-            raise HTTPException(status_code=404, detail="Screening not found.")
-
-    if body.approval is not None:
-        # Existence wins over the unknown-id check: an unknown id is 404
-        # regardless of approval value, matching the url-only branch above.
-        try:
-            screening = screening_store.set_approval(screening_id, body.approval)
-        except screening_store.ApprovalConflict as e:
-            raise HTTPException(status_code=409, detail=str(e)) from e
-        except ValueError as e:
-            raise HTTPException(status_code=422, detail=str(e)) from e
-        if screening is None:
-            raise HTTPException(status_code=404, detail="Screening not found.")
-
+    screening = screenings_service.update_screening(
+        screening_id,
+        role=body.role,
+        url=body.url,
+        posting_text=body.posting_text,
+        approval=body.approval,
+    )
     return _screening_model(screening)
 
 
@@ -672,34 +468,6 @@ def get_screening_letter(screening_id: str) -> CoverLetterDraftModel:
     return _draft_model(draft)
 
 
-def _screening_letter_approvals(
-    approvals: CoverLetterApprovals | None,
-    paragraphs: list[dict] | None,
-) -> tuple[set[str], set[str]]:
-    """Resolve blocked-claim ids to claim texts against the paragraphs SUPPLIED
-    IN THIS REQUEST, not the wizard's cached draft (_letter_approvals uses that
-    one; it is wrong here — a screening's letter is per-screening, not global).
-    Mirrors the wizard's id derivation exactly: LETTER_SCOPE_ID + _claim_id.
-    """
-    if not approvals or not paragraphs:
-        return set(), set()
-
-    from coverletter import LETTER_SCOPE_ID
-
-    approved_ids = set(approvals.approved_claim_ids)
-    denied_ids = set(approvals.denied_claim_ids)
-    approved: set[str] = set()
-    denied: set[str] = set()
-    for para in paragraphs:
-        for claim in para.get("claims", []):
-            cid = _claim_id(LETTER_SCOPE_ID, claim)
-            if cid in approved_ids:
-                approved.add(claim)
-            if cid in denied_ids:
-                denied.add(claim)
-    return approved, denied
-
-
 @router.post("/screenings/{screening_id}/letter", response_model=CoverLetterDraftModel)
 def generate_screening_letter(
     screening_id: str, body: LetterGenerateRequest
@@ -714,53 +482,18 @@ def generate_screening_letter(
     The retry can carry `approvals` and the blocked attempt's `paragraphs` to
     re-validate the SAME letter, mirroring `/api/cover-letter`.
     """
-    screening = screening_store.get(screening_id)
-    if screening is None:
-        raise HTTPException(status_code=404, detail="Screening not found.")
-    if not screening.posting_text.strip():
-        raise HTTPException(
-            status_code=409,
-            detail="No posting text stored for this screening, so there is nothing to draft from.",
-        )
-    existing = letter_store.load(screening_id)
-    if existing is not None and existing.source == "operator" and not body.force:
-        raise HTTPException(
-            status_code=409,
-            detail="This letter was edited by you. Redrafting would discard those edits.",
-        )
-    approved_texts, denied_texts = _screening_letter_approvals(body.approvals, body.paragraphs)
-    result = _generate_letter_for_operator(
-        posting=screening.posting_text,
+    approvals = body.approvals
+    draft = screening_letters_service.generate(
+        screening_id,
+        force=body.force,
+        approved_ids=approvals.approved_claim_ids if approvals else None,
+        denied_ids=approvals.denied_claim_ids if approvals else None,
+        paragraphs=body.paragraphs,
         preset_id=body.preset_id,
         length=body.length,
-        approved_texts=approved_texts,
-        denied_texts=denied_texts,
-        paragraphs=body.paragraphs,
-        company=screening.company or None,
         provider_factory=get_provider,
     )
-    if result["blocked"]:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": "The letter was blocked by the truthfulness guardrail.",
-                "blockedReason": result.get("blocked_reason", ""),
-                "blockedClaims": [
-                    {
-                        "claimId": _claim_id(c["scope_id"], c["text"]),
-                        "experienceId": c["scope_id"],
-                        "text": c["text"],
-                        "tokens": c["tokens"],
-                    }
-                    for c in result["blocked_claims"]
-                ],
-                "paragraphs": result["paragraphs"],
-            },
-        )
-    draft = letter_store.CoverLetterDraft(
-        text=result["text"], paragraphs=result["paragraphs"], source="generated"
-    )
-    return _draft_model(letter_store.save(screening_id, draft))
+    return _draft_model(draft)
 
 
 @router.put("/screenings/{screening_id}/letter", response_model=CoverLetterDraftModel)
@@ -775,20 +508,7 @@ def save_screening_letter(
     operator is the source of that document. `source` records that a human wrote
     this, and the agent applies with it unchanged.
     """
-    if screening_store.get(screening_id) is None:
-        raise HTTPException(status_code=404, detail="Screening not found.")
-    if not body.text.strip():
-        raise HTTPException(
-            status_code=422,
-            detail="An empty letter cannot be saved — blanking is not an edit; regenerate instead.",
-        )
-    existing = letter_store.load(screening_id)
-    draft = letter_store.CoverLetterDraft(
-        text=body.text,
-        paragraphs=existing.paragraphs if existing else [],
-        source="operator",
-    )
-    return _draft_model(letter_store.save(screening_id, draft))
+    return _draft_model(screening_letters_service.save_operator_text(screening_id, body.text))
 
 
 @router.delete("/screenings/{screening_id}", status_code=204)
@@ -819,27 +539,6 @@ def _truth_doc(truth: Truth) -> TruthDoc:
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MiB — a CV/cover-letter upload has no legitimate reason to exceed this
 
-# Guards the persist_source_text/persist_source_hash/persist_profile triple below:
-# uploads run in asyncio.to_thread, so two concurrent /upload requests could
-# otherwise interleave their writes (e.g. source text from one request paired
-# with the hash/profile of another).
-_UPLOAD_PERSIST_LOCK = threading.Lock()
-
-
-def _extract_and_persist_upload(filename: str, data: bytes) -> None:
-    """Extract text from an uploaded file and persist it, off the event loop.
-
-    Raises DocumentExtractError on an unsupported/unparseable file; the
-    caller maps that to a 400 response.
-    """
-    ext = extension_for(filename)
-    text = extract_document_text(filename, data)
-    with _UPLOAD_PERSIST_LOCK:
-        persist_source_text(text)
-        persist_source_hash(text)  # keyed cache: lets /extract skip a repeat LLM pass
-        persist_profile(data, ext)
-
-
 @router.post("/upload", status_code=204)
 async def upload(file: UploadFile = File(...)) -> None:
     # Read one byte past the cap so an oversized upload is detected without
@@ -849,27 +548,14 @@ async def upload(file: UploadFile = File(...)) -> None:
         raise HTTPException(
             status_code=413, detail="Upload exceeds the maximum allowed size."
         )
-    try:
-        await asyncio.to_thread(_extract_and_persist_upload, file.filename or "", data)
-    except DocumentExtractError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    await asyncio.to_thread(truth_service.ingest_upload, file.filename or "", data)
 
 
 @router.post("/extract", response_model=TruthDoc)
 def extract() -> TruthDoc:
-    text = load_source_text()
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="Upload your CV before extracting.")
-    try:
-        truth = build_truth_from_text(text, get_provider("truth_extract"))
-    except ProviderError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
-    except Exception as e:  # noqa: BLE001 — surface upstream LLM/SDK errors cleanly
-        raise HTTPException(
-            status_code=502,
-            detail=f"The language model call failed: {type(e).__name__}: {e}",
-        ) from e
-    return _truth_doc(truth)
+    return _truth_doc(
+        truth_service.extract_truth(lambda: get_provider("truth_extract"))
+    )
 
 
 @router.get("/truth", response_model=TruthDoc)
@@ -888,21 +574,8 @@ def put_truth(body: TruthDoc) -> None:
 
 @router.post("/tailor", response_model=TailorResult)
 def tailor_route(body: TailorRequest) -> TailorResult:
-    try:
-        result = tailor_engine.tailor(body.posting, load(), get_provider)
-    except ProviderError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
-    except Exception as e:  # noqa: BLE001 — surface upstream LLM/SDK errors cleanly
-        raise HTTPException(
-            status_code=502,
-            detail=f"The language model call failed: {type(e).__name__}: {e}",
-        ) from e
-    from storage import data_dir
-
-    (data_dir() / "posting.txt").write_text(body.posting, encoding="utf-8")
-    return TailorResult.model_validate(
-        {"keywords": result["keywords"], "inferences": result["inferences"]}
-    )
+    result = tailor_service.tailor_posting(body.posting, get_provider)
+    return TailorResult.model_validate(result)
 
 
 @router.post("/confirm-inferences", status_code=204)
@@ -1090,42 +763,6 @@ def delete_application(app_id: str) -> None:
         raise HTTPException(status_code=404, detail="Application not found.")
 
 
-def _strip_html(text: str) -> str:
-    """Drop tags/entities so the guardrail sees prose, not markup.
-
-    Why: an edited CV arrives as HTML; tag names like `p`/`div` are not claims
-    and must not be diffed against the truth. Cover-letter text passes through
-    unchanged (it has no markup).
-    """
-    import html as html_lib
-    import re
-
-    without_tags = re.sub(r"<[^>]+>", " ", text or "")
-    return html_lib.unescape(without_tags)
-
-
-def _render_to_files(html: str, pdf_name: str, docx_name: str) -> bool:
-    """Best-effort render HTML to the named PDF and DOCX on the volume.
-
-    Returns True if at least one format was produced. It never raises on an
-    unavailable backend: callers that have already recorded the document must
-    keep the saved link even when WeasyPrint/pandoc are missing, and the
-    download-URL builder nulls links for files that were not produced.
-    """
-    produced = False
-    try:
-        render_pdf(html, pdf_name)
-        produced = True
-    except RenderUnavailable:
-        pass
-    try:
-        render_docx(html, docx_name)
-        produced = True
-    except RenderUnavailable:
-        pass
-    return produced
-
-
 @router.put("/applications/{app_id}/cv", response_model=SaveDocumentResult)
 def save_application_cv(app_id: str, body: SaveCvRequest) -> SaveDocumentResult:
     """Render and save edited CV HTML onto an application.
@@ -1134,14 +771,7 @@ def save_application_cv(app_id: str, body: SaveCvRequest) -> SaveDocumentResult:
     as-is — the truthfulness guardrail only gates the automatic AI generation
     (/render, /tailor), not a document the user edited by hand.
     """
-    if app_store.get(app_id) is None:
-        raise HTTPException(status_code=404, detail="Application not found.")
-
-    # Record the document FIRST so the link always persists, then render
-    # best-effort — a missing render backend must never lose the saved CV.
-    app = app_store.save_cv_document(app_id, body.html)
-    pdf_name, docx_name = app_store.cv_filenames(app_id)
-    produced = _render_to_files(body.html, pdf_name, docx_name)
+    app, produced = applications_service.save_cv(app_id, body.html)
     return SaveDocumentResult(
         blocked=False,
         application=_application_model(app),
@@ -1158,53 +788,11 @@ def save_application_cover_letter(
     A manual edit is trusted and saved as-is; the truthfulness guardrail only
     gates the automatic AI generation, not a hand-edited document.
     """
-    if app_store.get(app_id) is None:
-        raise HTTPException(status_code=404, detail="Application not found.")
-
-    from render.cover_letter import render_letter_html
-
-    _profile = load().profile
-    html = render_letter_html(
-        body.text,
-        name=_profile.name or "Your Name",
-        contact=_contact_line(_profile),
-    )
-    # Record the document FIRST so the link always persists, then render
-    # best-effort — a missing backend must never lose the saved cover letter.
-    app = app_store.save_cover_letter_document(app_id, body.text)
-    pdf_name, docx_name = app_store.cover_letter_filenames(app_id)
-    produced = _render_to_files(html, pdf_name, docx_name)
+    app, produced = applications_service.save_cover_letter(app_id, body.text)
     return SaveDocumentResult(
         blocked=False,
         application=_application_model(app),
         render_unavailable=not produced,
-    )
-
-
-_V1_PROVIDER_TO_CARD = {"anthropic": "claude", "openai": "codex", "ollama": "ollama"}
-_CARD_TO_V1_PROVIDER = {v: k for k, v in _V1_PROVIDER_TO_CARD.items()}
-
-
-def _settings_status() -> SettingsStatus:
-    routing = modelrouting.load()
-    if routing.default is not None:
-        active_provider = _CARD_TO_V1_PROVIDER.get(routing.default.connection, routing.default.connection)
-        model = routing.default.model
-    else:
-        card, model = secretstore.legacy_default()
-        active_provider = _CARD_TO_V1_PROVIDER.get(card, card or "")
-    return SettingsStatus(
-        encryption_available=secretstore.encryption_available(),
-        active_provider=active_provider,
-        model=model,
-        anthropic_key_set=bool(secretstore.get_connection("claude").get("apiKey")),
-        # OpenAI key is set if the codex card has either an api key or a valid
-        # oauth subscription — either mode makes the card usable.
-        openai_key_set=bool(
-            secretstore.get_connection("codex").get("apiKey")
-            or secretstore.get_connection("codex").get("oauth", {}).get("accessToken")
-        ),
-        ollama_host=secretstore.get_connection("ollama").get("baseUrl", ""),
     )
 
 
@@ -1213,36 +801,17 @@ def profile() -> ProfileStatus:
     return ProfileStatus(has_profile=has_profile())
 
 
-def _onboarding_state() -> OnboardingState:
-    """Build the current onboarding status from provider routing, the profile,
-    and the persisted onboarding progress."""
-    provider_done = onboarding_store.provider_ready()
-    profile_done = has_profile()
-    state = onboarding_store.load()
-    return OnboardingState(
-        provider_done=provider_done,
-        has_profile=profile_done,
-        cv_reviewed_at=state.cv_reviewed_at,
-        tour_seen_at=state.tour_seen_at,
-        complete=provider_done and profile_done and state.cv_reviewed_at is not None,
-    )
-
-
 @router.get("/onboarding", response_model=OnboardingState)
 def onboarding() -> OnboardingState:
     """First-run onboarding progress: provider setup, profile, CV review, tour."""
-    onboarding_store.ensure_initialized()
-    return _onboarding_state()
+    return OnboardingState(**onboarding_service.get_state())
 
 
 @router.put("/onboarding", response_model=OnboardingState)
 def put_onboarding(body: OnboardingUpdate) -> OnboardingState:
     """Merge only the fields the client actually sent onto the stored state."""
-    onboarding_store.ensure_initialized()
-    merged = onboarding_store.load().to_dict()
-    merged.update(body.model_dump(exclude_unset=True, by_alias=False))
-    onboarding_store.save(onboarding_store.OnboardingState.from_dict(merged))
-    return _onboarding_state()
+    sent = body.model_dump(exclude_unset=True, by_alias=False)
+    return OnboardingState(**onboarding_service.update_state(sent))
 
 
 @router.get("/profile/answers", response_model=AnswersModel)
@@ -1258,231 +827,33 @@ def put_profile_answers(body: AnswersUpdate) -> AnswersModel:
     flow means most PUTs carry a strict subset of the 21 fields, and treating
     absence the same as "clear this" would silently blank the rest.
     """
-    merged = load_answers().to_dict()
-    merged.update(body.model_dump(exclude_unset=True, by_alias=False))
-    answers = Answers.from_dict(merged)
-    return AnswersModel.model_validate(save_answers(answers).to_dict())
-
-
-def _resolved_job_boards(cfg: agent_config_store.AgentConfig) -> list[dict]:
-    """Build the RESOLVED wire list of job boards from an agent config.
-
-    Both GET and PUT responses go through this helper so they cannot drift.
-    Iterates ``cfg.resolved_boards()`` (the four defaults, then the operator's
-    own boards, each already carrying its EFFECTIVE mode) and for each board
-    emits its stored sign-in override (if any), plus the server-resolved
-    domain, effective sign-in URL, default marker and mode. ``mode_locked``
-    is True for any catalog source — its mode is fixed and not operator-
-    editable — and False only for a custom board. The response deliberately
-    carries this resolved list rather than the stored one, so the client
-    never re-implements the union — and ``is_default`` is what tells the UI
-    to withhold a remove button.
-    """
-    from agentconfig import boards
-
-    result = []
-    for board in cfg.resolved_boards():
-        result.append({
-            "source": board.source,
-            "signin_url": board.signin_url,
-            "mode": board.mode,
-            "search_url": board.search_url,
-            "enabled": board.enabled,
-            "posting_url_pattern": board.posting_url_pattern,
-            "mode_locked": not boards.is_custom_source(board.source),
-            "domain": boards.resolve_domain(board.source) or "",
-            "effective_signin_url": boards.resolve_signin_url(board.source, board.signin_url),
-            "is_default": boards.is_default_source(board.source),
-            "is_api": boards.is_api_source(board.source),
-            "key_required": boards.requires_key(board.source),
-        })
-    return result
-
-
-def _target_company_boards(cfg: agent_config_store.AgentConfig) -> list:
-    """Recorded company boards pruned to the current watchlist.
-
-    Matched by identity key (not raw casefold equality) so a legal-entity
-    suffix on either side does not exclude a board that is really for a
-    target company. Shared by ``get_agent_config``'s ``company_boards``
-    response field and ``_fetch_feed_postings``'s ATS fan-out, so the two
-    never drift onto different prunings of the same store.
-    """
-    from companyboards import store as board_store
-
-    boards_store_boards = board_store.load()
-    board_store.prune(cfg.target_companies)
-    target_company_keys = {company_identity_key(name) for name in cfg.target_companies}
-    return [
-        board for board in boards_store_boards.values()
-        if company_identity_key(board.company) in target_company_keys
-    ]
-
-
-def _merge_feed_results(*results):
-    """Merge several ``FeedResult``s into one, de-duplicated by URL.
-
-    One source failing must not empty out a working one, so every result's
-    postings are kept regardless of whether that same result also carries an
-    error; the errors themselves are joined so a simultaneous failure of more
-    than one source is not silently reduced to just the first.
-    """
-    from jobfeeds import FeedResult
-
-    postings = []
-    seen_urls = set()
-    errors = []
-    for result in results:
-        for posting in result.postings:
-            if posting.url and posting.url not in seen_urls:
-                seen_urls.add(posting.url)
-                postings.append(posting)
-        if result.error:
-            errors.append(result.error)
-    return FeedResult(postings=postings, error=" ".join(errors))
-
-
-# Combined wall-clock ceiling for the Remote Rocketship, Arbeitnow AND
-# per-company ATS fetches TOGETHER, not each source's own separate budget.
-# agent/agent-config.js gives the job_config request a fixed 30s socket
-# timeout and treats a timeout as a hard failure: it destroys the request and
-# calls process.exit(1), discarding the whole config — profiles, feed,
-# company boards, and dorks. Each fetcher's own BUDGET_SECONDS (20.0s) was
-# sized on the assumption it was the ONLY fetch running; fanning out to three
-# independent fetchers with independent budgets can now approach 60s.
-# Threading this ONE shared deadline into every caller instead keeps them
-# together under a single ceiling: whatever the earlier fetchers spend comes
-# out of what the others are given. 25s leaves 5s of headroom under the 30s
-# socket timeout for the rest of the config route's own work.
-FEED_FETCH_BUDGET_SECONDS = 25.0
-
-
-def _fetch_feed_postings(cfg: agent_config_store.AgentConfig, company_boards: list):
-    """Pull postings from Remote Rocketship, Arbeitnow, and every watchlist
-    company's own ATS API, whichever apply.
-
-    Fans out across three independent sources and merges them, de-duplicated
-    by URL (see ``_merge_feed_results``):
-
-    - Remote Rocketship, gated on a resolved board naming it specifically
-      (via ``boards.api_source_key``, not the broader ``is_api_source`` —
-      Arbeitnow is also API-backed and always present as a default, and must
-      not switch Remote Rocketship on) plus its saved key.
-    - Arbeitnow, an always-on default board (agentconfig.boards.DEFAULT_BOARD_SOURCES)
-      with a public API — gated the same way on a resolved board naming it,
-      but never needs a key.
-    - Each watchlist company's own ATS API (jobfeeds.ats), gated only on that
-      company's ``CompanyBoard.ats`` naming a recognised ATS — no key needed.
-
-    No fetcher ever raises, and this function does not either: a source that
-    fails degrades the merged ``error`` rather than emptying the response,
-    while the other sources' postings still arrive.
-
-    All three fetches share ONE wall-clock deadline (FEED_FETCH_BUDGET_SECONDS)
-    instead of each getting its own — see that constant's comment for why.
-    They also run on their own threads instead of one after another, so the
-    slowest of the three governs the wall-clock cost of this function rather
-    than their sum; the shared deadline still bounds each individually
-    exactly as when they ran serially.
-    """
-    import threading
-    import time
-
-    from agentconfig import boards
-    from jobfeeds import arbeitnow, ats, remoterocketship
-
-    deadline = time.monotonic() + FEED_FETCH_BUDGET_SECONDS
-    results: dict = {}
-    resolved_sources = cfg.resolved_board_sources()
-
-    def _run_remote_rocketship() -> None:
-        if any(boards.api_source_key(source) == remoterocketship.SOURCE for source in resolved_sources):
-            results["rr"] = remoterocketship.fetch_postings(
-                cfg.profiles, remoterocketship.api_key(), cfg.max_posting_age_days, deadline=deadline
-            )
-        else:
-            results["rr"] = remoterocketship.FeedResult()
-
-    def _run_arbeitnow() -> None:
-        if any(boards.api_source_key(source) == arbeitnow.SOURCE for source in resolved_sources):
-            results["arbeitnow"] = arbeitnow.fetch_postings(
-                cfg.profiles, cfg.max_posting_age_days, deadline=deadline
-            )
-        else:
-            results["arbeitnow"] = arbeitnow.FeedResult()
-
-    def _run_ats() -> None:
-        results["ats"] = ats.fetch_ats_postings(company_boards, cfg.max_posting_age_days, deadline=deadline)
-
-    threads = [
-        threading.Thread(target=_run_remote_rocketship),
-        threading.Thread(target=_run_arbeitnow),
-        threading.Thread(target=_run_ats),
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-
-    return _merge_feed_results(results["rr"], results["arbeitnow"], results["ats"])
+    sent = body.model_dump(exclude_unset=True, by_alias=False)
+    return AnswersModel.model_validate(truth_service.update_answers(sent).to_dict())
 
 
 @router.get("/job-boards/{source}/key", response_model=JobBoardKeyStatus)
 def get_job_board_key(source: str) -> JobBoardKeyStatus:
     """Whether an API-backed board has a key saved. The key itself is never returned."""
-    from agentconfig import boards
-    from jobfeeds import remoterocketship
-
-    if not boards.requires_key(source):
-        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board that needs a key.")
-    return JobBoardKeyStatus(
-        source=remoterocketship.SOURCE,
-        key_set=bool(remoterocketship.api_key()),
-        encryption_available=secretstore.encryption_available(),
-    )
+    return JobBoardKeyStatus(**job_boards_service.key_status(source))
 
 
 @router.put("/job-boards/{source}/key", response_model=JobBoardKeyStatus)
 def put_job_board_key(source: str, body: JobBoardKeyUpdate) -> JobBoardKeyStatus:
     """Save (or, with an empty string, clear) an API-backed board's key."""
-    from agentconfig import boards
-    from jobfeeds import remoterocketship
-
-    if not boards.requires_key(source):
-        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board that needs a key.")
-    if not secretstore.encryption_available():
-        raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
-    value = body.api_key.strip()
-    secretstore.set_connection(remoterocketship.SOURCE, {"apiKey": value or None})
-    return JobBoardKeyStatus(
-        source=remoterocketship.SOURCE,
-        key_set=bool(remoterocketship.api_key()),
-        encryption_available=True,
-    )
+    return JobBoardKeyStatus(**job_boards_service.set_key(source, body.api_key))
 
 
 @router.post("/job-boards/{source}/key/test", response_model=TestResult)
 def test_job_board_key(source: str) -> TestResult:
     """Verify the saved key with one live request against the board's API."""
-    from agentconfig import boards
-    from jobfeeds import remoterocketship
-
-    if not boards.requires_key(source):
-        raise HTTPException(status_code=404, detail=f"'{source}' is not an API-backed job board that needs a key.")
-    ok, detail = remoterocketship.check_key(remoterocketship.api_key())
+    ok, detail = job_boards_service.test_key(source)
     return TestResult(ok=ok, detail=detail)
 
 
 @router.get("/settings/jev", response_model=JevSettingsStatus)
 def get_jev_settings() -> JevSettingsStatus:
     """Whether Jev cross-checking is configured. The key itself is never returned."""
-    conn = secretstore.get_connection("jev")
-    return JevSettingsStatus(
-        key_set=bool(conn.get("apiKey")),
-        use_for_screening=conn.get("useForScreening") is True,
-        use_for_email_tracking=conn.get("useForEmailTracking") is True,
-        encryption_available=secretstore.encryption_available(),
-    )
+    return JevSettingsStatus(**settings_service.jev_status())
 
 
 @router.put("/settings/jev", response_model=JevSettingsStatus)
@@ -1490,27 +861,10 @@ def put_jev_settings(body: JevSettingsUpdate) -> JevSettingsStatus:
     """Save (or, with an empty string, clear) the Jev API key and/or the
     useForScreening / useForEmailTracking toggles. Saving a non-empty key
     requires encryption."""
-    updates: dict = {}
-    if body.api_key is not None:
-        updates["apiKey"] = body.api_key.strip() or None
-    if body.use_for_screening is not None:
-        updates["useForScreening"] = body.use_for_screening
-    if body.use_for_email_tracking is not None:
-        updates["useForEmailTracking"] = body.use_for_email_tracking
-    # Any persisted field — including the toggle — is written through the
-    # same encrypted store as the key, so a write of either kind needs a
-    # valid ENCRYPTION_KEY, not just a non-empty api_key.
-    if updates and not secretstore.encryption_available():
-        raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
-    if updates:
-        secretstore.set_connection("jev", updates)
-    conn = secretstore.get_connection("jev")
-    return JevSettingsStatus(
-        key_set=bool(conn.get("apiKey")),
-        use_for_screening=conn.get("useForScreening") is True,
-        use_for_email_tracking=conn.get("useForEmailTracking") is True,
-        encryption_available=secretstore.encryption_available(),
+    status = settings_service.update_jev(
+        body.api_key, body.use_for_screening, body.use_for_email_tracking
     )
+    return JevSettingsStatus(**status)
 
 
 @router.post("/settings/jev/test", response_model=TestResult)
@@ -1522,26 +876,10 @@ def test_jev_settings() -> TestResult:
     return TestResult(ok=ok, detail=detail)
 
 
-def require_gmail_tracking_enabled() -> None:
-    """Raise 403 unless Gmail response-tracking is configured and opted in.
-
-    Gated on the same secretstore "jev" record as Jev screening cross-checks:
-    a non-empty apiKey AND useForEmailTracking set to True. Gmail sync
-    auto-applies Jev-confirmed transitions, so it must never run on a bare
-    Gmail connection without this explicit opt-in.
-    """
-    conn = secretstore.get_connection("jev")
-    if not conn.get("apiKey") or conn.get("useForEmailTracking") is not True:
-        raise HTTPException(
-            status_code=403,
-            detail="Gmail response-tracking requires a saved Jev API key and useForEmailTracking enabled.",
-        )
-
-
 @router.post("/auth/gmail/start", response_model=StartLoginResult)
 def start_gmail_login(request: Request) -> StartLoginResult:
     """Begin the Gmail OAuth flow. Gated on the useForEmailTracking opt-in."""
-    require_gmail_tracking_enabled()
+    guards.require_gmail_tracking_enabled()
     redirect_uri = gmail_auth.redirect_uri_override() or str(request.url_for("gmail_callback"))
     try:
         return StartLoginResult.model_validate(gmail_auth.start_login(redirect_uri))
@@ -1569,18 +907,9 @@ def complete_gmail_login(
     turned off while the consent screen was open), it redirects with
     `gmailError=not_enabled` rather than rendering a 403 JSON body.
     """
-    try:
-        require_gmail_tracking_enabled()
-    except HTTPException:
-        query = urlencode({"gmailError": "not_enabled"})
-        return RedirectResponse(url=f"/?{query}")
-    if error or not code or not state:
-        query = urlencode({"gmailError": error or "missing_code"})
-        return RedirectResponse(url=f"/?{query}")
-    try:
-        gmail_auth.complete_login(code, state)
-    except gmail_auth.AuthError:
-        query = urlencode({"gmailError": "auth_failed"})
+    code_error = gmail_service.complete_login(code, state, error)
+    if code_error:
+        query = urlencode({"gmailError": code_error})
         return RedirectResponse(url=f"/?{query}")
     return RedirectResponse(url="/")
 
@@ -1594,15 +923,7 @@ def get_gmail_status() -> GmailStatusModel:
     the UI can explain why Gmail is unavailable, rather than getting a
     blanket error.
     """
-    jev_conn = secretstore.get_connection("jev")
-    tracking_enabled = bool(jev_conn.get("apiKey")) and jev_conn.get("useForEmailTracking") is True
-    oauth = secretstore.get_connection("gmail").get("oauth") or {}
-    return GmailStatusModel(
-        connected=bool(oauth.get("email")),
-        email=oauth.get("email") or None,
-        reauth_required=oauth.get("reauthRequired") is True,
-        tracking_enabled=tracking_enabled,
-    )
+    return GmailStatusModel(**gmail_service.status())
 
 
 @router.post("/gmail/responses/sync")
@@ -1612,7 +933,7 @@ def sync_gmail_responses(body: GmailSyncRequest | None = None) -> dict:
 
     Returns gmailsync.service.run_sync's own summary dict unchanged.
     """
-    require_gmail_tracking_enabled()
+    guards.require_gmail_tracking_enabled()
     from gmailsync import service as gmailsync_service
 
     force = body.force if body is not None else False
@@ -1631,55 +952,9 @@ def get_agent_config(include_feed: bool = False) -> AgentConfigModel:
     making every page load wait on a third-party API — or fail with it — is a
     cost paid for nothing, since the browser never renders the postings.
     """
-    from agentconfig.dorks import compose_direct_boards, compose_queries
-
-    cfg = agent_config_store.load()
-    data = cfg.to_dict()
-
-    # Company boards, pruned to the current target watchlist. Shared with the
-    # feed fan-out below so the two do not load/prune the store separately.
-    target_boards = _target_company_boards(cfg)
-    data["company_boards"] = [
-        {"company": board.company, "careers_url": board.careers_url, "ats": board.ats, "status": board.status, "resolved_at": board.resolved_at}
-        for board in target_boards
-    ]
-
-    # Populate job_boards with the resolved (defaults-first) list.
-    data["job_boards"] = _resolved_job_boards(cfg)
-
-    # Populate search_queries in response. The freshness window is applied to
-    # the composed URLs here rather than stored on them, so changing the
-    # setting takes effect on the next fetch with no stored state to migrate.
-    # searched_boards() (not resolved_boards()) is passed so a direct-mode OR
-    # operator-disabled board is excluded from the dorks rather than
-    # defaulting to "dork"/enabled the way a bare source string would.
-    searched = cfg.searched_boards()
-    data["search_queries"] = compose_queries(cfg.profiles, cfg.dork_recency, searched)
-
-    # One entry per direct-mode board, for the agent to search on-site.
-    data["direct_boards"] = compose_direct_boards(cfg.profiles, searched)
-
-    # Postings from API-backed boards, on request only. fetch_postings never
-    # raises, so a Remote Rocketship outage degrades this response to the
-    # config it always carried rather than failing the agent's config fetch.
-    if include_feed:
-        feed = _fetch_feed_postings(cfg, target_boards)
-        # Drop postings the ledger already screened, so the agent stops
-        # re-screening postings that only come back created:false. An
-        # unread-placeholder screening is not in `keys` (screened_dedupe_keys
-        # excludes it), so that posting stays in the feed for a real screen.
-        # Only postings screened for EVERY enabled profile (or passed/deferred,
-        # or profile-less) count as screened; a rejection under one profile
-        # must not hide the posting from the others.
-        keys = screening_store.screened_dedupe_keys(
-            [p.name for p in cfg.profiles if p.enabled]
-        )
-        kept = [p for p in feed.postings if posting_dedupe_key(p.url) not in keys]
-        data["feed_postings"] = [p.to_dict() for p in kept]
-        data["feed_error"] = feed.error
-        data["feed_already_screened"] = len(feed.postings) - len(kept)
-
-    return AgentConfigModel.model_validate(data)
+    return AgentConfigModel.model_validate(
+        agent_config_service.build_agent_config(include_feed)
+    )
 
 
 @router.put("/agent/config", response_model=AgentConfigModel)
@@ -1707,89 +982,8 @@ def put_agent_config(body: AgentConfigUpdate) -> AgentConfigModel:
     sent = body.model_dump(exclude_unset=True, by_alias=False)
     saved = agent_config_service.update_agent_config(sent)
     data = saved.to_dict()
-    data["job_boards"] = _resolved_job_boards(saved)
+    data["job_boards"] = agent_config_service.resolved_job_boards(saved)
     return AgentConfigModel.model_validate(data)
-
-
-def _claude_credentials(model: str) -> AgentLlmCredentials:
-    """Resolve claude card credentials: oauth first, then apikey, else 404/503."""
-    conn = secretstore.get_connection("claude")
-    oauth = conn.get("oauth") or {}
-    if oauth.get("accessToken") and conn.get("authMode") != "apikey":
-        try:
-            token = get_valid_access_token()
-        except AuthError:
-            raise HTTPException(
-                status_code=503, detail="Claude subscription needs reconnecting."
-            ) from None
-        return AgentLlmCredentials(
-            auth_type="oauth", token=token, model=model,
-            provider="claude", wire="anthropic-messages",
-        )
-
-    api_key = conn.get("apiKey")
-    if api_key:
-        return AgentLlmCredentials(
-            auth_type="api_key", token=api_key, model=model,
-            provider="claude", wire="anthropic-messages",
-        )
-    raise HTTPException(status_code=404)
-
-
-def _codex_credentials(model: str) -> AgentLlmCredentials:
-    """Resolve codex card credentials: subscription oauth or apikey, OpenAI wire."""
-    conn = secretstore.get_connection("codex")
-    oauth = conn.get("oauth") or {}
-    if oauth.get("accessToken") and conn.get("authMode") != "apikey":
-        try:
-            token = codex_auth.get_valid_access_token()
-        except codex_auth.AuthError:
-            raise HTTPException(
-                status_code=503, detail="ChatGPT subscription needs reconnecting."
-            ) from None
-        return AgentLlmCredentials(
-            auth_type="oauth", token=token, model=model,
-            provider="codex", wire="openai-responses",
-        )
-    api_key = conn.get("apiKey")
-    if not api_key:
-        raise HTTPException(status_code=404)
-    return AgentLlmCredentials(
-        auth_type="api_key", token=api_key, model=model,
-        provider="codex", wire="openai-chat-completions",
-    )
-
-
-def _openrouter_credentials(model: str) -> AgentLlmCredentials:
-    """Resolve openrouter card credentials: apikey-only, plain OpenAI wire (not
-    the Anthropic-compat shim, which is only for the claude CLI)."""
-    api_key = secretstore.get_connection("openrouter").get("apiKey")
-    if not api_key:
-        raise HTTPException(status_code=404)
-    return AgentLlmCredentials(
-        auth_type="api_key", token=api_key, model=model,
-        base_url=OPENROUTER_BASE_URL,
-        provider="openrouter", wire="openai-chat-completions",
-    )
-
-
-def _ollama_credentials(model: str) -> AgentLlmCredentials:
-    """Resolve ollama card credentials: url-only, no token, OpenAI-shaped wire."""
-    base_url = secretstore.get_connection("ollama").get("baseUrl")
-    if not base_url:
-        raise HTTPException(status_code=404)
-    return AgentLlmCredentials(
-        auth_type="url", token="", model=model, base_url=base_url,
-        provider="ollama", wire="openai-chat-completions",
-    )
-
-
-_CARD_CREDENTIALS = {
-    "claude": _claude_credentials,
-    "codex": _codex_credentials,
-    "openrouter": _openrouter_credentials,
-    "ollama": _ollama_credentials,
-}
 
 
 @router.get("/agent/llm-credentials", response_model=AgentLlmCredentials)
@@ -1805,29 +999,9 @@ def get_agent_llm_credentials(x_agent_token: str = Header(default="")) -> AgentL
     if not secret or not hmac.compare_digest(given, secret.encode("utf-8")):
         raise HTTPException(status_code=404)
 
-    return _credentials_for_route(modelrouting.load().agent)
-
-
-def _credentials_for_route(route: modelrouting.Route | None) -> AgentLlmCredentials:
-    """Credentials for a route (None = the claude card, default model).
-    Raises 404 when the card is unknown or has no usable credentials."""
-    card = route.connection if route else "claude"
-    model = route.model if route else ""
-    resolve = _CARD_CREDENTIALS.get(card)
-    if resolve is None:
-        raise HTTPException(status_code=404)
-    return resolve(model)
-
-
-_REFRESH_PROVIDERS = {
-    "claude": (
-        lambda **kw: get_valid_access_token(**kw), AuthError, "Claude subscription needs reconnecting."),
-    "codex": (
-        lambda **kw: codex_auth.get_valid_access_token(**kw),
-        codex_auth.AuthError,
-        "ChatGPT subscription needs reconnecting.",
-    ),
-}
+    return AgentLlmCredentials.model_validate(
+        agent_credentials_service.credentials_for_route(modelrouting.load().agent)
+    )
 
 
 @router.post("/agent/llm-token/refresh", response_model=AgentLlmTokenResult)
@@ -1840,14 +1014,7 @@ def post_agent_llm_token_refresh(
     The token is response-only and never logged."""
     if not _agent_token_ok(x_agent_token):
         raise HTTPException(status_code=404)
-    conn = secretstore.get_connection(body.provider)
-    if not (conn.get("oauth") or {}).get("accessToken") or conn.get("authMode") == "apikey":
-        raise HTTPException(status_code=404)
-    fetch, auth_error, detail = _REFRESH_PROVIDERS[body.provider]
-    try:
-        token = fetch(rejected_sha256=body.rejected_token_sha256)
-    except auth_error:
-        raise HTTPException(status_code=503, detail=detail) from None
+    token = agent_credentials_service.refresh_token(body.provider, body.rejected_token_sha256)
     return AgentLlmTokenResult(token=token)
 
 
@@ -1858,22 +1025,7 @@ def get_agent_llm_routes(x_agent_token: str = Header(default="")) -> dict:
     egress; tokens are never logged."""
     if not _agent_token_ok(x_agent_token):
         raise HTTPException(status_code=404)
-    r = modelrouting.load()
-
-    def _creds(route):
-        if route is None:
-            return None
-        # One stage whose card has no usable credentials must not blank the
-        # others: it resolves to null and the harness falls back per stages.ts.
-        try:
-            return _credentials_for_route(route).model_dump(by_alias=True)
-        except HTTPException:
-            return None
-
-    stages = {"apply": _creds(r.agent)}
-    for name in modelrouting.AGENT_STAGE_NAMES:
-        stages[name] = _creds(modelrouting.resolve_agent_stage(r, name))
-    return {"stages": stages}
+    return agent_credentials_service.stage_routes()
 
 
 def _agent_token_ok(given: str) -> bool:
@@ -1940,67 +1092,6 @@ def post_agent_run_finish(
     return AgentRunAccountingResult(recorded=record is not None)
 
 
-def _agent_control_url(path: str) -> str:
-    """Build the supervisor.js control URL from env, defaulting port 9099."""
-    port = os.environ.get("AGENT_CONTROL_PORT", "9099")
-    return f"http://agent:{port}{path}"
-
-
-def _forward_to_supervisor(path: str, method: str = "GET") -> dict:
-    """Forward a request to the agent supervisor.js control server.
-
-    Raises HTTPException(503) when the agent is unreachable, 502 when it
-    answered with an error status (403 = token mismatch), and 500 when this
-    service has no AGENT_API_TOKEN to send. These are kept distinct on purpose:
-    they have three different fixes and used to share one message.
-    """
-    token = os.environ.get("AGENT_API_TOKEN", "").strip()
-    # An unset shared secret is not a network problem and never becomes one by
-    # retrying: the supervisor rejects every request and the operator has no
-    # way to tell that from a container that is down. Fail here, before the
-    # dial, so the message names the actual cause.
-    if not token:
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "AGENT_API_TOKEN is not set on the app service, so the agent "
-                "will reject every request. Set it in .env (the same value for "
-                "app, agent and browser) and restart the stack."
-            ),
-        )
-
-    url = _agent_control_url(path)
-    req = urllib.request.Request(
-        url,
-        method=method,
-        headers={"X-Agent-Token": token},
-        data=b"" if method == "POST" else None,
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as exc:
-        # MUST be caught before URLError: HTTPError subclasses it, so a single
-        # URLError handler renders a 403 as "Agent service unreachable" — the
-        # one message that sends the operator to look at the network when the
-        # supervisor answered perfectly well and refused the token.
-        if exc.code in (401, 403):
-            raise HTTPException(
-                status_code=502,
-                detail=(
-                    f"Agent service refused the request (HTTP {exc.code}): the app "
-                    "and the agent container disagree on AGENT_API_TOKEN. Make both "
-                    "match in .env and restart the stack."
-                ),
-            ) from exc
-        raise HTTPException(
-            status_code=502,
-            detail=f"Agent service returned HTTP {exc.code} for {path}",
-        ) from exc
-    except urllib.error.URLError as exc:
-        raise HTTPException(status_code=503, detail="Agent service unreachable") from exc
-
-
 @router.get("/agent/status", response_model=AgentStatus)
 def get_agent_status() -> AgentStatus:
     """Return the agent supervisor's running/idle state.
@@ -2009,7 +1100,7 @@ def get_agent_status() -> AgentStatus:
     Returns 503 when the agent container is unreachable, 502 when it answers
     with an error (403 = AGENT_API_TOKEN mismatch).
     """
-    data = _forward_to_supervisor("/status", method="GET")
+    data = supervisor_service.forward_to_supervisor("/status", method="GET")
     return AgentStatus(
         running=data.get("running", False),
         cancelling=data.get("cancelling", False),
@@ -2032,7 +1123,7 @@ def post_agent_run() -> AgentRunResult:
     trigger — does NOT wait for the run to complete. Returns 503 when the
     agent container is unreachable.
     """
-    data = _forward_to_supervisor("/run", method="POST")
+    data = supervisor_service.forward_to_supervisor("/run", method="POST")
     return AgentRunResult(
         started=data.get("started", False),
         running=data.get("running", False),
@@ -2049,27 +1140,11 @@ def post_agent_cancel() -> AgentCancelResult:
     Returns 503 when the agent container is unreachable, 502 when it answers
     with an error (403 = AGENT_API_TOKEN mismatch).
     """
-    data = _forward_to_supervisor("/cancel", method="POST")
+    data = supervisor_service.forward_to_supervisor("/cancel", method="POST")
     return AgentCancelResult(
         cancelled=data.get("cancelled", False),
         running=data.get("running", False),
     )
-
-
-def _host_of(url: str) -> str:
-    """The full host of an absolute http(s) URL, or "" if it is not one.
-
-    Anything without a scheme and a netloc is not addressable, so it cannot be
-    a sign-in destination — returning "" drops it rather than grouping several
-    unrelated records under a blank host.
-    """
-    try:
-        parsed = urlparse(url or "")
-    except ValueError:
-        return ""
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        return ""
-    return parsed.netloc.casefold()
 
 
 @router.get("/browser/signin-queue", response_model=SigninQueue)
@@ -2080,69 +1155,8 @@ def get_signin_queue() -> SigninQueue:
     state: the agent's experience is the only source of truth here, so an entry
     exists exactly as long as a posting is still waiting behind that sign-in.
     """
-    grouped: dict[str, dict] = {}
-    for s in screening_store.load_all():
-        if s.apply_blocker != "login_required":
-            continue
-        # Only items still queued to be applied to. Applied or rejected means
-        # nothing is waiting on this sign-in any more.
-        if s.approval not in ("pending", "approved"):
-            continue
-        url = s.signin_url or s.url
-        host = _host_of(url)
-        if not host:
-            continue
-        entry = grouped.setdefault(
-            host,
-            {"host": host, "signin_url": url, "waiting": 0, "last_blocked_at": "", "companies": []},
-        )
-        entry["waiting"] += 1
-        if s.updated_at > entry["last_blocked_at"]:
-            entry["last_blocked_at"] = s.updated_at
-        if s.company and s.company not in entry["companies"]:
-            entry["companies"].append(s.company)
-    sites = [SigninQueueSite(**e) for e in grouped.values()]
-    sites.sort(key=lambda s: (-s.waiting, s.host))
+    sites = [SigninQueueSite(**e) for e in screenings_service.signin_queue()]
     return SigninQueue(sites=sites)
-
-
-def _browser_control_url(path: str) -> str:
-    """Build the session-server control URL from env, defaulting port 8932."""
-    port = os.environ.get("SESSION_SERVER_PORT", "8932")
-    return f"http://browser:{port}{path}"
-
-
-def _forward_to_session_server(path: str, method: str = "GET", body: dict | None = None) -> dict:
-    """Forward a request to browser/session-server.js.
-
-    Distinguishes three outcomes the UI must tell apart: a normal answer, a
-    refusal the session server made deliberately (4xx/503 — forwarded with its
-    own status so "the agent is applying right now" does not read as "the
-    browser is broken"), and the container being unreachable (503).
-    """
-    token = os.environ.get("AGENT_API_TOKEN", "")
-    data = json.dumps(body or {}).encode() if method == "POST" else None
-    req = urllib.request.Request(
-        _browser_control_url(path),
-        method=method,
-        headers={"X-Agent-Token": token, "Content-Type": "application/json"},
-        data=data,
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as exc:
-        # Forward the session server's own refusal payload. It distinguishes
-        # session_open (which carries the already-open session's URL, so the UI
-        # can offer to return to it) from agent_running and profile_busy — all
-        # three are 409s that call for different words on screen.
-        try:
-            detail = json.loads(exc.read())
-        except (ValueError, OSError):
-            detail = {"reason": "refused"}
-        raise HTTPException(status_code=exc.code, detail=detail) from exc
-    except urllib.error.URLError as exc:
-        raise HTTPException(status_code=503, detail="Browser service unreachable") from exc
 
 
 def _session_from(data: dict) -> BrowserSession:
@@ -2157,7 +1171,7 @@ def _session_from(data: dict) -> BrowserSession:
 @router.get("/browser/session", response_model=BrowserSession)
 def get_browser_session() -> BrowserSession:
     """Whether an attended sign-in session is open, and at which URL."""
-    return _session_from(_forward_to_session_server("/session", method="GET"))
+    return _session_from(browser_service.forward_to_session_server("/session", method="GET"))
 
 
 @router.post("/browser/session", response_model=BrowserSession)
@@ -2167,10 +1181,10 @@ def post_browser_session(payload: BrowserSessionRequest) -> BrowserSession:
     Refused with 409 while a run is in progress: unattended runs win, and the
     operator is told to try again shortly rather than the run being disturbed.
     """
-    if _host_of(payload.url) == "":
+    if screenings_service.host_of(payload.url) == "":
         raise HTTPException(status_code=422, detail="An http(s) URL is required")
     return _session_from(
-        _forward_to_session_server("/session", method="POST", body={"url": payload.url})
+        browser_service.forward_to_session_server("/session", method="POST", body={"url": payload.url})
     )
 
 
@@ -2181,26 +1195,12 @@ def delete_browser_session() -> BrowserSessionClosed:
     When closing a session, re-arm any login-blocked items whose host matches
     the closed session's URL, so they re-enter the queue for the next run.
     """
-    # Read the current session URL before closing it
-    session_data = _forward_to_session_server("/session")
-    session_url = session_data.get("url", "")
-    
-    # Forward the close request
-    data = _forward_to_session_server("/session/close", method="POST")
-    
-    signins_cleared = 0
-    # Only clear blockers if the session existed and the close was accepted
-    if session_url and (data.get("closed", False) or data.get("closing", False)):
-        # Clear login blockers for this host
-        host = _host_of(session_url)
-        if host:
-            signins_cleared = screenings_service.clear_login_blockers_for_host(host)
-    
+    data = browser_service.close_session()
     return BrowserSessionClosed(
-        closed=data.get("closed", False),
-        closing=data.get("closing", False),
-        reserving=data.get("reserving", False),
-        signins_cleared=signins_cleared,
+        closed=data["closed"],
+        closing=data["closing"],
+        reserving=data["reserving"],
+        signins_cleared=data["signins_cleared"],
     )
 
 
@@ -2274,7 +1274,7 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
 
 @router.get("/settings", response_model=SettingsStatus)
 def get_settings() -> SettingsStatus:
-    return _settings_status()
+    return SettingsStatus(**settings_service.settings_status())
 
 
 @router.post("/settings", response_model=SettingsStatus)
@@ -2282,96 +1282,31 @@ def post_settings(body: SettingsUpdate) -> SettingsStatus:
     """Old single-provider POST shape, shimmed onto the v2 store: the key/host
     lands in that provider's connection, and {connection, model} becomes the
     routing default."""
-    if not secretstore.encryption_available():
-        raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
-    card = _V1_PROVIDER_TO_CARD.get(body.active_provider, body.active_provider)
-    if card not in catalog.CARDS:
-        raise HTTPException(
-            status_code=400, detail=f"Unknown provider '{body.active_provider}'."
-        )
-
-    updates: dict = {}
-    if body.api_key:  # empty/None leaves the stored key unchanged
-        updates["apiKey"] = body.api_key
-    if body.ollama_host:
-        updates["baseUrl"] = body.ollama_host
-    if updates:
-        secretstore.set_connection(card, updates)
-
-    routing = modelrouting.load()
-    if body.model is not None:
-        model = body.model
-    else:
-        model = routing.default.model if routing.default else ""
-    routing.default = modelrouting.Route(card, model)
-    modelrouting.save(routing)
-
-    reset_provider()
-    return _settings_status()
+    status = settings_service.save_v1_settings(
+        body.active_provider, body.api_key, body.ollama_host, body.model
+    )
+    return SettingsStatus(**status)
 
 
 @router.post("/settings/test", response_model=TestResult)
 def test_settings(body: SettingsUpdate) -> TestResult:
-    try:
-        post_settings(body)
-        provider = get_provider(refresh=True)
-        provider.complete("ping", [{"role": "user", "content": "ping"}])
-        return TestResult(ok=True, detail="Connection succeeded.")
-    except HTTPException as e:
-        return TestResult(ok=False, detail=str(e.detail))
-    except Exception as e:  # noqa: BLE001
-        return TestResult(ok=False, detail=f"{type(e).__name__}: {e}")
-
-
-def _provider_from_update(body: SettingsUpdate):
-    """Build a provider from the submitted settings WITHOUT persisting anything.
-
-    Uses a key/host typed in the form if present, otherwise the saved connection
-    — so the model list can load with an unsaved key (like Test connection) and
-    without writing secrets just to populate a dropdown.
-    """
-    name = (body.active_provider or "").strip().lower()
-    card = _V1_PROVIDER_TO_CARD.get(name)
-    if card is None:
-        raise HTTPException(status_code=400, detail=f"Unknown provider '{name}'.")
-    conn = secretstore.get_connection(card)
-    if card == "claude":
-        from providers.anthropic_provider import AnthropicProvider
-
-        return AnthropicProvider(api_key=body.api_key or conn.get("apiKey") or None)
-    if card == "codex":
-        from providers.openai_provider import OpenAIProvider
-
-        return OpenAIProvider(api_key=body.api_key or conn.get("apiKey") or None)
-    if card == "ollama":
-        from providers.ollama_provider import OllamaProvider
-
-        return OllamaProvider(host=body.ollama_host or conn.get("baseUrl") or None)
-    raise HTTPException(status_code=400, detail=f"Unknown provider '{name}'.")
+    ok, detail = settings_service.test_v1_settings(
+        body.active_provider,
+        body.api_key,
+        body.ollama_host,
+        body.model,
+        provider_factory=lambda: get_provider(refresh=True),
+    )
+    return TestResult(ok=ok, detail=detail)
 
 
 @router.post("/models", response_model=ModelList)
 def list_models(body: SettingsUpdate) -> ModelList:
     """Live model list for the selected provider, pulled from its API/SDK."""
-    name = (body.active_provider or "").strip().lower()
-    card = _V1_PROVIDER_TO_CARD.get(name, "")
-    try:
-        provider = _provider_from_update(body)
-        models = provider.list_models()
-    except HTTPException:
-        raise
-    except ProviderError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}") from e
+    models, card = settings_service.list_v1_models(
+        body.active_provider, body.api_key, body.ollama_host
+    )
     return _models_result(models, card)
-
-
-def _require_card(provider: str) -> dict:
-    try:
-        return catalog.card(provider)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Unknown connection '{provider}'.") from None
 
 
 def _connection_status(card_key: str) -> ConnectionStatus:
@@ -2413,22 +1348,9 @@ def get_connection_status() -> ConnectionList:
     )
 
 
-# Card -> auth module registry
-_AUTH_MODULES = {"claude": claude_auth, "codex": codex_auth}
-
-
 @router.post("/auth/{provider}/start", response_model=StartLoginResult)
 def start_connection_login(provider: str) -> StartLoginResult:
-    _require_card(provider)
-    if provider not in _AUTH_MODULES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Subscription sign-in is not available for '{provider}'.",
-        )
-    try:
-        return StartLoginResult.model_validate(_AUTH_MODULES[provider].start_login())
-    except (claude_auth.AuthError, codex_auth.AuthError) as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return StartLoginResult.model_validate(connections_service.start_login(provider))
 
 
 # Specific route must come BEFORE the generic /{provider}/complete to avoid
@@ -2442,27 +1364,13 @@ def complete_claude_login_alias(body: CompleteLoginRequest) -> ConnectionStatus:
 
 @router.post("/auth/{provider}/complete", response_model=ConnectionStatus)
 def _complete_login(provider: str, body: CompleteLoginRequest) -> ConnectionStatus:
-    if provider not in _AUTH_MODULES:
-        raise HTTPException(status_code=404, detail=f"Unknown connection '{provider}'.")
-    try:
-        _AUTH_MODULES[provider].complete_login(body.code)
-    except (claude_auth.AuthError, codex_auth.AuthError) as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    reset_provider()
+    connections_service.complete_login(provider, body.code)
     return _connection_status(provider)
 
 
 @router.post("/auth/{provider}/poll", response_model=PollLoginResult)
 def _poll_login(provider: str) -> PollLoginResult:
-    if provider not in _AUTH_MODULES:
-        raise HTTPException(status_code=404, detail=f"Unknown connection '{provider}'.")
-    mod = _AUTH_MODULES[provider]
-    if not hasattr(mod, "poll_login"):
-        raise HTTPException(status_code=400, detail=f"Provider '{provider}' does not support polling.")
-    try:
-        result = mod.poll_login()
-    except (claude_auth.AuthError, codex_auth.AuthError) as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    result = connections_service.poll_login(provider)
     if result.get("status") == "complete":
         return PollLoginResult(
             status="complete",
@@ -2476,63 +1384,15 @@ def _poll_login(provider: str) -> PollLoginResult:
     )
 
 
-def _probe_key(card: str, body: ApiKeyRequest) -> list[dict]:
-    """Construct a provider directly from the submitted credential (never via
-    the stored oauth path) and list its models. An empty submitted value falls
-    back to the currently stored credential, so a bare re-validate still works."""
-    conn = secretstore.get_connection(card)
-    if card == "claude":
-        from providers.anthropic_provider import AnthropicProvider
-
-        provider = AnthropicProvider(api_key=body.api_key or conn.get("apiKey") or None)
-    elif card in ("codex", "openrouter"):
-        from providers.openai_provider import OpenAIProvider
-
-        base_url = OPENROUTER_BASE_URL if card == "openrouter" else None
-        provider = OpenAIProvider(
-            api_key=body.api_key or conn.get("apiKey") or None, base_url=base_url
-        )
-    elif card == "ollama":
-        from providers.ollama_provider import OllamaProvider
-
-        provider = OllamaProvider(
-            host=body.base_url or conn.get("baseUrl") or None,
-            bearer=body.bearer or conn.get("bearer") or None,
-        )
-    else:
-        raise ProviderError(f"Unknown connection '{card}'.")
-    return provider.list_models()
-
-
 @router.post("/auth/{provider}/key", response_model=ModelList)
 def post_connection_key(provider: str, body: ApiKeyRequest) -> ModelList:
-    _require_card(provider)
-    if not secretstore.encryption_available():
-        raise HTTPException(status_code=400, detail="Set ENCRYPTION_KEY in .env first.")
-    try:
-        models = _probe_key(provider, body)
-    except ProviderError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:  # noqa: BLE001 — surface upstream SDK auth errors as 400s
-        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}") from e
-    updates: dict = {}
-    if body.api_key:
-        updates["apiKey"] = body.api_key
-    if body.base_url:
-        updates["baseUrl"] = body.base_url
-    if body.bearer:
-        updates["bearer"] = body.bearer
-    if body.api_key and "subscription" in catalog.card(provider)["modes"]:
-        updates["authMode"] = "apikey"
-    if updates:
-        secretstore.set_connection(provider, updates)
-    reset_provider()
+    models = connections_service.save_key(provider, body.api_key, body.base_url, body.bearer)
     return _models_result(models, provider)
 
 
 @router.get("/auth/{provider}/models", response_model=ModelList)
 def get_connection_models(provider: str) -> ModelList:
-    _require_card(provider)
+    connections_service.require_card(provider)
     try:
         models = build_connection_provider(provider, None).list_models()
     except ProviderError as e:
@@ -2544,7 +1404,7 @@ def get_connection_models(provider: str) -> ModelList:
 
 @router.post("/auth/{provider}/test", response_model=TestResult)
 def test_connection(provider: str, body: ConnectionTestRequest) -> TestResult:
-    _require_card(provider)
+    connections_service.require_card(provider)
     try:
         provider_obj = build_connection_provider(provider, body.model)
         provider_obj.complete("ping", [{"role": "user", "content": "ping"}])
@@ -2564,29 +1424,14 @@ def logout_connection(provider: str, mode: str | None = None) -> ConnectionStatu
     mode. Passing `mode` clears just that mode and leaves the other intact —
     that is the same semantics the existing per-mode logout tests pin.
     """
-    _require_card(provider)
-    if mode is not None:
-        secretstore.clear_mode(provider, mode)
-    else:
-        conn = secretstore.get_connection(provider)
-        # Pick the mode that is actually active: subscription if oauth is set,
-        # otherwise apikey. clear_mode is a no-op on the missing side.
-        active = "subscription" if conn.get("oauth", {}).get("accessToken") else "apikey"
-        secretstore.clear_mode(provider, active)
-    reset_provider()
+    connections_service.logout(provider, mode)
     return _connection_status(provider)
 
 
 @router.get("/routing", response_model=RoutingModel)
 def get_routing() -> RoutingModel:
     """Get the current model routing configuration."""
-    routing = modelrouting.load()
-    return RoutingModel(
-        tasks={k: _route_model(v) for k, v in routing.tasks.items()},
-        agent=_route_model(routing.agent) if routing.agent else None,
-        default=_route_model(routing.default) if routing.default else None,
-        agent_stages={k: _route_model(v) for k, v in routing.agent_stages.items()},
-    )
+    return _routing_model(modelrouting.load())
 
 
 @router.put("/routing", response_model=RoutingModel)
@@ -2597,75 +1442,20 @@ def put_routing(body: RoutingUpdate) -> RoutingModel:
     clears that route (`default`/`agent` sent as null, or a `tasks` entry
     sent as null, removes it) instead of leaving the stored value untouched.
     """
-    # Load current routing
-    stored = modelrouting.load()
-    stored_dict = stored.to_dict()
-
     # Prepare update from body — exclude_unset only, so an explicit null
     # survives into update_dict and is distinguishable from an absent field.
     update_dict = body.model_dump(exclude_unset=True, by_alias=False)
+    return _routing_model(settings_service.update_routing(update_dict))
 
-    # Validate all connections and effort levels in the update before applying
-    for route_dict in _all_routes_in_dict(update_dict):
-        connection = route_dict.get("connection")
-        if connection not in catalog.CARDS:
-            raise HTTPException(status_code=400, detail=f"unknown connection: {connection}")
-        effort = route_dict.get("effort", "")
-        if effort and not supports_effort_levels(connection, route_dict.get("model", "")):
-            raise HTTPException(
-                status_code=400,
-                detail=f"effort '{effort}' is not supported for {connection}/{route_dict.get('model', '')}",
-            )
 
-    # Merge: update the stored dict with only the fields that were sent.
-    # A None value clears the corresponding route rather than being ignored.
-    if "tasks" in update_dict:
-        for name, route in (update_dict["tasks"] or {}).items():
-            if route is None:
-                stored_dict["tasks"].pop(name, None)
-            else:
-                stored_dict["tasks"][name] = route
-    if "agent" in update_dict:
-        stored_dict["agent"] = update_dict["agent"]
-    if "default" in update_dict:
-        stored_dict["default"] = update_dict["default"]
-    if "agent_stages" in update_dict:
-        for name, route in (update_dict["agent_stages"] or {}).items():
-            if route is None:
-                stored_dict["agent_stages"].pop(name, None)
-            else:
-                stored_dict["agent_stages"][name] = route
-
-    # Parse back to Routing and save
-    routing = modelrouting.Routing.from_dict(stored_dict)
-    modelrouting.save(routing)
-    reset_provider()
-
-    # Return fresh routing
+def _routing_model(routing: modelrouting.Routing) -> RoutingModel:
+    """Convert a stored Routing to its API wire model."""
     return RoutingModel(
         tasks={k: _route_model(v) for k, v in routing.tasks.items()},
         agent=_route_model(routing.agent) if routing.agent else None,
         default=_route_model(routing.default) if routing.default else None,
         agent_stages={k: _route_model(v) for k, v in routing.agent_stages.items()},
     )
-
-
-def _all_routes_in_dict(d: dict) -> list[dict]:
-    """Collect all route dicts from a routing update dict."""
-    routes = []
-    if "agent" in d and isinstance(d["agent"], dict):
-        routes.append(d["agent"])
-    if "default" in d and isinstance(d["default"], dict):
-        routes.append(d["default"])
-    if "tasks" in d and isinstance(d["tasks"], dict):
-        for route in d["tasks"].values():
-            if isinstance(route, dict):
-                routes.append(route)
-    if "agent_stages" in d and isinstance(d["agent_stages"], dict):
-        for route in d["agent_stages"].values():
-            if isinstance(route, dict):
-                routes.append(route)
-    return routes
 
 
 def _route_model(route: modelrouting.Route) -> RouteModel:

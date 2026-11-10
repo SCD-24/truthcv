@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Path, Query
 
+from services import gmail as gmail_service
+
 from .schemas import GmailDismissRequest
 
 router = APIRouter(prefix="/api/gmail/suggestions")
@@ -17,7 +19,7 @@ MAX_SUGGESTION_ID_LEN = 200
 
 def _guard() -> None:
     """Reuse the exact gate the existing Gmail sync route enforces."""
-    from api.routes import require_gmail_tracking_enabled
+    from api.guards import require_gmail_tracking_enabled
 
     require_gmail_tracking_enabled()
 
@@ -39,10 +41,8 @@ def list_suggestions(
 def dismiss_suggestions(body: GmailDismissRequest) -> dict:
     """Dismiss the given pending suggestions; report the count and remaining pending."""
     _guard()
-    from gmailsync import service as gmailsync_service
 
-    dismissed = gmailsync_service.dismiss(body.ids)
-    _, pending = gmailsync_service.list_pending(1, 0)
+    dismissed, pending = gmail_service.dismiss_and_count(body.ids)
     return {"dismissed": dismissed, "pending": pending}
 
 
@@ -59,10 +59,9 @@ def accept_suggestion(
     from gmailsync import service as gmailsync_service
 
     try:
-        accepted = gmailsync_service.accept(suggestion_id)
+        accepted, pending = gmail_service.accept_and_count(suggestion_id)
     except gmailsync_service.SuggestionNotFound:
         raise HTTPException(status_code=404, detail="Email response not found.") from None
     except gmailsync_service.SuggestionNotAcceptable:
         raise HTTPException(status_code=409, detail="This email response can no longer be accepted.") from None
-    _, pending = gmailsync_service.list_pending(1, 0)
     return {"suggestion": accepted.to_dict(), "pending": pending}

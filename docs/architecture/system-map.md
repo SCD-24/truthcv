@@ -47,17 +47,13 @@ graph TD
     api -->|HTTPS| gmail-api
     api -->|in-process| gmail-response-sync
     api -->|in-process| guardrail-validator
-    api -->|in-process| job-feeds
     api -->|in-process| job-runner
-    api -->|in-process| onboarding-store
     api -->|in-process| prompt-store
-    api -->|in-process| renderer
     api -->|in-process| run-store
     api -->|in-process| screening-engine
     api -->|in-process| secret-store
     api -->|in-process| services-layer
     api -->|in-process| storage-leaf
-    api -->|in-process| tailor-engine
     api -->|in-process| truth-store
     application-agent -->|HTTP/REST| agent-config
     application-agent -->|HTTP/MCP (streamable HTTP JSON-RPC)| api
@@ -116,12 +112,17 @@ graph TD
     secret-store -->|in-process| storage-leaf
     secret-store -->|file I/O| truth-data-volume
     services-layer -->|in-process| agent-config
+    services-layer -->|HTTP/REST| application-agent
     services-layer -->|in-process| application-tracker
+    services-layer -->|HTTP| browser-service
     services-layer -->|in-process| company-research
+    services-layer -->|in-process| connections
     services-layer -->|in-process| cover-letter-engine
     services-layer -->|in-process| gmail-response-sync
     services-layer -->|in-process| guardrail-validator
+    services-layer -->|in-process| job-feeds
     services-layer -->|in-process| llm-provider-layer
+    services-layer -->|in-process| onboarding-store
     services-layer -->|in-process| prompt-store
     services-layer -->|in-process| renderer
     services-layer -->|in-process| run-store
@@ -190,17 +191,13 @@ graph TD
 - [api → gmail-api](interactions/api--gmail-api.md) via `HTTPS`
 - [api → gmail-response-sync](interactions/api--gmail-response-sync.md) via `in-process`
 - [api → guardrail-validator](interactions/api--guardrail-validator.md) via `in-process`
-- [api → job-feeds](interactions/api--job-feeds.md) via `in-process`
 - [api → job-runner](interactions/api--job-runner.md) via `in-process`
-- [api → onboarding-store](interactions/api--onboarding-store.md) via `in-process`
 - [api → prompt-store](interactions/api--prompt-store.md) via `in-process`
-- [api → renderer](interactions/api--renderer.md) via `in-process`
 - [api → run-store](interactions/api--run-store.md) via `in-process`
 - [api → screening-engine](interactions/api--screening-engine.md) via `in-process`
 - [api → secret-store](interactions/api--secret-store.md) via `in-process`
 - [api → services-layer](interactions/api--services-layer.md) via `in-process`
 - [api → storage-leaf](interactions/api--storage-leaf.md) via `in-process`
-- [api → tailor-engine](interactions/api--tailor-engine.md) via `in-process`
 - [api → truth-store](interactions/api--truth-store.md) via `in-process`
 - [application-agent → agent-config](interactions/application-agent--agent-config.md) via `HTTP/REST`
 - [application-agent → api](interactions/application-agent--api.md) via `HTTP/MCP (streamable HTTP JSON-RPC)`
@@ -259,12 +256,17 @@ graph TD
 - [secret-store → storage-leaf](interactions/secret-store--storage-leaf.md) via `in-process`
 - [secret-store → truth-data-volume](interactions/secret-store--truth-data-volume.md) via `file I/O`
 - [services-layer → agent-config](interactions/services-layer--agent-config.md) via `in-process`
+- [services-layer → application-agent](interactions/services-layer--application-agent.md) via `HTTP/REST`
 - [services-layer → application-tracker](interactions/services-layer--application-tracker.md) via `in-process`
+- [services-layer → browser-service](interactions/services-layer--browser-service.md) via `HTTP`
 - [services-layer → company-research](interactions/services-layer--company-research.md) via `in-process`
+- [services-layer → connections](interactions/services-layer--connections.md) via `in-process`
 - [services-layer → cover-letter-engine](interactions/services-layer--cover-letter-engine.md) via `in-process`
 - [services-layer → gmail-response-sync](interactions/services-layer--gmail-response-sync.md) via `in-process`
 - [services-layer → guardrail-validator](interactions/services-layer--guardrail-validator.md) via `in-process`
+- [services-layer → job-feeds](interactions/services-layer--job-feeds.md) via `in-process`
 - [services-layer → llm-provider-layer](interactions/services-layer--llm-provider-layer.md) via `in-process`
+- [services-layer → onboarding-store](interactions/services-layer--onboarding-store.md) via `in-process`
 - [services-layer → prompt-store](interactions/services-layer--prompt-store.md) via `in-process`
 - [services-layer → renderer](interactions/services-layer--renderer.md) via `in-process`
 - [services-layer → run-store](interactions/services-layer--run-store.md) via `in-process`
