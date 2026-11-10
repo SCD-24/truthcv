@@ -1,5 +1,5 @@
 <!-- generated:start edge:job-runner→gmail-response-sync -->
-# Interaction: Job Runner → Gmail Response Sync
+# Interaction: Background Tasks → Gmail Response Sync
 
 - **Participants:** `job-runner` → `gmail-response-sync`
 - **Transport:** `in-process`

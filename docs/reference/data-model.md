@@ -124,7 +124,7 @@ Projected from `schema` widgets on the architecture canvas.
 <!-- generated:end comp:run-store -->
 
 <!-- generated:start comp:job-runner -->
-## Job Runner (`job-runner`)
+## Background Tasks (`job-runner`)
 
 ### Job record
 
