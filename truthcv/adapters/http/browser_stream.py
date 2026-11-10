@@ -20,7 +20,7 @@ That guard is three checks, all run before `websocket.accept()`:
 - `origin_allowed` requires the Origin header to match Host and to be a
   loopback (or explicitly allowed) hostname, defending the browser-reachable
   path: WebSocket handshakes are exempt from the same-origin policy and the
-  CORS middleware in `api/main.py` does not see them, so without this check
+  CORS middleware in `truthcv/adapters/http/main.py` does not see them, so without this check
   any page the operator visits while a session is open could open this
   socket and drive a browser holding their live sessions.
 - `session_is_open` requires the browser container's session server to report
@@ -124,7 +124,7 @@ def _running_in_container(marker: str = "/.dockerenv") -> bool:
     The gateway is trusted ONLY inside a container, where it is how host
     traffic arrives through Docker's NAT. On a bare host the same lookup
     returns the LAN router, which has no business reaching this socket —
-    running `api/main.py` directly binds `0.0.0.0`, and without this check
+    running `truthcv/adapters/http/main.py` directly binds `0.0.0.0`, and without this check
     the router's address would be silently admitted.
 
     `marker` is overridable so the decision is testable without depending on
@@ -233,13 +233,13 @@ def origin_allowed(origin: str, host: str) -> bool:
 
 
 # One short request per handshake, not per frame: the check gates the accept
-# and nothing after it. Kept well under the 10s `api/routes.py` allows itself,
+# and nothing after it. Kept well under the 10s `truthcv/adapters/http/routes.py` allows itself,
 # because a viewer socket waiting on it is a page that has not rendered yet.
 _SESSION_QUERY_TIMEOUT = 3
 
 
 def session_control_url() -> str:
-    """The session server's own `GET /session`, same address `api/routes.py` uses."""
+    """The session server's own `GET /session`, same address `truthcv/adapters/http/routes.py` uses."""
     port = os.environ.get("SESSION_SERVER_PORT", "8932")
     return f"http://browser:{port}/session"
 

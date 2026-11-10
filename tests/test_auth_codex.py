@@ -1,4 +1,4 @@
-"""Tests for connections/auth/codex.py — ChatGPT device-code OAuth flow."""
+"""Tests for truthcv/integrations/connections/auth/codex.py — ChatGPT device-code OAuth flow."""
 
 import base64
 import json as _json

@@ -15,7 +15,7 @@ _REAL_COMPANY_BOARDS_JSON = _REPO_ROOT / "data" / "company_boards.json"
 
 
 def test_data_dir_is_isolated_without_opting_in():
-    """truth.store.data_dir() resolves outside the repo even for a test that never requests data_dir.
+    """truthcv.domain.truth.store.data_dir() resolves outside the repo even for a test that never requests data_dir.
 
     Proves isolation is automatic (autouse), not something each test must opt into.
     """
@@ -25,7 +25,7 @@ def test_data_dir_is_isolated_without_opting_in():
 
 
 def test_recording_a_company_board_never_touches_the_real_data_file():
-    """Writing via companyboards.store.record() must not create/modify the repo's real data file."""
+    """Writing via truthcv.domain.companyboards.store.record() must not create/modify the repo's real data file."""
     existed_before = _REAL_COMPANY_BOARDS_JSON.exists()
     mtime_before = _REAL_COMPANY_BOARDS_JSON.stat().st_mtime if existed_before else None
 

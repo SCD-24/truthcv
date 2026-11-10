@@ -1,12 +1,12 @@
 """Persistence for agent run records against the ./data volume.
 
-Mirrors screening/store.py: one JSON file on the shared data volume. Every
+Mirrors truthcv/domain/screening/store.py: one JSON file on the shared data volume. Every
 mutator runs its whole load-modify-write inside ``datafile.locked`` for the
 same reason screenings do — the API and the agent's MCP tools can both touch
 this file, and an unguarded load-modify-write silently drops one writer's
 change.
 
-Deliberately NOT modelled on agentconfig/store.py, which hand-rolls its own
+Deliberately NOT modelled on truthcv/domain/agentconfig/store.py, which hand-rolls its own
 write and takes no lock: a run record is written far more often (every tool
 call bumps a counter) and losing one silently is exactly the failure mode
 this store exists to avoid.

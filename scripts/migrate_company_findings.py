@@ -1,7 +1,7 @@
 """One-shot migration: move legacy entity/glassdoor screening data into
 companyresearch.
 
-Invariant: applications.model.ApplicationScreening no longer carries `entity` or
+Invariant: truthcv.domain.applications.model.ApplicationScreening no longer carries `entity` or
 `glassdoor` — those were company-level claims with no source or as-of date.
 This script moves whatever value each application's screening object still
 holds for those keys into the append-only companyresearch store, tagged
@@ -164,7 +164,7 @@ def apply_fixes(plans: list[dict]) -> dict:
 def _strip_legacy_keys(apply_changes: bool) -> int:
     """Remove entity/glassdoor from every application's screening object.
 
-    Writes through applications.store's own locked/atomic path — never a
+    Writes through truthcv.domain.applications.store's own locked/atomic path — never a
     bare write. Returns the number of applications changed.
     """
     path = applications_path()

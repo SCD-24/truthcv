@@ -316,7 +316,7 @@ def test_letter_file_is_never_written_outside_the_volume(data_dir, fake_renderer
 
 
 def test_two_concurrent_renders_both_produce_a_file(data_dir, monkeypatch):
-    """`storage/atomic.py` records what a shared staging name costs: whichever
+    """`truthcv/infra/storage/atomic.py` records what a shared staging name costs: whichever
     writer renames second finds the source already gone. A queue read with no
     run_id claims nothing, so two overlapping runs can render the same letter
     at the same moment — and a run that rendered successfully must not be told
@@ -349,8 +349,8 @@ def test_two_concurrent_renders_both_produce_a_file(data_dir, monkeypatch):
 
 
 def test_cover_letter_service_pdf_survives_a_failing_docx_render(data_dir, monkeypatch):
-    """services/cover_letter.py renders PDF and DOCX on two threads (mirroring
-    services/render_cv.py's two-thread render). A DOCX RenderUnavailable on its
+    """truthcv/services/cover_letter.py renders PDF and DOCX on two threads (mirroring
+    truthcv/services/render_cv.py's two-thread render). A DOCX RenderUnavailable on its
     own thread must not cost the PDF url."""
     import truthcv.services.cover_letter as cover_letter_svc
     from truthcv.integrations.providers.fake import FakeProvider

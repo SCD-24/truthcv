@@ -1,4 +1,4 @@
-"""api.config.public_url() across every combination of PUBLIC_PORT/PORT.
+"""truthcv.adapters.http.config.public_url() across every combination of PUBLIC_PORT/PORT.
 
 PUBLIC_PORT is the host-side port docker-compose publishes, used purely to
 log a reachable URL at startup; PORT is the port the process actually binds

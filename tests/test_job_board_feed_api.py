@@ -38,7 +38,7 @@ def mock_http(monkeypatch):
     return install
 
 
-# Arbeitnow is an always-on default board (agentconfig.boards.DEFAULT_BOARD_SOURCES),
+# Arbeitnow is an always-on default board (truthcv.domain.agentconfig.boards.DEFAULT_BOARD_SOURCES),
 # so every test below that exercises the feed also exercises it, whether or
 # not the test cares about its postings. This is its empty, well-formed page.
 _ARBEITNOW_EMPTY_PAGE = {"data": [], "links": {"next": None}}
@@ -543,7 +543,7 @@ def test_the_combined_fetch_shares_one_deadline_between_both_sources(client, dat
     BUDGET_SECONDS window of its own.
 
     The two fetches now run concurrently on their own threads (see
-    api/routes.py's ``_fetch_feed_postings``) rather than one after another,
+    truthcv/adapters/http/routes.py's ``_fetch_feed_postings``) rather than one after another,
     so there is no longer a well-defined "first fetcher's spend eats into the
     second's budget" moment to pin a fake clock to — whichever thread the
     scheduler happens to run first is not something a test should assume.

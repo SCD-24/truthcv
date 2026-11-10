@@ -3,7 +3,7 @@
 Kept out of runs.json (which is loaded on every runs request) in one small
 JSON file per run under the data volume. ``write`` REPLACES the file, so a
 later, fuller report from the agent supersedes an earlier one. Locking and
-atomic writes mirror runs/store.py.
+atomic writes mirror truthcv/domain/runs/store.py.
 
 An entry is ``{url, outcome, detail, sources: [{source, channel}]}``.
 """

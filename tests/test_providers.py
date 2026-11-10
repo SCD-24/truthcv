@@ -29,7 +29,7 @@ def test_get_provider_defaults_and_selects(data_dir, monkeypatch):
 
 def test_get_provider_unknown_raises(data_dir, monkeypatch):
     # data_dir isolates the data volume, and ENCRYPTION_KEY must be cleared too:
-    # earlier tests in a full-suite run import api.main, which loads the real
+    # earlier tests in a full-suite run import truthcv.adapters.http.main, which loads the real
     # .env into os.environ, so without this the legacy-secrets path in
     # load_store() reads/writes the real data/secrets.enc instead of a fake one.
     monkeypatch.delenv("ENCRYPTION_KEY", raising=False)
@@ -42,7 +42,7 @@ def test_get_provider_unknown_raises(data_dir, monkeypatch):
 
 
 def test_get_provider_uses_secrets_credentials(data_dir, monkeypatch):
-    # LLM_PROVIDER=fake is now an env-only test bypass (providers/__init__.py's
+    # LLM_PROVIDER=fake is now an env-only test bypass (truthcv/integrations/providers/__init__.py's
     # resolution ladder), not a value the legacy secrets path maps to a card —
     # so this exercises the legacy-secrets fallback with a real provider name
     # instead, which is what "uses secrets credentials" is actually testing.

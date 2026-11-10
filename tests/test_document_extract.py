@@ -1,4 +1,4 @@
-"""truth.document: format dispatch for CV uploads (PDF, DOCX, TXT, MD)."""
+"""truthcv.domain.truth.document: format dispatch for CV uploads (PDF, DOCX, TXT, MD)."""
 
 from __future__ import annotations
 

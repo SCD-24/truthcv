@@ -1,4 +1,4 @@
-"""Tests for applications/sorting.py, mirroring web/src/applications/sorting.test.ts."""
+"""Tests for truthcv/domain/applications/sorting.py, mirroring web/src/applications/sorting.test.ts."""
 
 import pytest
 from datetime import date

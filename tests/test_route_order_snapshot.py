@@ -15,8 +15,8 @@ What is locked:
   match decides the 405 response and its ``Allow`` header (the first partial
   match is the one used), so that order is observable too.
 
-Why the full order is not locked: Phase 4 splits ``api/routes.py`` into one
-``APIRouter`` per resource module, and ``api/routes.py`` becomes an aggregator
+Why the full order is not locked: Phase 4 splits ``truthcv/adapters/http/routes.py`` into one
+``APIRouter`` per resource module, and ``truthcv/adapters/http/routes.py`` becomes an aggregator
 of ``include_router`` calls. That reorders routes that no single request can
 match together, which cannot change which handler serves any request. Locking
 matching behaviour, not file layout, lets that split land.
@@ -49,7 +49,7 @@ Nesting depth, wrappers and endpoint modules are deliberately not recorded
 because they change on purpose when routers move.
 
 The SPA catch-all ``GET /{full_path:path}`` and the ``/assets`` StaticFiles
-``Mount`` in ``api/main.py`` (``_mount_static``) are registered only when the
+``Mount`` in ``truthcv/adapters/http/main.py`` (``_mount_static``) are registered only when the
 built frontend bundle exists at import time, so they are absent from the test
 app and from the fixture. ``_overlaps`` still handles both shapes.
 

@@ -17,7 +17,7 @@ from truthcv.infra.storage import data_dir
 
 # Per-data_dir cache of the parsed synonym groups; initialised lazily by
 # synonym_groups() so import order never touches the filesystem. A test may
-# reset it with `vocabulary.synonyms._synonyms_cache = None`.
+# reset it with `truthcv.engines.vocabulary.synonyms._synonyms_cache = None`.
 _synonyms_cache: tuple[str, tuple[frozenset[str], ...]] | None = None
 
 

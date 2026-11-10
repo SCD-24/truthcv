@@ -4,11 +4,11 @@ This module holds prose only. It defines the twenty-two seeded fragments
 distilled from the practitioner cover-letter prompt (one ``voice``, one
 ``structure``, one ``opener``, and nineteen ``rules``) as module-level string
 constants, and exposes them as ``PRACTITIONER_SPECS`` so
-``prompts/fragments.py`` can turn each entry into a ``Fragment`` without
+``truthcv/engines/prompts/fragments.py`` can turn each entry into a ``Fragment`` without
 importing any prose of its own.
 
 Every fragment stands alone and reads correctly when concatenated in any
-order with the others, because ``prompts/assemble.py`` joins fragment texts
+order with the others, because ``truthcv/engines/prompts/assemble.py`` joins fragment texts
 with a single space.
 
 Hard character rules, asserted on the assembled prompt by

@@ -69,7 +69,7 @@ def test_extract_route_passes_task_name(data_dir, monkeypatch):
 
 def test_routes_pass_task_names(data_dir, monkeypatch):
     """The API handlers hand get_provider their task name (patched at the
-    api.routes seam, the same one existing tests patch)."""
+    truthcv.adapters.http.routes seam, the same one existing tests patch)."""
     asked: list[str | None] = []
 
     def fake_get_provider(task=None, refresh=False):

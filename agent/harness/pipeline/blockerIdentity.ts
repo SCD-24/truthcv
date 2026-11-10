@@ -1,26 +1,26 @@
 /**
  * Role/company values a screening_blocker record can carry, derived from a
  * harvest title and posting URL, and guaranteed to pass record_screening's
- * placeholder validation (screening/role.py, screening/company.py).
+ * placeholder validation (truthcv/domain/screening/role.py, truthcv/infra/identity/company.py).
  */
 
 /** Role recorded on a blocker when the harvest title is unusable (record_screening rejects placeholders). */
 export const BLOCKER_ROLE_FALLBACK = 'Unreadable posting';
 /** Company recorded on a blocker when the URL has no usable hostname. */
 export const BLOCKER_COMPANY_FALLBACK = 'Unidentified employer';
-/** Max title length record_screening accepts as a role (screening/role.py). */
+/** Max title length record_screening accepts as a role (truthcv/domain/screening/role.py). */
 const MAX_ROLE_CHARS = 120;
-/** Separator punctuation stripped from the ends of a title (screening/role.py `_SEPARATORS`). */
+/** Separator punctuation stripped from the ends of a title (truthcv/domain/screening/role.py `_SEPARATORS`). */
 const EDGE_SEPARATORS = /^[-–—|·,:;\s]+|[-–—|·,:;\s]+$/g;
 
-/** Placeholder titles record_screening rejects. Mirrors `_BOARD_NOISE` in screening/role.py; keep in sync. */
+/** Placeholder titles record_screening rejects. Mirrors `_BOARD_NOISE` in truthcv/domain/screening/role.py; keep in sync. */
 export const ROLE_BOARD_NOISE: ReadonlySet<string> = new Set([
   'apply', 'apply now', 'view job', 'view details', 'save job', 'job', 'jobs', 'position', 'vacancy',
   'n/a', 'na', 'none', 'unknown', 'tbd', 'see posting', 'see description',
   'full time', 'full-time', 'part time', 'part-time', 'remote', 'hybrid', 'onsite', 'on-site',
 ]);
 
-/** Placeholder employers record_screening rejects. Mirrors `_PLACEHOLDERS` in screening/company.py; keep in sync. */
+/** Placeholder employers record_screening rejects. Mirrors `_PLACEHOLDERS` in truthcv/infra/identity/company.py; keep in sync. */
 export const COMPANY_PLACEHOLDERS: ReadonlySet<string> = new Set([
   'n/a', 'na', 'none', 'null', 'unknown', 'tbd', 'company', 'the company', 'employer', 'confidential',
   'undisclosed', 'not stated', 'not specified', 'see posting', 'see description', 'various', '-', '--',

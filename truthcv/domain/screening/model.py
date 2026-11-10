@@ -95,7 +95,7 @@ class Screening:
     # criteria.py check, so the operator can see which profile produced them.
     profile: str = ""
     # The posting's own stated remote arrangement, as the agent read it. See
-    # screening.criteria.REMOTE_ARRANGEMENT_VALUES: "" means not supplied,
+    # truthcv.domain.screening.criteria.REMOTE_ARRANGEMENT_VALUES: "" means not supplied,
     # "unstated" means the agent looked and the posting did not say.
     remote_arrangement: str = ""
     # A working language the posting EXPLICITLY requires, free text (e.g.
@@ -113,7 +113,7 @@ class Screening:
     # text. "" means the posting states none.
     role_type_stated: str = ""
     # The posting's own stated EOR/PEO requirement. See
-    # screening.criteria.EOR_STATED_VALUES: "" means not supplied,
+    # truthcv.domain.screening.criteria.EOR_STATED_VALUES: "" means not supplied,
     # "unstated" means the agent looked and the posting did not say.
     eor_stated: str = ""
     # Approval state. Deliberately absent from EDITABLE: that tuple is what
@@ -140,7 +140,7 @@ class Screening:
     # record_screening time, not a grant of approval or a routing decision.
     screening_blocker: str = ""
     # Lease state: which run currently holds this item and until when. Set
-    # only by get_approved_applications' hand-out (screening.store.claim_for_run)
+    # only by get_approved_applications' hand-out (truthcv.domain.screening.store.claim_for_run)
     # and cleared on release/retire — like approval, this is NOT in EDITABLE,
     # because a claim is granted by the hand-out call, not something the agent
     # is entitled to patch onto its own record. An expired claim_expires_at
@@ -151,7 +151,7 @@ class Screening:
     # above in lifetime. claimed_by_run is an ephemeral lease, cleared on
     # release and by store._retire; run_id is written once at record time and
     # must never be cleared, because it is the evidence the run record's
-    # coverage counters are derived from (runs/derive.py). Empty means the
+    # coverage counters are derived from (truthcv/domain/runs/derive.py). Empty means the
     # record belongs to no run (manual entry, or the historical import).
     run_id: str = ""
     created_at: str = ""

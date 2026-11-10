@@ -3,7 +3,7 @@
 Separate from truth.yaml: these are candidate-editable answers to recurring
 application-screener questions (phone, work authorisation, notice period, ...)
 — but never salary, which the agent derives from the matched job profile's
-clamped ask band (agentconfig/salary.py) rather than from a free-text answer —
+clamped ask band (truthcv/domain/agentconfig/salary.py) rather than from a free-text answer —
 rather than guardrail-validated CV facts, so they get their own file on the
 same data volume and never touch the Truth Store's content or validation.
 """

@@ -404,7 +404,7 @@ def fetch_postings(
 
     ``deadline`` is an optional shared ``time.monotonic()`` ceiling from a
     caller fanning this fetch out alongside another source (see
-    jobfeeds.ats.fetch_ats_postings and services.agent_config's
+    truthcv.domain.jobfeeds.ats.fetch_ats_postings and truthcv.services.agent_config's
     ``fetch_feed_postings``): when given, it is used as-is instead of a
     fresh BUDGET_SECONDS window, so the two fetchers split one wall-clock
     ceiling between them instead of each getting its own.

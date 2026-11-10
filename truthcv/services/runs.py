@@ -2,7 +2,7 @@
 
 The discovery-coverage guard, the per-channel ``finish_phase`` check and the
 coverage allow-lists live here so the tool adapters in
-``agenttools/tools_runs.py`` only parse input and translate results.
+``truthcv/adapters/mcp/tools_runs.py`` only parse input and translate results.
 """
 
 from __future__ import annotations
@@ -117,7 +117,7 @@ def _coverage_shortfall(record, channels: tuple[str, ...] = ("direct", "dork")) 
 
 
 def _normalized_status(status: str) -> str:
-    """``status`` as the store would see it (``runs.model.validate_status``:
+    """``status`` as the store would see it (``truthcv.domain.runs.model.validate_status``:
     stripped and casefolded), or the same fallback normalization if that
     raises — a raw ``!= "completed"`` comparison let a trailing space or
     different case (e.g. "Completed ") slip past the guard entirely even
@@ -304,7 +304,7 @@ def list_runs_page(limit: int, offset: int) -> tuple[list[dict], int]:
     """One page of the most recently started runs (newest first) as dicts,
     plus the total.
 
-    Reads the shared data volume in-process via runs.store — this does NOT
+    Reads the shared data volume in-process via truthcv.domain.runs.store — this does NOT
     proxy to the supervisor. The caller is expected to have clamped a negative
     offset already; the page and its total come from one read of the store so
     they always describe the same set of runs.

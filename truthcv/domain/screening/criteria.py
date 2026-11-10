@@ -3,9 +3,9 @@
 A screening records not just a verdict but the evidence behind it: what the
 posting itself said about remote work and required languages, so a rejection
 can be explained in terms the operator can check against the posting later.
-This module is standalone, like ``screening.posting`` and ``screening.role``,
-and is deliberately not imported by ``screening.model`` — the dataclass stays
-a plain data shape; only ``screening.store`` normalises against it.
+This module is standalone, like ``truthcv.domain.screening.posting`` and ``truthcv.domain.screening.role``,
+and is deliberately not imported by ``truthcv.domain.screening.model`` — the dataclass stays
+a plain data shape; only ``truthcv.domain.screening.store`` normalises against it.
 """
 
 from __future__ import annotations

@@ -6,7 +6,7 @@ application has no explicit cooldown field, so one is derived from its
 itself a reason to wait before reconsidering the same company/role. Whichever
 source yields the later expiry wins.
 
-Company matching is by identity key (``identity.company.company_identity_key``),
+Company matching is by identity key (``truthcv.infra.identity.company.company_identity_key``),
 not raw casefold equality, so a legal-entity suffix does not manufacture a
 second company: an application to "RobCo GmbH" puts "RobCo" in cooldown too.
 """

@@ -1,6 +1,6 @@
 """Built-in search/posting URL presets for well-known direct-mode boards.
 
-Leaf module: imports only ``agentconfig.boards.resolve_domain``. A preset
+Leaf module: imports only ``truthcv.domain.agentconfig.boards.resolve_domain``. A preset
 fills in a direct board's blank ``search_url`` / ``posting_url_pattern``;
 a non-blank operator value always wins (see dorks.compose_direct_boards).
 """

@@ -1,9 +1,9 @@
 """Job board catalog: the single source of truth for known job boards.
 
-Both discovery (agentconfig/dorks.py) and configuration (agentconfig/store.py)
+Both discovery (truthcv/domain/agentconfig/dorks.py) and configuration (truthcv/domain/agentconfig/store.py)
 resolve board sources through this module so the domain list, the default
 boards, and their sign-in URLs cannot drift apart. This module is a leaf: it
-must not import agentconfig.store or agentconfig.dorks, so both of them can
+must not import truthcv.domain.agentconfig.store or truthcv.domain.agentconfig.dorks, so both of them can
 import it without a cycle.
 """
 
@@ -46,7 +46,7 @@ API_BOARD_SOURCES: list[str] = ["remoterocketship", "arbeitnow"]
 
 # API-backed sources that need a saved key/credential before their feed can
 # run. Arbeitnow's job-board API is public (no auth), so it is API_BOARD_SOURCES
-# but NOT here — the key routes (api/routes.py) 404 for it, and its feed is
+# but NOT here — the key routes (truthcv/adapters/http/routes.py) 404 for it, and its feed is
 # always fetched rather than gated on a saved key.
 KEYED_API_SOURCES: list[str] = ["remoterocketship"]
 
@@ -89,7 +89,7 @@ SIGNIN_URLS: dict[str, str] = {
 # hand-edited config file. They CAN be disabled, though (JobBoard.enabled) —
 # a disabled default stays listed and re-enableable but drops out of
 # discovery. The first four are dork boards; "arbeitnow" is fetched directly
-# (see jobfeeds/arbeitnow.py) and never gets a dork, so it deliberately stays
+# (see truthcv/domain/jobfeeds/arbeitnow.py) and never gets a dork, so it deliberately stays
 # OUT of DEFAULT_BOARD_DOMAINS.
 DEFAULT_BOARD_SOURCES: list[str] = ["ashby", "greenhouse", "lever", "workday", "arbeitnow"]
 

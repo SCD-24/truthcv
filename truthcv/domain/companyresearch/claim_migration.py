@@ -3,7 +3,7 @@
 Company findings used to carry any free-text ``claim``. Duplicates that meant
 the same thing ("Employing entity", "EOR", ...) never matched, so contradiction
 detection silently missed them. This rewrites every stored finding whose
-claim is not in ``companyresearch.model.CLAIM_TYPES``: the original text moves
+claim is not in ``truthcv.domain.companyresearch.model.CLAIM_TYPES``: the original text moves
 to ``claim_label`` and ``claim`` becomes one of the fixed types, chosen by a
 case-insensitive keyword match:
 

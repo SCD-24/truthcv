@@ -18,7 +18,7 @@ import { globToRegExp, hasEmptyWildcardTail, hasLetter, hasPaginationSegment, ho
 /** Cap on postings returned per board — bounds the structured result's size. */
 const MAX_POSTINGS_PER_BOARD = 50;
 
-/** Known ATS posting URL shapes — mirrors the four ATSes `jobfeeds/ats.py`
+/** Known ATS posting URL shapes — mirrors the four ATSes `truthcv/domain/jobfeeds/ats.py`
  * already integrates against and `agent/RUNBOOK.md` names by name. Duplicated
  * here on purpose, exactly as `screenPosting.ts` duplicates its own
  * Python-side value sets. */

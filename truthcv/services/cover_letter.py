@@ -2,13 +2,13 @@
 letter, then produce best-effort PDF/DOCX files.
 
 Framework-free — nothing here imports FastAPI. The HTTP adapter in
-``api/routes.py`` marshals a ``CoverLetterRequest`` into the explicit arguments
+``truthcv/adapters/http/routes.py`` marshals a ``CoverLetterRequest`` into the explicit arguments
 this module takes and turns the returned :class:`CoverLetterOutcome` back into
 the wire ``CoverLetterResult``. It also owns the two responses this module
 deliberately does NOT raise for itself: a missing posting (:class:`DraftMissing`
 -> HTTP 400) and a pure preview whose render backend was unavailable (HTTP 500).
 
-Mirrors ``services/render_cv.py``: the guardrail runs inside ``build_letter``
+Mirrors ``truthcv/services/render_cv.py``: the guardrail runs inside ``build_letter``
 before any file is produced, and a blocked letter comes back ``blocked=True``
 with the unverifiable tokens and the flagged claims — nothing is rendered.
 """
@@ -41,7 +41,7 @@ class CoverLetterOutcome:
 
     The service deliberately does NOT decide the "no application and no output"
     hard-error case — the adapter owns that (it maps to HTTP 500, not the 503 a
-    ``services.errors`` exception would produce).
+    ``truthcv.services.errors`` exception would produce).
     """
 
     blocked: bool = False
@@ -185,7 +185,7 @@ def generate_cover_letter(
         app_store.save_cover_letter_document(app_id, letter["text"])
 
     # PDF and DOCX are independent, slow, best-effort steps — run them on two
-    # threads (mirroring services/render_cv.py) so one does not wait on the
+    # threads (mirroring truthcv/services/render_cv.py) so one does not wait on the
     # other. Each keeps its own try/except so a RenderUnavailable backend for
     # one format never costs the other.
     pdf_url = docx_url = None

@@ -25,7 +25,7 @@ def render_letter_pdf(
     """Render letter prose to a PDF on the data volume, or None if it could not be.
 
     Rendered under a name unique to this write and moved into place, for the
-    two reasons ``storage/atomic.py`` records for the JSON stores: the renderer
+    two reasons ``truthcv/infra/storage/atomic.py`` records for the JSON stores: the renderer
     writes straight through to its destination, so a failure part-way leaves a
     truncated file a caller would mistake for a finished one; and a temp name
     shared between writers is worse than no temp name at all, because two

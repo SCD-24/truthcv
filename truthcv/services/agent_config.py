@@ -90,7 +90,7 @@ def load_enabled_profile(profile_name: str):
     searching under would be meaningless, so a disabled or unknown name is
     refused rather than silently matched.
 
-    Public because the screening gate (services/screenings.py) and the agent
+    Public because the screening gate (truthcv/services/screenings.py) and the agent
     tools both need the same lookup; one definition keeps the match rule and
     the refusal text from drifting apart.
     """
@@ -111,7 +111,7 @@ def recommend_salary(profile_name: str, proposed: int | None = None) -> dict:
 
     Looks up ``profile_name`` in the configured job profiles and clamps
     ``proposed`` (or the band minimum, if omitted) into
-    ``[salary_ask_min, salary_ask_max]`` via ``agentconfig.salary.clamp_ask``.
+    ``[salary_ask_min, salary_ask_max]`` via ``truthcv.domain.agentconfig.salary.clamp_ask``.
     Returns a refusal dict if the profile is unknown or has no salary band.
 
     Lives here so the agent's ``recommend_salary`` tool is a thin adapter and
@@ -239,10 +239,10 @@ def fetch_feed_postings(cfg: agent_config_store.AgentConfig, company_boards: lis
       (via ``boards.api_source_key``, not the broader ``is_api_source`` —
       Arbeitnow is also API-backed and always present as a default, and must
       not switch Remote Rocketship on) plus its saved key.
-    - Arbeitnow, an always-on default board (agentconfig.boards.DEFAULT_BOARD_SOURCES)
+    - Arbeitnow, an always-on default board (truthcv.domain.agentconfig.boards.DEFAULT_BOARD_SOURCES)
       with a public API — gated the same way on a resolved board naming it,
       but never needs a key.
-    - Each watchlist company's own ATS API (jobfeeds.ats), gated only on that
+    - Each watchlist company's own ATS API (truthcv.domain.jobfeeds.ats), gated only on that
       company's ``CompanyBoard.ats`` naming a recognised ATS — no key needed.
 
     No fetcher ever raises, and this function does not either: a source that

@@ -1,4 +1,4 @@
-"""Unit tests for services.gmail (tracking/login/status), services.job_boards and services.browser."""
+"""Unit tests for truthcv.services.gmail (tracking/login/status), truthcv.services.job_boards and truthcv.services.browser."""
 
 from __future__ import annotations
 

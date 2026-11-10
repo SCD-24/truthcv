@@ -1,4 +1,4 @@
-"""Unit tests for services.agent_credentials: error branches and null stages."""
+"""Unit tests for truthcv.services.agent_credentials: error branches and null stages."""
 
 import pytest
 

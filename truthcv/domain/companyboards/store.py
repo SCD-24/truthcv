@@ -14,7 +14,7 @@ class CompanyBoard:
     company: str
     careers_url: str
     # Free text the agent records via record_company_board (e.g. "greenhouse",
-    # "lever", "ashby", "personio"). This is the dispatch key jobfeeds.ats
+    # "lever", "ashby", "personio"). This is the dispatch key truthcv.domain.jobfeeds.ats
     # matches case-insensitively to pick a fetcher; blank or unrecognised
     # values are skipped there, not an error.
     ats: str = ""
@@ -138,7 +138,7 @@ def save(boards: dict[str, CompanyBoard]) -> None:
 def _normalize_company(name: str) -> str:
     """Normalize a company name to its identity key for use as the store's dict key.
 
-    Delegates to ``identity.company.company_identity_key`` so a
+    Delegates to ``truthcv.infra.identity.company.company_identity_key`` so a
     legal-entity suffix (e.g. "RobCo" vs "RobCo GmbH") does not produce two
     board entries for the same employer. See ``load()``/``_reconcile_keys``
     for how already-persisted entries under the old plain

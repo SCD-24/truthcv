@@ -1,7 +1,7 @@
 """HTTP client for the browser/session-server.js control server, and session close.
 
 Lives in services so the attended-session routes only shape the response; it
-raises ``services.errors`` types instead of ``HTTPException`` and the global
+raises ``truthcv.services.errors`` types instead of ``HTTPException`` and the global
 handler maps them back to the same statuses.
 """
 

@@ -19,7 +19,7 @@ For each stored screening it computes ``normalize_role_title(role)`` and runs
   silently left alone.
 * Otherwise, if the normalized value differs from the stored one, the record is
   FIXABLE and -- under ``--apply`` -- rewritten through
-  ``screening.store.update`` (one call per record, so the store owns the atomic
+  ``truthcv.domain.screening.store.update`` (one call per record, so the store owns the atomic
   write and ``updated_at`` stamp).
 * Otherwise the record already holds a clean, usable title and is left
   untouched (UNCHANGED).
@@ -28,7 +28,7 @@ It is **idempotent**: once ``--apply`` has run, every fixable record's stored
 role already equals its normalized form, so a second ``--apply`` normalizes
 nothing. The default is a dry run that writes nothing and only reports.
 
-This script goes through ``screening.store`` for every read and write; it never
+This script goes through ``truthcv.domain.screening.store`` for every read and write; it never
 touches ``data/screenings.json`` directly.
 
 Usage::

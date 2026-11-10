@@ -1,9 +1,9 @@
 """The operator's cover-letter workflow for one screening.
 
 Behind ``POST`` and ``PUT /api/screenings/{id}/letter``. Generation goes
-through ``services.letters.generate_cover_letter_for_operator`` — the same
+through ``truthcv.services.letters.generate_cover_letter_for_operator`` — the same
 guardrailed function the agent's own generation uses — and the draft is
-persisted per screening in ``coverletter.store``. Both modules are looked up
+persisted per screening in ``truthcv.engines.coverletter.store``. Both modules are looked up
 at call time so tests can patch them. The provider comes from the caller as
 ``provider_factory``; this module never constructs one.
 """
@@ -132,7 +132,7 @@ def save_operator_text(screening_id: str, text: str) -> letter_store.CoverLetter
     """Save the operator's own text, verbatim and unvalidated.
 
     The one path in the system where text reaches an employer without passing
-    guardrail/validate.py, and deliberately so: the guardrail exists to stop the
+    truthcv/engines/guardrail/validate.py, and deliberately so: the guardrail exists to stop the
     AGENT asserting facts it cannot ground in the operator's truth document. The
     operator is the source of that document. `source` records that a human wrote
     this, and the agent applies with it unchanged.

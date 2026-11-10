@@ -1,4 +1,4 @@
-"""Unit tests for the edited-document save workflows in services.applications."""
+"""Unit tests for the edited-document save workflows in truthcv.services.applications."""
 
 from types import SimpleNamespace
 

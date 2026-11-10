@@ -1,5 +1,5 @@
 """Guard + behaviour tests for the read-only diagnostics MCP endpoint
-(/mcp/diagnostics, api/diagnostics_mcp.py).
+(/mcp/diagnostics, truthcv/adapters/http/diagnostics_mcp.py).
 
 These pin down the two things that matter about a second, bearer-token-only
 MCP surface: that it is unreachable without the right token (404, never a
@@ -8,11 +8,11 @@ twelve read-only diagnostics tools — never any tool from the operational
 registry that can write.
 
 The 404-gate tests use a bare ``TestClient(app)`` (no lifespan): the auth
-check in api.main's /mcp/diagnostics route runs and rejects the request
+check in truthcv.adapters.http.main's /mcp/diagnostics route runs and rejects the request
 *before* it ever reaches the MCP dispatch, so no active session manager is
 needed.
 
-The tools/list and tools/call tests exercise api.diagnostics_mcp's own
+The tools/list and tools/call tests exercise truthcv.adapters.http.diagnostics_mcp's own
 JSON-RPC handlers (`_handle_diag_list_tools` / `_handle_diag_call_tool`)
 directly rather than over real HTTP. This is deliberate, not a shortcut for
 its own sake: mcp.server.streamable_http's StreamableHTTPSessionManager.run()

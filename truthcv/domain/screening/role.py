@@ -2,7 +2,7 @@
 
 A screening is only actionable if the operator knows which role it is for —
 they screen candidates on the title. This module provides a strict check for
-that title, kept standalone and deliberately separate from ``screening.store``
+that title, kept standalone and deliberately separate from ``truthcv.domain.screening.store``
 — the store stays lenient about titles so the legacy importer
 (``scripts/migrate_jobs_history.py``) can bring in historical records that
 predate this requirement.

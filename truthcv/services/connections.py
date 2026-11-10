@@ -1,7 +1,7 @@
 """Connection (provider credential) logic moved out of the route handlers.
 
 Lives in services so the sign-in, key-save and logout flows do not need the
-API layer; it raises ``services.errors`` types instead of ``HTTPException``
+API layer; it raises ``truthcv.services.errors`` types instead of ``HTTPException``
 and the global handler maps them back to the same statuses and detail text.
 """
 

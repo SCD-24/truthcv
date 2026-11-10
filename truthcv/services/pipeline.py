@@ -1,7 +1,7 @@
 """Pipeline workflows: screening-aware URL filtering and application outcome notes.
 
 Lives in the services layer so the agent tool adapter in
-``agenttools/tools_pipeline.py`` stays a thin translation of arguments and
+``truthcv/adapters/mcp/tools_pipeline.py`` stays a thin translation of arguments and
 results, and so the same rules can be called from any other adapter without
 importing the agent tool surface.
 """

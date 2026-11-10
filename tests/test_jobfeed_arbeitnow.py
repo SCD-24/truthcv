@@ -1,4 +1,4 @@
-"""jobfeeds/arbeitnow.py: client-side matching, pagination, and failure handling."""
+"""truthcv/domain/jobfeeds/arbeitnow.py: client-side matching, pagination, and failure handling."""
 
 from __future__ import annotations
 

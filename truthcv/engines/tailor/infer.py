@@ -52,14 +52,14 @@ def _uncovered_keywords(
     waste effort (or hallucinate) re-proposing keywords the CV already backs.
 
     Coverage is now token/phrase aware: it uses the loose "interleaved" matcher
-    from ``vocabulary.match``, so "unit and integration tests" counts as
+    from ``truthcv.engines.vocabulary.match``, so "unit and integration tests" counts as
     covering "unit tests", while spurious substring hits (e.g. "Go" inside
     "django") no longer count. ``aliases``, when given, is keyed by the exact
     original keyword string and lets a known-equivalent form count as coverage.
 
-    Note the deliberate asymmetry versus ``render/ats.py``'s ATS lint: this is
+    Note the deliberate asymmetry versus ``truthcv/engines/render/ats.py``'s ATS lint: this is
     the LOOSE check ("does truth back this claim at all, even interleaved or via
-    a known alias?"), whereas ``render/ats.py::lint`` uses the STRICT contiguous
+    a known alias?"), whereas ``truthcv/engines/render/ats.py::lint`` uses the STRICT contiguous
     check ("will an ATS actually see this phrase as written?"). Same underlying
     matcher, different verdict threshold — intentionally.
     """

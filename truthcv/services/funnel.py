@@ -1,6 +1,6 @@
 """Per-source run funnel recording: validation, mismatch computation, storage.
 
-Moved out of agenttools.tools_funnel so the validation rules live in the
+Moved out of truthcv.adapters.mcp.tools_funnel so the validation rules live in the
 service layer; the MCP tool is a thin adapter over ``record_source_funnel``.
 """
 

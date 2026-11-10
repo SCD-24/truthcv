@@ -1,4 +1,4 @@
-"""Tests for identity.company.company_identity_key."""
+"""Tests for truthcv.infra.identity.company.company_identity_key."""
 
 from truthcv.infra.identity.company import company_identity_key
 

@@ -193,7 +193,7 @@ export function BrowserSessionPage() {
       }
       if (failedRef.current) return;
       // noVNC sets `clean: false` for every failure, including the one the
-      // relay produces: `api/browser_stream.py` closes a socket it refuses
+      // relay produces: `truthcv/adapters/http/browser_stream.py` closes a socket it refuses
       // (peer, Origin or "no session open") with 1008 BEFORE accepting it,
       // and the browser container being down looks the same. RFB is still
       // in `connecting` then, so it reports the close as a failure rather

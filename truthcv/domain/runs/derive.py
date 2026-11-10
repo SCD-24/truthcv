@@ -13,7 +13,7 @@ it was already screened leaves no record behind to count.
 board_breakdown_by_run derives a per-board summary of screenings attributed to
 each run, grouping them by the job board derived from their URL host.
 
-This module never imports or calls ``screening.store`` / ``applications.store``
+This module never imports or calls ``truthcv.domain.screening.store`` / ``truthcv.domain.applications.store``
 itself. It takes already-loaded lists so a caller rendering fifty runs loads
 each store once instead of fifty times.
 """
@@ -37,7 +37,7 @@ def _count_screening(counters: dict, screening) -> None:
     """Fold one screening into ``counters`` already known to belong to its run."""
     counters["screenings_recorded"] += 1
     # screening_blocker is "could not READ the posting"; apply_blocker is
-    # "could not SUBMIT". They are deliberately distinct in screening/model.py
+    # "could not SUBMIT". They are deliberately distinct in truthcv/domain/screening/model.py
     # and only the former belongs in blocked_count.
     if getattr(screening, "screening_blocker", ""):
         counters["blocked_count"] += 1

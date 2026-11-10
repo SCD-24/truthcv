@@ -3,7 +3,7 @@
 Why this package exists: the provider layer needs resolved credentials, but it must
 not import the api layer to get them — that made providers depend *up* on api and
 formed the project's only import cycle. Housing credential resolution here (a leaf
-that imports only truth.store for the data path) lets both api and providers depend
+that imports only truthcv.domain.truth.store for the data path) lets both api and providers depend
 on it downward, breaking the cycle.
 
 Resolution order for any credential: secrets.enc (if ENCRYPTION_KEY is valid) -> env.

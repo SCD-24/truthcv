@@ -1,4 +1,4 @@
-"""screening.posting: normalization and the rules that reject unusable posting text."""
+"""truthcv.domain.screening.posting: normalization and the rules that reject unusable posting text."""
 
 from __future__ import annotations
 

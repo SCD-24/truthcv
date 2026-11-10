@@ -7,7 +7,7 @@ Returns a list of {code, message} — the frontend renders these as atsWarnings.
 Keyword matching here is now token/phrase-aware and strict-by-design
 (contiguous-phrase matching) because it models what an ATS scanner actually
 does: it only credits a keyword whose full phrase appears as an adjacent run. A
-separate, looser check exists elsewhere (`tailor/infer.py`) for truth-coverage
+separate, looser check exists elsewhere (`truthcv/engines/tailor/infer.py`) for truth-coverage
 purposes, which is intentionally more permissive.
 """
 

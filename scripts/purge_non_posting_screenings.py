@@ -2,7 +2,7 @@
 
 LinkedIn search/listing pages (``linkedin.com`` URLs that are not
 ``/jobs/view/<id>``) were once recorded as if they were postings. This one-off
-script removes them via ``screening.store.delete_many`` (which also removes
+script removes them via ``truthcv.domain.screening.store.delete_many`` (which also removes
 each record's orphaned cover-letter draft).
 
 Records the operator has acted on (approval ``applied`` or ``approved``) are

@@ -2,7 +2,7 @@
 
 This runs in-process inside the TruthCV container using the MCP SDK (>=1.9).
 REST routes GET /mcp/tools and POST /mcp/tools/{name} provide the tool surface
-to non-MCP clients. The JSON-RPC endpoint (registered in api/main.py) exposes
+to non-MCP clients. The JSON-RPC endpoint (registered in truthcv/adapters/http/main.py) exposes
 the same tools via the streamable-HTTP MCP transport at POST /mcp, which TruthCV's
 own agent harness (agent/harness) dials as a streamable-HTTP JSON-RPC client. It
 is per-application: every tool takes its state as
@@ -89,8 +89,8 @@ def call_tool(name: str, body: dict[str, Any]) -> dict:
 def tool_specs() -> dict[str, tuple[Callable[..., dict], str]]:
     """The MCP tool registry: tool name -> (callable, description).
 
-    Lets ``api`` reach the registry through the one permitted
-    api -> agenttools.server edge instead of importing ``agenttools.mcp_app``.
+    Lets ``truthcv.adapters.http`` reach the registry through the one permitted
+    truthcv.adapters.http -> truthcv.adapters.mcp.server edge instead of importing ``truthcv.adapters.mcp.mcp_app``.
     """
     from truthcv.adapters.mcp.mcp_app import _TOOL_REGISTRY
 

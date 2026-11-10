@@ -1,4 +1,4 @@
-"""screening.criteria: normalization and profile/posting compatibility checks."""
+"""truthcv.domain.screening.criteria: normalization and profile/posting compatibility checks."""
 
 from __future__ import annotations
 

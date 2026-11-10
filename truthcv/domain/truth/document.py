@@ -40,7 +40,7 @@ def _extract_docx_text(file_bytes: bytes) -> str:
 def extract_document_text(filename: str, file_bytes: bytes) -> str:
     """Extract text from an uploaded CV file, dispatching on its extension.
 
-    Supports PDF (via truth.pdf), DOCX (via python-docx), and plain-text TXT/MD
+    Supports PDF (via truthcv.domain.truth.pdf), DOCX (via python-docx), and plain-text TXT/MD
     (decoded as UTF-8). Raises DocumentExtractError on empty input, an
     unsupported extension, an unreadable DOCX, or text that is empty once
     extracted.

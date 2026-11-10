@@ -7,12 +7,12 @@ own, deliberately different, contracts on top:
   The HTTP route raises a 409 carrying the existing screening's id when
   ``created`` is False; the MCP tool instead returns the existing record with
   ``created: false``. Both are correct for their caller and neither is
-  "fixed" to match the other — see api/routes.py's create_screening
+  "fixed" to match the other — see truthcv/adapters/http/routes.py's create_screening
   docstring for why.
 * **Validation and error tiers.** Each adapter validates its own inputs
   (the route via ``ScreeningCreate``'s pydantic validators, the tool via
   ``record_screening_verdict``'s direct calls to
-  ``identity.company``/``screening.model``/``screening.posting``)
+  ``truthcv.infra.identity.company``/``truthcv.domain.screening.model``/``truthcv.domain.screening.posting``)
   and raises in its own idiom (HTTPException vs ValueError/refusal dict).
   Only the terminal store call is shared: the MCP tool's queueing gate
   (``record_screening_verdict``) lives here too, but the HTTP route
@@ -63,7 +63,7 @@ def create_screening(fields: dict) -> tuple[Screening, bool]:
 def delete_screening(screening_id: str) -> bool:
     """Delete a screening and, if it was removed, its cover-letter draft.
 
-    The draft cascade lives here rather than in ``screening.store`` so the
+    The draft cascade lives here rather than in ``truthcv.domain.screening.store`` so the
     domain store does not reach up into the cover-letter engine.
 
     Returns:
@@ -80,7 +80,7 @@ def delete_screening(screening_id: str) -> bool:
 def delete_screenings(ids: list[str]) -> list[tuple[str, bool]]:
     """Delete several screenings and the cover-letter drafts of those removed.
 
-    Same cascade as ``delete_screening``, kept out of ``screening.store`` for
+    Same cascade as ``delete_screening``, kept out of ``truthcv.domain.screening.store`` for
     the same reason. Unknown ids are reported False and have no draft touched.
 
     Returns:
@@ -146,7 +146,7 @@ def claim_screening_for_apply(screening_id: str) -> ApplyClaimResult:
 
     When the claim is refused, ``refused_screening`` is the current record
     (or None if it no longer exists at all) and ``reason`` is the same
-    machine-readable refusal reason ``screening.store``'s private
+    machine-readable refusal reason ``truthcv.domain.screening.store``'s private
     ``_apply_refusal`` derives — callers must not reach into that private
     function themselves; this is the one place that does.
     """
@@ -167,7 +167,7 @@ def _evaluate_profile_criteria(profile_name: str, evidence: dict, agent_reason: 
 
     Loads the named ENABLED profile via ``load_enabled_profile`` (which
     raises ``ValueError`` naming the enabled ones for an unknown/disabled
-    name), then runs ``screening.criteria.evaluate_hard_requirements`` over
+    name), then runs ``truthcv.domain.screening.criteria.evaluate_hard_requirements`` over
     ``evidence``. Returns ``{}`` when the posting is compatible with every
     one of remote model, working language, salary floor, employment country,
     rejected role types, and EOR/PEO allowance. Otherwise returns a dict with

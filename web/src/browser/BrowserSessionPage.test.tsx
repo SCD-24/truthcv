@@ -145,7 +145,7 @@ describe("BrowserSessionPage", () => {
   });
 
   it("does not report a viewport that never connected as a finished session", async () => {
-    // What the relay in api/browser_stream.py does when it refuses (1008
+    // What the relay in truthcv/adapters/http/browser_stream.py does when it refuses (1008
     // before accept), and what a browser container that is down looks like:
     // RFB is still in `connecting`, so it reports the close as unclean. That
     // used to land on the "Closed. If it worked, the next run will get

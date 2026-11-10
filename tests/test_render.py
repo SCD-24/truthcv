@@ -215,7 +215,7 @@ def test_ats_flags_missing_keyword_form_from_aliases_arg():
 
 def test_ats_flags_missing_keyword_form_from_synonyms_file(data_dir):
     """The same missing-keyword-form verdict is driven purely by an operator
-    synonyms.txt file (no `aliases` argument), loaded via vocabulary.synonyms."""
+    synonyms.txt file (no `aliases` argument), loaded via truthcv.engines.vocabulary.synonyms."""
     vocab_dir = data_dir / "vocabulary"
     vocab_dir.mkdir()
     (vocab_dir / "synonyms.txt").write_text(

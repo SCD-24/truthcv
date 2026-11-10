@@ -2,8 +2,8 @@
 be shipped — otherwise the container fails to start (import error) instead of
 a test failing at build time.
 
-Regression coverage for the "missing onboarding COPY" incident: api/routes.py
-imports onboarding.store, but the Dockerfile's app stage never copied
+Regression coverage for the "missing onboarding COPY" incident: truthcv/adapters/http/routes.py
+imports truthcv.domain.onboarding.store, but the Dockerfile's app stage never copied
 onboarding/ into the image, so the container crashed on start.
 """
 from __future__ import annotations

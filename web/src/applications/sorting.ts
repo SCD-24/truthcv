@@ -6,7 +6,7 @@ export type ColumnDef = {
   sortable: boolean;
   /** The server sort key this column orders by (GET /api/applications/page).
    * Sorting happens server-side so it holds across pages; the comparator
-   * semantics live in applications/sorting.py. */
+   * semantics live in truthcv/domain/applications/sorting.py. */
   sortKey?: ApplicationSortKey;
 };
 

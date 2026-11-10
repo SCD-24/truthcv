@@ -1,9 +1,9 @@
-"""FastAPI routes for triggering and polling background jobs (jobs.runner).
+"""FastAPI routes for triggering and polling background jobs (truthcv.infra.background_tasks.runner).
 
 Runnable job kinds are declared in ``_JOB_KINDS``: each maps a URL segment to
 an optional synchronous guard (run before accepting the job, so a gate like
 ``require_gmail_tracking_enabled`` still 403s immediately instead of failing
-the job asynchronously) and the zero-argument callable jobs.runner executes
+the job asynchronously) and the zero-argument callable truthcv.infra.background_tasks.runner executes
 on a worker thread. Adding a new kind means adding one entry there.
 """
 

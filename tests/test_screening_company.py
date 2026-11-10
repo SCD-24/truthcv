@@ -1,4 +1,4 @@
-"""identity.company: normalization and the rules that reject an unusable name."""
+"""truthcv.infra.identity.company: normalization and the rules that reject an unusable name."""
 
 from __future__ import annotations
 

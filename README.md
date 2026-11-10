@@ -570,7 +570,7 @@ npm install
 npm run dev        # http://localhost:5173, proxies /api to the backend on :8080
 ```
 
-Run the backend (above) alongside it. The Vite build outputs into `api/static`,
+Run the backend (above) alongside it. The Vite build outputs into `truthcv/adapters/http/static`,
 which the API serves in production.
 
 ## Tests

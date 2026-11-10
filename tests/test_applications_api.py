@@ -453,7 +453,7 @@ def test_render_rejects_unknown_application_id(client):
 
 
 def test_evidence_round_trips_on_list(client):
-    """Evidence the agent persisted via applications.store must surface on
+    """Evidence the agent persisted via truthcv.domain.applications.store must surface on
     GET /api/applications under its camelCase wire keys."""
     import truthcv.domain.applications.store as app_store
 

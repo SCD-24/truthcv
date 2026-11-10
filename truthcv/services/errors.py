@@ -1,6 +1,6 @@
 """Framework-free domain exceptions raised by the services layer.
 
-Nothing here imports FastAPI. ``api/main.py`` maps each of these to an
+Nothing here imports FastAPI. ``truthcv/adapters/http/main.py`` maps each of these to an
 ``HTTPException`` for the HTTP adapter; the MCP adapter's
 ``_handle_call_tool`` already catches any ``Exception`` and turns it into an
 ``isError=True`` result, so these need no special handling there.
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 
 class ServiceError(Exception):
-    """Base class for every domain exception raised by services/*."""
+    """Base class for every domain exception raised by truthcv/services/*."""
 
 
 class NotFound(ServiceError):

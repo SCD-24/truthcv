@@ -1,7 +1,7 @@
 """The agent tool registry and the JSON Schemas advertised for it.
 
 This module owns *what* the tools are; the MCP streamable-HTTP JSON-RPC
-endpoint that serves them is built and registered in ``api/main.py``.
+endpoint that serves them is built and registered in ``truthcv/adapters/http/main.py``.
 """
 
 from __future__ import annotations

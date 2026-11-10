@@ -1,4 +1,4 @@
-"""services.settings: error branches and key return shapes.
+"""truthcv.services.settings: error branches and key return shapes.
 
 The data volume is isolated per test by conftest; providers are fakes.
 """

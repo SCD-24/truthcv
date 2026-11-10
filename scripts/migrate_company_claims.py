@@ -1,7 +1,7 @@
 """Preview or force the company claims migration (free-text claim -> CLAIM_TYPES).
 
-The migration itself lives in ``companyresearch.claim_migration`` and now runs
-automatically at app startup (api/main.py lifespan) whenever legacy claims
+The migration itself lives in ``truthcv.domain.companyresearch.claim_migration`` and now runs
+automatically at app startup (truthcv/adapters/http/main.py lifespan) whenever legacy claims
 exist. This script is for previewing (dry run) or forcing it manually.
 
 Usage::

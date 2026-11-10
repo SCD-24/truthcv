@@ -1,7 +1,7 @@
 """The application-record workflows shared by the HTTP routes and MCP tools.
 
-Only the parts that genuinely coincide between api/routes.py and
-agenttools/tools_ledger.py live here, plus the export-bundle machinery and the
+Only the parts that genuinely coincide between truthcv/adapters/http/routes.py and
+truthcv/adapters/mcp/tools_ledger.py live here, plus the export-bundle machinery and the
 agent's application workflows. The export helpers are used by only the HTTP
 route today, but they are entirely framework-free and belong with the rest of
 the application-record logic rather than inline in a route module.
@@ -9,8 +9,8 @@ the application-record logic rather than inline in a route module.
 The agent's ``record_application``, ``get_approved_applications`` and
 ``report_apply_failure`` workflows also live here (``record_application``,
 ``get_approved_applications``, ``record_apply_failure``), so the MCP tools in
-agenttools/tools_ledger.py are thin adapters. That includes the claim-lease
-mechanics (``_CLAIM_LEASE_SECONDS`` and ``screening.store.claim_for_run``),
+truthcv/adapters/mcp/tools_ledger.py are thin adapters. That includes the claim-lease
+mechanics (``_CLAIM_LEASE_SECONDS`` and ``truthcv.domain.screening.store.claim_for_run``),
 which only the agent uses, and the backfill and structured-evidence steps of
 ``record_application``, which deliberately do more than the HTTP create route.
 The tool still merges its named parameters and parses the evidence before
@@ -19,7 +19,7 @@ calling in, so a malformed payload is rejected before any write.
 What is deliberately NOT here:
 
 * **FastAPI concerns.** Nothing here imports FastAPI: the ``StreamingResponse``
-  that wraps ``build_export_zip``'s output stays in api/routes.py, and the
+  that wraps ``build_export_zip``'s output stays in truthcv/adapters/http/routes.py, and the
   export format (CSV column order, zip layout, per-company folder naming) is a
   user-facing contract that must stay byte-for-byte stable.
 """
@@ -344,10 +344,10 @@ def record_application(
     malformed payload is rejected before any store write happens here — the
     orphan-row fix. Each evidence argument is ``None`` when not provided.
 
-    ``applications.store.create`` only accepts ``Application.EDITABLE`` fields,
+    ``truthcv.domain.applications.store.create`` only accepts ``Application.EDITABLE`` fields,
     so the editable record is created (or, for a ``screening_id`` that already
     has a row, patched) first, and each structured field is then persisted
-    through its own ``save_*`` helper in ``applications.store``. With a
+    through its own ``save_*`` helper in ``truthcv.domain.applications.store``. With a
     ``screening_id`` the approved queue item is retired, and an application
     for an item this ``run_id`` did not hold is counted as an over-cap write.
     """
@@ -382,7 +382,7 @@ def record_application(
         # or change the return shape — a real submission must never be lost
         # over an accounting failure.
         # applications_submitted is NOT bumped here: it is derived on read from
-        # the application records themselves (runs/derive.py), and bumping it
+        # the application records themselves (truthcv/domain/runs/derive.py), and bumping it
         # too would double-count. over_cap_writes stays an incremented counter
         # because it records a lease violation with no derivable source.
         if run_id:
@@ -412,7 +412,7 @@ def _already_submitted_this_run(run_id: str) -> int:
     A submitted item has already left the approved queue (it is not one of
     the items the loop below re-claims), so this must be seeded separately
     rather than double counted with the loop's own claimed_count. Reuses
-    ``runs.derive.counters_by_run`` over the applications store alone
+    ``truthcv.domain.runs.derive.counters_by_run`` over the applications store alone
     (``screenings=[]``, since only ``applications_submitted`` is wanted).
     Best-effort: any error here must not block the tool, so it falls back
     to 0.

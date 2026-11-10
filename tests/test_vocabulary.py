@@ -1,7 +1,7 @@
 """Vocabulary layer invariants: synonym-file parsing and keyword matching.
 
-These pin the operator-editable synonym store (vocabulary/synonyms.py) and the
-token/phrase-aware matcher (vocabulary/match.py). Every test uses the data_dir
+These pin the operator-editable synonym store (truthcv/engines/vocabulary/synonyms.py) and the
+token/phrase-aware matcher (truthcv/engines/vocabulary/match.py). Every test uses the data_dir
 fixture so DATA_DIR is a tmp_path and the real ./data is never touched.
 """
 

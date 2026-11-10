@@ -317,7 +317,7 @@ def test_discovery_coverage_written_via_the_tool_survives_the_wire(client):
 
 
 def test_the_model_start_run_joins_the_host_created_record(client, agent_token):
-    """runs.store.start is idempotent, so the agent's own start_run lands on the
+    """truthcv.domain.runs.store.start is idempotent, so the agent's own start_run lands on the
     record the supervisor already created rather than resetting it — including
     the accurate trigger, which start_run could only ever guess."""
     from truthcv.adapters.mcp import tools_runs
@@ -358,7 +358,7 @@ def test_finish_rejects_an_unknown_status_instead_of_storing_it(client, agent_to
 
 
 def test_limit_zero_means_every_retained_run(client):
-    """`limit <= 0` means "no limit" — the contract runs.store documents and
+    """`limit <= 0` means "no limit" — the contract truthcv.domain.runs.store documents and
     the old callers relied on. An external client can ask for it, so it is
     pinned at the HTTP layer and not only in the store."""
     _dated_runs(12)

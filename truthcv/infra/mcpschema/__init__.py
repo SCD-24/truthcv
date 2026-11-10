@@ -1,7 +1,7 @@
 """Dependency-free JSON Schema derivation for MCP tool signatures.
 
 A leaf package (stdlib only) so ``api`` can build MCP ``inputSchema`` values
-without importing ``agenttools.mcp_app``, which owns the tool registry.
+without importing ``truthcv.adapters.mcp.mcp_app``, which owns the tool registry.
 """
 
 from __future__ import annotations

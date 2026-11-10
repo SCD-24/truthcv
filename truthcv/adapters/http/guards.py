@@ -11,7 +11,7 @@ def require_gmail_tracking_enabled() -> None:
     """Raise 403 unless Gmail response-tracking is configured and opted in.
 
     Exists so the Gmail route modules share one HTTP gate; the predicate itself
-    lives in ``services.gmail.tracking_enabled``.
+    lives in ``truthcv.services.gmail.tracking_enabled``.
     """
     if not gmail_service.tracking_enabled():
         raise HTTPException(

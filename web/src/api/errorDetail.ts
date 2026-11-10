@@ -35,7 +35,7 @@ function formatValidationItem(item: ValidationErrorItem): string {
   return segment ? `${segment}: ${msg}` : msg;
 }
 
-/** A blocked-claim entry as the letter routes send it (guardrail/validate.py
+/** A blocked-claim entry as the letter routes send it (truthcv/engines/guardrail/validate.py
  * BlockedClaim, asdict'd — snake_case keys except `text`, which is spelled
  * the same either way, so it's the only field read here). */
 interface BlockedClaimItem {

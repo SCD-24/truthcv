@@ -198,9 +198,9 @@ def select_system(
 
     Selection still may NOT add information. A rephrasing that introduces an
     acronym/expansion whose tokens are not present in the truth WILL be blocked
-    by ``guardrail/validate.py``'s traceability check UNLESS that specific
+    by ``truthcv/engines/guardrail/validate.py``'s traceability check UNLESS that specific
     equivalence is registered in the operator's ``data/vocabulary/synonyms.txt``
-    file (loaded by ``vocabulary/synonyms.py``). This is intentional: such a
+    file (loaded by ``truthcv/engines/vocabulary/synonyms.py``). This is intentional: such a
     claim surfaces at the existing approve/deny gate rather than being silently
     emitted.
     """

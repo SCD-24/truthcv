@@ -4,7 +4,7 @@ A RunRecord is the durable, honest account of one execution of the
 unattended job-application agent: when it started and finished, how it
 ended, and how much of the work it actually covered. It exists so a run
 that stops early — crash, cap reached, cancelled — leaves behind a truthful
-summary instead of silence. Modelled on screening/model.py.
+summary instead of silence. Modelled on truthcv/domain/screening/model.py.
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ class RunRecord:
     # error, one apply session that did not finish. Absent from older records,
     # which from_dict's known-field filter loads as 0.
     items_failed: int = 0
-    # Full per-item error text for those failures (capped by runs/store.py).
+    # Full per-item error text for those failures (capped by truthcv/domain/runs/store.py).
     # Absent from older records, which load as [].
     item_errors: list[str] = field(default_factory=list)
     # Free-text note the agent can leave via record_run_note.
@@ -85,7 +85,7 @@ class RunRecord:
     # from the dict, which callers must treat the same as "".
     discovery_coverage: list[dict] = field(default_factory=list)
     # Set when finish_run was refused once because discovery coverage looked
-    # incomplete (see agenttools/tools_runs.py's shortfall check), so a
+    # incomplete (see truthcv/adapters/mcp/tools_runs.py's shortfall check), so a
     # second finish_run call is allowed through unconditionally rather than
     # refusing forever. Defaults False and is absent from records written
     # before this field existed, which from_dict's known-field filter loads
@@ -94,11 +94,11 @@ class RunRecord:
     # How many times finish_run has been refused for this run. Paired with
     # finish_refused (which only says "at least once") so a harness-aware
     # caller passing turns_remaining can compare against a small cap
-    # (_MAX_FINISH_REFUSALS in agenttools/tools_runs.py) instead of the
+    # (_MAX_FINISH_REFUSALS in truthcv/adapters/mcp/tools_runs.py) instead of the
     # all-or-nothing one-shot guard. Absent from records written before this
     # field existed, which from_dict's known-field filter loads as 0.
     finish_refusals: int = 0
-    # Per-channel refusal counts for finish_phase (agenttools/tools_runs.py),
+    # Per-channel refusal counts for finish_phase (truthcv/adapters/mcp/tools_runs.py),
     # keyed by "feed"/"direct"/"dork". finish_phase never touches run status,
     # so it tracks its own refusal count separately from finish_refusals
     # rather than sharing it. Defaults {} and absent from records written
@@ -116,7 +116,7 @@ class RunRecord:
     # Names of sources whose row does not add up (postings_seen != sum of the
     # outcome columns), computed server-side. Absent -> [].
     funnel_mismatches: list[str] = field(default_factory=list)
-    # True when the per-run URL ledger (runs/url_ledger.py) hit its cap and
+    # True when the per-run URL ledger (truthcv/domain/runs/url_ledger.py) hit its cap and
     # dropped entries; the counts above stay complete. Absent -> False.
     url_ledger_truncated: bool = False
 

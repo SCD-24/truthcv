@@ -2,7 +2,7 @@
 model list and the routing update.
 
 Moved out of the FastAPI handlers so the logic is framework-free. Errors are
-raised as services.errors types with the exact status and detail text the
+raised as truthcv.services.errors types with the exact status and detail text the
 routes returned before the move.
 """
 
@@ -149,8 +149,8 @@ def test_v1_settings(
         return False, f"{type(e).__name__}: {e}"
 
 
-# Not a pytest test: services/ is outside testpaths (tests/), but a test module
-# that does `from services.settings import test_v1_settings` would otherwise
+# Not a pytest test: truthcv/services/ is outside testpaths (tests/), but a test module
+# that does `from truthcv.services.settings import test_v1_settings` would otherwise
 # collect it.
 test_v1_settings.__test__ = False
 

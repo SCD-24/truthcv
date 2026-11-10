@@ -1,5 +1,5 @@
 """A posting the agent could not read is recorded with a blocker, not a
-guessed verdict — screening/model.py + screening/store.py + the wire model."""
+guessed verdict — truthcv/domain/screening/model.py + truthcv/domain/screening/store.py + the wire model."""
 
 from __future__ import annotations
 

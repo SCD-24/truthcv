@@ -91,7 +91,7 @@ def test_the_tool_listing_route_exposes_no_approval_parameter():
 def test_no_tool_module_reaches_the_guardrail_allow_list():
     """No tool module may widen what the guardrail permits: none may fold
     into `approved_texts`, import `guardrail`, or call `validate(`/`Scope(`
-    directly. Only a human-driven route (api/routes.py) may do that. The
+    directly. Only a human-driven route (truthcv/adapters/http/routes.py) may do that. The
     module list is discovered from the registered tools' `__module__`, so a
     tool added in a new module is covered automatically."""
     module_names = {fn.__module__ for fn in mcp_server.TOOLS.values()}
@@ -406,7 +406,7 @@ def test_record_application_with_unknown_screening_id_still_creates(data_dir):
 
 
 def test_check_cooldown_agrees_with_the_http_route(data_dir):
-    """check_cooldown delegates to the same screening.cooldown.cooldown as
+    """check_cooldown delegates to the same truthcv.domain.screening.cooldown.cooldown as
     GET /api/cooldown, so the two surfaces must never disagree — proven here
     for both an in-cooldown company and one with no screening at all."""
     client = TestClient(app)
@@ -528,7 +528,7 @@ def test_record_screening_schema_advertises_every_editable_field():
 def test_record_screening_persists_verdict_and_company(data_dir):
     """A verdict passed by name reaches the store, and a deferred one queues.
 
-    `screening.store.create` gates the approval queue on `verdict`, so a
+    `truthcv.domain.screening.store.create` gates the approval queue on `verdict`, so a
     dropped verdict means nothing ever reaches the operator.
     """
     _enable_profile()

@@ -8,7 +8,7 @@ its run prompt. There is no browser sign-in and no Google dork for these
 boards.
 
 The fetcher contract, so a second fetcher (e.g. an ATS fetcher) can implement
-the same shape as jobfeeds.remoterocketship:
+the same shape as truthcv.domain.jobfeeds.remoterocketship:
 
   - A fetcher is a callable that takes the enabled job profiles plus its own
     credential/config, and returns a ``FeedResult``.
@@ -17,7 +17,7 @@ the same shape as jobfeeds.remoterocketship:
     caller (a config route serving other data alongside the feed) keeps
     working when the board does not.
 
-This package is a leaf on the data path: it imports agentconfig.store for the
+This package is a leaf on the data path: it imports truthcv.domain.agentconfig.store for the
 profile shape and secretstore for the key, and nothing imports it but api/.
 """
 

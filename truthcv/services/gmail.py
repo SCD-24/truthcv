@@ -1,7 +1,7 @@
 """Gmail response-tracking workflow shared by the agent tool and the sync gate.
 
 The opt-in gate and the applied/pending summary live here so the MCP tool in
-``agenttools/tools_gmail.py`` only translates the result. The gate must match
+``truthcv/adapters/mcp/tools_gmail.py`` only translates the result. The gate must match
 the ``/api/gmail/*`` routes, so any change to one belongs in both.
 """
 
@@ -30,7 +30,7 @@ def require_tracking_enabled() -> None:
     Exists as a service function so every caller that runs a Gmail sync gates
     the same way, not only the agent tool.
 
-    Mirrors api.guards.require_gmail_tracking_enabled's gate exactly: the
+    Mirrors truthcv.adapters.http.guards.require_gmail_tracking_enabled's gate exactly: the
     secretstore "jev" connection must have a non-empty apiKey AND
     useForEmailTracking set to True. Gmail sync auto-applies Jev-confirmed
     status transitions, so it must never run without this explicit opt-in.
@@ -95,7 +95,7 @@ def complete_login(code: str | None, state: str | None, error: str | None) -> st
     code/state), and ``auth_failed`` (token exchange failed).
     """
     # Looked up through the module at call time so patches on
-    # connections.auth.gmail keep intercepting.
+    # truthcv.integrations.connections.auth.gmail keep intercepting.
     from truthcv.integrations.connections.auth import gmail as gmail_auth
 
     if not tracking_enabled():

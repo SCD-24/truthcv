@@ -1,4 +1,4 @@
-"""Tests for companyresearch/claim_migration.py and scripts/migrate_company_claims.py.
+"""Tests for truthcv/domain/companyresearch/claim_migration.py and scripts/migrate_company_claims.py.
 
 The module holds the migration logic (incl. startup ``migrate_claims_if_needed``);
 the script is a thin CLI (dry run / --apply) over it.

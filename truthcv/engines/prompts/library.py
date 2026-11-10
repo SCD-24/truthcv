@@ -1,6 +1,6 @@
 """JSON-backed persistence for operator-editable prompt fragments and presets.
 
-Seeded fragments and presets (from ``prompts.fragments``) always exist and can
+Seeded fragments and presets (from ``truthcv.engines.prompts.fragments``) always exist and can
 never be edited or deleted; operator-authored ("user") fragments and presets
 are layered on top, stored as flat JSON lists in ``data_dir()``. A user record
 sharing an id with a seeded one overrides it in the merged view.

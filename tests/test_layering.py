@@ -1,15 +1,15 @@
 """Pins the layering invariants the services-layer refactor establishes, so
 they cannot silently regress.
 
-(a) No module under services/ imports fastapi.
+(a) No module under truthcv/services/ imports fastapi.
 (b) The route handlers named in _EXTRACTED_ROUTE_FUNCTIONS make no direct
-    data_dir() call, wherever the Phase 4 split of api/routes.py now defines
-    them (api/routes.py or one of its split-out modules) — file I/O is reached
-    through services/. Each name must be found in exactly one of those files.
-(c) No module outside storage/ and truth/ imports data_dir from truth.store
-    (truth.store no longer defines data_dir at all; storage.paths is its only
+    data_dir() call, wherever the Phase 4 split of truthcv/adapters/http/routes.py now defines
+    them (truthcv/adapters/http/routes.py or one of its split-out modules) — file I/O is reached
+    through truthcv/services/. Each name must be found in exactly one of those files.
+(c) No module outside truthcv/infra/storage/ and truthcv/domain/truth/ imports data_dir from truthcv.domain.truth.store
+    (truthcv.domain.truth.store no longer defines data_dir at all; truthcv.infra.storage.paths is its only
     home now).
-(d) None of the files in the Phase 4 split of api/routes.py calls an
+(d) None of the files in the Phase 4 split of truthcv/adapters/http/routes.py calls an
     underscore-prefixed function of any store module.
 """
 
@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SERVICES_DIR = REPO_ROOT / "truthcv" / "services"
 HTTP_DIR = REPO_ROOT / "truthcv" / "adapters" / "http"
 
-# The Phase 4 split of api/routes.py: the code that used to live in routes.py is
+# The Phase 4 split of truthcv/adapters/http/routes.py: the code that used to live in routes.py is
 # moving, one resource at a time, into flat modules (plus shared helpers in
 # route_support.py). These are the files the routes.py invariants apply to.
 # Named explicitly, not globbed: prompt_routes, job_routes and
@@ -65,7 +65,7 @@ def test_services_modules_do_not_import_fastapi():
     assert offenders == [], f"services/* module(s) import fastapi: {offenders}"
 
 
-# Only these six workflows were extracted into services/ by this refactor
+# Only these six workflows were extracted into truthcv/services/ by this refactor
 # (per the plan's explicit out-of-scope note: "All 63 routes — only the six
 # workflows carrying substantial inline logic ... are extracted; the rest
 # are already thin"). Route handlers outside this list may still legitimately
@@ -105,7 +105,7 @@ def _function_body(text: str, name: str) -> str | None:
 def test_extracted_routes_do_not_call_data_dir_directly():
     # get_provider() is deliberately still called from some of these route
     # handlers (e.g. cover_letter) and passed INTO the service as an explicit
-    # argument — services/* must never construct its own provider (checked
+    # argument — truthcv/services/* must never construct its own provider (checked
     # separately below). data_dir(), by contrast, must not appear in any of
     # these route bodies at all: file I/O for these six workflows is now
     # entirely the service's job.

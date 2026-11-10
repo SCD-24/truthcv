@@ -1,8 +1,8 @@
-"""Guard tests for screening/role.py: a screening is only actionable if the
+"""Guard tests for truthcv/domain/screening/role.py: a screening is only actionable if the
 operator knows which role it is for, so the title check must collapse noisy
 whitespace, strip edge separators without mangling internal punctuation, and
 reject placeholder/URL/empty junk — each rejection distinguishable, with the
-empty case given its own message (mirroring identity/url.py).
+empty case given its own message (mirroring truthcv/infra/identity/url.py).
 """
 
 from __future__ import annotations
@@ -103,7 +103,7 @@ def test_validate_rejects_over_length_title():
 
 def test_empty_and_malformed_messages_differ():
     """The empty case has its own message, distinct from a malformed one —
-    mirroring identity/url.py giving the empty input a dedicated message."""
+    mirroring truthcv/infra/identity/url.py giving the empty input a dedicated message."""
     with pytest.raises(ValueError) as empty_excinfo:
         validate_role_title("")
     with pytest.raises(ValueError) as url_excinfo:

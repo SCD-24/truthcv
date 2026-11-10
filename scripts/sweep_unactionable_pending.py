@@ -1,7 +1,7 @@
 """Reject pending screenings that have no posting text and no draft to act on.
 
-Before ``screening.posting.validate_posting_text`` became a precondition for
-new records (and before ``screening.store.create`` stopped queueing
+Before ``truthcv.domain.screening.posting.validate_posting_text`` became a precondition for
+new records (and before ``truthcv.domain.screening.store.create`` stopped queueing
 ``not_found``/``expired`` blockers), the legacy importer
 (``scripts/migrate_jobs_history.py``) and the pre-guard agent could leave a
 record sitting in the operator's Found queue (``approval == "pending"``) with
@@ -14,14 +14,14 @@ For each stored screening:
   AND it has no saved cover-letter draft (the same definition used elsewhere:
   a draft with only whitespace text does not count), the
   record is SWEPT — under ``--apply`` its approval is rewritten to
-  ``"rejected"`` through ``screening.store.set_approval``. There is nothing to
+  ``"rejected"`` through ``truthcv.domain.screening.store.set_approval``. There is nothing to
   draft from and nothing left for the operator to decide.
 * If it is pending, has blank posting text, but DOES have a saved draft, it is
   KEPT (has a draft): a draft already exists, so the record is still
   actionable and is never written.
 * Every other record (not pending, or has posting text) is UNTOUCHED.
 
-This script goes through ``screening.store`` and ``coverletter.store`` for
+This script goes through ``truthcv.domain.screening.store`` and ``truthcv.engines.coverletter.store`` for
 every read and write; it never touches ``data/screenings.json`` or
 ``data/cover_letters/`` directly.
 
@@ -54,7 +54,7 @@ import truthcv.domain.screening.store as screening_store  # noqa: E402
 def _has_draft(screening_id: str) -> bool:
     """Whether a cover-letter draft exists for this screening.
 
-    Mirrors ``api/routes.py``'s ``_has_draft`` exactly: a draft with only
+    Mirrors ``truthcv/adapters/http/routes.py``'s ``_has_draft`` exactly: a draft with only
     whitespace text does not count as a draft.
     """
     draft = letter_store.load(screening_id)

@@ -1,7 +1,7 @@
 """API-backed job-board key management (status, save, live test).
 
 Lives in services so the ``/api/job-boards/{source}/key`` routes only shape the
-response. Raises ``services.errors`` types the global handler maps to the same
+response. Raises ``truthcv.services.errors`` types the global handler maps to the same
 statuses the handlers returned before the move.
 """
 

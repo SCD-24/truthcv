@@ -1,7 +1,7 @@
 """First-run onboarding state, lifted out of the route handlers.
 
-``has_profile`` is looked up through ``truth.pdf`` and the store through the
-``onboarding.store`` module object at call time, so patches on either work.
+``has_profile`` is looked up through ``truthcv.domain.truth.pdf`` and the store through the
+``truthcv.domain.onboarding.store`` module object at call time, so patches on either work.
 """
 
 from __future__ import annotations

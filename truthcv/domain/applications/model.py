@@ -91,7 +91,7 @@ class ApplicationScreening:
     role type), not about a company. Company-level claims — the employing
     entity, employer-review figures, and anything else that needs a source
     and an as-of date — live in ``companyresearch`` (see
-    ``companyresearch.store``) instead: a company fact must be traceable to
+    ``truthcv.domain.companyresearch.store``) instead: a company fact must be traceable to
     where it was read and must never be silently overwritten by a later run.
     """
 

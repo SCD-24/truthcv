@@ -16,7 +16,7 @@ truncated query silently drops the trailing filters. Discovery therefore
 renders TITLES (job-title terms), not free-form keywords, quoted and '|'-grouped as many
 per query as fit the word budget, one query per title chunk per board.
 Rejected role types are appended as negatives (-"term") best-effort in
-whatever room the titles leave; screening (screening/criteria.py
+whatever room the titles leave; screening (truthcv/domain/screening/criteria.py
 role_type_compatible) still enforces role types.
 """
 
@@ -183,7 +183,7 @@ def _resolve_sources(boards: list[JobBoard] | None) -> list[str]:
     consume a `site:` dork slot. A disabled board
     (``enabled`` False) is skipped the same way.
 
-    API-backed boards (agentconfig.boards.API_BOARD_SOURCES) are SKIPPED here
+    API-backed boards (truthcv.domain.agentconfig.boards.API_BOARD_SOURCES) are SKIPPED here
     too. Their postings are pulled from the board's own API in jobfeeds/ and
     handed to the agent as concrete URLs; composing a `site:` dork for one
     would send it to the aggregator's listing pages instead, which is

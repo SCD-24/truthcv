@@ -4,9 +4,9 @@ A screening is only actionable if the operator knows who the employer is: the
 cooldown rules match on company, the blocklist matches on company, and the
 approval queue is unreadable without it. This module provides a strict check
 for that name, kept standalone and deliberately separate from
-``screening.store`` — the store stays lenient so the legacy importer
+``truthcv.domain.screening.store`` — the store stays lenient so the legacy importer
 (``scripts/migrate_jobs_history.py``) can bring in historical records that
-predate this requirement, exactly as ``screening.role`` does for titles.
+predate this requirement, exactly as ``truthcv.domain.screening.role`` does for titles.
 """
 
 from __future__ import annotations

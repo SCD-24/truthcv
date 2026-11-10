@@ -30,7 +30,7 @@ mcp==2.3.0
 # --- Transitive dependencies -------------------------------------------
 # Pinned too, because pinning only the direct ones does not give a
 # reproducible install. Two of these are imported by our own code
-# (starlette in truthcv/adapters/http/browser_stream.py, pydantic in api/schemas.py), and an
+# (starlette in truthcv/adapters/http/browser_stream.py, pydantic in truthcv/adapters/http/schemas/), and an
 # unpinned pydyf is what broke weasyprint. Regenerate this block with:
 #   pip install -r <the direct pins above> && pip freeze
 # Do not hand-edit a line here without re-running the suite.

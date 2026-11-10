@@ -1,8 +1,8 @@
 """check_gmail_responses agent tool: the same Jev-opt-in gate as the routes,
 then a run_sync call summarized as skipped/processed/applied/pending.
 
-Patterned on tests/test_agent_mcp.py's tool-level tests. gmailsync.service and
-gmailsync.store are always mocked — no live network call is made.
+Patterned on tests/test_agent_mcp.py's tool-level tests. truthcv.domain.gmailsync.service and
+truthcv.domain.gmailsync.store are always mocked — no live network call is made.
 """
 
 from __future__ import annotations

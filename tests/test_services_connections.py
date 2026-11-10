@@ -1,4 +1,4 @@
-"""Unit tests for services.connections (error text and key-save policy)."""
+"""Unit tests for truthcv.services.connections (error text and key-save policy)."""
 
 from __future__ import annotations
 

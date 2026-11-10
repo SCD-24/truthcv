@@ -1,4 +1,4 @@
-"""gmailsync.matcher: company keyword extraction skips stopwords/short words."""
+"""truthcv.domain.gmailsync.matcher: company keyword extraction skips stopwords/short words."""
 
 from __future__ import annotations
 

@@ -4,7 +4,7 @@ A CompanyFinding records one claim about an employer — its legal/EOR entity,
 an employer-review figure, or any other company-level fact — together with
 where it came from and how strong that source is. Findings are append-only:
 a later pass never overwrites an earlier one, because overwriting destroys
-the signal that two passes disagreed. See ``companyresearch.store`` for how
+the signal that two passes disagreed. See ``truthcv.domain.companyresearch.store`` for how
 that discipline is enforced and how a disagreement is surfaced.
 
 The operator's "edit" works by superseding: a new finding whose ``supersedes``
@@ -83,7 +83,7 @@ class CompanyFinding:
 
     Only ``resolution``/``resolved_at``/``resolution_note`` may ever be set on
     an existing record after it is written — every other field is fixed at
-    creation. See ``companyresearch.store.record`` and ``.resolve``.
+    creation. See ``truthcv.domain.companyresearch.store.record`` and ``.resolve``.
     """
 
     id: str = ""
@@ -94,7 +94,7 @@ class CompanyFinding:
     source_class: str = ""
     # The date the SOURCE is dated, not the date this finding was recorded.
     # Empty means unknown and is NEVER inferred from `observed_at` — the same
-    # discipline `screening.model.Screening.posted_date` uses for a posting's
+    # discipline `truthcv.domain.screening.model.Screening.posted_date` uses for a posting's
     # publication date.
     as_of: str = ""
     observed_at: str = ""

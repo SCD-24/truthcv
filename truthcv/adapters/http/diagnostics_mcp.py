@@ -1,7 +1,7 @@
 """A second, bearer-token-authenticated, strictly read-only MCP endpoint.
 
 This module owns its own tool registry (`_DIAG_TOOL_REGISTRY`) and its own
-`mcp.server.Server`, deliberately separate from `agenttools.mcp_app`'s
+`mcp.server.Server`, deliberately separate from `truthcv.adapters.mcp.mcp_app`'s
 `_TOOL_REGISTRY`: the operational /mcp surface can start runs, record
 screenings and applications, and generate cover letters, and none of that
 belongs on a surface a remote MCP client can reach with nothing but a bearer
@@ -9,7 +9,7 @@ token. Every tool registered here reads a store and returns a summary; none
 of them write anything, and `get_status` never returns secret material —
 only a boolean for whether secret encryption is available.
 
-The ASGI app and session manager built here are wired into `api.main`'s
+The ASGI app and session manager built here are wired into `truthcv.adapters.http.main`'s
 route and lifespan; this module has no FastAPI route of its own.
 """
 
@@ -154,7 +154,7 @@ def list_gmail_suggestions(limit: int = 0, offset: int = 0) -> dict:
 
 # Exactly twelve read-only tools. Nothing here writes to a store, starts a
 # run, or generates a document — this registry is deliberately smaller than
-# agenttools.mcp_app._TOOL_REGISTRY, not a superset of it.
+# truthcv.adapters.mcp.mcp_app._TOOL_REGISTRY, not a superset of it.
 _DIAG_TOOL_REGISTRY = {
     "list_runs": (
         list_runs,
@@ -237,7 +237,7 @@ _DIAG_TOOL_REGISTRY = {
 
 # Build a second MCP Server app for the diagnostics streamable-HTTP JSON-RPC
 # endpoint. Mirrors the construction of the operational server in
-# api/main.py: same transport security relaxation (this endpoint is reached
+# truthcv/adapters/http/main.py: same transport security relaxation (this endpoint is reached
 # over the compose network / a tunnel, not a browser, so the SDK's
 # DNS-rebinding guard would otherwise 421 legitimate requests whose Host
 # header isn't 127.0.0.1), same JSON-response, stateless-http streamable-HTTP
@@ -245,7 +245,7 @@ _DIAG_TOOL_REGISTRY = {
 _diag_mcp_server = Server(name="truthcv-diagnostics")
 _diag_mcp_http_app = _diag_mcp_server.streamable_http_app(
     # Must match the path this app is reached at — the /mcp/diagnostics route
-    # in api/main.py forwards the request scope verbatim, so scope["path"] is
+    # in truthcv/adapters/http/main.py forwards the request scope verbatim, so scope["path"] is
     # still "/mcp/diagnostics".
     streamable_http_path="/mcp/diagnostics",
     transport_security=TransportSecuritySettings(
@@ -328,7 +328,7 @@ _diag_mcp_server.add_request_handler(
 def diagnostics_token_ok(given: str) -> bool:
     """Whether `given` matches DIAGNOSTICS_MCP_TOKEN.
 
-    Same rule as api.routes._agent_token_ok: an unset or empty secret
+    Same rule as truthcv.adapters.http.agent_routes._agent_token_ok: an unset or empty secret
     matches nothing, so a deployment that never set the token cannot be
     reached by any bearer value, including an empty one.
     """
@@ -340,9 +340,9 @@ def diagnostics_token_ok(given: str) -> bool:
     )
 
 
-# Exposed for api/main.py: the ASGI app to forward /mcp/diagnostics requests
+# Exposed for truthcv/adapters/http/main.py: the ASGI app to forward /mcp/diagnostics requests
 # to, and the session manager whose run() must wrap the app's lifetime (see
-# api/main.py's lifespan) — without it every request raises "Task group is
+# truthcv/adapters/http/main.py's lifespan) — without it every request raises "Task group is
 # not initialized".
 diagnostics_mcp_app = _diag_mcp_http_app
 diagnostics_session_manager = _diag_mcp_server.session_manager

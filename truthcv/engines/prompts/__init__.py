@@ -9,7 +9,7 @@ feature modules, and nothing the model returns is trusted until it passes the
 truth store and the deterministic guardrail.
 
 Each prompt is served as a function so callers never reach past this API to a
-raw constant; style fragments live in ``prompts.style`` and are re-exported.
+raw constant; style fragments live in ``truthcv.engines.prompts.style`` and are re-exported.
 """
 
 from __future__ import annotations

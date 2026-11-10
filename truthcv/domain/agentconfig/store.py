@@ -117,7 +117,7 @@ class JobProfile:
     # Search group
     keywords: list[str] = field(default_factory=list)
     # Job titles used for Google dork discovery; when empty, dork composition
-    # falls back to titles detected from keywords (see agentconfig/dorks.py).
+    # falls back to titles detected from keywords (see truthcv/domain/agentconfig/dorks.py).
     title_keywords: list[str] = field(default_factory=list)
     locations: list[str] = field(default_factory=list)
     # Requirement fields (all optional/nullable per spec)
@@ -244,7 +244,7 @@ class AgentConfig:
     # Google dork recency (after:<date> operator): one of DORK_RECENCIES. Default past week.
     dork_recency: str = "w"
     # The operator's OWN boards, beyond the four defaults. The defaults
-    # (agentconfig.boards.DEFAULT_BOARD_SOURCES) are unioned in at resolve
+    # (truthcv.domain.agentconfig.boards.DEFAULT_BOARD_SOURCES) are unioned in at resolve
     # time via resolved_board_sources(), so they cannot be lost to a bad PUT
     # or a hand-edited file, but a default is now STORED here when it carries
     # a sign-in override OR has been disabled — both are per-board state that
@@ -265,7 +265,7 @@ class AgentConfig:
     def resolved_board_sources(self) -> list[str]:
         """ENABLED job board sources actually searched: the four defaults, then the operator's own.
 
-        The one place the union is expressed, so discovery (agentconfig/dorks.py)
+        The one place the union is expressed, so discovery (truthcv/domain/agentconfig/dorks.py)
         and the API cannot drift apart on what "the boards" means. A default or
         custom board the operator has disabled is excluded — see resolved_boards()
         for the full listing (enabled or not).
@@ -278,7 +278,7 @@ class AgentConfig:
         Mirrors resolved_board_sources()'s defaults-first union but returns
         full JobBoard records (source, signin_url, effective mode) instead of
         bare source strings. Effective mode is the catalog's fixed mode for a
-        catalog source (agentconfig.boards.catalog_mode), else the board's
+        catalog source (truthcv.domain.agentconfig.boards.catalog_mode), else the board's
         own stored mode, else "dork" — the behaviour every board had before
         modes existed.
         """
@@ -543,8 +543,8 @@ def save(cfg: AgentConfig) -> AgentConfig:
 def is_blocked(cfg: AgentConfig, company: str) -> bool:
     """Check if a company is blocked.
 
-    Company matching: identity-key equality (identity.company.company_identity_key),
-    the same key used by screening/cooldown.py, so a legal-entity suffix does
+    Company matching: identity-key equality (truthcv.infra.identity.company.company_identity_key),
+    the same key used by truthcv/domain/screening/cooldown.py, so a legal-entity suffix does
     not let a blocked company slip through under a slightly different name
     (blocking "RobCo" also blocks "RobCo GmbH"). Non-string or blank company
     returns False (checked before the key is computed).

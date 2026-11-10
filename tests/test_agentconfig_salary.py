@@ -1,4 +1,4 @@
-"""Salary helpers (agentconfig/salary.py) and the recommend_salary /
+"""Salary helpers (truthcv/domain/agentconfig/salary.py) and the recommend_salary /
 get_job_profiles MCP tools: clamping a proposed ask into a profile's
 configured band, formatting an ask for display, and the tool-level
 refusals when a profile is unknown or has no band configured.

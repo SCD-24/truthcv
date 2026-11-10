@@ -147,7 +147,7 @@ def extract_keywords_with_aliases(
     WARNING: these aliases come from the LLM and must NEVER be fed to the
     guardrail as truth-equivalent — a model-supplied alias must never widen what
     counts as truth. Only the operator's own data/vocabulary/synonyms.txt file
-    (loaded by vocabulary/synonyms.py, a separate, unrelated mechanism) is
+    (loaded by truthcv/engines/vocabulary/synonyms.py, a separate, unrelated mechanism) is
     trusted for that.
 
     Args:

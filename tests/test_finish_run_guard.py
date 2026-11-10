@@ -1,4 +1,4 @@
-"""agenttools/tools_runs.py: finish_run's discovery-coverage guard.
+"""truthcv/adapters/mcp/tools_runs.py: finish_run's discovery-coverage guard.
 
 The agent's first premature finish_run for a 'completed' run with short
 direct/dork discovery coverage must fail loudly (ValueError, and as an
@@ -132,7 +132,7 @@ def test_config_load_error_does_not_raise(monkeypatch, data_dir):
 
 def test_status_with_whitespace_and_case_is_still_refused(monkeypatch, data_dir):
     """'Completed ' must be refused just like 'completed': the store
-    normalizes status via runs.model.validate_status (strip + casefold), so
+    normalizes status via truthcv.domain.runs.model.validate_status (strip + casefold), so
     the guard must compare against that same normalization, not the raw
     string."""
     _patch_expected_counts(monkeypatch, direct_count=2, query_count=3)

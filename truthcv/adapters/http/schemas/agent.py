@@ -63,7 +63,7 @@ class AgentConfigModel(_Camel):
     feed_postings: list[FeedPostingModel] = Field(default_factory=list)
     feed_error: str = ""
     # Count of feed postings dropped because the ledger already has a
-    # screening for them (see screening.store.screened_dedupe_keys), so the
+    # screening for them (see truthcv.domain.screening.store.screened_dedupe_keys), so the
     # agent can see it stopped re-screening postings that return
     # created:false instead of silently getting a shorter feed.
     feed_already_screened: int = 0
@@ -243,7 +243,7 @@ class AgentLlmCredentials(_Camel):
     # Set only for Anthropic-compatible third parties (OpenRouter). Empty means
     # the agent talks to Anthropic directly, as it always did.
     base_url: str = ""
-    # The connections/catalog.py card key this credential came from.
+    # The truthcv/integrations/connections/catalog.py card key this credential came from.
     provider: str = ""
     # The wire dialect to speak: "anthropic-messages", "openai-chat-completions",
     # or "openai-responses" (ChatGPT subscription).

@@ -195,7 +195,7 @@ def test_custom_board_returns_mode_locked_false(client, data_dir):
 
 
 def test_mode_set_via_put_survives_a_subsequent_get(client, data_dir):
-    """Regression: the services/agent_config.py merge used to drop mode on save."""
+    """Regression: the truthcv/services/agent_config.py merge used to drop mode on save."""
     client.put("/api/agent/config", json={"jobBoards": [{"source": "custom.example.com", "mode": "direct"}]})
     got = client.get("/api/agent/config").json()
     custom = next(b for b in got["jobBoards"] if b["source"] == "custom.example.com")
@@ -800,7 +800,7 @@ def test_get_returns_resolved_boards_for_target_companies(client, data_dir):
 def test_get_returns_resolved_boards_for_suffix_equivalent_target_company(client, data_dir):
     """A target company matches a board recorded under a legal-entity-suffix variant.
 
-    The match is by identity key (identity.company.company_identity_key), so
+    The match is by identity key (truthcv.infra.identity.company.company_identity_key), so
     a target company "RobCo" also picks up a board recorded as "RobCo GmbH".
     """
     from truthcv.domain.companyboards import store as board_store

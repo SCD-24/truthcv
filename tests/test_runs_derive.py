@@ -1,4 +1,4 @@
-"""runs/derive.py: coverage counters derived from a run's own records."""
+"""truthcv/domain/runs/derive.py: coverage counters derived from a run's own records."""
 
 from __future__ import annotations
 

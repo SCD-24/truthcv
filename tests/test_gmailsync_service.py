@@ -1,8 +1,8 @@
-"""gmailsync.service: per-application query scoping, closed-status filtering,
+"""truthcv.domain.gmailsync.service: per-application query scoping, closed-status filtering,
 Jev-only classification/auto-apply with evidence notes, decline handling,
 and dedupe.
 
-Also covers screening.jev.confirm's fail-open behavior directly (HTTP
+Also covers truthcv.domain.screening.jev.confirm's fail-open behavior directly (HTTP
 error/timeout/bad shape), alongside tests/test_screening_jev.py's patterns.
 The Gmail HTTP layer and Jev are both mocked here — this suite must never
 make a live call to either.
@@ -56,7 +56,7 @@ def _metadata(message_id: str, sender: str, subject: str, date: str, snippet: st
 
 
 class FakeGmailClient:
-    """Stand-in for gmailsync.service.GmailClient: records queries, serves canned messages."""
+    """Stand-in for truthcv.domain.gmailsync.service.GmailClient: records queries, serves canned messages."""
 
     def __init__(self, messages_by_query=None, metadata_by_id=None, full_by_id=None):
         self.queries: list[str] = []

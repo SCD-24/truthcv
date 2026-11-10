@@ -9,7 +9,7 @@ into one batch of Noul questions per posting, sends them in a single request,
 and reports back which ones Jev flagged as true — i.e. the posting appears to
 violate that requirement — at or above JEV_REJECT_THRESHOLD.
 
-Like jobfeeds.remoterocketship, a call here NEVER raises for the caller's
+Like truthcv.domain.jobfeeds.remoterocketship, a call here NEVER raises for the caller's
 benefit: any transport failure, timeout, or unexpected response shape fails
 open (an empty result), because Jev is a cross-check on top of the operator's
 own screening criteria, not the source of truth. The API key is never logged,

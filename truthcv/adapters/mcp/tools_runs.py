@@ -3,7 +3,7 @@
 Every function here is best-effort accountability, never a thing that can
 fail a run: a run record exists so a partial or crashed run leaves behind an
 honest coverage summary, not so a forgetful tool call can abort the agent
-mid-application. Every parameter has a default (agenttools/mcp_app.py derives
+mid-application. Every parameter has a default (truthcv/adapters/mcp/mcp_app.py derives
 the JSON schema from ``inspect.signature`` and marks a defaultless parameter
 required, which would turn a forgetful model call into a mid-run TypeError),
 and every function no-ops on an empty ``run_id`` rather than raising.
@@ -11,11 +11,11 @@ and every function no-ops on an empty ``run_id`` rather than raising.
 One deliberate exception: ``finish_run`` raises ``ValueError`` when it is
 called on a run whose direct-board or dork-query discovery coverage looks
 incomplete, so the model is sent back to finish discovery instead of
-silently ending a partial run. See ``services.runs._coverage_shortfall``. When the caller
+silently ending a partial run. See ``truthcv.services.runs._coverage_shortfall``. When the caller
 does not pass ``turns_remaining`` this is the legacy one-shot guard: the
 FIRST such call raises and a second always closes the run. When the harness
 does pass ``turns_remaining`` the guard is harness-aware instead: it keeps
-refusing (up to ``services.runs._MAX_FINISH_REFUSALS`` times) as long as there is enough
+refusing (up to ``truthcv.services.runs._MAX_FINISH_REFUSALS`` times) as long as there is enough
 run left to act on the refusal, and lets the call through once turns are
 nearly exhausted or the refusal cap is reached. ``finish_phase`` offers a
 non-terminal way to report the same shortfall mid-run, per channel, without
@@ -209,7 +209,7 @@ def bump_run_counters(run_id: str = "", **counters: int) -> dict:
     Only ``over_cap_writes`` (a lease violation, with no derivable source) and
     ``postings_seen`` (via ``record_postings_seen``) still have callers. The
     rest — screenings_recorded, blocked_count, queued_for_approval,
-    applications_submitted — are derived on read by ``runs/derive.py`` from
+    applications_submitted — are derived on read by ``truthcv/domain/runs/derive.py`` from
     the records the run actually produced, and are not incremented here.
     """
     if not run_id or not counters:

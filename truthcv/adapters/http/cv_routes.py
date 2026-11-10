@@ -38,7 +38,7 @@ def render_route(body: RenderRequest | None = None) -> RenderResult:
     # Thin marshalling: pull the request-derived arguments, run the framework-
     # free render workflow, and translate its outcome (or its DraftMissing) into
     # the HTTP response. All business logic — the guardrail, scope-building and
-    # approval-filtering — lives in services/render_cv.py.
+    # approval-filtering — lives in truthcv/services/render_cv.py.
     app_id = body.application_id if body else None
     approved: set[str] = set()
     denied: set[str] = set()
@@ -92,7 +92,7 @@ def cover_letter(body: CoverLetterRequest) -> CoverLetterResult:
     # cover-letter workflow, and translate its outcome — or its DraftMissing, or
     # an LLM failure — into the HTTP response. All business logic (posting
     # resolution, render-scoped approvals, the guardrail and best-effort render)
-    # lives in services/cover_letter.py.
+    # lives in truthcv/services/cover_letter.py.
     _require_application(body.application_id)
 
     approved_ids = set(body.approvals.approved_claim_ids) if body.approvals else set()

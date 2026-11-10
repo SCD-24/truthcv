@@ -1,12 +1,12 @@
 """Cover-letter workflow for one application: generation and the letter file.
 
 Two callers share generation here. The agent tool surface
-(agenttools/tools_letter.py) reads and writes NOTHING global: the posting,
+(truthcv/adapters/mcp/tools_letter.py) reads and writes NOTHING global: the posting,
 length, writing-style preset, and any previously generated paragraphs all
 arrive as arguments, and the generated letter is returned to the caller rather
 than cached on disk, so N unattended applications can call it concurrently
 without clobbering each other's state. The operator HTTP route
-(api/routes.py's POST /screenings/{id}/letter) additionally passes
+(truthcv/adapters/http/routes.py's POST /screenings/{id}/letter) additionally passes
 generation-scoped approvals through `generate_cover_letter_for_operator`.
 
 The provider comes from the caller: either a ready ``provider`` or a
@@ -153,8 +153,8 @@ def generate_cover_letter_for_operator(
     """Generate a guardrailed cover letter, honouring operator approvals.
 
     This function is NOT registered anywhere as an agent tool — nothing in
-    agenttools/mcp_app.py or agenttools/server.py references it. It exists
-    solely for the operator HTTP route (api/routes.py's POST
+    truthcv/adapters/mcp/mcp_app.py or truthcv/adapters/mcp/server.py references it. It exists
+    solely for the operator HTTP route (truthcv/adapters/http/routes.py's POST
     /screenings/{id}/letter) to call directly, where a human is making an
     approval decision in the moment. An unattended agent must never get this
     lever: if it could pass approved claim texts it would be self-approving its
@@ -234,7 +234,7 @@ def render_screening_letter(screening_id: str, text: str) -> dict:
         from truthcv.services.render_cv import _contact_line
 
         # Header composed exactly as the wizard's own renders compose it
-        # (services/render_cv.py), so the letter an employer receives from the
+        # (truthcv/services/render_cv.py), so the letter an employer receives from the
         # agent and the operator's own copy of it carry the same header.
         truth = load_truth()
         name = truth.profile.name or "Your Name"

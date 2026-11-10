@@ -1,6 +1,6 @@
 """Persistence for job screening records against the ./data volume.
 
-Mirrors applications/store.py and truth/store.py: one JSON file on the shared
+Mirrors truthcv/domain/applications/store.py and truthcv/domain/truth/store.py: one JSON file on the shared
 data volume.
 
 Every function that mutates the list runs its whole load-modify-write inside
@@ -134,7 +134,7 @@ def rejected_page(
     """One page of rejected screenings, the matching total and category counts.
 
     Returns ``(page, total, counts)`` from ONE ``load_all`` read, so all three
-    describe the same file (see ``runs.store.list_page``). ``total`` and the
+    describe the same file (see ``truthcv.domain.runs.store.list_page``). ``total`` and the
     page are after the ``category`` filter; ``counts`` cover the whole
     rejected population before it. An unknown category matches nothing.
     """
@@ -465,7 +465,7 @@ def delete(screening_id: str) -> bool:
     """Remove a screening record.
 
     Does not touch the cover-letter draft; callers that need it gone too
-    go through ``services.screenings.delete_screening``.
+    go through ``truthcv.services.screenings.delete_screening``.
 
     Returns:
         True if the screening existed and was removed.
@@ -483,7 +483,7 @@ def delete_many(ids: list[str]) -> list[tuple[str, bool]]:
     """Remove several screening records in one write.
 
     Loads the list once and writes the survivors once; cover-letter drafts
-    are not touched (see ``services.screenings.delete_screenings``). Unknown ids are reported False rather than
+    are not touched (see ``truthcv.services.screenings.delete_screenings``). Unknown ids are reported False rather than
     raising, so a partially-stale selection from the client is not fatal.
 
     Args:
@@ -595,7 +595,7 @@ def _apply_refusal(
     and there is nothing left to arbitrate. "contradictory_research" fires
     when the company has an unresolved contradiction in companyresearch — a
     company whose own research disagrees with itself must not be applied to
-    until the operator resolves it (see companyresearch.store.resolve).
+    until the operator resolves it (see truthcv.domain.companyresearch.store.resolve).
 
     `open_contradictions` only calls `load_all()`, which takes no lock, so
     this is safe to call from inside the screenings lock — it must stay to
@@ -653,7 +653,7 @@ def mark_applied(screening_id: str) -> Screening | None:
     remains unconditional with respect to *claims*: this never refuses an
     item because a different run (or no run) claimed it, because it is
     called after the ledger row is already written
-    (agenttools/tools_ledger.py's record_application) — refusing here would
+    (truthcv/adapters/mcp/tools_ledger.py's record_application) — refusing here would
     lose a real submission that has already happened in the world.
 
     Shares its implementation with `claim_for_apply` (see `_retire`) so the

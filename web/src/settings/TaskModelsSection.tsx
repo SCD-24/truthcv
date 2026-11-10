@@ -5,7 +5,7 @@ import { SettingsAutosaveProvider, useHasSettingsAutosaveProvider } from "./Sett
 import type { ConnectionStatus, Routing } from "../api/types";
 
 /** The task keys the backend routes independently, paired with the label each
- * row shows. Mirrors `modelrouting.TASK_NAMES` (modelrouting/store.py) — same
+ * row shows. Mirrors `modelrouting.TASK_NAMES` (truthcv/integrations/modelrouting/store.py) — same
  * drift-protection pattern as CONNECTION_MODES for the mode literals. */
 export const TASKS = [
   { key: "truth_extract", label: "Truth extraction", description: "Extracts factual career information from your uploaded profile." },

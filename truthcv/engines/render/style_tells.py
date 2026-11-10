@@ -1,7 +1,7 @@
 """Style-tell checker: deterministic warnings for AI-sounding prose.
 
 Pure and provider-agnostic: no LLM, no I/O. Returns a list of {code, message}
-in the same shape as ``render.ats.lint``. Strong tells warn on one sighting;
+in the same shape as ``truthcv.engines.render.ats.lint``. Strong tells warn on one sighting;
 weak tells warn only when several accumulate.
 
 Patterns are drawn from humanizer's "Signs of AI writing"

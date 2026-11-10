@@ -1,12 +1,12 @@
 """Verify the PDF TruthCV actually produces, not the input HTML it came from.
 
-render/ats.py::lint checks the HTML about to be rendered. This module checks
+truthcv/engines/render/ats.py::lint checks the HTML about to be rendered. This module checks
 the artifact that comes OUT the other end: it extracts text back out of the
 produced PDF and compares it against the expected visible text of that same
 HTML, so a WeasyPrint/font/kerning defect that glues or splits words in the
 PDF (or drops text entirely) surfaces as a warning even though the source
 HTML was fine. Every finding here is a WARNING, in the same {code, message}
-shape as render/ats.py::lint, meant to be merged straight into atsWarnings.
+shape as truthcv/engines/render/ats.py::lint, meant to be merged straight into atsWarnings.
 This module has no notion of failure: verify_pdf() never raises and never
 blocks a render.
 """

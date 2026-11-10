@@ -4,10 +4,10 @@ A screening is only actionable at approval time if the operator has enough
 of the original posting to draft a cover letter from days later — on a page
 the capturing agent never sees. This module provides a strict check for
 that captured text, kept standalone and deliberately separate from
-``screening.store`` — the store stays lenient so the legacy importer
+``truthcv.domain.screening.store`` — the store stays lenient so the legacy importer
 (``scripts/migrate_jobs_history.py``) can bring in historical records that
-predate this requirement, exactly as ``screening.role`` and
-``identity.company`` do for their fields.
+predate this requirement, exactly as ``truthcv.domain.screening.role`` and
+``truthcv.infra.identity.company`` do for their fields.
 """
 
 from __future__ import annotations

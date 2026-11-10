@@ -1,4 +1,4 @@
-"""Tests for onboarding/store.py."""
+"""Tests for truthcv/domain/onboarding/store.py."""
 
 from __future__ import annotations
 

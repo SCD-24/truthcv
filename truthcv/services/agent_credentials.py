@@ -1,7 +1,7 @@
 """LLM credentials for the unattended agent: per-card resolution, the forced
 subscription-token refresh, and the per-stage route credentials.
 
-Framework-free: failures raise services.errors (NotFound → 404, Unavailable →
+Framework-free: failures raise truthcv.services.errors (NotFound → 404, Unavailable →
 503) with the same detail text the HTTP routes always returned. Credentials
 are returned as the camelCase wire dict (the ``AgentLlmCredentials`` aliases)
 so the stage-routes response can carry them unchanged. Tokens are

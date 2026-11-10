@@ -2,7 +2,7 @@
 
 A screening is only actionable if the operator can open the posting it came
 from. This module provides a strict check for that URL, kept standalone and
-deliberately separate from ``screening.store`` — the store stays lenient about
+deliberately separate from ``truthcv.domain.screening.store`` — the store stays lenient about
 urls so the legacy importer (``scripts/migrate_jobs_history.py``) can bring in
 historical records that predate this requirement.
 """
@@ -147,7 +147,7 @@ def posting_dedupe_key(url: str) -> str:
 
     Two URLs that yield the same key are the same job posting, and the
     screening store refuses to hold a second record for one (see
-    ``screening.store.create_or_get``). The key collapses only differences
+    ``truthcv.domain.screening.store.create_or_get``). The key collapses only differences
     that are cosmetic for that purpose: scheme and host case, a trailing
     slash, a trailing ``apply``/``application`` segment, the fragment, and
     tracking parameters (``_TRACKING_PARAMS``, plus anything ``utm_``-

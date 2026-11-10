@@ -1,19 +1,19 @@
 """Per-company ATS postings: pull a watched company's jobs straight from its
 applicant-tracking-system's public API, keyed off the recorded ``CompanyBoard``.
 
-Where jobfeeds.remoterocketship maps enabled profiles onto one shared board,
-this module maps recorded company boards (``companyboards.store.CompanyBoard``)
+Where truthcv.domain.jobfeeds.remoterocketship maps enabled profiles onto one shared board,
+this module maps recorded company boards (``truthcv.domain.companyboards.store.CompanyBoard``)
 onto four ATS APIs, dispatching on ``CompanyBoard.ats`` (matched
 case-insensitively, since it is free text the agent recorded via
 ``record_company_board``). It holds the same contract as every other fetcher
-in this package (see jobfeeds/__init__.py): a callable that never raises,
+in this package (see truthcv/domain/jobfeeds/__init__.py): a callable that never raises,
 returns a ``FeedResult``, and isolates one company's failure from the rest.
 
 All four ATS endpoints are unauthenticated and public — no key, no
 secretstore involvement, no per-tenant credential to manage.
 
 ``CompanyBoard.careers_url`` is an EMPLOYER careers/apply page (see
-``agenttools/tools_boards.py`` and ``companyboards/store.py``), not
+``truthcv/adapters/mcp/tools_boards.py`` and ``truthcv/domain/companyboards/store.py``), not
 necessarily a URL already hosted on the ATS itself — e.g. Google's recorded
 careers_url is "https://careers.google.com" even though its ``ats`` is
 "Lever". Before deriving a board token/slug/name from it, each builder below
@@ -100,7 +100,7 @@ TIER = "api"
 TIMEOUT_SECONDS = 8.0
 
 # Wall-clock ceiling on a whole fetch, across every company board. Sized like
-# jobfeeds.remoterocketship's own budget since this fetcher is expected to run
+# truthcv.domain.jobfeeds.remoterocketship's own budget since this fetcher is expected to run
 # alongside it inside the same config request.
 BUDGET_SECONDS = 20.0
 
@@ -597,7 +597,7 @@ def fetch_ats_postings(
 
     ``deadline`` is an optional shared ``time.monotonic()`` ceiling from a
     caller fanning this fetch out alongside another source (see
-    jobfeeds.remoterocketship.fetch_postings and services.agent_config's
+    truthcv.domain.jobfeeds.remoterocketship.fetch_postings and truthcv.services.agent_config's
     ``fetch_feed_postings``): when given, it is used as-is instead of a
     fresh BUDGET_SECONDS window, so the two fetchers split one wall-clock
     ceiling between them instead of each getting its own. Each request is

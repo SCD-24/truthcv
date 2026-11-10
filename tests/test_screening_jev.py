@@ -1,4 +1,4 @@
-"""screening.jev: question construction, threshold mapping, fail-open, enabled().
+"""truthcv.domain.screening.jev: question construction, threshold mapping, fail-open, enabled().
 
 The HTTP layer is always mocked here — this suite must never make a live
 call to Jev.

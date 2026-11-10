@@ -1,6 +1,6 @@
 """Persistence for tracked applications against the ./data volume.
 
-Mirrors truth/store.py: one JSON file on the shared data volume, written
+Mirrors truthcv/domain/truth/store.py: one JSON file on the shared data volume, written
 written through ``datafile``, which serialises each load-modify-write against
 an advisory lock — the agent records applications over MCP into the same `app`
 process the operator's browser writes from, so concurrent writers are routine.
@@ -130,7 +130,7 @@ def create_for_screening(fields: dict, screening_id: str) -> tuple[Application, 
     always reports ``created=True``.
 
     Otherwise the existence check and the write share one lock — like
-    ``screening.store.claim_for_apply`` — which is what makes it idempotent:
+    ``truthcv.domain.screening.store.claim_for_apply`` — which is what makes it idempotent:
     two concurrent callers racing on the same ``screening_id`` cannot both find
     it absent and both create a row. The loser sees the winner's record and gets
     ``(existing, False)`` without writing anything.

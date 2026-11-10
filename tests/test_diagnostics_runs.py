@@ -1,4 +1,4 @@
-"""Tests for the run summary / bounded detail tools (api/diagnostics_runs.py)."""
+"""Tests for the run summary / bounded detail tools (truthcv/adapters/http/diagnostics_runs.py)."""
 
 from __future__ import annotations
 

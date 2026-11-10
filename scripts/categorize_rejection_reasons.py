@@ -2,8 +2,8 @@
 
 Older screening records carry free-text criteria ("1. Fully remote"). This
 one-off maintenance script rewrites each rejected record's value to one of the
-canonical rejection categories (see ``screening.rejection_categories``)
-through ``screening.store.update``, and reports how many records are
+canonical rejection categories (see ``truthcv.domain.screening.rejection_categories``)
+through ``truthcv.domain.screening.store.update``, and reports how many records are
 unchanged, how many would change, the count per final category, and up to 50
 distinct raw values that fell into ``other``. Non-rejected records are skipped.
 

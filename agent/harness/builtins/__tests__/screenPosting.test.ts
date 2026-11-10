@@ -72,7 +72,7 @@ describe('screenPosting', () => {
     const result = await screenPosting(VALID_ARGS, adapter);
 
     expect(result.isError).toBe(false);
-    // record_screening (agenttools/tools_ledger.py) takes snake_case
+    // record_screening (truthcv/adapters/mcp/tools_ledger.py) takes snake_case
     // arguments; the isolated screening model's own reply is camelCase (see
     // VALID_VERDICT_JSON), but the JSON handed back to the calling model must
     // already be renamed onto record_screening's own argument names so it can

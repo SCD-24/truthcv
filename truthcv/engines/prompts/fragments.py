@@ -4,8 +4,8 @@ A ``Fragment`` is one swappable slice of prompt guidance (a voice, a
 structure, an opener convention, or a style/rules rule). A ``Preset`` names a
 set of fragment ids an operator can select together in one action. The
 SEEDED_* constants below reproduce, byte-for-byte in spirit, the guidance that
-used to live as fixed literals in ``prompts/coverletter.py`` and
-``prompts/style.py``, split at sentence boundaries so each piece can be
+used to live as fixed literals in ``truthcv/engines/prompts/coverletter.py`` and
+``truthcv/engines/prompts/style.py``, split at sentence boundaries so each piece can be
 swapped independently. Splitting existing prose into fragments changes
 nothing about what is sent to the model until an operator actually swaps a
 fragment out.
@@ -130,8 +130,8 @@ class Preset:
 
 
 # --- Text bodies below are split, at sentence boundaries, from the fixed
-# literals that used to live in prompts/coverletter.py (_TONE_DIRECTION,
-# _WRITING_STANDARD) and prompts/style.py (letter_style, letter_anti_slop).
+# literals that used to live in truthcv/engines/prompts/coverletter.py (_TONE_DIRECTION,
+# _WRITING_STANDARD) and truthcv/engines/prompts/style.py (letter_style, letter_anti_slop).
 # Splitting them into fragments changes no default output; it only makes each
 # piece independently swappable.
 
@@ -296,7 +296,7 @@ def seeded_fragments(conventions: CvConventions = DEFAULT_CONVENTIONS) -> list[F
 
 
 def _practitioner_fragments() -> list[Fragment]:
-    """Build the practitioner fragments from ``prompts.practitioner`` specs.
+    """Build the practitioner fragments from ``truthcv.engines.prompts.practitioner`` specs.
 
     Every one is ``seeded`` but never ``recommended``: the recommended set is
     what the Writing Style page warns about when a preset omits it, and

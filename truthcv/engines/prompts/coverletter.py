@@ -80,7 +80,7 @@ def _answer_lines(answers: Answers | None) -> list[str]:
         "requires_sponsorship": "Requires sponsorship",
         # Neutral label: the operator's work-authorisation status in their own
         # words. The legacy country-specific key maps to the same neutral label
-        # so an un-migrated answers.yaml still renders (the truth/answers.py
+        # so an un-migrated answers.yaml still renders (the truthcv/domain/truth/answers.py
         # loader migrates its value into work_authorisation_note on load).
         "work_authorisation_note": "Work authorisation",
         "authorized_non_german_country": "Work authorisation",

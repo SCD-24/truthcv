@@ -171,7 +171,7 @@ def _findings_table(findings: list) -> list[str]:
     """
     if not findings:
         return []
-    # Mirrors companyresearch.model.SOURCE_CLASSES ranking (strongest first),
+    # Mirrors truthcv.domain.companyresearch.model.SOURCE_CLASSES ranking (strongest first),
     # duplicated rather than imported so this module keeps no dependency on
     # the company research store — render_log stays pure: applications and
     # findings in, Markdown out, nothing loaded here.

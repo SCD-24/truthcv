@@ -1,5 +1,5 @@
-"""Error branches of services.screening_letters and the screening services
-extracted from api/routes.py: each raises the ServiceError the route's HTTP
+"""Error branches of truthcv.services.screening_letters and the screening services
+extracted from truthcv/adapters/http/routes.py: each raises the ServiceError the route's HTTP
 status maps to, with the route's exact detail text/payload."""
 
 from __future__ import annotations
@@ -106,7 +106,7 @@ def test_save_operator_text_errors_and_keeps_paragraphs():
     assert (draft.text, draft.paragraphs, draft.source) == ("mine", [{"text": "g"}], "operator")
 
 
-# --- services.screenings ---------------------------------------------------
+# --- truthcv.services.screenings ---------------------------------------------------
 
 def test_bulk_set_approval_swallows_conflict_and_refuses_bad_value():
     a = _screening(profile="A", verdict="rejected")

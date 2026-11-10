@@ -1,4 +1,4 @@
-"""Unit tests for services.truth, services.onboarding and services.tailor."""
+"""Unit tests for truthcv.services.truth, truthcv.services.onboarding and truthcv.services.tailor."""
 
 from __future__ import annotations
 

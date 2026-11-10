@@ -622,7 +622,7 @@ export function setScreeningPostingText(
  *
  * `request`'s errors are plain `Error`s carrying only a message (see its
  * definition above) — no status code survives the throw. The 404 route
- * (api/routes.py get_screening_letter) always sends the same detail string,
+ * (truthcv/adapters/http/routes.py get_screening_letter) always sends the same detail string,
  * so that string is what distinguishes "no draft yet" from a real failure. */
 export async function getScreeningLetter(id: string): Promise<CoverLetterDraft | null> {
   try {

@@ -1,4 +1,4 @@
-"""runs/store.py: lifecycle, retention, corruption-safety, and lock safety."""
+"""truthcv/domain/runs/store.py: lifecycle, retention, corruption-safety, and lock safety."""
 
 from __future__ import annotations
 

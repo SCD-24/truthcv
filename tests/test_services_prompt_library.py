@@ -1,4 +1,4 @@
-"""Unit tests for services.prompt_library and the gmail *_and_count helpers."""
+"""Unit tests for truthcv.services.prompt_library and the gmail *_and_count helpers."""
 
 from __future__ import annotations
 

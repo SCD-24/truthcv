@@ -4,9 +4,9 @@ The equivalence tests lock in that the fragment-based assembler produces the
 same sentence content (though not necessarily the same order/slot placement)
 as the plain-literal cover letter prompts this project has always produced.
 The LEGACY_* constants below are that pre-refactor text, reconstructed from
-the exact literals ``prompts/coverletter.py`` and ``prompts/style.py`` used to
+the exact literals ``truthcv/engines/prompts/coverletter.py`` and ``truthcv/engines/prompts/style.py`` used to
 hold before they were split into swappable fragments (see the "Text bodies"
-comment in ``prompts/fragments.py``), for tone='professional'/'warm'/'concise'
+comment in ``truthcv/engines/prompts/fragments.py``), for tone='professional'/'warm'/'concise'
 and length='standard' with ``DEFAULT_CONVENTIONS``.
 
 This is a pure data/logic layer: no LLM calls, no mocks, and (via the

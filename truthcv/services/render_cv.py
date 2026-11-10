@@ -1,7 +1,7 @@
 """Render workflow: build guardrail scopes, validate, then produce CV files.
 
 Framework-free — nothing here imports FastAPI. The HTTP adapter in
-``api/routes.py`` marshals a ``RenderRequest`` into the explicit arguments this
+``truthcv/adapters/http/routes.py`` marshals a ``RenderRequest`` into the explicit arguments this
 module takes and turns the returned :class:`RenderOutcome` back into the wire
 ``RenderResult``.
 
@@ -51,7 +51,7 @@ class RenderOutcome:
     ``ats_warnings`` are the raw warning dicts from the linter/verifier; the
     adapter converts them to its wire model. The service deliberately does NOT
     decide the "no application and no output" hard-error case — the adapter
-    owns that (it maps to HTTP 500, not the 503 a ``services.errors`` exception
+    owns that (it maps to HTTP 500, not the 503 a ``truthcv.services.errors`` exception
     would produce).
     """
 

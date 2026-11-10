@@ -1,4 +1,4 @@
-"""api.genkey produces a valid Fernet key."""
+"""truthcv.adapters.http.genkey produces a valid Fernet key."""
 
 from __future__ import annotations
 

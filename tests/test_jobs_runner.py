@@ -1,11 +1,11 @@
-"""Tests for jobs.runner: submit/get/list_jobs against the bounded pool.
+"""Tests for truthcv.infra.background_tasks.runner: submit/get/list_jobs against the bounded pool.
 
 Synchronization is entirely threading.Event based (no sleeps). Several tests
 saturate the pool with MAX_WORKERS blocked jobs so a job of interest is
 provably still queued (pending), then release exactly one worker and confirm
 completion with a "sentinel" job: since only one worker is free, the
 sentinel can only start once the worker that ran the job of interest has
-fully returned from jobs.runner._run_job -- which is also where that job's
+fully returned from truthcv.infra.background_tasks.runner._run_job -- which is also where that job's
 final status is recorded -- giving a real happens-before via Event set/wait,
 not a timing guess.
 """

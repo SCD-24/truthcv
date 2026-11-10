@@ -162,7 +162,7 @@ def _synonym_expanded(allowed: set[str]) -> set[str]:
     """Widen `allowed` with every sibling form of an already-attested synonym group.
 
     For each equivalence group in the operator's data/vocabulary/synonyms.txt
-    (loaded via vocabulary.synonyms.synonym_groups()), if the tokens of SOME form
+    (loaded via truthcv.engines.vocabulary.synonyms.synonym_groups()), if the tokens of SOME form
     in that group are already fully present in `allowed`, every token of EVERY
     form in that group is added too. Iterated to a small fixed point (at most
     twice) so a chain of two synonym groups both resolve in one call.

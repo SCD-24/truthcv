@@ -15,7 +15,7 @@ different notions of "match":
   (:func:`contains_ordered`): the keyword's tokens must appear in order, but a
   bounded number of other tokens may sit between them.
 
-This module deliberately does NOT import ``guardrail.validate`` — the guardrail
+This module deliberately does NOT import ``truthcv.engines.guardrail.validate`` — the guardrail
 will later import this module, and importing it back would create a circular
 import. The tokenizer here is therefore a private copy of the guardrail's
 (same regex, lowering, and stripping) rather than a shared import.
@@ -143,7 +143,7 @@ def match_keyword(keyword: str, text: str, aliases: Iterable[str] = ()) -> str:
     2. Otherwise an ordered, gap-bounded match of the keyword ->
        :data:`INTERLEAVED`.
     3. Otherwise, if any alias form — the caller-supplied ``aliases`` plus the
-       known-equivalent forms from :func:`vocabulary.synonyms.equivalent_forms`
+       known-equivalent forms from :func:`truthcv.engines.vocabulary.synonyms.equivalent_forms`
        — matches contiguously or in order -> :data:`ALIAS_ONLY`.
     4. Otherwise -> :data:`ABSENT`.
 

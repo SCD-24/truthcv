@@ -1,7 +1,7 @@
 """HTTP client for the agent supervisor.js control server.
 
 Lives in services so the run lifecycle logic can reach the supervisor without
-importing the API layer; it raises ``services.errors`` types instead of
+importing the API layer; it raises ``truthcv.services.errors`` types instead of
 ``HTTPException`` and the global handler maps them back to the same statuses.
 """
 

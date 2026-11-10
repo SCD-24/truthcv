@@ -26,7 +26,7 @@ def public_url() -> str:
     PUBLIC_PORT is the HOST-side port docker-compose publishes (display
     only); `port()` above is the port this process actually binds inside
     the container. They are deliberately different variables: PUBLIC_PORT
-    is NOT named APP_PORT because api/__init__.py's _load_dotenv()
+    is NOT named APP_PORT because truthcv/adapters/http/__init__.py's _load_dotenv()
     setdefault()s every repo-root .env key into the process, which would
     leak the host port into local dev runs that bind 8080 directly.
     """
@@ -37,7 +37,7 @@ def public_url() -> str:
 
 # Credential/secret config moved to the neutral `secretstore` package so the
 # provider layer can reach it without importing api. Re-exported here for the
-# existing `from api.config import encryption_key/secrets_path` callers.
+# existing `from truthcv.adapters.http.config import encryption_key/secrets_path` callers.
 from truthcv.infra.secretstore import encryption_key, secrets_path  # noqa: E402,F401
 
 

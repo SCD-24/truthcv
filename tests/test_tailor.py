@@ -253,7 +253,7 @@ def test_guardrail_matches_accented_company_name_in_truth_and_draft():
 
 def test_operator_supplied_stopwords_stop_being_flagged(data_dir):
     """Words listed on the data volume are no longer unverifiable claims."""
-    # guardrail/__init__ re-exports the validate() function over the
+    # truthcv/engines/guardrail/__init__ re-exports the validate() function over the
     # submodule name, so reach the module through sys.modules.
     import sys
 
@@ -345,7 +345,7 @@ def test_uncovered_keywords_honours_alias_argument():
 
 def test_select_and_infer_run_concurrently(data_dir):
     """select_and_rephrase and detect_inferences each get their own provider
-    (tailor/infer) and run concurrently, not serially.
+    (truthcv/engines/tailor/infer) and run concurrently, not serially.
 
     A shared threading.Barrier(2) only releases once BOTH blocking providers'
     extract_json calls have reached it. If tailor() ran the two calls

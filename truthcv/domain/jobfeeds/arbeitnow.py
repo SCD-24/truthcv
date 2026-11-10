@@ -2,11 +2,11 @@
 
 Unlike Remote Rocketship, Arbeitnow's job-board API is public — GET, no
 auth, no per-operator credential — so this feed is not opt-in per board: it
-is an unremovable default (see agentconfig/boards.DEFAULT_BOARD_SOURCES) and
+is an unremovable default (see truthcv/domain/agentconfig/boards.DEFAULT_BOARD_SOURCES) and
 is always fetched alongside Remote Rocketship and the ATS feeds.
 
-Same contract as every other fetcher in this package (see jobfeeds/__init__.py
-and jobfeeds/remoterocketship.py): ``fetch_postings`` NEVER raises. Every
+Same contract as every other fetcher in this package (see truthcv/domain/jobfeeds/__init__.py
+and truthcv/domain/jobfeeds/remoterocketship.py): ``fetch_postings`` NEVER raises. Every
 failure comes back as a ``FeedResult`` with ``error`` set.
 
 The API has no server-side keyword filter, so every page fetched is matched
@@ -32,7 +32,7 @@ TIMEOUT_SECONDS = 8.0
 
 # Wall-clock ceiling on a whole fetch when no shared deadline is given by the
 # caller. Mirrors remoterocketship.BUDGET_SECONDS: the config route gives the
-# combined feed fetch one shared budget (see services.agent_config's
+# combined feed fetch one shared budget (see truthcv.services.agent_config's
 # ``fetch_feed_postings``), and this default only applies when this fetcher
 # is exercised on its own (e.g. in tests).
 BUDGET_SECONDS = 20.0
@@ -234,7 +234,7 @@ def fetch_postings(
     de-duplicated per profile by URL and capped fetch-wide at MAX_POSTINGS.
 
     ``deadline`` is an optional shared ``time.monotonic()`` ceiling (see
-    remoterocketship.fetch_postings and services.agent_config's
+    remoterocketship.fetch_postings and truthcv.services.agent_config's
     ``fetch_feed_postings``): when given, it is used as-is instead of a
     fresh BUDGET_SECONDS window.
     """

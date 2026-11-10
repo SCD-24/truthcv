@@ -172,7 +172,7 @@ def test_profile_header_is_allowed_claim_source(data_dir):
 
 
 def test_answers_block_without_parameter_unblock_with_parameter(data_dir):
-    """A letter claiming a value that exists only in truth.answers.Answers is
+    """A letter claiming a value that exists only in truthcv.domain.truth.answers.Answers is
     blocked without answers=, and unblocked when answers= carries it."""
     truth = _truth()
     answers = Answers(current_role="Staff Engineer")

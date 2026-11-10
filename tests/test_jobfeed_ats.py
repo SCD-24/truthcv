@@ -1,4 +1,4 @@
-"""jobfeeds/ats.py: per-company ATS dispatch, response parsing, failure isolation."""
+"""truthcv/domain/jobfeeds/ats.py: per-company ATS dispatch, response parsing, failure isolation."""
 
 from __future__ import annotations
 
@@ -372,7 +372,7 @@ def test_several_unhosted_boards_are_counted_together_in_one_note(mock_http):
 
 def test_an_explicit_deadline_overrides_the_default_budget(mock_http, monkeypatch):
     """A caller fanning this fetch out alongside another source (see
-    api/routes.py's _fetch_feed_postings) passes its own shared deadline; it
+    truthcv/adapters/http/routes.py's _fetch_feed_postings) passes its own shared deadline; it
     must be honored instead of a fresh BUDGET_SECONDS window."""
     monkeypatch.setattr(ats.time, "monotonic", lambda: 0.0)
     timeouts = []

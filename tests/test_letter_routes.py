@@ -34,7 +34,7 @@ def _queued(posting_text="Staff AI Engineer, Germany (Remote). Python, LLMs."):
 
 class _StubProvider:
     """Returns one paragraph with an empty ``claims`` list. The guardrail only
-    validates a paragraph's self-tagged claims (coverletter/generate.py's
+    validates a paragraph's self-tagged claims (truthcv/engines/coverletter/generate.py's
     ``_letter_scope`` builds its Scope from ``claims``, never from ``text``),
     so an empty claims list clears validation regardless of the prose. Keeps
     these tests off the network."""
@@ -157,7 +157,7 @@ def test_blocked_generation_writes_nothing_and_names_the_claims(client, monkeypa
 
 def test_generate_422_when_company_is_blocklisted(client, stub_provider):
     """The blocklist short-circuits before the model is ever called (see
-    agenttools/tools_letter.py's is_blocked check), returning the same
+    truthcv/adapters/mcp/tools_letter.py's is_blocked check), returning the same
     blocked=True shape as a guardrail rejection. That path is untested at
     the route layer even though it's safe by inspection, so exercise it
     directly: nothing should be written to the letter store either."""
@@ -296,7 +296,7 @@ def test_denying_the_blocked_claim_drops_it(client, monkeypatch):
 
 
 def test_generate_without_preset_id_uses_default_preset_prompt(client, monkeypatch):
-    """Omitting presetId must resolve through prompts.library.default_preset(),
+    """Omitting presetId must resolve through truthcv.engines.prompts.library.default_preset(),
     not silently fall back to some other preset (or error) — the system
     prompt the provider actually receives must match what that default
     preset produces."""

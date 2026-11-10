@@ -20,7 +20,7 @@ Follow these ordered steps for any change in this repository (TruthCV — a Fast
 
 5. **Validate locally.**
    - Backend: `pip install -r requirements-dev.txt` then `pytest` (config in `pyproject.toml`: `testpaths=["tests"]`, `pythonpath=["."]`).
-   - Frontend: from `web/`, run `npm run typecheck` and `npm run build` (the build emits into `api/static`, which the API serves in production).
+   - Frontend: from `web/`, run `npm run typecheck` and `npm run build` (the build emits into `truthcv/adapters/http/static`, which the API serves in production).
    - Note: PDF/DOCX rendering shells out to native libs (WeasyPrint deps, pandoc, DejaVu fonts) that `pip` does not install — run render-dependent paths inside Docker (`docker compose up --build`) or install the OS packages listed in `README.md`.
 
 6. **Keep docs and architecture coherent.** Update only agent-owned Markdown sections you invalidated — **never edit inside `<!-- generated:start ... -->` / `<!-- generated:end -->` markers** (e.g. the generated blocks in `CLAUDE.md`, `agent-workflow.md`, and the architecture pages). If your change alters components, interactions, or the system boundary, that must be reflected through the architecture-canvas tooling, not by hand-editing generated blocks. Consult a doc-change matrix if one exists (tooling-owned; **none is present in this repo today**).

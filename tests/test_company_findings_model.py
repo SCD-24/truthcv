@@ -1,4 +1,4 @@
-"""Tests for companyresearch.model: source ranking and validation rules."""
+"""Tests for truthcv.domain.companyresearch.model: source ranking and validation rules."""
 
 from __future__ import annotations
 

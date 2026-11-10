@@ -33,7 +33,7 @@ BROWSER_MCP_URL="${BROWSER_MCP_URL:-http://browser:8931/mcp}"
 
 STAMP="$(date +%Y-%m-%d_%H%M)"
 
-# TRUTHCV_RUN_ID identifies this run to the run store (runs/store.py) via the
+# TRUTHCV_RUN_ID identifies this run to the run store (truthcv/domain/runs/store.py) via the
 # start_run/finish_run/record_run_note MCP tools. The supervisor (supervisor.js)
 # mints one and passes it through the environment for a scheduled run; a
 # manual invocation with no supervisor gets one generated here so it is still
@@ -240,15 +240,15 @@ log "agent mode: $AGENT_MODE"
 # language, and accepted/rejected role types. Missing fields render as
 # "not configured" rather than being silently dropped, so the agent never
 # mistakes an unset criterion for a waived one.
-# The `select(.enabled == true)` filter matches agentconfig/dorks.compose_queries:
+# The `select(.enabled == true)` filter matches truthcv/domain/agentconfig/dorks.compose_queries:
 # a disabled profile's criteria must never render into the run prompt as if
 # active, since record_screening's `profile` argument only accepts an
 # enabled profile name — rendering a disabled one here would offer the agent
 # criteria it can never successfully screen against.
-# Field names are camelCase to match the wire format api/schemas.py's
+# Field names are camelCase to match the wire format truthcv/adapters/http/schemas/'s
 # AgentConfigModel/JobProfileModel produce (same convention as the
 # targetCompanies/companyBoards/cooldownDays fields already used above).
-# currency is exposed on the wire (api/schemas.py JobProfileModel) and may be
+# currency is exposed on the wire (truthcv/adapters/http/schemas/ JobProfileModel) and may be
 # null: no regional default exists, so a band without a configured currency
 # renders as "not configured" rather than quoting a currency the user never
 # chose.
