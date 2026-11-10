@@ -1,0 +1,866 @@
+[
+  {
+    "class": "Route",
+    "path": "/openapi.json",
+    "methods": [
+      "GET",
+      "HEAD"
+    ],
+    "endpoint": "openapi"
+  },
+  {
+    "class": "Route",
+    "path": "/docs",
+    "methods": [
+      "GET",
+      "HEAD"
+    ],
+    "endpoint": "swagger_ui_html"
+  },
+  {
+    "class": "Route",
+    "path": "/docs/oauth2-redirect",
+    "methods": [
+      "GET",
+      "HEAD"
+    ],
+    "endpoint": "swagger_ui_redirect"
+  },
+  {
+    "class": "Route",
+    "path": "/redoc",
+    "methods": [
+      "GET",
+      "HEAD"
+    ],
+    "endpoint": "redoc_html"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/screenings",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "list_screenings"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/screenings/rejected",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "list_rejected_screenings"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/runs",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "list_runs"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/runs/{run_id}",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_run"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/runs/{run_id}/urls",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_run_urls"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/runs/{run_id}/stop",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "post_run_stop"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/screenings",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "create_screening"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/screenings/approvals",
+    "methods": [
+      "PATCH"
+    ],
+    "endpoint": "bulk_set_approval"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/screenings/{screening_id}/applied",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "mark_screening_applied"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/screenings/deletions",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "bulk_delete_screenings"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/screenings/{screening_id}",
+    "methods": [
+      "PATCH"
+    ],
+    "endpoint": "set_screening_approval"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/company-findings",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "list_company_findings"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/company-findings/contradictions",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "list_company_finding_contradictions"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/company-findings/{company}",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "list_company_findings_for"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/company-findings",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "create_company_finding"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/company-findings/{finding_id}",
+    "methods": [
+      "PATCH"
+    ],
+    "endpoint": "resolve_company_finding"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/screenings/{screening_id}/letter",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_screening_letter"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/screenings/{screening_id}/letter",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "generate_screening_letter"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/screenings/{screening_id}/letter",
+    "methods": [
+      "PUT"
+    ],
+    "endpoint": "save_screening_letter"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/screenings/{screening_id}",
+    "methods": [
+      "DELETE"
+    ],
+    "endpoint": "delete_screening"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/cooldown",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_cooldown"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/upload",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "upload"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/extract",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "extract"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/truth",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_truth"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/truth",
+    "methods": [
+      "PUT"
+    ],
+    "endpoint": "put_truth"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/tailor",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "tailor_route"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/confirm-inferences",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "confirm_inferences"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/render",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "render_route"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/applications",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "list_applications"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/applications/page",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "list_applications_page"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/applications/export",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "export_applications"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/applications",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "create_application"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/applications/{app_id}",
+    "methods": [
+      "PUT"
+    ],
+    "endpoint": "update_application"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/applications/{app_id}",
+    "methods": [
+      "DELETE"
+    ],
+    "endpoint": "delete_application"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/applications/{app_id}/cv",
+    "methods": [
+      "PUT"
+    ],
+    "endpoint": "save_application_cv"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/applications/{app_id}/cover-letter",
+    "methods": [
+      "PUT"
+    ],
+    "endpoint": "save_application_cover_letter"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/profile",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "profile"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/onboarding",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "onboarding"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/onboarding",
+    "methods": [
+      "PUT"
+    ],
+    "endpoint": "put_onboarding"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/profile/answers",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_profile_answers"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/profile/answers",
+    "methods": [
+      "PUT"
+    ],
+    "endpoint": "put_profile_answers"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/job-boards/{source}/key",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_job_board_key"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/job-boards/{source}/key",
+    "methods": [
+      "PUT"
+    ],
+    "endpoint": "put_job_board_key"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/job-boards/{source}/key/test",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "test_job_board_key"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/settings/jev",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_jev_settings"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/settings/jev",
+    "methods": [
+      "PUT"
+    ],
+    "endpoint": "put_jev_settings"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/settings/jev/test",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "test_jev_settings"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/auth/gmail/start",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "start_gmail_login"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/auth/gmail/callback",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "complete_gmail_login"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/gmail/status",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_gmail_status"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/gmail/responses/sync",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "sync_gmail_responses"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/agent/config",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_agent_config"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/agent/config",
+    "methods": [
+      "PUT"
+    ],
+    "endpoint": "put_agent_config"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/agent/llm-credentials",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_agent_llm_credentials"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/agent/llm-token/refresh",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "post_agent_llm_token_refresh"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/agent/llm-routes",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_agent_llm_routes"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/agent/runs/{run_id}/start",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "post_agent_run_start"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/agent/runs/{run_id}/finish",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "post_agent_run_finish"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/agent/status",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_agent_status"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/agent/run",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "post_agent_run"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/agent/cancel",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "post_agent_cancel"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/browser/signin-queue",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_signin_queue"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/browser/session",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_browser_session"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/browser/session",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "post_browser_session"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/browser/session",
+    "methods": [
+      "DELETE"
+    ],
+    "endpoint": "delete_browser_session"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/cover-letter",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "cover_letter"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/settings",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_settings"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/settings",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "post_settings"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/settings/test",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "test_settings"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/models",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "list_models"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/auth/status",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_connection_status"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/auth/{provider}/start",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "start_connection_login"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/auth/claude/complete",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "complete_claude_login_alias"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/auth/{provider}/complete",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "_complete_login"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/auth/{provider}/poll",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "_poll_login"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/auth/{provider}/key",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "post_connection_key"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/auth/{provider}/models",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_connection_models"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/auth/{provider}/test",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "test_connection"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/auth/{provider}/logout",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "logout_connection"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/routing",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_routing"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/routing",
+    "methods": [
+      "PUT"
+    ],
+    "endpoint": "put_routing"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/mcp/tools",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "list_tools"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/mcp/tools/{name}",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "call_tool"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/prompt-fragments",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_prompt_fragments"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/prompt-fragments",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "create_prompt_fragment"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/prompt-fragments/{id}",
+    "methods": [
+      "PUT"
+    ],
+    "endpoint": "update_prompt_fragment"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/prompt-fragments/{id}",
+    "methods": [
+      "DELETE"
+    ],
+    "endpoint": "remove_prompt_fragment"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/prompt-presets",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_prompt_presets"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/prompt-presets",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "create_prompt_preset"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/prompt-presets/{id}",
+    "methods": [
+      "PUT"
+    ],
+    "endpoint": "update_prompt_preset"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/prompt-presets/{id}",
+    "methods": [
+      "DELETE"
+    ],
+    "endpoint": "remove_prompt_preset"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/prompt-presets/{id}/default",
+    "methods": [
+      "PUT"
+    ],
+    "endpoint": "set_prompt_preset_default"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/jobs",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "list_all_jobs"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/jobs/{job_id}",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "get_job"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/jobs/{kind}",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "start_job"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/gmail/suggestions",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "list_suggestions"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/gmail/suggestions/dismiss",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "dismiss_suggestions"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/gmail/suggestions/{suggestion_id}/accept",
+    "methods": [
+      "POST"
+    ],
+    "endpoint": "accept_suggestion"
+  },
+  {
+    "class": "APIWebSocketRoute",
+    "path": "/api/browser/session/stream",
+    "methods": null,
+    "endpoint": "browser_session_stream"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/mcp",
+    "methods": [
+      "DELETE",
+      "GET",
+      "HEAD",
+      "OPTIONS",
+      "PATCH",
+      "POST",
+      "PUT",
+      "TRACE"
+    ],
+    "endpoint": "mcp_json_rpc_endpoint"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/mcp/diagnostics",
+    "methods": [
+      "DELETE",
+      "GET",
+      "HEAD",
+      "OPTIONS",
+      "PATCH",
+      "POST",
+      "PUT",
+      "TRACE"
+    ],
+    "endpoint": "mcp_diagnostics_json_rpc_endpoint"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/download/{name}",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "download"
+  }
+]
