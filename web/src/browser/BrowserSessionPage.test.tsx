@@ -32,7 +32,7 @@ const { MockRfb, rfbHolder } = vi.hoisted(() => {
   return { MockRfb: MockRfbClass, rfbHolder };
 });
 
-vi.mock("@novnc/novnc/lib/rfb", () => ({
+vi.mock("./rfb", () => ({
   default: MockRfb,
 }));
 

@@ -1,12 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { Alert, AppBar, Box, Button, Stack, Toolbar, Typography } from "@mui/material";
-// `@novnc/novnc` is pinned to an EXACT 1.6.0 in package.json (no caret) —
-// 1.7.0's package.json restricts `exports` to `./core/rfb.js` only, which
-// breaks this `lib/rfb` subpath entirely (Vite's resolver fails before this
-// module even loads). Do not loosen the pin or bump the version without
-// re-checking that `@novnc/novnc/lib/rfb` still resolves.
-import RFB from "@novnc/novnc/lib/rfb";
+import RFB from "./rfb";
 
 import {
   BrowserSessionError,
