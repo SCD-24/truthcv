@@ -5,7 +5,7 @@
       "id": "agent-vitest",
       "name": "Agent tests (vitest)",
       "kind": "test",
-      "command": "agent/node_modules/.bin/vitest run --root agent",
+      "command": "agent/node_modules/.bin/vitest run --root agent --passWithNoTests",
       "enabled": true,
       "scope": "repo"
     },

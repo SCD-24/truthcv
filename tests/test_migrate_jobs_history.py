@@ -40,6 +40,8 @@ class _FrozenClock:
         """The fixed instant every call reports."""
         return datetime(2026, 8, 14, 12, 0, 0, tzinfo=tz or timezone.utc)
 
+    fromisoformat = staticmethod(datetime.fromisoformat)
+
 
 RECORD = {
     "schema_version": 1,
@@ -268,9 +270,12 @@ def test_cooldown_clause_survives_a_line_wrap(jobs_tree):
     assert found["Acme GmbH"] == "2026-11-11"
 
 
-def test_a_migrated_company_is_reported_in_cooldown(data_dir, jobs_tree):
+def test_a_migrated_company_is_reported_in_cooldown(data_dir, jobs_tree, monkeypatch):
     """The point of the whole migration: a company known ONLY from migrated
     history must still block the agent from re-applying."""
+    monkeypatch.setattr(
+        "truthcv.domain.screening.cooldown.datetime", _FrozenClock, raising=True
+    )
     assert cooldown("Acme GmbH").in_cooldown is False
     run(jobs_tree, dry_run=False)
     status = cooldown("Acme GmbH")

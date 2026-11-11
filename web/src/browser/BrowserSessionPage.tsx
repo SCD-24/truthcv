@@ -1,12 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { Alert, AppBar, Box, Button, Stack, Toolbar, Typography } from "@mui/material";
-// `@novnc/novnc` is pinned to an EXACT 1.6.0 in package.json (no caret) —
-// 1.7.0's package.json restricts `exports` to `./core/rfb.js` only, which
-// breaks this `lib/rfb` subpath entirely (Vite's resolver fails before this
-// module even loads). Do not loosen the pin or bump the version without
-// re-checking that `@novnc/novnc/lib/rfb` still resolves.
-import RFB from "@novnc/novnc/lib/rfb";
+import getRfb, { type RFB } from "./rfb";
+import { Countdown } from "./Countdown";
 
 import {
   BrowserSessionError,
@@ -47,6 +43,11 @@ const CLOSE_POLL_MS = 500;
  * momentary blip is worse than staying live a little past a real outage. */
 const MAX_CONSECUTIVE_POLL_FAILURES = 3;
 
+/** Shown when the viewport never connected, whether noVNC reported it or the
+ * viewer could not even be created. */
+const VIEWPORT_CONNECT_FAILED =
+  "The viewport could not connect to the browser. Try again; if it keeps failing, check that the browser service is running.";
+
 type State = "starting" | "live" | "refused" | "unavailable" | "closed";
 
 function hostOf(url: string): string {
@@ -55,36 +56,6 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
-}
-
-/** Seconds remaining until an eviction deadline, floored at zero. */
-function secondsLeft(deadline: string): number {
-  const ms = Date.parse(deadline) - Date.now();
-  return ms > 0 ? Math.ceil(ms / 1000) : 0;
-}
-
-function mmss(total: number): string {
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-/** How often the eviction countdown re-renders. Isolated into its own
- * component so ticking it doesn't re-render the whole page (and, in
- * particular, doesn't touch the noVNC viewer) every second. */
-const COUNTDOWN_TICK_MS = 1000;
-
-/** Ticking "time left" label for an eviction deadline. */
-function Countdown({ deadline }: { deadline: string }) {
-  const [remaining, setRemaining] = useState(() => secondsLeft(deadline));
-
-  useEffect(() => {
-    setRemaining(secondsLeft(deadline));
-    const id = setInterval(() => setRemaining(secondsLeft(deadline)), COUNTDOWN_TICK_MS);
-    return () => clearInterval(id);
-  }, [deadline]);
-
-  return <>{mmss(remaining)}</>;
 }
 
 /** The attended sign-in viewport.
@@ -175,7 +146,16 @@ export function BrowserSessionPage() {
     connectedRef.current = false;
     if (!canvasRef.current) return;
     const wsUrl = `${location.origin.replace(/^http/, "ws")}/api/browser/session/stream`;
-    const rfb = new RFB(canvasRef.current, wsUrl);
+    let rfb: RFB;
+    try {
+      rfb = new (getRfb())(canvasRef.current, wsUrl);
+    } catch (error) {
+      console.error("Could not start the noVNC viewer", error);
+      failedRef.current = true;
+      setState("unavailable");
+      setMessage(VIEWPORT_CONNECT_FAILED);
+      return;
+    }
     // noVNC 1.6.0 defaults to rendering the full remote 1920x1080 desktop
     // at native size, which overflows this page's <Box> with no way to pan
     // to the right/bottom of the desktop. Scale-and-clip it to the box instead.
@@ -210,7 +190,7 @@ export function BrowserSessionPage() {
         setMessage(
           connectedRef.current
             ? "The connection to the browser dropped. Nothing was saved on the way out — try again."
-            : "The viewport could not connect to the browser. Try again; if it keeps failing, check that the browser service is running.",
+            : VIEWPORT_CONNECT_FAILED,
         );
         return;
       }
