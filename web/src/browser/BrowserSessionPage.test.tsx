@@ -8,7 +8,7 @@ import { BrowserSessionPage } from "./BrowserSessionPage";
 // `vi.mock` factories are hoisted above the rest of the module, so the mock
 // class and the holder that captures its latest instance must be created
 // through `vi.hoisted` rather than as ordinary top-level declarations.
-const { MockRfb, rfbHolder } = vi.hoisted(() => {
+const { rfbHolder, getRfbMock } = vi.hoisted(() => {
   const rfbHolder: { current: InstanceType<typeof MockRfbClass> | null } = { current: null };
   class MockRfbClass {
     private listeners: Record<string, Array<(e?: unknown) => void>> = {};
@@ -29,11 +29,12 @@ const { MockRfb, rfbHolder } = vi.hoisted(() => {
       this.listeners[type]?.forEach((cb) => cb(detail !== undefined ? { detail } : undefined));
     }
   }
-  return { MockRfb: MockRfbClass, rfbHolder };
+  const getRfbMock = vi.fn((): unknown => MockRfbClass);
+  return { rfbHolder, getRfbMock };
 });
 
 vi.mock("./rfb", () => ({
-  default: MockRfb,
+  default: getRfbMock,
 }));
 
 // Mirrors what the real RFB does: a failed handshake fires `securityfailure`
@@ -420,5 +421,64 @@ describe("BrowserSessionPage", () => {
       expect(screen.getByText(/browser could not be started/i)).toBeTruthy();
     });
     expect(screen.queryByText(/agent is applying right now/i)).toBeNull();
+  });
+
+  describe("when the viewer cannot be created", () => {
+    const failureCopy = /viewport could not connect to the browser/i;
+    let errorSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      errorSpy.mockRestore();
+    });
+
+    it("shows the error screen with Try again when the RFB constructor throws", async () => {
+      getRfbMock.mockImplementationOnce(
+        () =>
+          class {
+            constructor() {
+              throw new Error("constructor boom");
+            }
+          },
+      );
+      renderPage();
+
+      expect(await screen.findByText(failureCopy)).toBeTruthy();
+      expect(screen.getByRole("alert")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /try again/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /back to job boards/i })).toBeTruthy();
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("reaches the live view when Try again finds a working constructor", async () => {
+      getRfbMock.mockImplementationOnce(
+        () =>
+          class {
+            constructor() {
+              throw new Error("constructor boom");
+            }
+          },
+      );
+      renderPage();
+      fireEvent.click(await screen.findByRole("button", { name: /try again/i }));
+
+      expect(await screen.findByRole("button", { name: /done/i })).toBeTruthy();
+      expect(screen.queryByText(failureCopy)).toBeNull();
+      expect(rfbHolder.current).not.toBeNull();
+    });
+
+    it("shows the same error screen when resolving the constructor throws", async () => {
+      getRfbMock.mockImplementationOnce(() => {
+        throw new Error("resolver boom");
+      });
+      renderPage();
+
+      expect(await screen.findByText(failureCopy)).toBeTruthy();
+      expect(screen.getByRole("button", { name: /try again/i })).toBeTruthy();
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+    });
   });
 });

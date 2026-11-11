@@ -30,10 +30,15 @@ export function unwrapRfbConstructor(mod: unknown): RfbConstructor {
   return found;
 }
 
-/** The noVNC `RFB` class, resolved past any bundler interop wrapper. */
-const RFB = unwrapRfbConstructor(RfbModule);
+let resolved: RfbConstructor | undefined;
+
+/** The noVNC `RFB` class, resolved past any bundler interop wrapper. Resolved
+ * on first call rather than at import, so a resolution failure surfaces to the
+ * caller instead of breaking module load. */
+export default function getRfb(): RfbConstructor {
+  resolved ??= unwrapRfbConstructor(RfbModule);
+  return resolved;
+}
 
 /** An instance of the noVNC `RFB` class. */
-type RFB = InstanceType<RfbConstructor>;
-
-export default RFB;
+export type RFB = InstanceType<RfbConstructor>;

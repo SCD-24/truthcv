@@ -8,8 +8,9 @@ const entryPath = "src/browser/rfb.bundle.test.ts";
 const exposedKey = "__rfbBundleClass";
 
 /** Consumer shape of BrowserSessionPage: a default import of the RFB module,
- * published on `globalThis` because app-mode builds drop entry exports. */
-const consumerSource = `import RFB from "./rfb"; (globalThis as Record<string, unknown>).${exposedKey} = RFB;`;
+ * called to resolve the class, and published on `globalThis` because app-mode
+ * builds drop entry exports. */
+const consumerSource = `import getRfb from "./rfb"; (globalThis as Record<string, unknown>).${exposedKey} = getRfb();`;
 
 /** Serves `consumerSource` under this file's own id. The id must be a real
  * file: Rolldown picks the CommonJS interop mode from the importing file, and
