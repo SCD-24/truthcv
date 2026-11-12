@@ -46,8 +46,8 @@ What the launcher actually does, each time you double-click it:
 2. Fills in `ENCRYPTION_KEY` and `AGENT_API_TOKEN` if they're blank — never
    overwriting a value already set — backing up any `.env` it modifies.
 3. Sets `APP_PORT` (default `5627`); if Docker reports that port already
-   allocated, it advances to the next candidate and rewrites `.env`, retrying
-   up to 10 times.
+   allocated, it advances to the next candidate and rewrites `.env`, trying
+   up to 10 ports in all.
 4. Runs `docker compose up -d --build`, which starts the app, browser and
    agent containers together.
 5. Polls the app until it answers, then opens it in your browser.
@@ -437,18 +437,27 @@ connection is only useful here for auto-applying Jev-confirmed transitions.
 3. Configure the **OAuth consent screen**, adding the
    `https://www.googleapis.com/auth/gmail.readonly` scope — the only scope
    TruthCV requests; it can only read your mail, never send or modify it.
-4. Create an OAuth client of type **Web application**, with an authorized
+4. Set the app's publishing status to **In production** (OAuth consent
+   screen → **Audience** → **Publish app**). While the status is **Testing**,
+   Google's token endpoint returns a refresh token that lasts 7 days, so
+   Google ends the Gmail connection every 7 days. TruthCV shows a warning
+   with the end date in **Settings → Gmail**. **Publish app** stays disabled
+   until the **Branding** page is complete: fill in the app name, user
+   support email, application home page URL and privacy policy URL (plus the
+   matching authorized domain), and save. Only then can you click
+   **Audience → Publish app**.
+5. Create an OAuth client of type **Web application**, with an authorized
    redirect URI of `http://localhost:<APP_PORT>/api/auth/gmail/callback`
    (substitute your actual `APP_PORT`; TruthCV derives this same URI from the
    request host at runtime, so it must match exactly).
-5. Set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in `.env` to
+6. Set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in `.env` to
    the client's id and secret.
-6. If the app is served behind a reverse proxy, or reached at anything other
+7. If the app is served behind a reverse proxy, or reached at anything other
    than `localhost:<APP_PORT>`, set `GOOGLE_OAUTH_REDIRECT_URI` in `.env` to
    the exact redirect URI registered above — request-derived detection can't
    be trusted through a proxy uvicorn doesn't trust, and the value must match
    the Google console entry character-for-character.
-7. Connect from **Settings → Gmail** in the app.
+8. Connect from **Settings → Gmail** in the app.
 
 ## Running it by hand
 
@@ -461,10 +470,12 @@ cp .env.example .env
 
 # 2. Set ENCRYPTION_KEY and AGENT_API_TOKEN (both required, both non-empty —
 #    an empty AGENT_API_TOKEN aborts every scheduled run with
-#    "AGENT_API_TOKEN is not set"). Generate each with:
-openssl rand -hex 32
-# or, dependency-free:
+#    "AGENT_API_TOKEN is not set").
+#    ENCRYPTION_KEY must be a Fernet key (urlsafe base64 of 32 random bytes);
+#    a hex string is not a valid key. Generate it with:
 python -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+#    Generate AGENT_API_TOKEN with:
+openssl rand -hex 32
 
 # 3. Build and run
 docker compose up -d --build
@@ -480,7 +491,7 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work \
 ```
 
 5627 is only the default — the actual URL depends on `APP_PORT` in your
-`.env`. The app now prints its real URL at startup, so `docker compose logs
+`.env`. The app prints its real URL at startup, so `docker compose logs
 app` (or `docker compose ps`, whose PORTS column shows
 `127.0.0.1:<host>->8080/tcp`) is the reliable way to find it. The app binds to
 loopback only (`docker-compose.yml` maps `127.0.0.1:<host>->8080`), so it's
