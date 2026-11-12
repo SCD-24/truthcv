@@ -176,6 +176,27 @@ describe("GmailSection", () => {
     expect(alert.textContent).toMatch(/publish app/i);
   });
 
+  it("reauthRequired with a past refreshExpiresAt: explains in past tense, no future-tense end date", async () => {
+    vi.mocked(getJevSettings).mockResolvedValueOnce(
+      makeJev({ keySet: true, useForEmailTracking: true }),
+    );
+    vi.mocked(getGmailStatus).mockResolvedValueOnce(
+      makeGmail({
+        connected: true,
+        email: "person@example.com",
+        reauthRequired: true,
+        refreshExpiresAt: 1700000000,
+      }),
+    );
+    render(<GmailSection />);
+
+    const alert = await screen.findByText(/google ended this connection/i);
+    expect(alert.textContent).toMatch(/every 7 days/i);
+    expect(alert.textContent).toMatch(/publish app/i);
+    expect(screen.queryByText(/will end this connection on/i)).toBeNull();
+    expect(screen.getByText(/needs to be reconnected/i)).toBeTruthy();
+  });
+
   it("connected without refreshExpiresAt: no expiry warning", async () => {
     vi.mocked(getJevSettings).mockResolvedValueOnce(
       makeJev({ keySet: true, useForEmailTracking: true }),
