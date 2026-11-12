@@ -9,6 +9,9 @@ gmailsync sync itself are always mocked — no live network call is made.
 
 from __future__ import annotations
 
+import logging
+
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -200,3 +203,76 @@ def test_gate_open_sync_passes_force_flag(client, monkeypatch):
     resp = client.post("/api/gmail/responses/sync", json={"force": True})
     assert resp.status_code == 200
     assert calls == [True]
+
+
+# --- get_valid_access_token: refresh failure classification ----------------
+
+_REFRESH_TOKEN = "1//refresh-secret-value"
+_CLIENT_SECRET = "client-secret-value"
+
+
+@pytest.fixture()
+def expired_gmail(data_dir, monkeypatch):
+    """A stored Gmail record, shaped by _store_record, whose access token is expired."""
+    monkeypatch.setenv("ENCRYPTION_KEY", FERNET_KEY)
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", _CLIENT_SECRET)
+    record = {
+        "accessToken": "ya29.old-access-value",
+        "refreshToken": _REFRESH_TOKEN,
+        "expiresAt": 0,
+        "scope": gmail_auth.SCOPE,
+        "connectedAt": 1000.0,
+        "email": "operator@example.com",
+        "reauthRequired": False,
+    }
+    secretstore.set_connection("gmail", {"oauth": record, "authMode": "subscription"})
+    return secretstore.get_connection("gmail")
+
+
+def _refresh_answers(monkeypatch, status, **kwargs):
+    request = httpx.Request("POST", gmail_auth.TOKEN_URL)
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: httpx.Response(status, request=request, **kwargs))
+
+
+def test_refresh_invalid_grant_requires_reconnect(expired_gmail, monkeypatch):
+    _refresh_answers(monkeypatch, 400, json={"error": "invalid_grant"})
+    with pytest.raises(gmail_auth.AuthError) as exc:
+        gmail_auth.get_valid_access_token()
+    assert exc.value.reconnect_required is True
+    oauth = secretstore.get_connection("gmail")["oauth"]
+    assert oauth["reauthRequired"] is True
+    assert oauth["accessToken"] == "" and oauth["refreshToken"] == ""
+
+
+@pytest.mark.parametrize(
+    ("status", "kwargs"),
+    [
+        (500, {"json": {"error": "internal_failure"}}),
+        (503, {"json": {"error": "backend_error"}}),
+        (429, {"json": {"error": "rate_limit_exceeded"}}),
+        (400, {"json": {"error": "invalid_request"}}),
+        (502, {"text": "<html>Bad Gateway</html>"}),
+    ],
+)
+def test_refresh_transient_failure_keeps_record(expired_gmail, monkeypatch, status, kwargs):
+    _refresh_answers(monkeypatch, status, **kwargs)
+    with pytest.raises(gmail_auth.AuthError) as exc:
+        gmail_auth.get_valid_access_token()
+    assert exc.value.reconnect_required is False
+    assert str(exc.value) == "Gmail token refresh failed — try again later."
+    assert secretstore.get_connection("gmail") == expired_gmail
+
+
+@pytest.mark.parametrize(("status", "code"), [(400, "invalid_grant"), (503, "backend_error")])
+def test_refresh_failure_logs_status_and_code_only(expired_gmail, monkeypatch, caplog, status, code):
+    _refresh_answers(monkeypatch, status, json={"error": code, "error_description": "secret detail"})
+    with caplog.at_level(logging.WARNING, logger=gmail_auth.__name__):
+        with pytest.raises(gmail_auth.AuthError):
+            gmail_auth.get_valid_access_token()
+    records = [r for r in caplog.records if r.name == gmail_auth.__name__]
+    assert len(records) == 1 and records[0].levelno == logging.WARNING
+    message = records[0].getMessage()
+    assert str(status) in message and code in message
+    for secret in (_REFRESH_TOKEN, _CLIENT_SECRET, "ya29.old-access-value", "secret detail"):
+        assert secret not in caplog.text

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import os
 import threading
 import time
@@ -22,6 +23,10 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 PROFILE_URL = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
 SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 _EXPIRY_SKEW_S = 300
+_HTTP_OK = 200
+_INVALID_GRANT = "invalid_grant"
+
+logger = logging.getLogger(__name__)
 
 
 class AuthError(RuntimeError):
@@ -167,6 +172,34 @@ def mark_reconnect_required() -> None:
     set_connection("gmail", {"oauth": oauth, "authMode": "subscription"})
 
 
+def _refresh_error_code(resp: httpx.Response) -> str:
+    """Google's OAuth ``error`` code from a failed refresh, or "" if the body has none."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return ""
+    code = body.get("error") if isinstance(body, dict) else None
+    return code if isinstance(code, str) else ""
+
+
+def _raise_refresh_failure(resp: httpx.Response) -> None:
+    """Classify a non-200 refresh answer and raise the matching AuthError.
+
+    Only ``invalid_grant`` means the refresh token is dead, so only it clears
+    the stored record. Anything else (5xx, 429, other 4xx, non-JSON) is treated
+    as transient and leaves the record untouched.
+    """
+    code = _refresh_error_code(resp)
+    logger.warning("gmail token refresh failed: status=%d error=%s", resp.status_code, code or "-")
+    if code == _INVALID_GRANT:
+        mark_reconnect_required()
+        raise AuthError(
+            "Gmail access was revoked or expired — reconnect Gmail in Settings.",
+            reconnect_required=True,
+        )
+    raise AuthError("Gmail token refresh failed — try again later.")
+
+
 def get_valid_access_token() -> str:
     client_id, client_secret = _require_client_config()
     with _refresh_lock:
@@ -193,12 +226,8 @@ def get_valid_access_token() -> str:
             )
         except httpx.HTTPError as exc:
             raise AuthError("Gmail token refresh failed — try again later.") from exc
-        if resp.status_code != 200:
-            mark_reconnect_required()
-            raise AuthError(
-                "Gmail access was revoked or expired — reconnect Gmail in Settings.",
-                reconnect_required=True,
-            )
+        if resp.status_code != _HTTP_OK:
+            _raise_refresh_failure(resp)
         refreshed = _store_record(
             resp.json(),
             email=record.get("email", ""),
