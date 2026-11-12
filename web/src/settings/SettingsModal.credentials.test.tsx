@@ -15,7 +15,7 @@ vi.mock("../api/client", () => ({
 }));
 const jev: JevSettings = { keySet: true, useForScreening: false,
   useForEmailTracking: false, encryptionAvailable: true };
-const gmail: GmailStatus = { connected: false, email: null, reauthRequired: false, trackingEnabled: false };
+const gmail: GmailStatus = { connected: false, email: null, reauthRequired: false, trackingEnabled: false, refreshExpiresAt: null };
 const accounts: ConnectionList = { encryptionAvailable: true, connections: [{
   provider: "claude", label: "Claude", modes: ["apikey"], subscriptionConnected: false,
   apiKeyConnected: true, authMode: "apikey", expiresAt: null, connectedAt: null,
