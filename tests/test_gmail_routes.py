@@ -336,3 +336,33 @@ def test_refresh_works_for_record_without_refresh_expiry_key(expired_gmail, monk
     assert "refreshExpiresAt" not in expired_gmail["oauth"]
     _refresh_answers(monkeypatch, 200, json=_google_token_payload())
     assert gmail_auth.get_valid_access_token() == "ya29.new-access-value"
+
+
+# --- GET /api/gmail/status exposes refreshExpiresAt --------------------------
+
+
+def _store_oauth(expired_gmail, **overrides):
+    oauth = {**expired_gmail["oauth"], **overrides}
+    secretstore.set_connection("gmail", {"oauth": oauth, "authMode": "subscription"})
+
+
+def test_status_reports_stored_refresh_expiry(client, expired_gmail):
+    _store_oauth(expired_gmail, refreshExpiresAt=_NOW + _REFRESH_TTL_S)
+    body = client.get("/api/gmail/status").json()
+    assert body["refreshExpiresAt"] == _NOW + _REFRESH_TTL_S
+
+
+def test_status_refresh_expiry_null_when_key_missing(client, expired_gmail):
+    assert "refreshExpiresAt" not in expired_gmail["oauth"]
+    body = client.get("/api/gmail/status").json()
+    assert body["connected"] is True and body["refreshExpiresAt"] is None
+
+
+def test_status_refresh_expiry_null_when_stored_none(client, expired_gmail):
+    _store_oauth(expired_gmail, refreshExpiresAt=None)
+    assert client.get("/api/gmail/status").json()["refreshExpiresAt"] is None
+
+
+def test_status_refresh_expiry_null_when_not_connected(client):
+    body = client.get("/api/gmail/status").json()
+    assert body["connected"] is False and body["refreshExpiresAt"] is None
