@@ -115,7 +115,8 @@ Projected from `schema` widgets on the architecture canvas.
 | `scope` | string | - | Defaults to https://www.googleapis.com/auth/gmail.readonly. |
 | `connectedAt` | float (epoch seconds) | - | Preserved across refreshes. |
 | `email` | string | - | Account address read from the Gmail profile endpoint at login. |
-| `reauthRequired` | bool | - | Set by mark_reconnect_required when refresh is rejected. |
+| `refreshExpiresAt` | float (epoch seconds) \| null | - | Login time or refresh time plus Google's `refresh_token_expires_in`; null when the token answer omits it or the record predates the field. |
+| `reauthRequired` | bool | - | Set, with accessToken and refreshToken cleared and expiresAt zeroed, by mark_reconnect_required. A refresh calls it only when Google answers `invalid_grant`; other refresh failures leave the record untouched. |
 <!-- generated:end comp:integrations -->
 
 <!-- generated:start comp:orchestration -->

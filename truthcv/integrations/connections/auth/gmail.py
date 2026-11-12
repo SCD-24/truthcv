@@ -108,6 +108,12 @@ def _gmail_profile(access_token: str) -> dict:
     return resp.json()
 
 
+def _refresh_expires_at(payload: dict, now: float) -> float | None:
+    """Epoch second Google says the refresh token lapses, or None when it sends no lifetime."""
+    remaining = payload.get("refresh_token_expires_in")
+    return now + float(remaining) if remaining is not None else None
+
+
 def _store_record(
     payload: dict,
     *,
@@ -123,6 +129,7 @@ def _store_record(
         "scope": payload.get("scope", SCOPE),
         "connectedAt": connected_at or now,
         "email": email,
+        "refreshExpiresAt": _refresh_expires_at(payload, now),
         "reauthRequired": False,
     }
     set_connection("gmail", {"oauth": record, "authMode": "subscription"})

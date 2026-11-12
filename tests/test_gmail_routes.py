@@ -276,3 +276,63 @@ def test_refresh_failure_logs_status_and_code_only(expired_gmail, monkeypatch, c
     assert str(status) in message and code in message
     for secret in (_REFRESH_TOKEN, _CLIENT_SECRET, "ya29.old-access-value", "secret detail"):
         assert secret not in caplog.text
+
+
+# --- refreshExpiresAt: Google's refresh_token_expires_in ---------------------
+
+_NOW = 2_000_000.0
+_REFRESH_TTL_S = 604610
+
+
+def _google_token_payload(**extra):
+    """A token-endpoint answer shaped like Google's, minus the refresh-token lifetime."""
+    return {
+        "access_token": "ya29.new-access-value",
+        "expires_in": 3599,
+        "scope": gmail_auth.SCOPE,
+        "token_type": "Bearer",
+        **extra,
+    }
+
+
+def _login_answers(monkeypatch, payload):
+    """Mock the code exchange (httpx.post) and the profile read (httpx.get)."""
+    request = httpx.Request("POST", gmail_auth.TOKEN_URL)
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: httpx.Response(200, request=request, json=payload))
+    profile = httpx.Response(200, request=request, json={"emailAddress": "operator@example.com"})
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: profile)
+
+
+@pytest.fixture()
+def frozen_clock(monkeypatch):
+    monkeypatch.setattr(gmail_auth.time, "time", lambda: _NOW)
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected"),
+    [({"refresh_token_expires_in": _REFRESH_TTL_S}, _NOW + _REFRESH_TTL_S), ({}, None)],
+)
+def test_login_exchange_stores_refresh_expiry(expired_gmail, frozen_clock, monkeypatch, extra, expected):
+    gmail_auth._pending["state1"] = {"verifier": "v", "redirect_uri": "https://app.example/cb"}
+    _login_answers(monkeypatch, _google_token_payload(refresh_token=_REFRESH_TOKEN, **extra))
+    gmail_auth.complete_login("authcode", "state1")
+    assert secretstore.get_connection("gmail")["oauth"]["refreshExpiresAt"] == expected
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected"),
+    [({"refresh_token_expires_in": _REFRESH_TTL_S}, _NOW + _REFRESH_TTL_S), ({}, None)],
+)
+def test_refresh_stores_refresh_expiry(expired_gmail, frozen_clock, monkeypatch, extra, expected):
+    _refresh_answers(monkeypatch, 200, json=_google_token_payload(**extra))
+    assert gmail_auth.get_valid_access_token() == "ya29.new-access-value"
+    oauth = secretstore.get_connection("gmail")["oauth"]
+    assert oauth["refreshExpiresAt"] == expected
+    assert oauth["refreshToken"] == _REFRESH_TOKEN
+
+
+def test_refresh_works_for_record_without_refresh_expiry_key(expired_gmail, monkeypatch):
+    """expired_gmail's record has no refreshExpiresAt key at all."""
+    assert "refreshExpiresAt" not in expired_gmail["oauth"]
+    _refresh_answers(monkeypatch, 200, json=_google_token_payload())
+    assert gmail_auth.get_valid_access_token() == "ya29.new-access-value"
