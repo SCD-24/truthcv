@@ -55,6 +55,115 @@ What the launcher actually does, each time you double-click it:
 **Stopping it:** quit Docker Desktop, or run `docker compose down`. Your data
 stays in `./data` either way.
 
+## Setting it up with an AI agent
+
+This section is for a coding agent setting TruthCV up for its user. It does
+by hand what the launcher does. Run the steps in order, from a shell.
+
+**Never echo, log or commit a secret.** `.env` holds `ENCRYPTION_KEY`,
+`AGENT_API_TOKEN` and any API keys. Do not print it, `cat` it, paste its
+values into chat or logs, or `git add` it (it is in `.gitignore`). Check that
+a key is set, never what it is.
+
+### Check the prerequisites
+
+Docker must be installed and running, and git must be installed:
+
+```bash
+command -v git >/dev/null 2>&1 && echo "git: ok"
+command -v docker >/dev/null 2>&1 && echo "docker: installed"
+docker info >/dev/null 2>&1 && echo "docker: running"
+```
+
+If any line prints nothing, stop and ask the user to install or start it.
+
+### Steps
+
+1. Clone the repository and enter it:
+
+   ```bash
+   git clone https://github.com/SCD-24/truthcv.git
+   cd truthcv
+   ```
+
+2. Create `.env` from the template. Skip this if `.env` already exists — never
+   overwrite it, it may hold the user's keys:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+3. Fill in `ENCRYPTION_KEY`, `AGENT_API_TOKEN` and `APP_PORT`. This runs the
+   launcher's own setup step. It writes the keys straight into `.env`, fills
+   only blank values, and prints just one line, `APP_PORT=<port>`:
+
+   ```bash
+   docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work \
+     python:3-alpine python -m launcher --repo /work
+   ```
+
+   Check both keys are set, without printing them:
+
+   ```bash
+   grep -qE '^ENCRYPTION_KEY=.+' .env && echo "ENCRYPTION_KEY: set"
+   grep -qE '^AGENT_API_TOKEN=.+' .env && echo "AGENT_API_TOKEN: set"
+   ```
+
+4. Build and start the app, browser and agent containers. The first build
+   takes about ten minutes:
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+   If it fails with `port is already allocated`, move to the next port and
+   run step 4 again:
+
+   ```bash
+   docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work \
+     python:3-alpine python -m launcher --repo /work --bump APP_PORT
+   ```
+
+5. Wait for the app to answer on `APP_PORT` (up to two minutes):
+
+   ```bash
+   APP_PORT="$(grep '^APP_PORT=' .env | cut -d= -f2)"
+   for _ in $(seq 1 60); do
+     if curl -fsS -o /dev/null "http://localhost:${APP_PORT}"; then echo "app: up"; break; fi
+     sleep 2
+   done
+   ```
+
+6. Confirm it is healthy:
+
+   ```bash
+   docker compose ps
+   ```
+
+   `app`, `browser` and `agent` should all be running, and `browser` should
+   show `healthy`. The app has no health check of its own; step 5 answering
+   is the sign that it is up. If something is not running, read
+   `docker compose logs app` (or `browser`, `agent`) to find out why.
+
+7. Tell the user to open `http://localhost:<APP_PORT>`, using the port from
+   step 5.
+
+### Steps only the user can do
+
+These happen in the browser and need the user's own accounts. Hand them over;
+do not try to do them.
+
+- Sign in to a model provider: during onboarding, or in **Model routing →
+  Accounts** (see [Connecting a model provider](#connecting-a-model-provider)).
+- Upload their CV and review the truth file.
+- Finish [onboarding](#onboarding), and fill in their identity answers on the
+  **Agents** page.
+- Optional: connect Jev from **Settings → Jev** (see
+  [Jev cross-checking](#jev-cross-checking-optional)).
+- Optional: set up Gmail in Google Cloud Console (see
+  [Setting it up in Google Cloud Console](#setting-it-up-in-google-cloud-console)).
+  The user creates the OAuth client and supplies its id and secret.
+
 ## Connecting a model provider
 
 TruthCV needs an LLM provider to extract, tailor and guardrail your CV, but it
