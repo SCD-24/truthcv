@@ -39,6 +39,7 @@ function makeGmail(overrides: Partial<GmailStatus> = {}): GmailStatus {
     email: null,
     reauthRequired: false,
     trackingEnabled: false,
+    refreshExpiresAt: null,
     ...overrides,
   };
 }
@@ -156,6 +157,36 @@ describe("GmailSection", () => {
     render(<GmailSection />);
 
     expect(await screen.findByText(/person@example\.com/)).toBeTruthy();
+  });
+
+  it("connected with refreshExpiresAt: warns with the local end date and the Publish app step", async () => {
+    const expiresAt = 1800000000;
+    vi.mocked(getJevSettings).mockResolvedValueOnce(
+      makeJev({ keySet: true, useForEmailTracking: true }),
+    );
+    vi.mocked(getGmailStatus).mockResolvedValueOnce(
+      makeGmail({ connected: true, email: "person@example.com", refreshExpiresAt: expiresAt }),
+    );
+    render(<GmailSection />);
+
+    const alert = await screen.findByText(/google will end this connection on/i);
+    // Same locale/timezone as the component, so the expectation is environment-robust.
+    expect(alert.textContent).toContain(new Date(expiresAt * 1000).toLocaleDateString());
+    expect(alert.textContent).toMatch(/every 7 days/i);
+    expect(alert.textContent).toMatch(/publish app/i);
+  });
+
+  it("connected without refreshExpiresAt: no expiry warning", async () => {
+    vi.mocked(getJevSettings).mockResolvedValueOnce(
+      makeJev({ keySet: true, useForEmailTracking: true }),
+    );
+    vi.mocked(getGmailStatus).mockResolvedValueOnce(
+      makeGmail({ connected: true, email: "person@example.com", refreshExpiresAt: null }),
+    );
+    render(<GmailSection />);
+
+    await screen.findByText(/person@example\.com/);
+    expect(screen.queryByText(/google will end this connection/i)).toBeNull();
   });
 
   it("connected: Sync now button syncs and shows the summary", async () => {
