@@ -2975,6 +2975,17 @@
             "title": "Reauthrequired",
             "type": "boolean"
           },
+          "refreshExpiresAt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refreshexpiresat"
+          },
           "trackingEnabled": {
             "default": false,
             "title": "Trackingenabled",
