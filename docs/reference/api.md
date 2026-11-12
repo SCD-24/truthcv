@@ -47,7 +47,6 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) - not ex
 | **GET** | `/api/applications/page` | One page of applications (limit default 25, offset, sort key, direction) with total; sorted server-side. |
 | **DELETE** | `/api/browser/session` | Closes the attended sign-in session; when a session existed and the close was accepted, clears the login_required apply-blocker on every pending/approved screening queued for that host so the next run retries them |
 | **POST** | `/api/runs/{run_id}/stop` | Stop a run: forwards cancel to the supervisor when it owns the run, otherwise closes the record as failed/orphaned. 404 unknown run, 409 already finished. |
-| **GET** | `/api/gmail/status` | Gmail connection status; never 403s. Returns connected, email, reauthRequired, trackingEnabled and refreshExpiresAt (epoch seconds when the stored refresh token expires; null when unknown or Gmail is not connected). |
 | **POST** | `/api/gmail/responses/sync` | Manually trigger a Gmail response sync (wired to the Web UI's Sync-now button); delegates to Gmail Response Sync |
 | **MCP** | `finish_phase` | Non-terminal end of one per-channel agent session (feed\|direct\|dork). Refuses while that channel's coverage is short and the harness reports turns remaining (max 3 refusals). Appends the note to the run and never closes it. |
 | **MCP** | `finish_run (turns_remaining)` | Optional turns_remaining argument supplied by the harness. While turns remain, a short or skipped coverage is refused repeatedly (max 3) instead of only once. |
@@ -56,6 +55,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) - not ex
 | **POST** | `/api/gmail/suggestions/dismiss` | Dismiss pending Gmail suggestions by id (1–200 ids); returns dismissed count and remaining pending total; gated like the sync route |
 | **POST** | `/api/gmail/suggestions/{id}/accept` | Accept a pending Gmail suggestion: apply its suggested status to the matched application (404 unknown, 409 not pending or no suggested status) |
 | **GET** | `/api/screenings/rejected` | One page of rejected screenings (agent- or operator-rejected, each with rejectedBy), newest first; limit (default 50, clamped 1..200), offset, category (default all); returns {items, total, limit, offset, categories}. |
+| **GET** | `/api/gmail/status` | Gmail connection status; never 403s. Returns connected, email, reauthRequired, trackingEnabled and refreshExpiresAt (epoch seconds when the stored refresh token expires; null when unknown or Gmail is not connected). |
 | **GET** | `/api/prompt-fragments` | List all prompt fragments (seeded + operator-defined) |
 | **POST** | `/api/prompt-fragments` | Create a prompt fragment; id derived from title if omitted (403 when clashing with a seeded fragment) |
 | **PUT** | `/api/prompt-fragments/{id}` | Update a prompt fragment by id (403 for seeded fragments) |

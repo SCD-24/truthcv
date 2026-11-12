@@ -248,6 +248,11 @@
                   "desc": "One page of rejected screenings (agent- or operator-rejected, each with rejectedBy), newest first; limit (default 50, clamped 1..200), offset, category (default all); returns {items, total, limit, offset, categories}.",
                   "method": "GET",
                   "path": "/api/screenings/rejected"
+                },
+                {
+                  "desc": "Gmail connection status; never 403s. Returns connected, email, reauthRequired, trackingEnabled and refreshExpiresAt (epoch seconds when the stored refresh token expires; null when unknown or Gmail is not connected).",
+                  "method": "GET",
+                  "path": "/api/gmail/status"
                 }
               ]
             },
@@ -2281,8 +2286,14 @@
                 },
                 {
                   "flags": "-",
+                  "name": "refreshExpiresAt",
+                  "notes": "Login time or refresh time plus Google's `refresh_token_expires_in`; null when the token answer omits it or the record predates the field.",
+                  "type": "float (epoch seconds) | null"
+                },
+                {
+                  "flags": "-",
                   "name": "reauthRequired",
-                  "notes": "Set by mark_reconnect_required when refresh is rejected.",
+                  "notes": "Set, with accessToken and refreshToken cleared and expiresAt zeroed, by mark_reconnect_required. A refresh calls it only when Google answers `invalid_grant`; other refresh failures leave the record untouched.",
                   "type": "bool"
                 }
               ]

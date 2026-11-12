@@ -35,7 +35,9 @@
     "89dd22f3",
     "cc7d741c",
     "676bca22",
-    "ba9777d4"
+    "ba9777d4",
+    "58fdbb9d",
+    "69d595f4"
   ],
   "dismissals": [],
   "acceptances": [
@@ -328,6 +330,34 @@
         "action": "none",
         "args": {}
       }
+    },
+    {
+      "id": "58fdbb9d",
+      "title": "Gmail connection record stores refreshExpiresAt, which the declared schema does not list",
+      "target": {
+        "type": "component",
+        "id": "integrations"
+      },
+      "suggestion": {
+        "action": "none",
+        "args": {}
+      }
+    },
+    {
+      "id": "69d595f4",
+      "title": "GET /api/gmail/status is not declared on the API component",
+      "target": {
+        "type": "component",
+        "id": "api"
+      },
+      "suggestion": {
+        "action": "add_endpoint",
+        "args": {
+          "componentId": "api",
+          "method": "GET",
+          "path": "/api/gmail/status"
+        }
+      }
     }
   ],
   "decisions": [
@@ -537,6 +567,28 @@
         "actor": "external-agent",
         "via": "chat",
         "at": "2026-11-09T19:02:35.070Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "58fdbb9d",
+      "title": "Gmail connection record stores refreshExpiresAt, which the declared schema does not list",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-12T12:17:40.462Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "69d595f4",
+      "title": "GET /api/gmail/status is not declared on the API component",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-12T12:19:11.602Z",
         "verified": false
       }
     }
