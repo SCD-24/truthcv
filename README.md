@@ -142,6 +142,19 @@ back out of the *produced PDF* and compares it against what was meant to be
 there — a font/kerning defect that glues or drops words in the PDF surfaces as
 an ATS warning, even though the source HTML was fine.
 
+## Architecture
+
+![Architecture diagram: the Web UI and API sit above an Orchestration layer that connects to the domain components, the Storage layer, the sibling Application Agent and Browser Service, and external services](docs/assets/architecture.png)
+
+The Web UI and API sit at the top and call into Orchestration. Orchestration
+coordinates the domain components: Document Generation, the Guardrail
+Validator, the LLM Provider Layer, the Application Pipeline and Integrations.
+Those components read and write the Storage layer: the Truth Store, the Secret
+Store and Storage & Shared Leaves, which sit on the Truth Data Volume. The
+Application Agent and the Browser Service are separate sibling containers that
+talk to the API and Orchestration. External services are an LLM provider
+service, Gmail / Google OAuth, Jev and the Arbeitnow job board.
+
 ## Application tracker
 
 Beyond generating documents, TruthCV keeps a ledger of every job you're
