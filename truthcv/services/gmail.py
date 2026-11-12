@@ -115,7 +115,8 @@ def status() -> dict:
     Exists so the status route only shapes the response. It never refuses: it
     reports the tracking gate's own state (tracking_enabled) so the UI can
     explain why Gmail is unavailable. Keys: connected, email, reauth_required,
-    tracking_enabled.
+    tracking_enabled, refresh_expires_at (epoch seconds of the stored refresh
+    token's expiry; None when the record has none or Gmail is not connected).
     """
     oauth = secretstore.get_connection("gmail").get("oauth") or {}
     return {
@@ -123,6 +124,7 @@ def status() -> dict:
         "email": oauth.get("email") or None,
         "reauth_required": oauth.get("reauthRequired") is True,
         "tracking_enabled": tracking_enabled(),
+        "refresh_expires_at": oauth.get("refreshExpiresAt"),
     }
 
 

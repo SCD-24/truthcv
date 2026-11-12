@@ -46,14 +46,123 @@ What the launcher actually does, each time you double-click it:
 2. Fills in `ENCRYPTION_KEY` and `AGENT_API_TOKEN` if they're blank — never
    overwriting a value already set — backing up any `.env` it modifies.
 3. Sets `APP_PORT` (default `5627`); if Docker reports that port already
-   allocated, it advances to the next candidate and rewrites `.env`, retrying
-   up to 10 times.
+   allocated, it advances to the next candidate and rewrites `.env`, trying
+   up to 10 ports in all.
 4. Runs `docker compose up -d --build`, which starts the app, browser and
    agent containers together.
 5. Polls the app until it answers, then opens it in your browser.
 
 **Stopping it:** quit Docker Desktop, or run `docker compose down`. Your data
 stays in `./data` either way.
+
+## Setting it up with an AI agent
+
+This section is for a coding agent setting TruthCV up for its user. It does
+by hand what the launcher does. Run the steps in order, from a shell.
+
+**Never echo, log or commit a secret.** `.env` holds `ENCRYPTION_KEY`,
+`AGENT_API_TOKEN` and any API keys. Do not print it, `cat` it, paste its
+values into chat or logs, or `git add` it (it is in `.gitignore`). Check that
+a key is set, never what it is.
+
+### Check the prerequisites
+
+Docker must be installed and running, and git must be installed:
+
+```bash
+command -v git >/dev/null 2>&1 && echo "git: ok"
+command -v docker >/dev/null 2>&1 && echo "docker: installed"
+docker info >/dev/null 2>&1 && echo "docker: running"
+```
+
+If any line prints nothing, stop and ask the user to install or start it.
+
+### Steps
+
+1. Clone the repository and enter it:
+
+   ```bash
+   git clone https://github.com/SCD-24/truthcv.git
+   cd truthcv
+   ```
+
+2. Create `.env` from the template. Skip this if `.env` already exists — never
+   overwrite it, it may hold the user's keys:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+3. Fill in `ENCRYPTION_KEY`, `AGENT_API_TOKEN` and `APP_PORT`. This runs the
+   launcher's own setup step. It writes the keys straight into `.env`, fills
+   only blank values, and prints just one line, `APP_PORT=<port>`:
+
+   ```bash
+   docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work \
+     python:3-alpine python -m launcher --repo /work
+   ```
+
+   Check both keys are set, without printing them:
+
+   ```bash
+   grep -qE '^ENCRYPTION_KEY=.+' .env && echo "ENCRYPTION_KEY: set"
+   grep -qE '^AGENT_API_TOKEN=.+' .env && echo "AGENT_API_TOKEN: set"
+   ```
+
+4. Build and start the app, browser and agent containers. The first build
+   takes about ten minutes:
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+   If it fails with `port is already allocated`, move to the next port and
+   run step 4 again:
+
+   ```bash
+   docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work \
+     python:3-alpine python -m launcher --repo /work --bump APP_PORT
+   ```
+
+5. Wait for the app to answer on `APP_PORT` (up to two minutes):
+
+   ```bash
+   APP_PORT="$(grep '^APP_PORT=' .env | cut -d= -f2)"
+   for _ in $(seq 1 60); do
+     if curl -fsS -o /dev/null "http://localhost:${APP_PORT}"; then echo "app: up"; break; fi
+     sleep 2
+   done
+   ```
+
+6. Confirm it is healthy:
+
+   ```bash
+   docker compose ps
+   ```
+
+   `app`, `browser` and `agent` should all be running, and `browser` should
+   show `healthy`. The app has no health check of its own; step 5 answering
+   is the sign that it is up. If something is not running, read
+   `docker compose logs app` (or `browser`, `agent`) to find out why.
+
+7. Tell the user to open `http://localhost:<APP_PORT>`, using the port from
+   step 5.
+
+### Steps only the user can do
+
+These happen in the browser and need the user's own accounts. Hand them over;
+do not try to do them.
+
+- Sign in to a model provider: during onboarding, or in **Model routing →
+  Accounts** (see [Connecting a model provider](#connecting-a-model-provider)).
+- Upload their CV and review the truth file.
+- Finish [onboarding](#onboarding), and fill in their identity answers on the
+  **Agents** page.
+- Optional: connect Jev from **Settings → Jev** (see
+  [Jev cross-checking](#jev-cross-checking-optional)).
+- Optional: set up Gmail in Google Cloud Console (see
+  [Setting it up in Google Cloud Console](#setting-it-up-in-google-cloud-console)).
+  The user creates the OAuth client and supplies its id and secret.
 
 ## Connecting a model provider
 
@@ -141,6 +250,19 @@ rendering, and a separate verification pass (`truthcv/engines/render/verify.py`)
 back out of the *produced PDF* and compares it against what was meant to be
 there — a font/kerning defect that glues or drops words in the PDF surfaces as
 an ATS warning, even though the source HTML was fine.
+
+## Architecture
+
+![Architecture diagram: the Web UI and API sit above an Orchestration layer that connects to the domain components, the Storage layer, the sibling Application Agent and Browser Service, and external services](docs/assets/architecture.png)
+
+The Web UI and API sit at the top and call into Orchestration. Orchestration
+coordinates the domain components: Document Generation, the Guardrail
+Validator, the LLM Provider Layer, the Application Pipeline and Integrations.
+Those components read and write the Storage layer: the Truth Store, the Secret
+Store and Storage & Shared Leaves, which sit on the Truth Data Volume. The
+Application Agent and the Browser Service are separate sibling containers that
+talk to the API and Orchestration. External services are an LLM provider
+service, Gmail / Google OAuth, Jev and the Arbeitnow job board.
 
 ## Application tracker
 
@@ -315,18 +437,27 @@ connection is only useful here for auto-applying Jev-confirmed transitions.
 3. Configure the **OAuth consent screen**, adding the
    `https://www.googleapis.com/auth/gmail.readonly` scope — the only scope
    TruthCV requests; it can only read your mail, never send or modify it.
-4. Create an OAuth client of type **Web application**, with an authorized
+4. Set the app's publishing status to **In production** (OAuth consent
+   screen → **Audience** → **Publish app**). While the status is **Testing**,
+   Google's token endpoint returns a refresh token that lasts 7 days, so
+   Google ends the Gmail connection every 7 days. TruthCV shows a warning
+   with the end date in **Settings → Gmail**. **Publish app** stays disabled
+   until the **Branding** page is complete: fill in the app name, user
+   support email, application home page URL and privacy policy URL (plus the
+   matching authorized domain), and save. Only then can you click
+   **Audience → Publish app**.
+5. Create an OAuth client of type **Web application**, with an authorized
    redirect URI of `http://localhost:<APP_PORT>/api/auth/gmail/callback`
    (substitute your actual `APP_PORT`; TruthCV derives this same URI from the
    request host at runtime, so it must match exactly).
-5. Set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in `.env` to
+6. Set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in `.env` to
    the client's id and secret.
-6. If the app is served behind a reverse proxy, or reached at anything other
+7. If the app is served behind a reverse proxy, or reached at anything other
    than `localhost:<APP_PORT>`, set `GOOGLE_OAUTH_REDIRECT_URI` in `.env` to
    the exact redirect URI registered above — request-derived detection can't
    be trusted through a proxy uvicorn doesn't trust, and the value must match
    the Google console entry character-for-character.
-7. Connect from **Settings → Gmail** in the app.
+8. Connect from **Settings → Gmail** in the app.
 
 ## Running it by hand
 
@@ -339,10 +470,12 @@ cp .env.example .env
 
 # 2. Set ENCRYPTION_KEY and AGENT_API_TOKEN (both required, both non-empty —
 #    an empty AGENT_API_TOKEN aborts every scheduled run with
-#    "AGENT_API_TOKEN is not set"). Generate each with:
-openssl rand -hex 32
-# or, dependency-free:
+#    "AGENT_API_TOKEN is not set").
+#    ENCRYPTION_KEY must be a Fernet key (urlsafe base64 of 32 random bytes);
+#    a hex string is not a valid key. Generate it with:
 python -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+#    Generate AGENT_API_TOKEN with:
+openssl rand -hex 32
 
 # 3. Build and run
 docker compose up -d --build
@@ -358,7 +491,7 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work \
 ```
 
 5627 is only the default — the actual URL depends on `APP_PORT` in your
-`.env`. The app now prints its real URL at startup, so `docker compose logs
+`.env`. The app prints its real URL at startup, so `docker compose logs
 app` (or `docker compose ps`, whose PORTS column shows
 `127.0.0.1:<host>->8080/tcp`) is the reliable way to find it. The app binds to
 loopback only (`docker-compose.yml` maps `127.0.0.1:<host>->8080`), so it's

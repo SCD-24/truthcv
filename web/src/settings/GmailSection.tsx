@@ -18,6 +18,36 @@ import { ButtonSpinner } from "../components/ButtonSpinner";
 import { SettingsSection } from "./SettingsModal";
 import type { GmailStatus, GmailSyncSummary, JevSettings } from "../api/types";
 
+const MS_PER_SECOND = 1000;
+
+/** Google ends refresh tokens after 7 days while the Cloud app is in Testing. */
+function RefreshExpiryWarning({
+  expiresAt,
+  ended,
+}: {
+  expiresAt: number;
+  /** True once Google has already ended the connection (reauth required). */
+  ended: boolean;
+}) {
+  if (ended) {
+    return (
+      <Alert severity="warning">
+        Google ended this connection. This happens every 7 days while the Google Cloud app is
+        in Testing status. To stop it, open Google Cloud Console → OAuth consent screen
+        (Audience) → Publish app, then reconnect.
+      </Alert>
+    );
+  }
+  const endDate = new Date(expiresAt * MS_PER_SECOND).toLocaleDateString();
+  return (
+    <Alert severity="warning">
+      Google will end this connection on {endDate}. This happens every 7 days while the
+      Google Cloud app is in Testing status. To stop it, open Google Cloud Console → OAuth
+      consent screen (Audience) → Publish app, then reconnect once.
+    </Alert>
+  );
+}
+
 /** Gmail response tracking: reads Gmail for replies to submitted
  * applications and (when Jev confirms a transition) auto-applies it. Locked
  * behind the same Jev API key as screening cross-checks — Gmail sync
@@ -173,6 +203,13 @@ export function GmailSection({
 
       {gmail.connected && gmail.email && (
         <Typography color="text.secondary">Connected as {gmail.email}</Typography>
+      )}
+
+      {gmail.connected && gmail.refreshExpiresAt !== null && (
+        <RefreshExpiryWarning
+          expiresAt={gmail.refreshExpiresAt}
+          ended={gmail.reauthRequired}
+        />
       )}
 
       {gmail.reauthRequired && (

@@ -196,6 +196,8 @@ export interface GmailStatus {
   email: string | null;
   reauthRequired: boolean;
   trackingEnabled: boolean;
+  /** Epoch seconds when Google will end the refresh token, or null. */
+  refreshExpiresAt: number | null;
 }
 
 /** Result of POST /api/gmail/responses/sync: the sync backend's dict is

@@ -57,6 +57,7 @@ def test_status_shape(data_dir):
         "email": None,
         "reauth_required": False,
         "tracking_enabled": False,
+        "refresh_expires_at": None,
     }
     _open_gate()
     secretstore.set_connection("gmail", {"oauth": {"email": "a@b.c", "reauthRequired": True}})
@@ -65,6 +66,7 @@ def test_status_shape(data_dir):
         "email": "a@b.c",
         "reauth_required": True,
         "tracking_enabled": True,
+        "refresh_expires_at": None,
     }
 
 

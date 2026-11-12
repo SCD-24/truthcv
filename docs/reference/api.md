@@ -55,6 +55,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) - not ex
 | **POST** | `/api/gmail/suggestions/dismiss` | Dismiss pending Gmail suggestions by id (1–200 ids); returns dismissed count and remaining pending total; gated like the sync route |
 | **POST** | `/api/gmail/suggestions/{id}/accept` | Accept a pending Gmail suggestion: apply its suggested status to the matched application (404 unknown, 409 not pending or no suggested status) |
 | **GET** | `/api/screenings/rejected` | One page of rejected screenings (agent- or operator-rejected, each with rejectedBy), newest first; limit (default 50, clamped 1..200), offset, category (default all); returns {items, total, limit, offset, categories}. |
+| **GET** | `/api/gmail/status` | Gmail connection status; never 403s. Returns connected, email, reauthRequired, trackingEnabled and refreshExpiresAt (epoch seconds when the stored refresh token expires; null when unknown or Gmail is not connected). |
 | **GET** | `/api/prompt-fragments` | List all prompt fragments (seeded + operator-defined) |
 | **POST** | `/api/prompt-fragments` | Create a prompt fragment; id derived from title if omitted (403 when clashing with a seeded fragment) |
 | **PUT** | `/api/prompt-fragments/{id}` | Update a prompt fragment by id (403 for seeded fragments) |

@@ -19,6 +19,7 @@ class GmailStatusModel(_Camel):
     email: str | None = None
     reauth_required: bool = False
     tracking_enabled: bool = False
+    refresh_expires_at: float | None = None
 
 
 class GmailSyncRequest(_Camel):

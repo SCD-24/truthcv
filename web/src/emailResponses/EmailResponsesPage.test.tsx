@@ -52,6 +52,7 @@ function setup(on = true) {
     email: "p@example.com",
     reauthRequired: false,
     trackingEnabled: on,
+    refreshExpiresAt: null,
   });
 }
 
