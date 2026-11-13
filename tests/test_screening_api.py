@@ -30,6 +30,18 @@ def test_applied_route_409s_when_another_record_for_the_posting_is_applied(clien
     assert "already been applied" in r.json()["detail"]
 
 
+def test_applied_route_409s_with_blocklist_message_for_blocked_company(client, monkeypatch):
+    from truthcv.domain.agentconfig.store import AgentConfig
+    from truthcv.domain.screening import store
+
+    s, _ = store.create_or_get({"company": "Zalando SE", "role": "Engineer", "verdict": "deferred"})
+    monkeypatch.setattr(store, "_agent_config_load", lambda: AgentConfig(blocked_companies=["Zalando"]))
+    r = client.post(f"/api/screenings/{s.id}/applied")
+    assert r.status_code == 409
+    assert r.json()["detail"] == "Zalando SE is on the blocklist."
+    assert store.get(s.id).approval != "applied"
+
+
 # --- POST/GET/DELETE screenings -------------------------------------------------
 
 def test_create_list_delete_screening(client):

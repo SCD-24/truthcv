@@ -573,6 +573,9 @@ def _refuse_apply_claim(result: ApplyClaimResult) -> None:
             "resolve it at /api/company-findings/contradictions before applying."
         )
         raise Conflict(msg, payload=msg)
+    if result.reason == screening_store.COMPANY_BLOCKED:
+        msg = f"{result.refused_screening.company} is on the blocklist."
+        raise Conflict(msg, payload=msg)
     msg = "This screening has already been applied to."
     raise Conflict(msg, payload=msg)
 
@@ -587,7 +590,10 @@ def mark_applied(screening_id: str) -> app_store.Application:
 
     Raises ``NotFound`` for an unknown id and ``Conflict`` rather than a second
     row when the screening has already been applied: a double click must not
-    create a duplicate application.
+    create a duplicate application. Also raises ``Conflict`` when the company
+    has an open research contradiction or is on the blocklist — this goes
+    through ``claim_for_apply``, not the store's post-submission
+    ``mark_applied``, so the blocklist still refuses it.
     """
     if screening_store.get(screening_id) is None:
         raise NotFound("Screening not found.")

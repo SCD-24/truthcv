@@ -131,7 +131,15 @@ def test_claims_refused_for_blocked_company(data_dir, monkeypatch):
     assert store._apply_refusal(s) == "company_blocked"
     assert store.claim_for_apply(s.id) is None
     assert store.claim_for_run(s.id, "run-1", 60) is None
-    assert store.mark_applied(s.id) is None
+
+
+def test_mark_applied_retires_blocked_company(data_dir, monkeypatch):
+    """mark_applied runs after the submission: a company blocked after the
+    item was claimed (and swept to rejected) must still end up 'applied'."""
+    s = _approved("Zalando")
+    _block(monkeypatch, "Zalando")
+    store.set_approval(s.id, "rejected")
+    assert store.mark_applied(s.id).approval == "applied"
 
 
 def test_blocked_company_matches_legal_suffix(data_dir, monkeypatch):
