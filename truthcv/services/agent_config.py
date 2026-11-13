@@ -25,6 +25,11 @@ _NULLABLE_FIELDS = (
     "max_posting_age_days",
 )
 
+# The failing criterion and reason prefix stamped on a queued screening when
+# its company is added to the blocklist.
+BLOCKED_CRITERION = "company_blocked"
+BLOCKED_REASON_PREFIX = "Company is on the blocklist. "
+
 
 def update_agent_config(sent: dict) -> agent_config_store.AgentConfig:
     """Merge only the fields present in ``sent`` (already `exclude_unset`d by
@@ -80,7 +85,32 @@ def update_agent_config(sent: dict) -> agent_config_store.AgentConfig:
             merged[nullable] = None
 
     cfg = agent_config_store.AgentConfig.from_dict(merged)
-    return agent_config_store.save(cfg)
+    saved = agent_config_store.save(cfg)
+    if "blocked_companies" in sent:
+        _sweep_blocked_from_queue(saved)
+    return saved
+
+
+def _sweep_blocked_from_queue(cfg: agent_config_store.AgentConfig) -> None:
+    """Reject every queued (pending or approved) screening for a blocked company.
+
+    Blocking a company must take its items out of the approval queue, not
+    only stop new ones. Matched by ``is_blocked`` (identity key), so blocking
+    "Zalando" also sweeps "Zalando SE". Applied records and any other approval
+    state are left untouched.
+    """
+    for s in screening_store.load_all():
+        if s.approval not in ("pending", "approved") or not agent_config_store.is_blocked(cfg, s.company):
+            continue
+        reason = s.reason or ""
+        if not reason.startswith(BLOCKED_REASON_PREFIX.rstrip()):
+            reason = (BLOCKED_REASON_PREFIX + reason).rstrip()
+        screening_store.update(s.id, {
+            "verdict": "rejected",
+            "failing_criterion": BLOCKED_CRITERION,
+            "reason": reason,
+        })
+        screening_store.set_approval(s.id, "rejected")
 
 
 def load_enabled_profile(profile_name: str):
