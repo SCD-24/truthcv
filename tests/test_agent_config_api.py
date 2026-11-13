@@ -548,6 +548,73 @@ def test_put_blocklist_strips_and_drops_empties(client, data_dir):
     assert r.json()["blockedCompanies"] == ["Acme"]
 
 
+def _screening_with_approval(company: str, approval: str, url: str):
+    """Record a passed screening for ``company`` and set its approval state."""
+    from truthcv.domain.screening import store as screening_store
+
+    s = screening_store.create({
+        "company": company, "role": "Dev", "url": url,
+        "verdict": "passed", "reason": "Good fit.",
+    })
+    return screening_store.set_approval(s.id, approval)
+
+
+def _reload(screening_id: str):
+    """Fetch the stored screening fresh from the store."""
+    from truthcv.domain.screening import store as screening_store
+
+    return screening_store.get(screening_id)
+
+
+def test_put_blocklist_sweeps_queued_screenings_of_blocked_company(client, data_dir):
+    pending = _screening_with_approval("Acme", "pending", "https://acme.example/jobs/1")
+    approved = _screening_with_approval("Acme", "approved", "https://acme.example/jobs/2")
+    r = client.put("/api/agent/config", json={"blockedCompanies": ["Acme"]})
+    assert r.status_code == 200
+    for original in (pending, approved):
+        got = _reload(original.id)
+        assert got.verdict == "rejected"
+        assert got.failing_criterion == "company_blocked"
+        assert got.reason == "Company is on the blocklist. Good fit."
+        assert got.approval not in ("pending", "approved")
+    # A second save does not stack the prefix.
+    client.put("/api/agent/config", json={"blockedCompanies": ["Acme"]})
+    assert _reload(pending.id).reason == "Company is on the blocklist. Good fit."
+
+
+def test_put_blocklist_leaves_applied_screenings_unchanged(client, data_dir):
+    applied = _screening_with_approval("Acme", "applied", "https://acme.example/jobs/3")
+    client.put("/api/agent/config", json={"blockedCompanies": ["Acme"]})
+    assert _reload(applied.id).to_dict() == applied.to_dict()
+
+
+def test_put_blocklist_leaves_other_companies_unchanged(client, data_dir):
+    other = _screening_with_approval("Globex", "pending", "https://globex.example/jobs/1")
+    client.put("/api/agent/config", json={"blockedCompanies": ["Acme"]})
+    assert _reload(other.id).to_dict() == other.to_dict()
+
+
+def test_put_blocklist_sweeps_legal_suffix_variant(client, data_dir):
+    queued = _screening_with_approval("Zalando SE", "approved", "https://zalando.example/jobs/1")
+    client.put("/api/agent/config", json={"blockedCompanies": ["Zalando"]})
+    got = _reload(queued.id)
+    assert got.failing_criterion == "company_blocked"
+    assert got.approval == "rejected"
+
+
+def test_put_without_blocklist_sweeps_nothing(client, data_dir):
+    from truthcv.domain.agentconfig import store as agent_config_store
+
+    # Blocked directly in the store, so only a PUT carrying the blocklist
+    # could sweep; this one does not carry it.
+    queued = _screening_with_approval("Acme", "pending", "https://acme.example/jobs/4")
+    cfg = agent_config_store.load()
+    cfg.blocked_companies = ["Acme"]
+    agent_config_store.save(cfg)
+    client.put("/api/agent/config", json={"mode": "off"})
+    assert _reload(queued.id).to_dict() == queued.to_dict()
+
+
 def test_put_rejects_bad_time(client, data_dir):
     assert client.put("/api/agent/config", json={"runAt": ["9:00"]}).status_code == 422
     assert client.put("/api/agent/config", json={"runAt": ["25:00"]}).status_code == 422

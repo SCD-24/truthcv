@@ -19,6 +19,7 @@ describe("rejectionCategories", () => {
   it("categoryLabel returns labels", () => {
     expect(categoryLabel("eor_allowed")).toBe("EOR / PEO");
     expect(categoryLabel("none")).toBe("No reason given");
+    expect(categoryLabel("company_blocked")).toBe("Company blocked");
   });
 
   it("countByCategory is in label order and only present", () => {

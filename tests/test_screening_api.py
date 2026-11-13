@@ -30,6 +30,18 @@ def test_applied_route_409s_when_another_record_for_the_posting_is_applied(clien
     assert "already been applied" in r.json()["detail"]
 
 
+def test_applied_route_409s_with_blocklist_message_for_blocked_company(client, monkeypatch):
+    from truthcv.domain.agentconfig.store import AgentConfig
+    from truthcv.domain.screening import store
+
+    s, _ = store.create_or_get({"company": "Zalando SE", "role": "Engineer", "verdict": "deferred"})
+    monkeypatch.setattr(store, "_agent_config_load", lambda: AgentConfig(blocked_companies=["Zalando"]))
+    r = client.post(f"/api/screenings/{s.id}/applied")
+    assert r.status_code == 409
+    assert r.json()["detail"] == "Zalando SE is on the blocklist."
+    assert store.get(s.id).approval != "applied"
+
+
 # --- POST/GET/DELETE screenings -------------------------------------------------
 
 def test_create_list_delete_screening(client):
@@ -695,3 +707,126 @@ def test_bulk_approval_reports_conflict_without_aborting(client):
         "/api/screenings/approvals", json={"ids": [a.id, b.id], "approval": "approved"}
     ).json()
     assert body["results"] == [{"id": a.id, "ok": True}, {"id": b.id, "ok": False}]
+
+
+# --- Blocklist: a blocked company never reaches the approval queue ------------
+
+_BLOCKED_POSTING_TEXT = "We are hiring an Engineer. " * 10
+
+
+def _block_and_enable_profile(*blocked):
+    """Save an agent config blocking ``blocked`` with one enabled profile."""
+    from truthcv.domain.agentconfig import store as agent_config_store
+
+    cfg = agent_config_store.load()
+    cfg.blocked_companies = list(blocked)
+    cfg.profiles = [agent_config_store.JobProfile(name="default", enabled=True)]
+    agent_config_store.save(cfg)
+
+
+def _record_verdict(company, verdict, url, **extra):
+    import truthcv.services.screenings as screenings_service
+
+    screening, _ = screenings_service.record_screening_verdict(
+        url=url,
+        role="Engineer",
+        company=company,
+        verdict=verdict,
+        reason="Looks good.",
+        posting_text=_BLOCKED_POSTING_TEXT,
+        profile="default",
+        remote_arrangement="remote",
+        **extra,
+    )
+    return screening
+
+
+def _assert_blocked_rejection(verdict, failing_criterion, reason, approval):
+    from truthcv.services.screenings import (
+        COMPANY_BLOCKED_CRITERION,
+        COMPANY_BLOCKED_REASON_PREFIX,
+    )
+
+    assert verdict == "rejected"
+    assert failing_criterion == COMPANY_BLOCKED_CRITERION
+    assert reason == f"{COMPANY_BLOCKED_REASON_PREFIX}Looks good."
+    assert approval != "pending"
+
+
+@pytest.mark.parametrize("verdict", ["passed", "deferred"])
+def test_record_screening_verdict_blocked_company_is_rejected_not_queued(verdict):
+    _block_and_enable_profile("Zalando SE")
+    s = _record_verdict("Zalando SE", verdict, f"https://zalando.example/jobs/{verdict}")
+    _assert_blocked_rejection(s.verdict, s.failing_criterion, s.reason, s.approval)
+
+
+def test_record_screening_verdict_blocked_company_with_blocker_is_rejected():
+    _block_and_enable_profile("Zalando SE")
+    s = _record_verdict(
+        "Zalando SE", "passed", "https://zalando.example/jobs/blocker",
+        screening_blocker="unreadable",
+    )
+    _assert_blocked_rejection(s.verdict, s.failing_criterion, s.reason, s.approval)
+
+
+@pytest.mark.parametrize("verdict", ["", "passed"])
+def test_record_screening_verdict_blocked_company_login_required_not_queued(verdict):
+    # login_required queues in the store whatever the verdict, so the
+    # blocklist must drop it too, not only downgrade the verdict.
+    _block_and_enable_profile("Zalando SE")
+    s = _record_verdict(
+        "Zalando SE", verdict, f"https://zalando.example/jobs/login-{verdict or 'none'}",
+        screening_blocker="login_required",
+    )
+    _assert_blocked_rejection(s.verdict, s.failing_criterion, s.reason, s.approval)
+    assert s.screening_blocker == ""
+
+
+def test_record_screening_verdict_blocklist_matches_legal_suffix():
+    _block_and_enable_profile("Zalando")
+    s = _record_verdict("Zalando SE", "deferred", "https://zalando.example/jobs/suffix")
+    _assert_blocked_rejection(s.verdict, s.failing_criterion, s.reason, s.approval)
+
+
+def test_record_screening_verdict_unblocked_company_still_queues():
+    _block_and_enable_profile("Zalando")
+    s = _record_verdict("Acme", "deferred", "https://acme.example/jobs/unblocked")
+    assert s.verdict == "deferred"
+    assert s.approval == "pending"
+
+
+@pytest.mark.parametrize("verdict", ["passed", "deferred"])
+def test_create_screening_route_blocked_company_is_rejected_not_queued(client, verdict):
+    _block_and_enable_profile("Zalando")
+    r = client.post(
+        "/api/screenings",
+        json={
+            "company": "Zalando SE",
+            "role": "Engineer",
+            "url": f"https://zalando.example/jobs/http-{verdict}",
+            "verdict": verdict,
+            "reason": "Looks good.",
+            "postingText": _BLOCKED_POSTING_TEXT,
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    _assert_blocked_rejection(
+        body["verdict"], body["failingCriterion"], body["reason"], body["approval"]
+    )
+
+
+def test_create_screening_route_unblocked_company_still_queues(client):
+    _block_and_enable_profile("Zalando")
+    r = client.post(
+        "/api/screenings",
+        json={
+            "company": "Acme",
+            "url": "https://acme.example/jobs/http-unblocked",
+            "verdict": "deferred",
+            "postingText": _BLOCKED_POSTING_TEXT,
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["verdict"] == "deferred"
+    assert r.json()["approval"] == "pending"

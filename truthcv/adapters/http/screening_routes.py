@@ -107,6 +107,9 @@ def create_screening(body: ScreeningCreate) -> ScreeningModel:
     merged into the first, and the existing record's id is returned in the
     detail so the caller can go and look at it. Delete that record to screen
     the posting again.
+
+    A passed/deferred verdict for a blocklisted company is stored as
+    rejected, never queued; the service owns that rule.
     """
     screening, created = screenings_service.create_screening(
         body.model_dump(by_alias=False)

@@ -111,3 +111,52 @@ def test_mark_applied(data_dir):
     s = store.create({"company": "Contoso", "verdict": "deferred"})
     store.set_approval(s.id, "approved")
     assert store.mark_applied(s.id).approval == "applied"
+
+
+def _approved(company: str, url: str = ""):
+    s = store.create({"company": company, "verdict": "deferred", "url": url})
+    store.set_approval(s.id, "approved")
+    return s
+
+
+def _block(monkeypatch, *names: str) -> None:
+    from truthcv.domain.agentconfig.store import AgentConfig
+
+    monkeypatch.setattr(store, "_agent_config_load", lambda: AgentConfig(blocked_companies=list(names)))
+
+
+def test_claims_refused_for_blocked_company(data_dir, monkeypatch):
+    s = _approved("Zalando")
+    _block(monkeypatch, "Zalando")
+    assert store._apply_refusal(s) == "company_blocked"
+    assert store.claim_for_apply(s.id) is None
+    assert store.claim_for_run(s.id, "run-1", 60) is None
+
+
+def test_mark_applied_retires_blocked_company(data_dir, monkeypatch):
+    """mark_applied runs after the submission: a company blocked after the
+    item was claimed (and swept to rejected) must still end up 'applied'."""
+    s = _approved("Zalando")
+    _block(monkeypatch, "Zalando")
+    store.set_approval(s.id, "rejected")
+    assert store.mark_applied(s.id).approval == "applied"
+
+
+def test_blocked_company_matches_legal_suffix(data_dir, monkeypatch):
+    s = _approved("Zalando SE")
+    _block(monkeypatch, "Zalando")
+    assert store.claim_for_apply(s.id) is None
+
+
+def test_unblocked_company_still_claimable(data_dir, monkeypatch):
+    s = _approved("Contoso")
+    _block(monkeypatch, "Zalando")
+    assert store.claim_for_run(s.id, "run-1", 60).claimed_by_run == "run-1"
+    assert store.claim_for_apply(s.id).approval == "applied"
+
+
+def test_already_applied_outranks_company_blocked(data_dir, monkeypatch):
+    s = _approved("Zalando")
+    store.mark_applied(s.id)
+    _block(monkeypatch, "Zalando")
+    assert store._apply_refusal(store.load_all()[0]) == "already_applied"
