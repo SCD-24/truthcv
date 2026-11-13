@@ -2,18 +2,18 @@
 /** Company Research page: cards, contradictions, search, and the dialogs.
  * Stubbing follows ScreeningsPage.test.tsx — mock the API client directly. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import {
   createCompanyFinding,
-  listCompanyFindings,
+  listCompanyGroupsPage,
   listContradictions,
   resolveCompanyFinding,
 } from "../api/client";
-import type { CompanyFinding, ContradictionGroup } from "../api/types";
+import type { CompanyFinding, CompanyGroup, CompanyGroupPage, ContradictionGroup } from "../api/types";
 import { CompanyResearchPage } from "./CompanyResearchPage";
 
 vi.mock("../api/client", () => ({
-  listCompanyFindings: vi.fn(),
+  listCompanyGroupsPage: vi.fn(),
   listContradictions: vi.fn(),
   createCompanyFinding: vi.fn(),
   resolveCompanyFinding: vi.fn(),
@@ -21,11 +21,12 @@ vi.mock("../api/client", () => ({
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 
 beforeEach(() => {
-  vi.mocked(listCompanyFindings).mockResolvedValue([]);
+  vi.mocked(listCompanyGroupsPage).mockResolvedValue(makePage([]));
   vi.mocked(listContradictions).mockResolvedValue([]);
 });
 
@@ -53,11 +54,60 @@ function makeFinding(overrides: Partial<CompanyFinding> = {}): CompanyFinding {
   };
 }
 
+/** One company group as GET /api/company-findings/companies emits it: the
+ * newest finding's spelling names the group. */
+function makeGroup(findings: CompanyFinding[], overrides: Partial<CompanyGroup> = {}): CompanyGroup {
+  const named = findings[findings.length - 1] ?? makeFinding();
+  return {
+    companyKey: named.companyKey,
+    company: named.company,
+    findings,
+    needsReview: false,
+    ...overrides,
+  };
+}
+
+/** One page response; `companies` names every company unless overridden. */
+function makePage(items: CompanyGroup[], overrides: Partial<CompanyGroupPage> = {}): CompanyGroupPage {
+  return {
+    items,
+    total: items.length,
+    limit: 50,
+    offset: 0,
+    companies: items.map((g) => g.company),
+    ...overrides,
+  };
+}
+
+/** Resolve every page fetch with one company holding `findings`. */
+function mockFindings(findings: CompanyFinding[]) {
+  vi.mocked(listCompanyGroupsPage).mockResolvedValue(makePage([makeGroup(findings)]));
+}
+
+/** Resolve every page fetch with one Acme Corp card out of 120 companies. */
+function mockManyPages() {
+  vi.mocked(listCompanyGroupsPage).mockResolvedValue(makePage([makeGroup([makeFinding()])], { total: 120 }));
+}
+
+/** Render, wait for the first page, then move to the second (offset 50). */
+async function renderOnSecondPage() {
+  render(<CompanyResearchPage />);
+  await screen.findByText("Acme Corp");
+  fireEvent.click(screen.getByRole("button", { name: /next page/i }));
+  await waitFor(() => expect(lastPageCall()?.offset).toBe(50));
+}
+
+/** The options of the most recent page fetch. */
+function lastPageCall() {
+  const calls = vi.mocked(listCompanyGroupsPage).mock.calls;
+  return calls[calls.length - 1]?.[0];
+}
+
 describe("CompanyResearchPage", () => {
   it("renders both sides of an open contradiction together, each with Accept/Reject", async () => {
     const a = makeFinding({ id: "a", value: "500", sourceClass: "company_statement" });
     const b = makeFinding({ id: "b", value: "2000", sourceClass: "audited_accounts" });
-    vi.mocked(listCompanyFindings).mockResolvedValue([a, b]);
+    mockFindings([a, b]);
     const group: ContradictionGroup = { claim: "employment_entity", findings: [a, b] };
     vi.mocked(listContradictions).mockResolvedValue([group]);
 
@@ -75,7 +125,7 @@ describe("CompanyResearchPage", () => {
   it("resolves a contested finding when Accept is clicked, strongest source first", async () => {
     const weak = makeFinding({ id: "weak", value: "500", sourceClass: "review_site" });
     const strong = makeFinding({ id: "strong", value: "2000", sourceClass: "audited_accounts" });
-    vi.mocked(listCompanyFindings).mockResolvedValue([weak, strong]);
+    mockFindings([weak, strong]);
     vi.mocked(listContradictions).mockResolvedValue([
       { claim: "employment_entity", findings: [weak, strong] },
     ]);
@@ -116,12 +166,28 @@ describe("CompanyResearchPage", () => {
         }),
       ),
     );
+    // The add refetches the current page.
+    await waitFor(() => expect(listCompanyGroupsPage).toHaveBeenCalledTimes(2));
+    expect(lastPageCall()).toEqual({ limit: 50, offset: 0, q: "", needsReview: false });
+  });
+
+  it("offers every company from the response's companies list in the dialog", async () => {
+    vi.mocked(listCompanyGroupsPage).mockResolvedValue(
+      makePage([makeGroup([makeFinding()])], { companies: ["Acme Corp", "Globex", "Initech"] }),
+    );
+    render(<CompanyResearchPage />);
+    await screen.findByText("Acme Corp");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add finding" }));
+    fireEvent.keyDown(await screen.findByRole("combobox", { name: /^Company/ }), { key: "ArrowDown" });
+
+    const listbox = await screen.findByRole("listbox");
+    const options = within(listbox).getAllByRole("option").map((o) => o.textContent);
+    expect(options).toEqual(["Acme Corp", "Globex", "Initech"]);
   });
 
   it("renders a normal https source URL as a clickable link", async () => {
-    vi.mocked(listCompanyFindings).mockResolvedValue([
-      makeFinding({ id: "f1", sourceUrl: "https://acme.example/about" }),
-    ]);
+    mockFindings([makeFinding({ id: "f1", sourceUrl: "https://acme.example/about" })]);
 
     render(<CompanyResearchPage />);
 
@@ -130,9 +196,7 @@ describe("CompanyResearchPage", () => {
   });
 
   it("does not render a javascript: source URL as a clickable link", async () => {
-    vi.mocked(listCompanyFindings).mockResolvedValue([
-      makeFinding({ id: "f1", sourceUrl: "javascript:alert(1)" }),
-    ]);
+    mockFindings([makeFinding({ id: "f1", sourceUrl: "javascript:alert(1)" })]);
 
     render(<CompanyResearchPage />);
 
@@ -143,32 +207,91 @@ describe("CompanyResearchPage", () => {
   });
 
   it("renders the literal 'unknown' when a finding's as-of is empty", async () => {
-    vi.mocked(listCompanyFindings).mockResolvedValue([makeFinding({ id: "f1", asOf: "" })]);
+    mockFindings([makeFinding({ id: "f1", asOf: "" })]);
 
     render(<CompanyResearchPage />);
 
     expect(await screen.findByText("unknown")).toBeTruthy();
   });
 
-  it("filters cards by the search box and shows a no-match state", async () => {
-    vi.mocked(listCompanyFindings).mockResolvedValue([
-      makeFinding({ id: "a", company: "Acme Corp", companyKey: "acme corp", value: "Acme AG" }),
-      makeFinding({ id: "b", company: "Globex", companyKey: "globex", value: "Globex Ltd" }),
-    ]);
+  it("fetches the first page of 50 companies", async () => {
     render(<CompanyResearchPage />);
-    await screen.findByText("Globex");
+    await screen.findByText(/No company findings recorded yet/i);
+    expect(listCompanyGroupsPage).toHaveBeenCalledWith({ limit: 50, offset: 0, q: "", needsReview: false });
+  });
 
+  it("the next page fetches offset 50", async () => {
+    mockManyPages();
+    await renderOnSecondPage();
+    expect(lastPageCall()).toEqual({ limit: 50, offset: 50, q: "", needsReview: false });
+  });
+
+  it("debounces the search box, then sends q from the first page", async () => {
+    mockManyPages();
+    await renderOnSecondPage();
+    const before = vi.mocked(listCompanyGroupsPage).mock.calls.length;
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("Search companies"), { target: { value: "gl" } });
     fireEvent.change(screen.getByLabelText("Search companies"), { target: { value: "glob" } });
-    expect(screen.queryByText("Acme Corp")).toBeNull();
-    expect(screen.getByText("Globex")).toBeTruthy();
+    await act(() => vi.advanceTimersByTimeAsync(299));
+    expect(listCompanyGroupsPage).toHaveBeenCalledTimes(before);
 
-    fireEvent.change(screen.getByLabelText("Search companies"), { target: { value: "zzz" } });
-    expect(screen.getByText(/No companies match/i)).toBeTruthy();
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(listCompanyGroupsPage).toHaveBeenCalledTimes(before + 1);
+    expect(lastPageCall()).toEqual({ limit: 50, offset: 0, q: "glob", needsReview: false });
+  });
+
+  it("the needs-review toggle sends needsReview from the first page", async () => {
+    mockManyPages();
+    await renderOnSecondPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "Needs review" }));
+    await waitFor(() =>
+      expect(lastPageCall()).toEqual({ limit: 50, offset: 0, q: "", needsReview: true }),
+    );
+  });
+
+  it("shows a no-match state when filters leave no companies", async () => {
+    vi.mocked(listCompanyGroupsPage).mockResolvedValue(makePage([], { companies: ["Acme Corp"] }));
+    render(<CompanyResearchPage />);
+    expect(await screen.findByText(/No companies match/i)).toBeTruthy();
     expect(screen.queryByText(/No company findings recorded yet/i)).toBeNull();
   });
 
-  it("groups variant spellings of one company into a single card", async () => {
-    vi.mocked(listCompanyFindings).mockResolvedValue([
+  it("steps back a page when a refetch empties the current one", async () => {
+    const acme = makeGroup([makeFinding()]);
+    vi.mocked(listCompanyGroupsPage).mockResolvedValue(makePage([acme], { total: 51 }));
+    render(<CompanyResearchPage />);
+    await screen.findByText("Acme Corp");
+    vi.mocked(listCompanyGroupsPage).mockImplementation(async ({ offset = 0 }) =>
+      makePage(offset === 50 ? [] : [acme], { total: 50, offset }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /next page/i }));
+    await waitFor(() => expect(lastPageCall()?.offset).toBe(0));
+    const offsets = vi.mocked(listCompanyGroupsPage).mock.calls.map(([o]) => o.offset);
+    expect(offsets).toEqual([0, 50, 0]);
+  });
+
+  it("ignores a superseded fetch that resolves after a newer one", async () => {
+    let resolveStale: (page: CompanyGroupPage) => void = () => {};
+    const fresh = makeGroup([makeFinding({ company: "Fresh Co", companyKey: "fresh co" })]);
+    vi.mocked(listCompanyGroupsPage)
+      .mockResolvedValueOnce(makePage([makeGroup([makeFinding()])], { total: 120 }))
+      .mockReturnValueOnce(new Promise((resolve) => (resolveStale = resolve)))
+      .mockResolvedValue(makePage([fresh], { total: 120 }));
+    await renderOnSecondPage();
+    fireEvent.click(screen.getByRole("button", { name: "Needs review" }));
+    expect(await screen.findByText("Fresh Co")).toBeTruthy();
+
+    const stale = makeGroup([makeFinding({ company: "Stale Co", companyKey: "stale co" })]);
+    await act(async () => resolveStale(makePage([stale], { total: 120, offset: 50 })));
+    expect(screen.queryByText("Stale Co")).toBeNull();
+    expect(screen.getByText("Fresh Co")).toBeTruthy();
+  });
+
+  it("renders one server group as a single card named by the group, a row per claim", async () => {
+    mockFindings([
       makeFinding({
         id: "a",
         company: "Acme GmbH",
@@ -195,7 +318,7 @@ describe("CompanyResearchPage", () => {
   });
 
   it("shows the current value with superseded history collapsed", async () => {
-    vi.mocked(listCompanyFindings).mockResolvedValue([
+    mockFindings([
       makeFinding({ id: "old", value: "Old Name", observedAt: "2024-01-01T00:00:00+00:00" }),
       makeFinding({
         id: "new",
@@ -213,9 +336,7 @@ describe("CompanyResearchPage", () => {
   });
 
   it("opens a prefilled dialog when Correct is clicked", async () => {
-    vi.mocked(listCompanyFindings).mockResolvedValue([
-      makeFinding({ id: "f1", value: "Acme SE" }),
-    ]);
+    mockFindings([makeFinding({ id: "f1", value: "Acme SE" })]);
     render(<CompanyResearchPage />);
     await screen.findByText("Acme SE");
 
@@ -227,18 +348,14 @@ describe("CompanyResearchPage", () => {
   });
 
   it("does not render a mailto: source URL as a link", async () => {
-    vi.mocked(listCompanyFindings).mockResolvedValue([
-      makeFinding({ id: "f1", sourceUrl: "mailto:a@b.example" }),
-    ]);
+    mockFindings([makeFinding({ id: "f1", sourceUrl: "mailto:a@b.example" })]);
     render(<CompanyResearchPage />);
     const text = (await screen.findByText("mailto:a@b.example")) as HTMLElement;
     expect(text.closest("a")).toBeNull();
   });
 
   it("hides Correct for legacy free-text claims", async () => {
-    vi.mocked(listCompanyFindings).mockResolvedValue([
-      makeFinding({ id: "f1", claim: "headcount" as CompanyFinding["claim"], value: "LegacyVal" }),
-    ]);
+    mockFindings([makeFinding({ id: "f1", claim: "headcount" as CompanyFinding["claim"], value: "LegacyVal" })]);
     render(<CompanyResearchPage />);
     await screen.findByText("LegacyVal");
     expect(screen.queryByRole("button", { name: "Correct" })).toBeNull();
@@ -248,7 +365,7 @@ describe("CompanyResearchPage", () => {
     const a = makeFinding({ id: "a", value: "AAA", sourceClass: "audited_accounts" });
     const b = makeFinding({ id: "b", value: "BBB", sourceClass: "company_statement" });
     const u = makeFinding({ id: "u", value: "UUU", sourceClass: "unattributed" });
-    vi.mocked(listCompanyFindings).mockResolvedValue([a, b, u]);
+    mockFindings([a, b, u]);
     vi.mocked(listContradictions).mockResolvedValue([
       { claim: "employment_entity", findings: [a, b] },
     ]);
@@ -261,21 +378,21 @@ describe("CompanyResearchPage", () => {
   it("reports a refetch failure after a successful resolve as a load error", async () => {
     const a = makeFinding({ id: "a", value: "AAA", sourceClass: "audited_accounts" });
     const b = makeFinding({ id: "b", value: "BBB", sourceClass: "company_statement" });
-    vi.mocked(listCompanyFindings).mockResolvedValueOnce([a, b]);
+    vi.mocked(listCompanyGroupsPage).mockResolvedValueOnce(makePage([makeGroup([a, b])]));
     vi.mocked(listContradictions).mockResolvedValueOnce([
       { claim: "employment_entity", findings: [a, b] },
     ]);
     vi.mocked(resolveCompanyFinding).mockResolvedValue(a);
     render(<CompanyResearchPage />);
     await screen.findByText("AAA");
-    vi.mocked(listCompanyFindings).mockRejectedValue(new Error("refetch boom"));
+    vi.mocked(listCompanyGroupsPage).mockRejectedValue(new Error("refetch boom"));
     fireEvent.click(screen.getAllByRole("button", { name: "Accept" })[0]);
     expect(await screen.findByText("refetch boom")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   });
 
   it("shows a load error separately from the empty state", async () => {
-    vi.mocked(listCompanyFindings).mockRejectedValue(new Error("boom"));
+    vi.mocked(listCompanyGroupsPage).mockRejectedValue(new Error("boom"));
     render(<CompanyResearchPage />);
     expect(await screen.findByText("boom")).toBeTruthy();
     expect(screen.queryByText(/No company findings recorded yet/i)).toBeNull();
