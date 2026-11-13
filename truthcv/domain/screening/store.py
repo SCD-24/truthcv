@@ -18,6 +18,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import NamedTuple
 
+from truthcv.domain.agentconfig.store import is_blocked as _is_blocked
 from truthcv.domain.agentconfig.store import load as _agent_config_load
 from truthcv.domain.companyresearch.store import open_contradictions as _open_contradictions
 from truthcv.infra.storage import atomic_write_text, locked
@@ -586,6 +587,9 @@ def clear_apply_failure(screening_id: str) -> Screening | None:
     return _mutate(screening_id, _clear)
 
 
+COMPANY_BLOCKED = "company_blocked"
+
+
 def _apply_refusal(
     screening: Screening, screenings: list[Screening] | None = None
 ) -> str:
@@ -603,6 +607,11 @@ def _apply_refusal(
     since holding one file's lock while acquiring another's is how two
     writers racing in opposite orders deadlock.
 
+    "company_blocked" fires when the company is on the Agents-page blocklist
+    (truthcv.domain.agentconfig.store.is_blocked). It reads agent config with
+    the unlocked `load()` only and takes no agentconfig lock, for the same
+    deadlock reason as above.
+
     ``screenings`` is the caller's already-loaded record list (never re-read
     here); when given, another record for the same posting that is already
     ``applied`` also yields "already_applied".
@@ -618,6 +627,8 @@ def _apply_refusal(
         return "already_applied"
     if _open_contradictions(screening.company):
         return "contradictory_research"
+    if _is_blocked(_agent_config_load(), screening.company):
+        return COMPANY_BLOCKED
     return ""
 
 
@@ -690,7 +701,8 @@ def _claim_is_live(screening: Screening, now: str) -> bool:
 def claim_for_run(screening_id: str, run_id: str, lease_seconds: int) -> Screening | None:
     """Hand a screening's work to `run_id` for `lease_seconds`.
 
-    Refuses (returns None) only when the item is currently, live-leased to a
+    Refuses (returns None) when the item's company is blocked (see
+    `_apply_refusal`), or when the item is currently, live-leased to a
     DIFFERENT run — an expired claim is reclaimable, which is what lets a
     crashed run's work return to the queue for the next run rather than
     being stranded forever. Claiming the same item again for the same
@@ -699,7 +711,7 @@ def claim_for_run(screening_id: str, run_id: str, lease_seconds: int) -> Screeni
     with locked(screenings_path()):
         screenings = load_all()
         screening = next((s for s in screenings if s.id == screening_id), None)
-        if screening is None:
+        if screening is None or _apply_refusal(screening, screenings) == COMPANY_BLOCKED:
             return None
         now = _now()
         if _claim_is_live(screening, now) and screening.claimed_by_run != run_id:
