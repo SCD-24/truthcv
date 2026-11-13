@@ -18,6 +18,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import NamedTuple
 
+from truthcv.domain.agentconfig.store import is_blocked as _is_blocked
 from truthcv.domain.agentconfig.store import load as _agent_config_load
 from truthcv.domain.companyresearch.store import open_contradictions as _open_contradictions
 from truthcv.infra.storage import atomic_write_text, locked
@@ -586,8 +587,14 @@ def clear_apply_failure(screening_id: str) -> Screening | None:
     return _mutate(screening_id, _clear)
 
 
+COMPANY_BLOCKED = "company_blocked"
+
+
 def _apply_refusal(
-    screening: Screening, screenings: list[Screening] | None = None
+    screening: Screening,
+    screenings: list[Screening] | None = None,
+    *,
+    check_blocklist: bool = True,
 ) -> str:
     """"" when `screening` may be applied to; a machine-readable reason otherwise.
 
@@ -602,6 +609,13 @@ def _apply_refusal(
     that one unlocked read and take no companyresearch lock of its own,
     since holding one file's lock while acquiring another's is how two
     writers racing in opposite orders deadlock.
+
+    "company_blocked" fires when the company is on the Agents-page blocklist
+    (truthcv.domain.agentconfig.store.is_blocked). It reads agent config with
+    the unlocked `load()` only and takes no agentconfig lock, for the same
+    deadlock reason as above. ``check_blocklist=False`` skips it: that is
+    `mark_applied`'s post-submission retire, which must not lose a real
+    submission because the company was blocked after the item was claimed.
 
     ``screenings`` is the caller's already-loaded record list (never re-read
     here); when given, another record for the same posting that is already
@@ -618,13 +632,17 @@ def _apply_refusal(
         return "already_applied"
     if _open_contradictions(screening.company):
         return "contradictory_research"
+    if check_blocklist and _is_blocked(_agent_config_load(), screening.company):
+        return COMPANY_BLOCKED
     return ""
 
 
-def _retire(screening_id: str) -> Screening | None:
+def _retire(screening_id: str, *, refuse_blocked: bool) -> Screening | None:
     """Shared body for mark_applied/claim_for_apply: retire a screening if it
     may be applied to, clearing any run lease it was holding since a retired
-    item is no longer anyone's work to do.
+    item is no longer anyone's work to do. ``refuse_blocked`` is passed to
+    `_apply_refusal` as ``check_blocklist``: True for a claim (before
+    submitting), False for `mark_applied` (after submitting).
 
     Runs under one lock, which is what makes this a claim rather than a
     request when called via `claim_for_apply`: two concurrent callers cannot
@@ -634,7 +652,9 @@ def _retire(screening_id: str) -> Screening | None:
     with locked(screenings_path()):
         screenings = load_all()
         screening = next((s for s in screenings if s.id == screening_id), None)
-        if screening is None or _apply_refusal(screening, screenings):
+        if screening is None or _apply_refusal(
+            screening, screenings, check_blocklist=refuse_blocked
+        ):
             return None
         screening.approval = "applied"
         screening.claimed_by_run = ""
@@ -654,20 +674,23 @@ def mark_applied(screening_id: str) -> Screening | None:
     item because a different run (or no run) claimed it, because it is
     called after the ledger row is already written
     (truthcv/adapters/mcp/tools_ledger.py's record_application) — refusing here would
-    lose a real submission that has already happened in the world.
+    lose a real submission that has already happened in the world. For the
+    same reason it never refuses a blocklisted company: the operator may
+    block a company after a run claimed its item, and the submission that
+    run then makes must still retire the screening as 'applied'.
 
     Shares its implementation with `claim_for_apply` (see `_retire`) so the
     two call paths cannot silently fork.
     """
-    return _retire(screening_id)
+    return _retire(screening_id, refuse_blocked=False)
 
 
 def claim_for_apply(screening_id: str) -> Screening | None:
     """Atomically retire a screening, but only if it may be applied to.
 
     Returns the record on success, or None if it does not exist, was already
-    ``applied``, or its company has an open research contradiction (see
-    `_apply_refusal`). The check and the write happen under one lock, which
+    ``applied``, its company has an open research contradiction, or its
+    company is on the blocklist (see `_apply_refusal`). The check and the write happen under one lock, which
     is what makes it a claim rather than a request: two concurrent callers
     cannot both succeed, so the caller that wins is the only one that may
     create the application row.
@@ -675,7 +698,7 @@ def claim_for_apply(screening_id: str) -> Screening | None:
     Shares its implementation with `mark_applied` (see `_retire`) so the two
     call paths cannot silently fork.
     """
-    return _retire(screening_id)
+    return _retire(screening_id, refuse_blocked=True)
 
 
 def _claim_is_live(screening: Screening, now: str) -> bool:
@@ -690,7 +713,8 @@ def _claim_is_live(screening: Screening, now: str) -> bool:
 def claim_for_run(screening_id: str, run_id: str, lease_seconds: int) -> Screening | None:
     """Hand a screening's work to `run_id` for `lease_seconds`.
 
-    Refuses (returns None) only when the item is currently, live-leased to a
+    Refuses (returns None) when the item's company is blocked (see
+    `_apply_refusal`), or when the item is currently, live-leased to a
     DIFFERENT run — an expired claim is reclaimable, which is what lets a
     crashed run's work return to the queue for the next run rather than
     being stranded forever. Claiming the same item again for the same
@@ -699,7 +723,7 @@ def claim_for_run(screening_id: str, run_id: str, lease_seconds: int) -> Screeni
     with locked(screenings_path()):
         screenings = load_all()
         screening = next((s for s in screenings if s.id == screening_id), None)
-        if screening is None:
+        if screening is None or _apply_refusal(screening, screenings) == COMPANY_BLOCKED:
             return None
         now = _now()
         if _claim_is_live(screening, now) and screening.claimed_by_run != run_id:

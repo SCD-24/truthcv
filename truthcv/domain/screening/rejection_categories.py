@@ -19,6 +19,7 @@ REJECTION_CATEGORIES = (
     "role_fit",
     "posting_age",
     "cooldown",
+    "company_blocked",
     "other",
 )
 

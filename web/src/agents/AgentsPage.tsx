@@ -1442,7 +1442,7 @@ function BlocklistSection({
   return (
     <Section
       title="Blocked companies"
-      description="The agent will never apply to a blocked company. Matching is by exact name, ignoring case."
+      description="The agent will never apply to a blocked company, and its queued postings move to Rejected. Matching ignores case and legal suffixes like GmbH or SE."
     >
       <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
         {config.blockedCompanies.map((company) => (

@@ -11,6 +11,7 @@ export const REJECTION_CATEGORY_LABELS: Record<string, string> = {
   role_fit: "Role fit",
   posting_age: "Posting too old",
   cooldown: "Cooldown",
+  company_blocked: "Company blocked",
   other: "Other",
   none: "No reason given",
 };
