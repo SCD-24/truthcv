@@ -8187,7 +8187,7 @@
         "summary": "List Screenings"
       },
       "post": {
-        "description": "Create a new screening record from client-supplied fields.\n\nA screening cannot be created without a resolvable posting URL: the\nrequirement is enforced by ``ScreeningCreate``'s ``url`` validator, which\nsurfaces an unusable URL as a 422 before this handler runs.\n\n409 when the store already holds a screening for that posting: one\nposting gets one record, so a second is refused rather than silently\nmerged into the first, and the existing record's id is returned in the\ndetail so the caller can go and look at it. Delete that record to screen\nthe posting again.",
+        "description": "Create a new screening record from client-supplied fields.\n\nA screening cannot be created without a resolvable posting URL: the\nrequirement is enforced by ``ScreeningCreate``'s ``url`` validator, which\nsurfaces an unusable URL as a 422 before this handler runs.\n\n409 when the store already holds a screening for that posting: one\nposting gets one record, so a second is refused rather than silently\nmerged into the first, and the existing record's id is returned in the\ndetail so the caller can go and look at it. Delete that record to screen\nthe posting again.\n\nA passed/deferred verdict for a blocklisted company is stored as\nrejected, never queued; the service owns that rule.",
         "operationId": "create_screening_api_screenings_post",
         "requestBody": {
           "content": {
