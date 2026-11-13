@@ -45,3 +45,7 @@ def test_blank():
 ])
 def test_examples(raw, expected):
     assert norm(raw) == expected
+
+
+def test_company_blocked_is_canonical():
+    assert norm("company_blocked") == "company_blocked"
