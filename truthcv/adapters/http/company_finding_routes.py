@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 
 from truthcv.domain.companyresearch import store as company_findings_store
 from truthcv.infra.identity.company import company_identity_key
+from truthcv.services import company_research_page
 
 from .schemas import (
     CompanyFindingCreate,
@@ -13,8 +14,28 @@ from .schemas import (
     CompanyFindingResolve,
     ContradictionGroupModel,
 )
+from .schemas.common import _Camel
 
 router = APIRouter()
+
+
+class CompanyGroupModel(_Camel):
+    """Wire shape for one company group on the Company research page."""
+
+    company_key: str
+    company: str
+    findings: list[CompanyFindingModel]
+    needs_review: bool
+
+
+class CompanyGroupsResponse(_Camel):
+    """One page of company groups, the filtered total and every company name."""
+
+    items: list[CompanyGroupModel]
+    total: int
+    limit: int
+    offset: int
+    companies: list[str]
 
 
 def _company_finding_model(f) -> CompanyFindingModel:
@@ -31,6 +52,39 @@ def list_company_findings() -> list[CompanyFindingModel]:
         company_findings_store.load_all(), key=lambda f: f.observed_at, reverse=True
     )
     return [_company_finding_model(f) for f in findings]
+
+
+# Declared BEFORE /company-findings/{company}: otherwise the router binds
+# "companies" as a company name and this route is unreachable.
+@router.get("/company-findings/companies", response_model=CompanyGroupsResponse)
+def list_company_groups(
+    limit: int = company_research_page.COMPANIES_DEFAULT_LIMIT,
+    offset: int = 0,
+    q: str = "",
+    needs_review: bool = False,
+) -> CompanyGroupsResponse:
+    """One page of companies with their findings, sorted by display name.
+
+    ``q`` matches a company name or any finding value, ignoring case;
+    ``needs_review`` keeps only companies with an open contradiction. limit
+    is clamped and a negative offset raised to 0; effective values are echoed.
+    """
+    page = company_research_page.companies_page(limit, offset, q, needs_review)
+    return CompanyGroupsResponse(
+        items=[
+            CompanyGroupModel(
+                company_key=g.company_key,
+                company=g.company,
+                findings=[_company_finding_model(f) for f in g.findings],
+                needs_review=g.needs_review,
+            )
+            for g in page.items
+        ],
+        total=page.total,
+        limit=page.limit,
+        offset=page.offset,
+        companies=page.companies,
+    )
 
 
 # Declared BEFORE /company-findings/{company}: otherwise the router binds
