@@ -17,6 +17,9 @@ own, deliberately different, contracts on top:
   Only the terminal store call is shared: the MCP tool's queueing gate
   (``record_screening_verdict``) lives here too, but the HTTP route
   deliberately does not go through it.
+* **Blocklist.** Both paths downgrade a queueing verdict for a blocklisted
+  company to ``rejected`` (see ``_apply_blocklist``), so a blocked company
+  never reaches the approval queue whichever adapter recorded it.
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ from datetime import date, datetime, timezone
 from urllib.parse import urlparse
 
 import truthcv.domain.applications as app_store
+import truthcv.domain.agentconfig.store as agent_config_store
 import truthcv.domain.screening.jev as _jev
 import truthcv.domain.screening.store as screening_store
 from truthcv.engines.coverletter import store as _coverletter_store
@@ -49,14 +53,79 @@ from truthcv.services.errors import Conflict, NotFound, Refused
 
 logger = logging.getLogger(__name__)
 
+# failing_criterion and reason prefix for a queueing verdict downgraded
+# because the company is on the Agents page blocklist.
+COMPANY_BLOCKED_CRITERION = "company_blocked"
+COMPANY_BLOCKED_REASON_PREFIX = "Company is on the blocklist. "
+
+
+def _apply_blocklist(company: str, verdict: str, reason: str, blocker: str = "") -> dict:
+    """Downgrade a queueing record for a blocklisted company to ``rejected``.
+
+    A record queues when ``verdict`` is 'passed' or 'deferred', or when
+    ``blocker`` is one of ``screening_store.QUEUEING_BLOCKERS`` (login_required)
+    whatever the verdict — the store queues on either. Returns ``{}`` unless
+    the record would queue and ``company`` is blocked per
+    ``truthcv.domain.agentconfig.store.is_blocked`` (identity-key match, so
+    blocking 'Zalando' also blocks 'Zalando SE'). Otherwise returns the same
+    ``verdict``/``failing_criterion``/``reason`` override shape as
+    ``_evaluate_profile_criteria``, with the blocklist note prefixed onto the
+    caller's reason, plus ``screening_blocker`` with any queueing blocker
+    dropped: left set, the store would still queue the rejected record, and a
+    blocked company has no reason to be in the sign-in queue. The record is
+    still stored — it just never queues.
+    """
+    queueing_blocker = blocker in screening_store.QUEUEING_BLOCKERS
+    if verdict not in ("passed", "deferred") and not queueing_blocker:
+        return {}
+    if not agent_config_store.is_blocked(agent_config_store.load(), company):
+        return {}
+    return {
+        "verdict": "rejected",
+        "failing_criterion": COMPANY_BLOCKED_CRITERION,
+        "reason": f"{COMPANY_BLOCKED_REASON_PREFIX}{reason}".strip(),
+        "screening_blocker": "" if queueing_blocker else blocker,
+    }
+
+
+def _validated_posting_fields(url: str, role: str, company: str, extra: dict | None) -> dict:
+    """``extra`` plus the validated url/role/company of an agent screening.
+
+    Raises ``ValueError`` for an invalid value or a LinkedIn search/listing
+    page, which is not a posting.
+    """
+    fields = dict(extra or {})
+    validated_url = _validate_posting_url(url)
+    if not _is_posting_url(validated_url):
+        raise ValueError(
+            f"{validated_url!r} is a LinkedIn search/listing page, not a "
+            "posting. Only linkedin.com/jobs/view/<id> URLs are accepted."
+        )
+    fields["url"] = validated_url
+    fields["role"] = _validate_role_title(role)
+    fields["company"] = _validate_company_name(company)
+    return fields
+
 
 def create_screening(fields: dict) -> tuple[Screening, bool]:
     """Create-or-get a screening from already-validated ``fields``.
+
+    The HTTP ``POST /api/screenings`` path. A queueing verdict for a
+    blocklisted company is downgraded first (see ``_apply_blocklist``).
 
     Returns ``(screening, created)`` — ``created`` is False when a screening
     for this posting already existed. What that means to the caller is the
     caller's decision (see the module docstring).
     """
+    fields = dict(fields)
+    fields.update(
+        _apply_blocklist(
+            fields.get("company", ""),
+            fields.get("verdict", ""),
+            fields.get("reason", ""),
+            fields.get("screening_blocker", ""),
+        )
+    )
     return screening_store.create_or_get(fields)
 
 
@@ -310,12 +379,13 @@ def _finalize_screening(fields: dict, named: dict) -> tuple[Screening, bool]:
     optional-field merge (an omitted field never overwrites a stored value,
     which is why only truthy values are copied) and the store call belong
     together as one step. Shaping the result (``created`` on the dict) is the
-    MCP adapter's job.
+    MCP adapter's job. Calls the store directly rather than
+    ``create_screening`` so the blocklist check is not applied twice.
     """
     for name, value in named.items():
         if value:
             fields[name] = value
-    return create_screening(fields)
+    return screening_store.create_or_get(fields)
 
 
 def record_screening_verdict(
@@ -346,29 +416,20 @@ def record_screening_verdict(
     This is the agent's screening workflow, behind the ``record_screening`` MCP
     tool (whose docstring is the contract for every field). It exists so the
     domain rules — the LinkedIn search-page rejection, hold-for-review
-    deferral, the queueing gate against the profile's hard requirements and
-    Jev, and today's-UTC-date stamping — live in the services layer rather
+    deferral, the blocklist downgrade, the queueing gate against the
+    profile's hard requirements and Jev, and today's-UTC-date stamping — live in the services layer rather
     than in the tool adapter. ``extra_fields`` carries any further fields the
     caller passed through ``**fields``.
 
     The HTTP ``POST /api/screenings`` route deliberately does NOT go through
     this function: it validates via ``ScreeningCreate`` and calls
-    ``create_screening`` directly, without the queueing gate.
+    ``create_screening`` directly, without the queueing gate (the blocklist
+    downgrade applies on both paths).
 
     Returns ``(screening, created)`` exactly as ``create_screening`` does.
     Every validation failure raises ``ValueError`` and persists nothing.
     """
-    fields = dict(extra_fields or {})
-    validated_url = _validate_posting_url(url)
-    if not _is_posting_url(validated_url):
-        raise ValueError(
-            f"{validated_url!r} is a LinkedIn search/listing page, not a "
-            "posting. Only linkedin.com/jobs/view/<id> URLs are accepted."
-        )
-    validated_role = _validate_role_title(role)
-    fields["url"] = validated_url
-    fields["role"] = validated_role
-    fields["company"] = _validate_company_name(company)
+    fields = _validated_posting_fields(url, role, company, extra_fields)
     validated_blocker = _validate_blocker(screening_blocker) if screening_blocker else ""
     validated_verdict = _validate_verdict(verdict, blocker=validated_blocker)
     if not validated_blocker and _holds_for_review(
@@ -380,6 +441,12 @@ def record_screening_verdict(
             "Remote arrangement not stated in the posting — held for your "
             "review. " + reason
         )
+    blocked = _apply_blocklist(fields["company"], validated_verdict, reason, validated_blocker)
+    if blocked:
+        validated_verdict = blocked["verdict"]
+        failing_criterion = blocked["failing_criterion"]
+        reason = blocked["reason"]
+        validated_blocker = blocked["screening_blocker"]
     fields["verdict"] = validated_verdict
     if validated_verdict in ("passed", "deferred") and not validated_blocker:
         # This is about to queue for the operator's decision: see
