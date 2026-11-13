@@ -131,3 +131,84 @@ def test_patch_resolves_but_cannot_change_factual_fields(client):
     assert body["value"] == "4.5"
     assert body["sourceUrl"] == "https://a.example/x"
     assert body["sourceClass"] == "press"
+
+
+@pytest.fixture()
+def ordered_clock(monkeypatch):
+    """Strictly increasing observed_at stamps, so "newest" is deterministic."""
+    from truthcv.domain.companyresearch import store
+
+    ticks = iter(range(10_000))
+    monkeypatch.setattr(store, "_now", lambda: f"2026-01-01T00:00:{next(ticks):05d}")
+
+
+def _companies(client, **params):
+    r = client.get("/api/company-findings/companies", params=params)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_companies_groups_by_identity_key_with_newest_name(client, ordered_clock):
+    _create(client, company="Zalando", value="4.0")
+    _create(client, company="Zalando SE", claim="employment_entity", value="Zalando SE")
+    body = _companies(client)
+    assert body["total"] == 1
+    group = body["items"][0]
+    assert group["company"] == "Zalando SE"
+    assert group["companyKey"] == "zalando"
+    # Newest observed first within a group, as the list route serves them.
+    assert [f["value"] for f in group["findings"]] == ["Zalando SE", "4.0"]
+    assert body["companies"] == ["Zalando SE"]
+
+
+def test_companies_sorted_case_insensitively(client):
+    for name in ("beta Inc", "Acme Co", "Cobalt Ltd"):
+        _create(client, company=name)
+    body = _companies(client)
+    assert [g["company"] for g in body["items"]] == ["Acme Co", "beta Inc", "Cobalt Ltd"]
+
+
+def test_companies_paging_clamps_and_echoes(client):
+    for name in ("Acme Co", "Beta Inc", "Cobalt Ltd"):
+        _create(client, company=name)
+    page = _companies(client, limit=2, offset=1)
+    assert [g["company"] for g in page["items"]] == ["Beta Inc", "Cobalt Ltd"]
+    assert (page["total"], page["limit"], page["offset"]) == (3, 2, 1)
+    low = _companies(client, limit=0, offset=-5)
+    assert (low["limit"], low["offset"], len(low["items"])) == (1, 0, 1)
+    assert _companies(client, limit=500)["limit"] == 200
+    assert _companies(client)["limit"] == 50
+
+
+def test_companies_search_name_and_value_with_unfiltered_names(client):
+    _create(client, company="Acme Co", value="4.5")
+    _create(client, company="Beta Inc", claim="employment_entity", value="Beta Holdings BV")
+    by_name = _companies(client, q="  ACME ")
+    assert [g["company"] for g in by_name["items"]] == ["Acme Co"]
+    assert by_name["total"] == 1
+    assert by_name["companies"] == ["Acme Co", "Beta Inc"]
+    by_value = _companies(client, q="holdings")
+    assert [g["company"] for g in by_value["items"]] == ["Beta Inc"]
+    assert _companies(client, q="   ")["total"] == 2
+
+
+def test_companies_needs_review_filter(client):
+    _create(client, company="Acme Co", value="4.5", sourceClass="press")
+    _create(client, company="Acme Co", value="3.0", sourceClass="review_site")
+    _create(client, company="Beta Inc", value="4.0")
+    every = _companies(client)
+    assert {g["company"]: g["needsReview"] for g in every["items"]} == {
+        "Acme Co": True,
+        "Beta Inc": False,
+    }
+    flagged = _companies(client, needs_review="true")
+    assert [g["company"] for g in flagged["items"]] == ["Acme Co"]
+    assert flagged["total"] == 1
+    assert flagged["companies"] == ["Acme Co", "Beta Inc"]
+
+
+def test_companies_route_not_captured_as_company(client):
+    _create(client, company="companies")
+    body = _companies(client)
+    assert isinstance(body, dict)
+    assert body["items"][0]["company"] == "companies"

@@ -35,6 +35,7 @@ import type {
   SaveDocumentResult,
   ScreeningRecord,
   RejectedScreeningPage,
+  ScreeningLedgerPage,
   CoverLetterDraft,
   CooldownStatus,
   AgentConfig,
@@ -53,6 +54,7 @@ import type {
   JobBoardKeyStatus,
   BrowserSession,
   CompanyFinding,
+  CompanyGroupPage,
   ClaimType,
   ContradictionGroup,
   RunPage,
@@ -478,6 +480,21 @@ export function listScreenings(): Promise<ScreeningRecord[]> {
   return request("/api/screenings");
 }
 
+/** One page of the screening ledger, newest first, without posting text.
+ * `blockedOnly` keeps only postings the agent could not read. */
+export function listScreeningLedgerPage(opts: {
+  limit?: number;
+  offset?: number;
+  blockedOnly?: boolean;
+}): Promise<ScreeningLedgerPage> {
+  const params = new URLSearchParams();
+  if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts.offset !== undefined) params.set("offset", String(opts.offset));
+  if (opts.blockedOnly) params.set("blocked_only", "true");
+  const qs = params.toString();
+  return request<ScreeningLedgerPage>(`/api/screenings/ledger${qs ? `?${qs}` : ""}`);
+}
+
 /** Delete a screening record, ending its cooldown and un-blocking the target. */
 export function deleteScreening(id: string): Promise<void> {
   return request<void>("/api/screenings/" + encodeURIComponent(id), {
@@ -506,6 +523,24 @@ export function listApprovedApplications(): Promise<ScreeningRecord[]> {
 /** Every sourced company research finding, newest observed first. */
 export function listCompanyFindings(): Promise<CompanyFinding[]> {
   return request("/api/company-findings");
+}
+
+/** One page of companies with their findings, sorted by display name. A
+ * non-blank `q` matches a company name or any finding value; `needsReview`
+ * keeps only companies with an open contradiction. */
+export function listCompanyGroupsPage(opts: {
+  limit?: number;
+  offset?: number;
+  q?: string;
+  needsReview?: boolean;
+}): Promise<CompanyGroupPage> {
+  const params = new URLSearchParams();
+  if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts.offset !== undefined) params.set("offset", String(opts.offset));
+  if (opts.q && opts.q.trim()) params.set("q", opts.q);
+  if (opts.needsReview) params.set("needs_review", "true");
+  const qs = params.toString();
+  return request<CompanyGroupPage>(`/api/company-findings/companies${qs ? `?${qs}` : ""}`);
 }
 
 /** Every finding recorded for one company. */

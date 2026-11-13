@@ -16,8 +16,13 @@ from .common import _Camel
 from .cv import CoverLetterApprovals
 
 
-class ScreeningModel(_Camel):
-    """A tracked job-screening record: the wire shape for GET/POST /screenings."""
+class ScreeningLedgerItemModel(_Camel):
+    """A screening record without its posting text: one GET /screenings/ledger row.
+
+    Every ScreeningModel field except ``posting_text``, which the Screenings
+    page never shows; ScreeningModel extends this with it, so the two shapes
+    share one set of field definitions.
+    """
 
     id: str = ""
     company: str = ""
@@ -29,7 +34,6 @@ class ScreeningModel(_Camel):
     reason: str = ""
     cooldown_expires: str = ""
     source: str = ""
-    posting_text: str = ""
     posted_date: str = ""
     profile: str = ""
     remote_arrangement: str = ""
@@ -45,6 +49,12 @@ class ScreeningModel(_Camel):
     claim_expires_at: str = ""
     created_at: str = ""
     updated_at: str = ""
+
+
+class ScreeningModel(ScreeningLedgerItemModel):
+    """A tracked job-screening record: the wire shape for GET/POST /screenings."""
+
+    posting_text: str = ""
 
 
 class ApprovalUpdate(_Camel):
@@ -253,3 +263,19 @@ class RejectedScreeningsResponse(_Camel):
     limit: int = 0
     offset: int = 0
     categories: list[CategoryCountModel]
+
+
+class ScreeningLedgerResponse(_Camel):
+    """GET /api/screenings/ledger: one page of screenings, newest first.
+
+    ``total`` counts records after the ``blockedOnly`` filter;
+    ``last_activity`` is the newest screened date (else created date) across
+    every record, unfiltered, or None when there are none. ``limit``/``offset``
+    are the effective values after clamping.
+    """
+
+    items: list[ScreeningLedgerItemModel]
+    total: int = 0
+    limit: int = 0
+    offset: int = 0
+    last_activity: str | None = None

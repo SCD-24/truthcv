@@ -2256,6 +2256,78 @@
         "title": "CompanyFindingResolve",
         "type": "object"
       },
+      "CompanyGroupModel": {
+        "description": "Wire shape for one company group on the Company research page.",
+        "properties": {
+          "company": {
+            "title": "Company",
+            "type": "string"
+          },
+          "companyKey": {
+            "title": "Companykey",
+            "type": "string"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyFindingModel"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "needsReview": {
+            "title": "Needsreview",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "companyKey",
+          "company",
+          "findings",
+          "needsReview"
+        ],
+        "title": "CompanyGroupModel",
+        "type": "object"
+      },
+      "CompanyGroupsResponse": {
+        "description": "One page of company groups, the filtered total and every company name.",
+        "properties": {
+          "companies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Companies",
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyGroupModel"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset",
+          "companies"
+        ],
+        "title": "CompanyGroupsResponse",
+        "type": "object"
+      },
       "CompleteLoginRequest": {
         "properties": {
           "code": {
@@ -4593,6 +4665,166 @@
         "title": "ScreeningCreate",
         "type": "object"
       },
+      "ScreeningLedgerItemModel": {
+        "description": "A screening record without its posting text: one GET /screenings/ledger row.\n\nEvery ScreeningModel field except ``posting_text``, which the Screenings\npage never shows; ScreeningModel extends this with it, so the two shapes\nshare one set of field definitions.",
+        "properties": {
+          "applyAttempts": {
+            "default": 0,
+            "title": "Applyattempts",
+            "type": "integer"
+          },
+          "applyError": {
+            "default": "",
+            "title": "Applyerror",
+            "type": "string"
+          },
+          "approval": {
+            "default": "",
+            "title": "Approval",
+            "type": "string"
+          },
+          "claimExpiresAt": {
+            "default": "",
+            "title": "Claimexpiresat",
+            "type": "string"
+          },
+          "claimedByRun": {
+            "default": "",
+            "title": "Claimedbyrun",
+            "type": "string"
+          },
+          "company": {
+            "default": "",
+            "title": "Company",
+            "type": "string"
+          },
+          "cooldownExpires": {
+            "default": "",
+            "title": "Cooldownexpires",
+            "type": "string"
+          },
+          "createdAt": {
+            "default": "",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "failingCriterion": {
+            "default": "",
+            "title": "Failingcriterion",
+            "type": "string"
+          },
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "languageRequirement": {
+            "default": "",
+            "title": "Languagerequirement",
+            "type": "string"
+          },
+          "postedDate": {
+            "default": "",
+            "title": "Posteddate",
+            "type": "string"
+          },
+          "profile": {
+            "default": "",
+            "title": "Profile",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          },
+          "remoteArrangement": {
+            "default": "",
+            "title": "Remotearrangement",
+            "type": "string"
+          },
+          "role": {
+            "default": "",
+            "title": "Role",
+            "type": "string"
+          },
+          "screenedDate": {
+            "default": "",
+            "title": "Screeneddate",
+            "type": "string"
+          },
+          "screeningBlocker": {
+            "default": "",
+            "title": "Screeningblocker",
+            "type": "string"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
+            "type": "string"
+          },
+          "updatedAt": {
+            "default": "",
+            "title": "Updatedat",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          },
+          "verdict": {
+            "default": "",
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "title": "ScreeningLedgerItemModel",
+        "type": "object"
+      },
+      "ScreeningLedgerResponse": {
+        "description": "GET /api/screenings/ledger: one page of screenings, newest first.\n\n``total`` counts records after the ``blockedOnly`` filter;\n``last_activity`` is the newest screened date (else created date) across\nevery record, unfiltered, or None when there are none. ``limit``/``offset``\nare the effective values after clamping.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScreeningLedgerItemModel"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "lastActivity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastactivity"
+          },
+          "limit": {
+            "default": 0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ScreeningLedgerResponse",
+        "type": "object"
+      },
       "ScreeningModel": {
         "description": "A tracked job-screening record: the wire shape for GET/POST /screenings.",
         "properties": {
@@ -6563,6 +6795,77 @@
         "summary": "Create Company Finding"
       }
     },
+    "/api/company-findings/companies": {
+      "get": {
+        "description": "One page of companies with their findings, sorted by display name.\n\n``q`` matches a company name or any finding value, ignoring case;\n``needs_review`` keeps only companies with an open contradiction. limit\nis clamped and a negative offset raised to 0; effective values are echoed.",
+        "operationId": "list_company_groups_api_company_findings_companies_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "needs_review",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Needs Review",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyGroupsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Company Groups"
+      }
+    },
     "/api/company-findings/contradictions": {
       "get": {
         "description": "Open contradiction groups; narrowed to one company, or across all of them.",
@@ -8300,6 +8603,67 @@
           }
         },
         "summary": "Bulk Delete Screenings"
+      }
+    },
+    "/api/screenings/ledger": {
+      "get": {
+        "description": "One page of every screening, newest first, without posting text.\n\nDeclared before the `/screenings/{screening_id}` routes so `ledger` is\nnever read as an id. limit is clamped into the service's bounds and a\nnegative offset to 0; the effective values are echoed back.",
+        "operationId": "list_screening_ledger_api_screenings_ledger_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "blocked_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Blocked Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScreeningLedgerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Screening Ledger"
       }
     },
     "/api/screenings/rejected": {

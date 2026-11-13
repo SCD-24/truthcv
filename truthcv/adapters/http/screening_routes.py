@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 
 from truthcv.integrations.providers import get_provider
 import truthcv.services.screenings as screenings_service
+import truthcv.services.screening_ledger as screening_ledger_service
 import truthcv.services.screening_letters as screening_letters_service
 from truthcv.domain.screening import store as screening_store
 from truthcv.domain.screening.cooldown import cooldown as check_cooldown
@@ -31,6 +32,7 @@ from .schemas import (
     ScreeningCreate,
     ScreeningModel,
 )
+from .schemas.screenings import ScreeningLedgerItemModel, ScreeningLedgerResponse
 
 router = APIRouter()
 
@@ -91,6 +93,38 @@ def list_rejected_screenings(
         limit=page.limit,
         offset=page.offset,
         categories=[CategoryCountModel(key=k, count=c) for k, c in page.counts],
+    )
+
+
+# Default page size for GET /screenings/ledger; the service clamps the bounds.
+LEDGER_DEFAULT_LIMIT = 50
+
+
+def _ledger_item(screening: Screening) -> ScreeningLedgerItemModel:
+    """Wire model for one ledger row: the screening without its posting text."""
+    data = _screening_model(screening).model_dump(exclude={"posting_text"})
+    return ScreeningLedgerItemModel(**data)
+
+
+@router.get("/screenings/ledger", response_model=ScreeningLedgerResponse)
+def list_screening_ledger(
+    limit: int = LEDGER_DEFAULT_LIMIT,
+    offset: int = 0,
+    blocked_only: bool = False,
+) -> ScreeningLedgerResponse:
+    """One page of every screening, newest first, without posting text.
+
+    Declared before the `/screenings/{screening_id}` routes so `ledger` is
+    never read as an id. limit is clamped into the service's bounds and a
+    negative offset to 0; the effective values are echoed back.
+    """
+    page = screening_ledger_service.ledger_page(limit, offset, blocked_only)
+    return ScreeningLedgerResponse(
+        items=[_ledger_item(s) for s in page.rows],
+        total=page.total,
+        limit=page.limit,
+        offset=page.offset,
+        last_activity=page.last_activity,
     )
 
 

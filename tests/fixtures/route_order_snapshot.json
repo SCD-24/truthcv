@@ -101,6 +101,14 @@
   },
   {
     "class": "APIRoute",
+    "path": "/api/screenings/ledger",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "list_screening_ledger"
+  },
+  {
+    "class": "APIRoute",
     "path": "/api/screenings/{screening_id}/applied",
     "methods": [
       "POST"
@@ -138,6 +146,14 @@
       "GET"
     ],
     "endpoint": "list_company_finding_contradictions"
+  },
+  {
+    "class": "APIRoute",
+    "path": "/api/company-findings/companies",
+    "methods": [
+      "GET"
+    ],
+    "endpoint": "list_company_groups"
   },
   {
     "class": "APIRoute",
