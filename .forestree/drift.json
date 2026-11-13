@@ -37,7 +37,9 @@
     "676bca22",
     "ba9777d4",
     "58fdbb9d",
-    "69d595f4"
+    "69d595f4",
+    "3f56886a",
+    "b76bc47b"
   ],
   "dismissals": [],
   "acceptances": [
@@ -358,6 +360,38 @@
           "path": "/api/gmail/status"
         }
       }
+    },
+    {
+      "id": "3f56886a",
+      "title": "GET /api/screenings/ledger not in API endpoint tables",
+      "target": {
+        "type": "component",
+        "id": "api"
+      },
+      "suggestion": {
+        "action": "add_endpoint",
+        "args": {
+          "componentId": "api",
+          "method": "GET",
+          "path": "/api/screenings/ledger"
+        }
+      }
+    },
+    {
+      "id": "b76bc47b",
+      "title": "GET /api/company-findings/companies not in API endpoint tables",
+      "target": {
+        "type": "component",
+        "id": "api"
+      },
+      "suggestion": {
+        "action": "add_endpoint",
+        "args": {
+          "componentId": "api",
+          "method": "GET",
+          "path": "/api/company-findings/companies"
+        }
+      }
     }
   ],
   "decisions": [
@@ -589,6 +623,28 @@
         "actor": "external-agent",
         "via": "chat",
         "at": "2026-11-12T12:19:11.602Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "3f56886a",
+      "title": "GET /api/screenings/ledger not in API endpoint tables",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-13T09:20:51.041Z",
+        "verified": false
+      }
+    },
+    {
+      "id": "b76bc47b",
+      "title": "GET /api/company-findings/companies not in API endpoint tables",
+      "status": "accepted",
+      "decidedBy": {
+        "actor": "external-agent",
+        "via": "chat",
+        "at": "2026-11-13T09:20:51.790Z",
         "verified": false
       }
     }

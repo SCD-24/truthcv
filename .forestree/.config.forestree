@@ -253,6 +253,16 @@
                   "desc": "Gmail connection status; never 403s. Returns connected, email, reauthRequired, trackingEnabled and refreshExpiresAt (epoch seconds when the stored refresh token expires; null when unknown or Gmail is not connected).",
                   "method": "GET",
                   "path": "/api/gmail/status"
+                },
+                {
+                  "desc": "",
+                  "method": "GET",
+                  "path": "/api/screenings/ledger"
+                },
+                {
+                  "desc": "",
+                  "method": "GET",
+                  "path": "/api/company-findings/companies"
                 }
               ]
             },
