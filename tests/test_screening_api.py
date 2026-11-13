@@ -338,6 +338,79 @@ def test_rejected_route_category_filter_keeps_counts_for_all_categories(client):
     assert (unknown["items"], unknown["total"]) == ([], 0)
 
 
+# --- GET screenings/ledger ------------------------------------------------------
+
+def _store_ledger_record(monkeypatch, n, created_at, **fields):
+    """Store screening ``n`` with a fixed ``created_at`` via the real write path."""
+    from truthcv.domain.screening import store
+
+    monkeypatch.setattr(store, "_now", lambda: created_at)
+    rec, created = store.create_or_get({
+        "company": f"Co{n}",
+        "role": "Engineer",
+        "url": f"https://co{n}.example/jobs/1",
+        "verdict": "rejected",
+        "posting_text": "We are hiring for this role. " * 6,
+        **fields,
+    })
+    assert created
+    return rec
+
+
+def test_ledger_route_pages_newest_first_and_echoes_clamped_params(client, monkeypatch):
+    for n in range(3):
+        _store_ledger_record(monkeypatch, n, f"2026-07-0{n + 1}T00:00:00+00:00")
+    body = client.get("/api/screenings/ledger").json()
+    assert set(body) == {"items", "total", "limit", "offset", "lastActivity"}
+    assert (body["total"], body["limit"], body["offset"]) == (3, 50, 0)
+    assert [i["company"] for i in body["items"]] == ["Co2", "Co1", "Co0"]
+    assert all("postingText" not in i for i in body["items"])
+    assert body["items"][0]["createdAt"] == "2026-07-03T00:00:00+00:00"
+    page = client.get("/api/screenings/ledger", params={"limit": 1, "offset": 1}).json()
+    assert [i["company"] for i in page["items"]] == ["Co1"]
+    assert (page["total"], page["limit"], page["offset"]) == (3, 1, 1)
+    low = client.get("/api/screenings/ledger", params={"limit": 0, "offset": -5}).json()
+    assert (len(low["items"]), low["limit"], low["offset"]) == (1, 1, 0)
+    high = client.get("/api/screenings/ledger", params={"limit": 999}).json()
+    assert high["limit"] == 200
+
+
+def test_ledger_route_blocked_only_filters_total_but_not_last_activity(client, monkeypatch):
+    _store_ledger_record(
+        monkeypatch, 0, "2026-07-01T00:00:00+00:00", screening_blocker="login_required"
+    )
+    _store_ledger_record(monkeypatch, 1, "2026-07-02T00:00:00+00:00")
+    body = client.get("/api/screenings/ledger", params={"blocked_only": "true"}).json()
+    assert [i["company"] for i in body["items"]] == ["Co0"]
+    assert body["items"][0]["screeningBlocker"] == "login_required"
+    assert body["total"] == 1
+    # The newest record is filtered out yet still sets last activity.
+    assert body["lastActivity"] == "2026-07-02T00:00:00+00:00"
+
+
+def test_ledger_route_last_activity_prefers_screened_date_across_all_pages(client, monkeypatch):
+    # Oldest by created_at (so last on the page order) but newest screened date.
+    _store_ledger_record(
+        monkeypatch, 0, "2026-07-01T00:00:00+00:00", screened_date="2026-08-15"
+    )
+    _store_ledger_record(monkeypatch, 1, "2026-07-02T00:00:00+00:00")
+    body = client.get("/api/screenings/ledger", params={"limit": 1}).json()
+    assert [i["company"] for i in body["items"]] == ["Co1"]
+    assert body["lastActivity"] == "2026-08-15"
+
+
+def test_ledger_route_empty_store_has_null_last_activity(client):
+    body = client.get("/api/screenings/ledger").json()
+    assert (body["items"], body["total"], body["lastActivity"]) == ([], 0, None)
+
+
+def test_ledger_route_is_not_captured_as_a_screening_id(client):
+    # "ledger" must reach the page route, not a /screenings/{screening_id} one.
+    r = client.get("/api/screenings/ledger")
+    assert r.status_code == 200, r.text
+    assert r.json()["items"] == []
+
+
 def test_list_screenings_stays_an_unpaged_array_beside_rejected_route(client):
     for n in range(3):
         _post_agent_rejection(client, f"Co{n}")
