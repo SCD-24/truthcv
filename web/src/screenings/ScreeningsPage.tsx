@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import IconButton from "@mui/material/IconButton";
@@ -17,14 +17,14 @@ import Tooltip from "@mui/material/Tooltip";
 import TextField from "@mui/material/TextField";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Checkbox from "@mui/material/Checkbox";
-import { deleteScreening, listScreenings, setScreeningRole } from "../api/client";
-import type { ScreeningRecord } from "../api/types";
+import TablePagination from "@mui/material/TablePagination";
+import { deleteScreening, listScreeningLedgerPage, setScreeningRole } from "../api/client";
+import type { ScreeningLedgerItem, ScreeningLedgerPage } from "../api/types";
 import { isCooldownActive } from "../settings/cooldown";
-import { lastAgentActivity } from "../settings/agentActivity";
 
 /** How a cooldown reads in the table: the active/expired/none label the chip
  * carries, kept separate from the pure isCooldownActive predicate. */
-function cooldownLabel(record: ScreeningRecord, active: boolean): string {
+function cooldownLabel(record: ScreeningLedgerItem, active: boolean): string {
   if (active) return `Until ${record.cooldownExpires}`;
   return record.cooldownExpires ? "Expired" : "No cooldown";
 }
@@ -61,7 +61,7 @@ function RoleCell({
   busy,
   onSave,
 }: {
-  record: ScreeningRecord;
+  record: ScreeningLedgerItem;
   busy: boolean;
   onSave: (id: string, role: string) => Promise<void>;
 }) {
@@ -149,7 +149,7 @@ function ScreeningRow({
   savingRole,
   onSaveRole,
 }: {
-  record: ScreeningRecord;
+  record: ScreeningLedgerItem;
   deleting: boolean;
   onDelete: (id: string) => void;
   savingRole: boolean;
@@ -199,70 +199,166 @@ function ScreeningRow({
   );
 }
 
-/**
- * The Screenings page — the agent's rejection & cooldown ledger, on its own
- * page (mirroring AnalyticsPage). Loads `ScreeningRecord[]` via
- * `listScreenings()` with loading/error/empty states, and lets the operator
- * delete a record to un-block a target immediately.
- */
-export function ScreeningsPage() {
-  const [screenings, setScreenings] = useState<ScreeningRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+/** Rows per ledger page, matching the other paged lists' fixed size. */
+const LEDGER_PAGE_SIZE = 50;
+
+type LedgerPos = { page: number; blockedOnly: boolean };
+
+/** Fetch the ledger page `pos` names, again whenever `nonce` changes. Each
+ * fetch supersedes the one before it, so a stale response never overwrites a
+ * newer one; a page a delete emptied moves back to the last page with rows.
+ * Loading is the state before the first response or error. */
+function useLedgerFetch(pos: LedgerPos, nonce: number, setPos: (p: LedgerPos) => void) {
+  const [data, setData] = useState<ScreeningLedgerPage | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [savingRoleId, setSavingRoleId] = useState<string | null>(null);
-  const [blockedOnly, setBlockedOnly] = useState(false);
 
   useEffect(() => {
-    let alive = true;
-    listScreenings()
-      .then((records) => {
-        if (alive) setScreenings(records);
+    let live = true;
+    const { page, blockedOnly } = pos;
+    listScreeningLedgerPage({ limit: LEDGER_PAGE_SIZE, offset: page * LEDGER_PAGE_SIZE, blockedOnly })
+      .then((res) => {
+        if (!live) return;
+        setError(null);
+        setData(res);
+        const next = Math.min(page, Math.max(0, Math.ceil(res.total / LEDGER_PAGE_SIZE) - 1));
+        if (next !== page) setPos({ page: next, blockedOnly });
       })
-      .catch((e) => {
-        if (alive) {
-          setError(e instanceof Error ? e.message : "Couldn't load screenings.");
-        }
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
+      .catch((e) => live && setError(e instanceof Error ? e.message : "Couldn't load screenings."));
     return () => {
-      alive = false;
+      live = false;
     };
-  }, []);
+  }, [pos, nonce, setPos]);
+
+  return { data, setData, error };
+}
+
+/** The ledger's server page plus its position: the page, the blocked-only
+ * filter (which resets to the first page), a refetch, and an in-place patch. */
+function useLedgerPage() {
+  const [pos, setPos] = useState<LedgerPos>({ page: 0, blockedOnly: false });
+  const [nonce, setNonce] = useState(0);
+  const { setData, ...fetched } = useLedgerFetch(pos, nonce, setPos);
+
+  /** Swap in an edited record without refetching. */
+  const patchItem = (updated: ScreeningLedgerItem) =>
+    setData((d) => d && { ...d, items: d.items.map((r) => (r.id === updated.id ? updated : r)) });
+
+  return {
+    ...pos,
+    ...fetched,
+    setPage: (page: number) => setPos((p) => ({ ...p, page })),
+    setBlockedOnly: (blockedOnly: boolean) => setPos({ page: 0, blockedOnly }),
+    refetch: () => setNonce((n) => n + 1),
+    patchItem,
+  };
+}
+
+type LedgerView = ReturnType<typeof useLedgerPage>;
+
+/** The ledger's column headings, left of the Delete column. */
+const LEDGER_COLUMNS = ["Company", "Role", "Verdict", "Failing criterion", "Cooldown"];
+
+/** The loaded ledger: last activity, the blocked-only filter, one page of
+ * rows and the page controls. */
+function LedgerTable({
+  view,
+  data,
+  row,
+}: {
+  view: LedgerView;
+  data: ScreeningLedgerPage;
+  row: (record: ScreeningLedgerItem) => ReactNode;
+}) {
+  const lastLabel = data.lastActivity ? new Date(data.lastActivity).toLocaleDateString() : null;
+  return (
+    <Stack spacing={2}>
+      {lastLabel && (
+        <Typography variant="body2" color="text.secondary">
+          Last recorded activity: {lastLabel}
+        </Typography>
+      )}
+      <FormControlLabel
+        control={
+          <Checkbox
+            size="small"
+            checked={view.blockedOnly}
+            onChange={(e) => view.setBlockedOnly(e.target.checked)}
+          />
+        }
+        label="Show only postings the agent couldn't read"
+      />
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            {LEDGER_COLUMNS.map((c) => (
+              <TableCell key={c}>{c}</TableCell>
+            ))}
+            <TableCell align="right">Delete</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>{data.items.map(row)}</TableBody>
+      </Table>
+      <TablePagination
+        component="div"
+        count={data.total}
+        page={view.page}
+        rowsPerPage={LEDGER_PAGE_SIZE}
+        rowsPerPageOptions={[LEDGER_PAGE_SIZE]}
+        onPageChange={(_, p) => view.setPage(p)}
+      />
+    </Stack>
+  );
+}
+
+/**
+ * The Screenings page — the agent's rejection & cooldown ledger, on its own
+ * page (mirroring AnalyticsPage). Loads one server page of the ledger via
+ * `listScreeningLedgerPage()` with loading/error/empty states, and lets the
+ * operator delete a record to un-block a target immediately.
+ */
+export function ScreeningsPage() {
+  const view = useLedgerPage();
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [savingRoleId, setSavingRoleId] = useState<string | null>(null);
 
   /** Save a corrected role and replace the record with the server's
    * (normalized) response — errors propagate for RoleCell to show inline. */
   async function handleSaveRole(id: string, role: string) {
     setSavingRoleId(id);
     try {
-      const updated = await setScreeningRole(id, role);
-      setScreenings((prev) => prev.map((r) => (r.id === id ? updated : r)));
+      view.patchItem(await setScreeningRole(id, role));
     } finally {
       setSavingRoleId(null);
     }
   }
 
-  /** Delete a screening record and drop it from the loaded list. */
+  /** Delete a screening record and refetch the current page. */
   async function handleDelete(id: string) {
     setDeletingId(id);
-    setError(null);
+    setActionError(null);
     try {
       await deleteScreening(id);
-      setScreenings((prev) => prev.filter((r) => r.id !== id));
+      view.refetch();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't delete the screening record.");
+      setActionError(e instanceof Error ? e.message : "Couldn't delete the screening record.");
     } finally {
       setDeletingId(null);
     }
   }
 
-  const last = lastAgentActivity(screenings);
-  const lastLabel = last ? new Date(last).toLocaleDateString() : null;
-  const visibleScreenings = blockedOnly
-    ? screenings.filter((r) => r.screeningBlocker)
-    : screenings;
+  const error = actionError ?? view.error;
+  const { data } = view;
+  const row = (record: ScreeningLedgerItem) => (
+    <ScreeningRow
+      key={record.id}
+      record={record}
+      deleting={deletingId === record.id}
+      onDelete={handleDelete}
+      savingRole={savingRoleId === record.id}
+      onSaveRole={handleSaveRole}
+    />
+  );
 
   return (
     <Box className="screenings-page" aria-labelledby="screenings-title">
@@ -286,57 +382,17 @@ export function ScreeningsPage() {
         </Alert>
       )}
 
-      {loading ? (
+      {!data && !view.error ? (
         <Stack direction="row" spacing={2} sx={{ py: 6, justifyContent: "center" }}>
           <CircularProgress size={20} sx={{ color: "var(--attest)" }} />
           <Typography color="text.secondary">Loading screenings…</Typography>
         </Stack>
-      ) : screenings.length === 0 ? (
+      ) : !data || (data.total === 0 && !view.blockedOnly) ? (
         <Typography color="text.secondary" sx={{ py: 6, textAlign: "center" }}>
           The agent hasn't recorded any activity yet.
         </Typography>
       ) : (
-        <Stack spacing={2}>
-          {lastLabel && (
-            <Typography variant="body2" color="text.secondary">
-              Last recorded activity: {lastLabel}
-            </Typography>
-          )}
-          <FormControlLabel
-            control={
-              <Checkbox
-                size="small"
-                checked={blockedOnly}
-                onChange={(e) => setBlockedOnly(e.target.checked)}
-              />
-            }
-            label="Show only postings the agent couldn't read"
-          />
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Company</TableCell>
-                <TableCell>Role</TableCell>
-                <TableCell>Verdict</TableCell>
-                <TableCell>Failing criterion</TableCell>
-                <TableCell>Cooldown</TableCell>
-                <TableCell align="right">Delete</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {visibleScreenings.map((record) => (
-                <ScreeningRow
-                  key={record.id}
-                  record={record}
-                  deleting={deletingId === record.id}
-                  onDelete={handleDelete}
-                  savingRole={savingRoleId === record.id}
-                  onSaveRole={handleSaveRole}
-                />
-              ))}
-            </TableBody>
-          </Table>
-        </Stack>
+        <LedgerTable view={view} data={data} row={row} />
       )}
     </Box>
   );

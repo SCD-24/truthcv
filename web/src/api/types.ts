@@ -410,6 +410,26 @@ export interface CompanyFinding {
   supersedes: string;
 }
 
+/** One company on the Company research page: its findings and whether any
+ * of them sit in an open contradiction. */
+export interface CompanyGroup {
+  /** Server company_identity_key(company): spellings of one company share it. */
+  companyKey: string;
+  company: string;
+  findings: CompanyFinding[];
+  needsReview: boolean;
+}
+
+/** One page of GET /api/company-findings/companies. `total` counts the
+ * companies matching the filters; `companies` names every company, unfiltered. */
+export interface CompanyGroupPage {
+  items: CompanyGroup[];
+  total: number;
+  limit: number;
+  offset: number;
+  companies: string[];
+}
+
 export type ClaimType = "employment_entity" | "employer_rating" | "other";
 
 export const CLAIM_TYPES: { value: ClaimType; label: string }[] = [
@@ -596,6 +616,21 @@ export interface RejectedScreeningPage {
   limit: number;
   offset: number;
   categories: RejectionCategoryCount[];
+}
+
+/** A screening as the ledger endpoint returns it: every field except the
+ * posting text, which the Screenings page never shows. */
+export type ScreeningLedgerItem = Omit<ScreeningRecord, "postingText">;
+
+/** One page of GET /api/screenings/ledger, newest first. `total` counts the
+ * rows matching the blocked-only filter; `lastActivity` is the newest
+ * screened (else created) date across every record, null when there are none. */
+export interface ScreeningLedgerPage {
+  items: ScreeningLedgerItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  lastActivity: string | null;
 }
 
 /** One execution of the unattended job-application agent — its identity, how
