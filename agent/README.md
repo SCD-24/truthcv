@@ -116,6 +116,8 @@ under the operator's name. Watch it.
 
 The container no longer aborts at start without an LLM credential — it logs a warning and continues; each scheduled run aborts (with a recorded reason on the Agents page) until a credential is available.
 
+When the app refuses the credential fetch with an error that carries a reason, the run aborts with `credential fetch failed: <reason>`. The reason is the app's own `detail` message, folded onto one line, cut to 300 characters, and with the agent token removed. Without one the abort reads `credential fetch failed (app returned non-zero exit)`. A failed `llm_routes` fetch is not fatal: the run logs one line, `llm_routes fetch failed: <reason>`, and continues without per-stage routes.
+
 The agent runs a provider-neutral harness (`agent/harness`, compiled into the image). Configure its independent **Application agent** route under **Model routing** in the web UI using a `claude`, `codex`, or `openrouter` connection from **Model routing → Accounts**. Clearing that route uses Claude independently of the default task model: the app resolves a saved Claude sign-in or API key, with an environment credential fallback. Changes take effect on the next run. The harness also supports `ollama` when configured outside this UI. Its credentials are resolved at run start through `GET /api/agent/llm-credentials`.
 
 ### Harness configuration surface

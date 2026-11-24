@@ -118,7 +118,7 @@ Endpoints **declared on the architecture canvas** (`endpoints` widgets) - not ex
 
 | Method | Path | Description |
 |---|---|---|
-| **GET** | `/api/auth/status` | Status of every catalog connection card. Returns `{encryptionAvailable, connections:[{provider,label,modes,subscriptionConnected,apiKeyConnected,authMode,expiresAt,connectedAt}]}`. |
+| **GET** | `/api/auth/status` | Status of every catalog connection card. Returns `{encryptionAvailable, connections:[{provider,label,modes,subscriptionConnected,reauthRequired,apiKeyConnected,authMode,expiresAt,connectedAt}]}`. `reauthRequired` is true when the subscription's refresh was refused with OAuth `invalid_grant`; while it is true, `subscriptionConnected` is false. Agent calls then fall back to the stored apiKey when one exists, and otherwise the agent endpoints return 503 until the subscription is reconnected. No token material is returned. |
 | **POST** | `/api/auth/{provider}/start` | Start the paste-code OAuth flow for a provider — Stage 1 supports this for `claude` only (400 for any other provider). Returns `{flow:"paste-code", authUrl}`. |
 | **POST** | `/api/auth/claude/complete` | Complete the Claude paste-code OAuth flow (authorization code → token); stores encrypted via ENCRYPTION_KEY. |
 | **POST** | `/api/auth/{provider}/key` | Save an API key (or, for `ollama`, a base URL/bearer token) for a provider connection — probes it live before persisting. Distinct from the paste-code OAuth flow above: this is key/URL storage, not subscription sign-in. An empty body re-validates the currently stored credential without changing it. |

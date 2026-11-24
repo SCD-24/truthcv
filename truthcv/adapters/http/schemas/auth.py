@@ -12,6 +12,9 @@ class ConnectionStatus(_Camel):
     label: str
     modes: list[str]
     subscription_connected: bool = False
+    # Set when a subscription's refresh was refused (OAuth invalid_grant);
+    # the subscription is then reported disconnected until re-login.
+    reauth_required: bool = False
     api_key_connected: bool = False
     auth_mode: str = ""
     expires_at: float | None = None

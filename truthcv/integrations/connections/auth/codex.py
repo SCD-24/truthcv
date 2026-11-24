@@ -23,10 +23,16 @@ VERIFICATION_URI = "https://auth.openai.com/codex/device"
 DEVICE_REDIRECT_URI = "https://auth.openai.com/deviceauth/callback"
 DEVICE_TIMEOUT_S = 900
 _EXPIRY_SKEW_S = 300
+_INVALID_GRANT = "invalid_grant"
+_RECONNECT_MSG = "ChatGPT token refresh failed — reconnect the subscription in Settings."
 
 
 class AuthError(RuntimeError):
     """Login/refresh failed or the connection is absent."""
+
+    def __init__(self, message: str, *, reconnect_required: bool = False) -> None:
+        super().__init__(message)
+        self.reconnect_required = reconnect_required
 
 
 _pending: dict | None = None
@@ -74,6 +80,7 @@ def _store_record(payload: dict, old_refresh: str | None = None) -> dict:
         "expiresAt": time.time() + float(payload.get("expires_in", 3600)),
         "scope": payload.get("scope", ""),
         "connectedAt": time.time(),
+        "reauthRequired": False,
     }
     set_connection("codex", {"oauth": record, "authMode": "subscription"})
     return record
@@ -196,6 +203,32 @@ def poll_login() -> dict:
     raise AuthError(f"Device auth error: {error_code}")
 
 
+def _refresh_error_code(resp: httpx.Response) -> str:
+    """OAuth ``error`` code from a failed refresh, or "" if the body has none."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return ""
+    code = body.get("error") if isinstance(body, dict) else None
+    return code if isinstance(code, str) else ""
+
+
+def _raise_refresh_failure(resp: httpx.Response, record: dict) -> None:
+    """Classify a non-200 refresh answer and raise the matching AuthError.
+
+    Only ``invalid_grant`` means the refresh token is dead, so only it marks the
+    record as needing reconnection (tokens are kept so logout still works).
+    Anything else (5xx, 429, other 4xx, non-JSON) is transient and leaves the
+    stored record untouched.
+    """
+    from truthcv.infra.secretstore import set_connection
+
+    if _refresh_error_code(resp) == _INVALID_GRANT:
+        set_connection("codex", {"oauth": {**record, "reauthRequired": True}})
+        raise AuthError(_RECONNECT_MSG, reconnect_required=True)
+    raise AuthError("ChatGPT token refresh failed — try again later.")
+
+
 def get_valid_access_token(rejected_sha256: str | None = None) -> str:
     """Return a valid codex access token, refreshing if within 300 s of expiry.
 
@@ -208,6 +241,8 @@ def get_valid_access_token(rejected_sha256: str | None = None) -> str:
 
     with _refresh_lock:
         record = get_connection("codex").get("oauth")
+        if record and record.get("reauthRequired"):
+            raise AuthError(_RECONNECT_MSG, reconnect_required=True)
         if not record or not record.get("accessToken"):
             raise AuthError("ChatGPT subscription is not connected.")
 
@@ -232,14 +267,10 @@ def get_valid_access_token(rejected_sha256: str | None = None) -> str:
                 timeout=30,
             )
         except httpx.HTTPError as exc:
-            raise AuthError(
-                "ChatGPT token refresh failed — reconnect the subscription in Settings."
-            ) from exc
+            raise AuthError("ChatGPT token refresh failed — try again later.") from exc
 
         if resp.status_code != 200:
-            raise AuthError(
-                "ChatGPT token refresh failed — reconnect the subscription in Settings."
-            )
+            _raise_refresh_failure(resp, record)
 
         return _store_record(
             resp.json(), old_refresh=record.get("refreshToken")

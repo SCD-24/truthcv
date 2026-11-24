@@ -947,6 +947,9 @@ export interface ConnectionStatus {
   modes: ConnectionMode[];
   subscriptionConnected: boolean;
   apiKeyConnected: boolean;
+  /** Stored subscription login was rejected and must be redone. While set,
+   * `subscriptionConnected` is false. */
+  reauthRequired?: boolean;
   authMode: string;
   expiresAt: number | null;
   connectedAt: number | null;

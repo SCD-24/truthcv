@@ -13,12 +13,16 @@ at call time, so tests can patch them on this module.
 
 from __future__ import annotations
 
+import logging
+
 import truthcv.integrations.modelrouting as modelrouting
 import truthcv.infra.secretstore as secretstore
 from truthcv.integrations.connections.auth import codex as codex_auth
 from truthcv.integrations.connections.auth.claude import AuthError, get_valid_access_token
 from truthcv.integrations.providers import OPENROUTER_BASE_URL
 from truthcv.services.errors import NotFound, ServiceError, Unavailable
+
+logger = logging.getLogger(__name__)
 
 
 def _credentials(
@@ -35,16 +39,36 @@ def _credentials(
     }
 
 
+def _subscription_token(card: str, conn: dict, fetch, auth_error, detail: str) -> str | None:
+    """The subscription token, or None when the subscription is dead (marked
+    reauthRequired, or the refresh says reconnect) and an apiKey is stored to
+    fall back on. Unavailable otherwise. Logs the fallback, never a secret."""
+    try:
+        return fetch()
+    except auth_error as exc:
+        dead = getattr(exc, "reconnect_required", False) or (conn.get("oauth") or {}).get(
+            "reauthRequired"
+        )
+        if not (dead and conn.get("apiKey")):
+            raise Unavailable(detail) from None
+    logger.warning(
+        "%s subscription needs reconnecting; falling back to the stored API key.", card
+    )
+    return None
+
+
 def _claude_credentials(model: str) -> dict:
-    """Resolve claude card credentials: oauth first, then apikey, else 404/503."""
+    """Resolve claude card credentials: oauth first, then apikey, else 404/503.
+    A dead subscription falls back to a stored apikey."""
     conn = secretstore.get_connection("claude")
     oauth = conn.get("oauth") or {}
     if oauth.get("accessToken") and conn.get("authMode") != "apikey":
-        try:
-            token = get_valid_access_token()
-        except AuthError:
-            raise Unavailable("Claude subscription needs reconnecting.") from None
-        return _credentials("oauth", token, model, "claude", "anthropic-messages")
+        token = _subscription_token(
+            "claude", conn, lambda: get_valid_access_token(), AuthError,
+            "Claude subscription needs reconnecting.",
+        )
+        if token is not None:
+            return _credentials("oauth", token, model, "claude", "anthropic-messages")
 
     api_key = conn.get("apiKey")
     if api_key:
@@ -53,15 +77,17 @@ def _claude_credentials(model: str) -> dict:
 
 
 def _codex_credentials(model: str) -> dict:
-    """Resolve codex card credentials: subscription oauth or apikey, OpenAI wire."""
+    """Resolve codex card credentials: subscription oauth or apikey, OpenAI wire.
+    A dead subscription falls back to a stored apikey."""
     conn = secretstore.get_connection("codex")
     oauth = conn.get("oauth") or {}
     if oauth.get("accessToken") and conn.get("authMode") != "apikey":
-        try:
-            token = codex_auth.get_valid_access_token()
-        except codex_auth.AuthError:
-            raise Unavailable("ChatGPT subscription needs reconnecting.") from None
-        return _credentials("oauth", token, model, "codex", "openai-responses")
+        token = _subscription_token(
+            "codex", conn, lambda: codex_auth.get_valid_access_token(), codex_auth.AuthError,
+            "ChatGPT subscription needs reconnecting.",
+        )
+        if token is not None:
+            return _credentials("oauth", token, model, "codex", "openai-responses")
     api_key = conn.get("apiKey")
     if not api_key:
         raise NotFound("Not Found")

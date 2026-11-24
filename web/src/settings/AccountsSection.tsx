@@ -24,6 +24,7 @@ import type { ConnectionList, ConnectionMode, ConnectionStatus, StartLoginResult
 function statusLine(status: ConnectionStatus): string {
   const parts: string[] = [];
   if (status.subscriptionConnected) parts.push("Subscription connected");
+  else if (status.reauthRequired) parts.push("Needs reconnecting");
   if (status.apiKeyConnected) parts.push("API key saved");
   return parts.length ? parts.join(" · ") : "Not connected";
 }
@@ -309,12 +310,23 @@ function ConnectionCard({
                   )}
                 </Stack>
               ) : (
-                <AsyncButton
-                  busy={connecting}
-                  busyLabel="Connecting…"
-                  label="Connect"
-                  onClick={handleConnect}
-                />
+                <>
+                  <AsyncButton
+                    busy={connecting}
+                    busyLabel={status.reauthRequired ? "Reconnecting…" : "Connecting…"}
+                    label={status.reauthRequired ? "Reconnect" : "Connect"}
+                    onClick={handleConnect}
+                  />
+                  {status.reauthRequired && (
+                    <AsyncButton
+                      variant="outlined"
+                      busy={disconnecting}
+                      busyLabel="Disconnecting…"
+                      label="Disconnect"
+                      onClick={() => handleDisconnect("subscription")}
+                    />
+                  )}
+                </>
               )}
             </Stack>
           )}

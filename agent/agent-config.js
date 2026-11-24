@@ -1,7 +1,9 @@
 // Fetch one field of the agent config from the app service. The agent image
 // has no curl (see daily-apply.sh's note); node is the only HTTP client.
 // Usage: node agent-config.js mode|enabled|run_at|run_days|run_timezone|job_config|llm_credentials|llm_routes
-// Errors print nothing and exit 1 — callers fall back to env defaults.
+// Errors exit 1 — callers fall back to env defaults. The one exception: a
+// non-200 response whose JSON body has a string `detail` also writes that
+// detail to stderr as a single line (see failWithDetail).
 import nodeHttp from "node:http";
 import nodeHttps from "node:https";
 
@@ -9,6 +11,27 @@ import nodeHttps from "node:https";
 // before exiting (prevents truncation on pipes with buffers <64KB).
 function emit(text, code = 0) {
   process.stdout.write(text, () => process.exit(code));
+}
+
+// Non-200 path: read the body, write the server's JSON `detail` to stderr as ONE
+// line (newlines folded to spaces, capped at 300 chars), then exit 1. `secret`,
+// the agent token when the request carried one, is redacted from the detail. A
+// body that is not JSON, or has no string detail, writes nothing.
+function failWithDetail(res, secret) {
+  let body = "";
+  res.on("data", (c) => (body += c));
+  res.on("end", () => {
+    let line = "";
+    try {
+      const detail = JSON.parse(body).detail;
+      if (typeof detail === "string") line = detail;
+    } catch { /* not JSON: nothing to report */ }
+    line = line.replace(/[\r\n]+/g, " ");
+    if (secret) line = line.split(secret).join("[redacted]");
+    line = line.slice(0, 300);
+    if (line) process.stderr.write(line + "\n", () => process.exit(1));
+    else process.exit(1);
+  });
 }
 
 const field = process.argv[2];
@@ -67,7 +90,7 @@ if (field === "llm_routes") {
   catch { process.exit(1); }
   const rhttp = ru.protocol === "https:" ? nodeHttps : nodeHttp;
   const rreq = rhttp.get(ru, { timeout: 5000, headers: { "X-Agent-Token": token } }, (res) => {
-    if (res.statusCode !== 200) { res.resume(); process.exit(1); }
+    if (res.statusCode !== 200) { failWithDetail(res, token); return; }
     let body = "";
     res.on("data", (c) => (body += c));
     res.on("end", () => {
@@ -90,7 +113,7 @@ if (field === "llm_credentials") {
   catch { process.exit(1); }
   const chttp = cu.protocol === "https:" ? nodeHttps : nodeHttp;
   const creq = chttp.get(cu, { timeout: 5000, headers: { "X-Agent-Token": token } }, (res) => {
-    if (res.statusCode !== 200) { res.resume(); process.exit(1); }
+    if (res.statusCode !== 200) { failWithDetail(res, token); return; }
     let body = "";
     res.on("data", (c) => (body += c));
     res.on("end", () => {
@@ -129,7 +152,7 @@ const http = u.protocol === "https:" ? nodeHttps : nodeHttp;
 // short timeout; they do no such work.
 const timeout = field === "job_config" ? 30000 : 5000;
 const req = http.get(u, { timeout }, (res) => {
-  if (res.statusCode !== 200) { res.resume(); process.exit(1); }
+  if (res.statusCode !== 200) { failWithDetail(res); return; }
   let body = "";
   res.on("data", (c) => (body += c));
   res.on("end", () => {

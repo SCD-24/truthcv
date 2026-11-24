@@ -9,36 +9,40 @@ const MAX_BUFFER = 16 * 1024 * 1024;
 interface RunResult {
   status: number | null;
   stdout: string;
+  stderr: string;
 }
 
 /**
- * Run agent-config.js for one field, capturing stdout through a pipe exactly
- * as daily-apply.sh and supervisor.js do. `fake` sets FAKE_AGENT_CONFIG,
- * `mcpUrl` sets TRUTHCV_MCP_URL; either is unset when omitted so the test
- * never inherits a real one from the environment. Async (not spawnSync) so
- * an in-test HTTP server on the same event loop can answer the child.
+ * Run agent-config.js for one field, capturing stdout and stderr through pipes
+ * exactly as daily-apply.sh and supervisor.js do. `fake` sets FAKE_AGENT_CONFIG,
+ * `mcpUrl` sets TRUTHCV_MCP_URL, `token` sets AGENT_API_TOKEN; each is unset
+ * when omitted so the test never inherits a real one from the environment.
+ * Async (not spawnSync) so an in-test HTTP server on the same event loop can
+ * answer the child.
  */
-function runConfig(field: string, opts: { fake?: string; mcpUrl?: string } = {}): Promise<RunResult> {
+function runConfig(field: string, opts: { fake?: string; mcpUrl?: string; token?: string } = {}): Promise<RunResult> {
   const env: NodeJS.ProcessEnv = { ...process.env };
   delete env.TRUTHCV_MCP_URL;
   delete env.FAKE_AGENT_CONFIG;
+  delete env.AGENT_API_TOKEN;
   if (opts.fake !== undefined) env.FAKE_AGENT_CONFIG = opts.fake;
   if (opts.mcpUrl !== undefined) env.TRUTHCV_MCP_URL = opts.mcpUrl;
+  if (opts.token !== undefined) env.AGENT_API_TOKEN = opts.token;
   return new Promise((resolve) => {
     const child = execFile(
       process.execPath,
       [SCRIPT, field],
       { encoding: 'utf8', maxBuffer: MAX_BUFFER, env },
-      (_err, stdout) => resolve({ status: child.exitCode, stdout }),
+      (_err, stdout, stderr) => resolve({ status: child.exitCode, stdout, stderr }),
     );
   });
 }
 
-/** Serve `body` as JSON on a loopback port; resolves to the base URL. */
-function serveJson(body: string): Promise<{ url: string; close: () => void }> {
+/** Serve `body` as JSON with `status` (default 200) on a loopback port; resolves to the base URL. */
+function serveJson(body: string, status = 200): Promise<{ url: string; close: () => void }> {
   return new Promise((resolve) => {
     const server = http.createServer((_req, res) => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.writeHead(status, { 'Content-Type': 'application/json' });
       res.end(body);
     });
     server.listen(0, '127.0.0.1', () => {
@@ -124,6 +128,45 @@ describe('agent-config.js — stdout is drained before exit', () => {
       expect(seen).toBe('tok /api/agent/llm-routes');
       expect((await run()).status).toBe(2);
       expect((await run('wrong')).status).toBe(1);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('writes the server detail to stderr as one capped line on a non-200 and exits 1', async () => {
+    const detail = 'Subscription needs reconnecting.\nOpen Settings > LLM. ' + 'x'.repeat(400);
+    const server = await serveJson(JSON.stringify({ detail }), 503);
+    try {
+      const res = await runConfig('mode', { mcpUrl: server.url });
+      expect(res.status).toBe(1);
+      expect(res.stdout).toBe('');
+      expect(res.stderr).toBe(detail.replace(/\n/g, ' ').slice(0, 300) + '\n');
+      expect(res.stderr.length).toBe(301);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('redacts the agent token from a non-200 detail', async () => {
+    const token = 'secret-token-123';
+    const server = await serveJson(JSON.stringify({ detail: `bad token ${token}` }), 401);
+    try {
+      const res = await runConfig('llm_credentials', { mcpUrl: server.url, token });
+      expect(res.status).toBe(1);
+      expect(res.stdout).toBe('');
+      expect(res.stderr).toBe('bad token [redacted]\n');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('exits 1 with empty stderr for a non-200 without a JSON detail', async () => {
+    const server = await serveJson('upstream exploded', 500);
+    try {
+      const res = await runConfig('mode', { mcpUrl: server.url });
+      expect(res.status).toBe(1);
+      expect(res.stdout).toBe('');
+      expect(res.stderr).toBe('');
     } finally {
       server.close();
     }

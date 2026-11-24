@@ -24,6 +24,7 @@ export function AgentModelSection({ connections, routing, onSaved }: {
       description="Runs unattended job applications in the browser, independently of task models. When unset, it uses Claude independently of the task default, using a saved Claude sign-in or API key with an environment credential fallback. Changes take effect on the next run."
       filterCards={["claude", "openrouter", "codex"]}
       allowClear
+      showTest
     />
     {AGENT_STAGES.map(({ key, label, description }) => (
       <ModelRoutePicker
