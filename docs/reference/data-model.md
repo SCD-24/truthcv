@@ -117,6 +117,15 @@ Projected from `schema` widgets on the architecture canvas.
 | `email` | string | - | Account address read from the Gmail profile endpoint at login. |
 | `refreshExpiresAt` | float (epoch seconds) \| null | - | Login time or refresh time plus Google's `refresh_token_expires_in`; null when the token answer omits it or the record predates the field. |
 | `reauthRequired` | bool | - | Set, with accessToken and refreshToken cleared and expiresAt zeroed, by mark_reconnect_required. A refresh calls it only when Google answers `invalid_grant`; other refresh failures leave the record untouched. |
+### claude / codex connection record (secretstore "<provider>".oauth)
+
+| Field | Type | Flags | Notes |
+|---|---|---|---|
+| `accessToken` | string | - | Current subscription access token; the status endpoint reports `subscriptionConnected` false while `reauthRequired` is true. |
+| `refreshToken` | string | - | Offline refresh token used to renew `accessToken`. |
+| `expiresAt` | float (epoch seconds) | - | Refreshed lazily before expiry. |
+| `connectedAt` | float (epoch seconds) | - | Preserved across refreshes. |
+| `reauthRequired` | bool | - | Set to true by a refresh that Anthropic or OpenAI answers with `invalid_grant`; the record is otherwise left intact. The stored apiKey, if any, is used for agent calls; with no apiKey, agent endpoints return 503. Cleared when the subscription is reconnected. Exposed as `reauthRequired` on `/api/auth/status`. |
 <!-- generated:end comp:integrations -->
 
 <!-- generated:start comp:orchestration -->

@@ -34,11 +34,13 @@ def _connection_status(card_key: str) -> ConnectionStatus:
     conn = secretstore.get_connection(card_key)
     oauth = conn.get("oauth") or {}
     has_key = bool(conn.get("apiKey")) or (card_key == "ollama" and bool(conn.get("baseUrl")))
+    reauth_required = bool(oauth.get("reauthRequired"))
     return ConnectionStatus(
         provider=card_key,
         label=meta["label"],
         modes=list(meta["modes"]),
-        subscription_connected=bool(oauth.get("accessToken")),
+        subscription_connected=bool(oauth.get("accessToken")) and not reauth_required,
+        reauth_required=reauth_required,
         api_key_connected=has_key,
         auth_mode=conn.get("authMode", ""),
         expires_at=oauth.get("expiresAt"),

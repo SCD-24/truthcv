@@ -30,6 +30,26 @@ def test_status_lists_cards_without_secrets(client):
     assert "sk-ant-1" not in str(body)
 
 
+def test_status_marked_reauth_required_reports_disconnected_subscription(client):
+    secretstore.set_connection("claude", {
+        "oauth": {"accessToken": "t", "expiresAt": time.time() + 100, "reauthRequired": True},
+        "apiKey": "sk-keep",
+    })
+    cards = {c["provider"]: c for c in client.get("/api/auth/status").json()["connections"]}
+    assert cards["claude"]["reauthRequired"] is True
+    assert cards["claude"]["subscriptionConnected"] is False
+    assert cards["claude"]["apiKeyConnected"] is True
+
+
+def test_status_unmarked_subscription_reauth_required_false(client):
+    secretstore.set_connection("claude", {
+        "oauth": {"accessToken": "t", "expiresAt": time.time() + 100},
+    })
+    cards = {c["provider"]: c for c in client.get("/api/auth/status").json()["connections"]}
+    assert cards["claude"]["reauthRequired"] is False
+    assert cards["claude"]["subscriptionConnected"] is True
+
+
 def test_start_claude_login(client):
     body = client.post("/api/auth/claude/start").json()
     assert body["flow"] == "paste-code" and "authUrl" in body
