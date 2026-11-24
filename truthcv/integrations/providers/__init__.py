@@ -10,6 +10,8 @@ truthfulness path depends on which provider is returned.
 
 from __future__ import annotations
 
+import logging
+
 from .base import LLMProvider, Message, ProviderError
 
 __all__ = [
@@ -28,6 +30,27 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 # fails. Do not "fix" these to match.
 ANTHROPIC_COMPAT_OPENROUTER_BASE_URL = "https://openrouter.ai/api"
 
+_log = logging.getLogger(__name__)
+
+
+def _falls_back_to_api_key(conn: dict) -> bool:
+    """A dead subscription (marked reauthRequired) with a stored apiKey."""
+    return bool((conn.get("oauth") or {}).get("reauthRequired") and conn.get("apiKey"))
+
+
+def _uses_subscription(card: str, conn: dict) -> bool:
+    """True when the card should use its subscription: an oauth record, not in
+    apikey mode, and not a dead subscription with a stored apiKey to fall back
+    on. Logs the fallback, never a secret."""
+    if not conn.get("oauth") or conn.get("authMode") == "apikey":
+        return False
+    if _falls_back_to_api_key(conn):
+        _log.warning(
+            "%s subscription needs reconnecting; falling back to the stored API key.", card
+        )
+        return False
+    return True
+
 
 def build_connection_provider(
     card: str, model: str | None, effort: str | None = None
@@ -44,17 +67,27 @@ def build_connection_provider(
     if card == "claude":
         from .anthropic_provider import AnthropicProvider
 
-        if conn.get("oauth") and conn.get("authMode") != "apikey":
+        if _uses_subscription(card, conn):
             return AnthropicProvider(model=model, oauth=True, effort=effort)
         return AnthropicProvider(model=model, api_key=conn.get("apiKey") or None, effort=effort)
     if card == "codex":
         from .openai_provider import OpenAIProvider
 
-        if conn.get("oauth") and conn.get("authMode") != "apikey":
+        if _uses_subscription(card, conn):
             from truthcv.integrations.connections.auth import codex as codex_auth
 
-            token = codex_auth.get_valid_access_token()
-            return OpenAIProvider(model=model, oauth_token=token, effort=effort)
+            try:
+                token = codex_auth.get_valid_access_token()
+            except codex_auth.AuthError as exc:
+                # The refresh just found the grant dead (and marked it): fall
+                # back to a stored apiKey; anything else still raises.
+                if not (exc.reconnect_required and conn.get("apiKey")):
+                    raise
+                _log.warning(
+                    "codex subscription needs reconnecting; falling back to the stored API key."
+                )
+            else:
+                return OpenAIProvider(model=model, oauth_token=token, effort=effort)
         return OpenAIProvider(model=model, api_key=conn.get("apiKey") or None, effort=effort)
     if card == "openrouter":
         from .openai_provider import OpenAIProvider
@@ -106,9 +139,15 @@ def get_provider(task: str | None = None, refresh: bool = False) -> LLMProvider:
     # not in the key because reset_provider() is the mechanism for picking up
     # a refreshed OAuth token — the provider instance captures its credential
     # at construction.
+    # A subscription marked reauthRequired (with an apiKey to fall back on) is
+    # keyed as apikey, so a cached subscription provider is never served once
+    # its refresh grant has died, and vice versa after reconnecting.
     from truthcv.infra.secretstore import get_connection
 
-    auth_mode = get_connection(card).get("authMode", "")
+    conn = get_connection(card)
+    auth_mode = conn.get("authMode", "")
+    if _falls_back_to_api_key(conn):
+        auth_mode = "apikey"
     key = (card, model, effort or "", auth_mode)
     if refresh:
         _cache.pop(key, None)

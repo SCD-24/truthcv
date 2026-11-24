@@ -62,6 +62,57 @@ def test_oauth_claude_when_record_present():
     assert provider._oauth is True
 
 
+def _dead_claude(api_key: str | None = "sk-ant-fb") -> None:
+    import time
+    conn = {
+        "oauth": {"accessToken": "t", "refreshToken": "r",
+                  "expiresAt": time.time() + 3600, "reauthRequired": True},
+        "authMode": "subscription",
+    }
+    if api_key:
+        conn["apiKey"] = api_key
+    secretstore.set_connection("claude", conn)
+
+
+def test_dead_claude_subscription_builds_api_key_provider():
+    _dead_claude()
+    provider = build_connection_provider("claude", None)
+    assert provider._oauth is False
+
+
+def test_dead_claude_subscription_without_key_stays_oauth():
+    _dead_claude(api_key=None)
+    assert build_connection_provider("claude", None)._oauth is True
+
+
+def test_dead_codex_subscription_builds_api_key_provider(monkeypatch):
+    from truthcv.integrations.connections.auth import codex as codex_auth
+
+    secretstore.set_connection("codex", {
+        "oauth": {"accessToken": "t", "refreshToken": "r", "expiresAt": 0},
+        "authMode": "subscription", "apiKey": "sk-codex-fb",
+    })
+
+    def _dead(**_kw):
+        raise codex_auth.AuthError("dead", reconnect_required=True)
+
+    monkeypatch.setattr(codex_auth, "get_valid_access_token", _dead)
+    provider = build_connection_provider("codex", None)
+    assert provider._oauth_token is None
+
+
+def test_cache_does_not_serve_oauth_provider_once_subscription_dies():
+    import time
+    secretstore.set_connection("claude", {
+        "oauth": {"accessToken": "t", "refreshToken": "r", "expiresAt": time.time() + 3600},
+        "authMode": "subscription", "apiKey": "sk-ant-fb",
+    })
+    modelrouting.save(Routing(default=Route("claude", "m")))
+    assert get_provider()._oauth is True
+    _dead_claude()  # the refresh path marks the record; nothing resets the cache
+    assert get_provider()._oauth is False
+
+
 def test_openrouter_uses_base_url():
     secretstore.set_connection("openrouter", {"apiKey": "sk-or-1"})
     provider = build_connection_provider("openrouter", "openrouter/auto")

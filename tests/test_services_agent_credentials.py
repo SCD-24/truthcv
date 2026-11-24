@@ -35,6 +35,67 @@ def test_claude_oauth_auth_error_is_unavailable(monkeypatch):
         svc.credentials_for_route(None)
 
 
+def _raise_reconnect(**_kw):
+    raise AuthError("dead", reconnect_required=True)
+
+
+def _raise_codex_reconnect(**_kw):
+    raise svc.codex_auth.AuthError("dead", reconnect_required=True)
+
+
+def test_dead_claude_subscription_falls_back_to_api_key(monkeypatch, caplog):
+    _conns(monkeypatch, {"claude": {
+        "oauth": {"accessToken": "t", "reauthRequired": True}, "apiKey": "sk-ant-fallback",
+    }})
+    monkeypatch.setattr(svc, "get_valid_access_token", _raise_reconnect)
+    with caplog.at_level("WARNING", logger=svc.__name__):
+        got = svc.credentials_for_route(Route("claude", "m"))
+    assert got == {
+        "authType": "api_key", "token": "sk-ant-fallback", "model": "m",
+        "baseUrl": "", "provider": "claude", "wire": "anthropic-messages",
+    }
+    assert "falling back" in caplog.text
+    assert "sk-ant-fallback" not in caplog.text and "'t'" not in caplog.text
+
+
+def test_refresh_reconnect_error_falls_back_to_api_key(monkeypatch):
+    # Not yet marked: the refresh itself is what discovers the dead grant.
+    _conns(monkeypatch, {"claude": {"oauth": {"accessToken": "t"}, "apiKey": "sk-ant-fb"}})
+    monkeypatch.setattr(svc, "get_valid_access_token", _raise_reconnect)
+    assert svc.credentials_for_route(None)["token"] == "sk-ant-fb"
+
+
+def test_dead_codex_subscription_falls_back_to_api_key(monkeypatch):
+    _conns(monkeypatch, {"codex": {"oauth": {"accessToken": "t"}, "apiKey": "sk-codex-fb"}})
+    monkeypatch.setattr(svc.codex_auth, "get_valid_access_token", _raise_codex_reconnect)
+    got = svc.credentials_for_route(Route("codex", "gpt-5"))
+    assert (got["authType"], got["token"], got["wire"]) == (
+        "api_key", "sk-codex-fb", "openai-chat-completions")
+
+
+def test_dead_subscription_without_api_key_is_unavailable(monkeypatch):
+    _conns(monkeypatch, {"claude": {"oauth": {"accessToken": "t", "reauthRequired": True}}})
+    monkeypatch.setattr(svc, "get_valid_access_token", _raise_reconnect)
+    with pytest.raises(Unavailable, match="^Claude subscription needs reconnecting.$"):
+        svc.credentials_for_route(None)
+
+
+def test_transient_refresh_error_does_not_fall_back(monkeypatch):
+    _conns(monkeypatch, {"claude": {"oauth": {"accessToken": "t"}, "apiKey": "sk-ant-fb"}})
+    monkeypatch.setattr(svc, "get_valid_access_token", _raise_auth)
+    with pytest.raises(Unavailable):
+        svc.credentials_for_route(None)
+
+
+def test_dead_subscription_stage_routes_use_api_key(monkeypatch):
+    _conns(monkeypatch, {"claude": {
+        "oauth": {"accessToken": "t", "reauthRequired": True}, "apiKey": "sk-ant-fb",
+    }})
+    monkeypatch.setattr(svc, "get_valid_access_token", _raise_reconnect)
+    modelrouting.save(Routing(agent=Route("claude", "m")))
+    assert svc.stage_routes()["stages"]["apply"]["authType"] == "api_key"
+
+
 def test_credentials_dict_matches_wire_model_dump(monkeypatch):
     _conns(monkeypatch, {"ollama": {"baseUrl": "http://o"}})
     got = svc.credentials_for_route(Route("ollama", "small"))

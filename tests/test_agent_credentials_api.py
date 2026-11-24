@@ -76,6 +76,30 @@ def test_oauth_refresh_fails_503(client, monkeypatch):
     assert "boom" not in resp.text
 
 
+def test_dead_subscription_with_api_key_serves_api_key(client):
+    # Real marked record (no patching): the auth module refuses it without a
+    # network call, and both agent endpoints serve the stored key instead.
+    secretstore.set_connection("claude", {
+        "oauth": {"accessToken": "at", "refreshToken": "rt",
+                  "expiresAt": time.time() + 3600, "reauthRequired": True},
+        "apiKey": "sk-ant-fb", "authMode": "subscription",
+    })
+    modelrouting.save(Routing(agent=Route("claude", "claude-opus-4-8")))
+    body = client.get("/api/agent/llm-credentials", headers=_hdr()).json()
+    assert (body["authType"], body["token"]) == ("api_key", "sk-ant-fb")
+    routes = client.get("/api/agent/llm-routes", headers=_hdr()).json()
+    assert routes["stages"]["apply"]["token"] == "sk-ant-fb"
+
+
+def test_dead_subscription_without_api_key_503(client):
+    secretstore.set_connection("claude", {
+        "oauth": {"accessToken": "at", "refreshToken": "rt",
+                  "expiresAt": time.time() + 3600, "reauthRequired": True},
+        "authMode": "subscription",
+    })
+    assert client.get("/api/agent/llm-credentials", headers=_hdr()).status_code == 503
+
+
 def test_non_ascii_header_404(client):
     # Raw non-ASCII bytes on the wire (as an ISO-8859-1/UTF-8 client might send)
     # must not crash hmac.compare_digest into a distinguishable 500 — every
