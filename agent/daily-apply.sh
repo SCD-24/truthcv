@@ -325,8 +325,23 @@ fi
 
 # Fetch routed LLM credentials from the app (Stage 2) and export them as the
 # provider-neutral variables the harness consumes (AGENT_LLM_*).
+#
+# On a non-200 answer agent-config.js writes the app's reason to stderr as one
+# line (already redacted and capped). It is captured to a temp file so the abort
+# can say why.
 AGENT_MODEL=""
-if CREDS="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" llm_credentials 2>/dev/null)"; then
+# Prints the first captured stderr line, folded and capped, with the agent token
+# removed; prints nothing when the file is empty. Removes the file either way.
+read_stderr_reason() {
+  local line=""
+  [[ -s "$1" ]] && line="$(tr '\r\n' '  ' <"$1" | head -c 300)"
+  if [[ -n "$line" && -n "${AGENT_API_TOKEN:-}" ]]; then line="${line//"$AGENT_API_TOKEN"/[redacted]}"; fi
+  rm -f "$1"
+  printf '%s' "$line"
+}
+CREDS_ERR="$(umask 077; mktemp)"
+if CREDS="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" llm_credentials 2>"$CREDS_ERR")"; then
+  rm -f "$CREDS_ERR"
   # Six lines, in order: authType, token, model, baseUrl, provider, wire.
   # An older agent-config.js emitting fewer lines yields empty values for
   # the missing ones here (sed on a missing line prints nothing), which the
@@ -353,6 +368,10 @@ if CREDS="$(node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" llm_credential
   log "using ${AGENT_LLM_PROVIDER:-unknown} credentials from app${AGENT_LLM_BASE_URL:+ ($AGENT_LLM_BASE_URL)}"
   unset CREDS AUTH_TOKEN AUTH_TYPE AGENT_PROVIDER AGENT_WIRE
 else
+  CREDS_REASON="$(read_stderr_reason "$CREDS_ERR")"
+  if [[ -n "$CREDS_REASON" ]]; then
+    abort "credential fetch failed: $CREDS_REASON"
+  fi
   abort "credential fetch failed (app returned non-zero exit)"
 fi
 
@@ -363,8 +382,14 @@ PIPE_DIR=""
 cleanup_tmp() { [[ -n "$ROUTES_FILE" ]] && rm -f "$ROUTES_FILE"; [[ -n "$PIPE_DIR" ]] && rm -rf "$PIPE_DIR"; return 0; }
 trap cleanup_tmp EXIT
 ROUTES_FILE="$(umask 077; mktemp)"
-if ! node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" llm_routes >"$ROUTES_FILE" 2>/dev/null; then
+ROUTES_ERR="$(umask 077; mktemp)"
+if ! node "${AGENT_CONFIG_JS:-/app/agent/agent-config.js}" llm_routes >"$ROUTES_FILE" 2>"$ROUTES_ERR"; then
   rm -f "$ROUTES_FILE"; ROUTES_FILE=""
+  # Not fatal: the run continues without per-stage routes, so log why.
+  ROUTES_REASON="$(read_stderr_reason "$ROUTES_ERR")"
+  log "llm_routes fetch failed: ${ROUTES_REASON:-no reason reported}; continuing without per-stage routes"
+else
+  rm -f "$ROUTES_ERR"
 fi
 
 # Final gate: the harness needs a known provider AND a usable credential for it.
