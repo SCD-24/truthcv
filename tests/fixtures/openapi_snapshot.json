@@ -2456,6 +2456,11 @@
             "title": "Provider",
             "type": "string"
           },
+          "reauthRequired": {
+            "default": false,
+            "title": "Reauthrequired",
+            "type": "boolean"
+          },
           "subscriptionConnected": {
             "default": false,
             "title": "Subscriptionconnected",
