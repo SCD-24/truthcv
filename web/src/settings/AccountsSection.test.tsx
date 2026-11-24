@@ -385,6 +385,57 @@ describe("AccountsSection", () => {
     vi.useRealTimers();
   }, 10000);
 
+  describe("reauthRequired", () => {
+    const reauth = (overrides: Partial<ConnectionStatus> = {}) =>
+      makeList([
+        makeStatus({
+          provider: "claude",
+          label: "Claude",
+          modes: ["subscription", "apikey"],
+          authMode: "subscription",
+          reauthRequired: true,
+          ...overrides,
+        }),
+      ]);
+
+    it("shows 'Needs reconnecting' with Reconnect and Disconnect, not Connect", () => {
+      render(<AccountsSection list={reauth()} onChanged={vi.fn()} />);
+
+      expect(screen.getByText("Needs reconnecting")).toBeTruthy();
+      expect(screen.queryByText(/subscription connected/i)).toBeNull();
+      expect(screen.getByRole("button", { name: "Reconnect" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+    });
+
+    it("keeps the saved API key fallback visible in the status line", () => {
+      render(<AccountsSection list={reauth({ apiKeyConnected: true })} onChanged={vi.fn()} />);
+
+      expect(screen.getByText("Needs reconnecting · API key saved")).toBeTruthy();
+    });
+
+    it("Reconnect re-runs the login flow", async () => {
+      vi.mocked(startLogin).mockResolvedValueOnce({ flow: "paste-code", authUrl: "https://x" });
+      render(<AccountsSection list={reauth()} onChanged={vi.fn()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+
+      expect(await screen.findByText(/open claude sign-in/i)).toBeTruthy();
+      expect(startLogin).toHaveBeenCalledWith("claude");
+    });
+
+    it("Disconnect logs out the subscription", async () => {
+      vi.mocked(logoutConnection).mockResolvedValueOnce(makeStatus());
+      const onChanged = vi.fn();
+      render(<AccountsSection list={reauth()} onChanged={onChanged} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+
+      await vi.waitFor(() => expect(onChanged).toHaveBeenCalled());
+      expect(logoutConnection).toHaveBeenCalledWith("claude", "subscription");
+    });
+  });
+
   it("CONNECTION_MODES pins the three backend mode literals fixtures derive from", () => {
     expect(CONNECTION_MODES).toEqual(["subscription", "apikey", "url"]);
   });
