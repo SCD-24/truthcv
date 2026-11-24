@@ -274,7 +274,7 @@ def test_failed_refresh_preserves_stored_credentials(enc, monkeypatch):
 
     def handler(request):
         assert str(request.url) == codex.TOKEN_URL
-        return Response(400, json={"error": "invalid_grant"})
+        return Response(500, json={"error": "server_error"})
 
     _use_transport(monkeypatch, handler)
     with pytest.raises(codex.AuthError, match="ChatGPT token refresh failed"):
@@ -321,10 +321,73 @@ def test_rejected_sha_mismatch_returns_stored_without_http(enc, monkeypatch):
 def test_rejected_sha_match_refresh_failure_keeps_credentials(enc, monkeypatch):
     existing = _fresh()
     secretstore.set_connection("codex", existing)
-    _use_transport(monkeypatch, lambda r: Response(400, json={"error": "invalid_grant"}))
+    _use_transport(monkeypatch, lambda r: Response(500, json={"error": "server_error"}))
     with pytest.raises(codex.AuthError, match="ChatGPT token refresh failed"):
         codex.get_valid_access_token(_sha("cur"))
     assert secretstore.get_connection("codex") == existing
+
+
+def _expiring():
+    rec = _fresh()
+    rec["oauth"]["expiresAt"] = time.time() + 10
+    return rec
+
+
+def test_invalid_grant_marks_reauth_required_and_raises_reconnect(enc, monkeypatch):
+    secretstore.set_connection("codex", _expiring())
+    _use_transport(monkeypatch, lambda r: Response(
+        400, json={"error": "invalid_grant", "error_description": "Refresh token expired"}))
+    with pytest.raises(codex.AuthError) as exc:
+        codex.get_valid_access_token()
+    assert exc.value.reconnect_required is True
+    rec = secretstore.get_connection("codex")["oauth"]
+    assert rec["reauthRequired"] is True
+    # tokens are kept so logout (which branches on accessToken) keeps working
+    assert rec["accessToken"] == "cur" and rec["refreshToken"] == "rt"
+
+
+@pytest.mark.parametrize("handler", [
+    lambda r: Response(500, json={"error": "server_error"}),
+    lambda r: Response(502, text="bad gateway"),
+    httpx.ConnectError,
+])
+def test_transient_refresh_failure_does_not_mark(enc, monkeypatch, handler):
+    existing = _expiring()
+    secretstore.set_connection("codex", existing)
+
+    def respond(request):
+        if handler is httpx.ConnectError:
+            raise httpx.ConnectError("connection refused")
+        return handler(request)
+
+    _use_transport(monkeypatch, respond)
+    with pytest.raises(codex.AuthError) as exc:
+        codex.get_valid_access_token()
+    assert exc.value.reconnect_required is False
+    assert secretstore.get_connection("codex") == existing
+
+
+def test_marked_record_short_circuits_without_http(enc, monkeypatch):
+    marked = _fresh()
+    marked["oauth"]["reauthRequired"] = True
+    secretstore.set_connection("codex", marked)
+
+    def handler(request):
+        raise AssertionError("no HTTP expected")
+
+    _use_transport(monkeypatch, handler)
+    for rejected in (None, _sha("cur"), _sha("other")):
+        with pytest.raises(codex.AuthError) as exc:
+            codex.get_valid_access_token(rejected)
+        assert exc.value.reconnect_required is True
+
+
+def test_store_record_clears_reauth_flag(enc):
+    marked = _fresh()
+    marked["oauth"]["reauthRequired"] = True
+    secretstore.set_connection("codex", marked)
+    codex._store_record({"access_token": "at-new", "refresh_token": "rt-new"})
+    assert secretstore.get_connection("codex")["oauth"]["reauthRequired"] is False
 
 
 def test_account_id_decodes_jwt_payload():

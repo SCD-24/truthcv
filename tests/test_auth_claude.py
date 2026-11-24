@@ -149,3 +149,65 @@ def test_complete_login_wraps_network_error_on_exchange(enc):
     respx.post(claude.TOKEN_URL).mock(side_effect=httpx.ConnectError("connection refused"))
     with pytest.raises(claude.AuthError):
         claude.complete_login(f"authcode#{state}")
+
+
+def _expiring():
+    rec = _fresh()
+    rec["oauth"]["expiresAt"] = time.time() + 10
+    return rec
+
+
+@respx.mock
+def test_invalid_grant_marks_reauth_required_and_raises_reconnect(enc):
+    secretstore.set_connection("claude", _expiring())
+    respx.post(claude.TOKEN_URL).mock(return_value=Response(
+        400, json={"error": "invalid_grant", "error_description": "Refresh token expired"}))
+    with pytest.raises(claude.AuthError) as exc:
+        claude.get_valid_access_token()
+    assert exc.value.reconnect_required is True
+    rec = secretstore.get_connection("claude")["oauth"]
+    assert rec["reauthRequired"] is True
+    # tokens are kept so logout (which branches on accessToken) keeps working
+    assert rec["accessToken"] == "cur" and rec["refreshToken"] == "rt"
+
+
+@pytest.mark.parametrize("fail", [
+    lambda: Response(500, json={"error": "server_error"}),
+    lambda: Response(502, text="bad gateway"),
+    lambda: httpx.ConnectError("connection refused"),
+])
+@respx.mock
+def test_transient_refresh_failure_does_not_mark(enc, fail):
+    existing = _expiring()
+    secretstore.set_connection("claude", existing)
+    outcome = fail()
+    route = respx.post(claude.TOKEN_URL)
+    if isinstance(outcome, Response):
+        route.mock(return_value=outcome)
+    else:
+        route.mock(side_effect=outcome)
+    with pytest.raises(claude.AuthError) as exc:
+        claude.get_valid_access_token()
+    assert exc.value.reconnect_required is False
+    assert secretstore.get_connection("claude") == existing
+
+
+@respx.mock
+def test_marked_record_short_circuits_without_http(enc):
+    marked = _fresh()
+    marked["oauth"]["reauthRequired"] = True
+    secretstore.set_connection("claude", marked)
+    route = respx.post(claude.TOKEN_URL).mock(return_value=Response(200, json={"access_token": "x"}))
+    for rejected in (None, _sha("cur"), _sha("other")):
+        with pytest.raises(claude.AuthError) as exc:
+            claude.get_valid_access_token(rejected)
+        assert exc.value.reconnect_required is True
+    assert route.call_count == 0
+
+
+def test_store_record_clears_reauth_flag(enc):
+    marked = _fresh()
+    marked["oauth"]["reauthRequired"] = True
+    secretstore.set_connection("claude", marked)
+    claude._store_record({"access_token": "at-new", "refresh_token": "rt-new"})
+    assert secretstore.get_connection("claude")["oauth"]["reauthRequired"] is False
