@@ -26,9 +26,17 @@ type TestState =
   | { kind: "fail"; detail: string };
 
 /** A provider connection is usable for routing once either its subscription
- * or its API key is connected. */
+ * or its API key is connected. A card whose subscription needs reconnecting
+ * stays selectable so a route pointing at it is kept and warned about. */
 function isConnected(status: ConnectionStatus): boolean {
-  return status.subscriptionConnected || status.apiKeyConnected;
+  return status.subscriptionConnected || status.apiKeyConnected || !!status.reauthRequired;
+}
+
+function reauthWarning(status: ConnectionStatus | undefined): string | null {
+  if (!status?.reauthRequired) return null;
+  return status.apiKeyConnected
+    ? `${status.label} subscription needs reconnecting. Its API key is being used instead.`
+    : `${status.label} subscription needs reconnecting. Nothing will work until then.`;
 }
 
 /** Shared connection + model picker: pick a connected provider, pick (or
@@ -88,6 +96,8 @@ export function ModelRoutePicker({
   const [effort, setEffort] = useState(restored?.effort ?? route?.effort ?? "");
   const requestId = useRef(0);
   const draftModel = useRef(restored?.model ?? route?.model ?? "");
+
+  const reauthMessage = reauthWarning(connectedConnections.find((c) => c.provider === connection));
 
   function queueChoice(next: { connection: string; model: string; custom: boolean; effort: string }, debounce = false) {
     if (!autosaveKey || autosave.locked) return;
@@ -329,6 +339,7 @@ export function ModelRoutePicker({
 
       </fieldset>
 
+      {reauthMessage && <Alert severity="warning">{reauthMessage}</Alert>}
       {test.kind === "ok" && <Alert severity="success">{test.detail}</Alert>}
       {test.kind === "fail" && <Alert severity="error">{test.detail}</Alert>}
       {autosaveKey && autosave.status !== "idle" && !(needsCommit && autosave.status === "saved") && (

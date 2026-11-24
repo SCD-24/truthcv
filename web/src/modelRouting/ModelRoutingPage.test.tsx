@@ -71,6 +71,12 @@ describe("Model routing page", () => {
     await vi.waitFor(() => expect(updateRouting).toHaveBeenCalledWith({ agent: null }));
   });
 
+  it("shows Test connection on the default and main agent pickers, not tasks or stages", async () => {
+    setup();
+    await screen.findByText("Application agent");
+    expect(screen.getAllByRole("button", { name: "Test connection" })).toHaveLength(2);
+  });
+
   it("saves an agent stage route and clears it with null", async () => {
     setup();
     await screen.findByText("Agent screening");

@@ -121,6 +121,62 @@ describe("ModelRoutePicker", () => {
     expect(testConnectionProvider).not.toHaveBeenCalled();
   });
 
+  it("warns that the API key is in use when a reauth card still has a stored key", () => {
+    const connections = [
+      makeStatus({ provider: "claude", label: "Claude", reauthRequired: true, apiKeyConnected: true }),
+    ];
+    render(
+      <ModelRoutePicker
+        connections={connections}
+        route={{ connection: "claude", model: "claude-opus-5" }}
+        onSave={vi.fn()}
+        title="Agent model"
+      />,
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toMatch(/needs reconnecting/i);
+    expect(alert.textContent).toMatch(/API key is being used instead/i);
+  });
+
+  it("warns nothing works and keeps the route when a reauth card has no API key", async () => {
+    vi.mocked(listConnectionModels).mockResolvedValue(models);
+    const connections = [
+      makeStatus({ provider: "claude", label: "Claude", reauthRequired: true }),
+      makeStatus({ provider: "codex", label: "Codex", apiKeyConnected: true }),
+    ];
+    const onSave = vi.fn();
+    render(
+      <ModelRoutePicker
+        connections={connections}
+        route={{ connection: "claude", model: "claude-opus-5" }}
+        onSave={onSave}
+        title="Agent model"
+        autosaveKey="test:reauth"
+      />,
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toMatch(/needs reconnecting/i);
+    expect(alert.textContent).toMatch(/nothing will work until then/i);
+    expect(screen.getByLabelText(/connection/i).textContent).toBe("Claude");
+    await vi.waitFor(() => {
+      expect((screen.getByLabelText(/^model$/i) as HTMLInputElement).value).toBe("Opus 5");
+    });
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("shows no reauth warning for a healthy connection", () => {
+    const connections = [
+      makeStatus({ provider: "claude", label: "Claude", subscriptionConnected: true }),
+    ];
+    render(
+      <ModelRoutePicker connections={connections} route={null} onSave={vi.fn()} title="Agent model" />,
+    );
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("does not render a context window field", () => {
     const connections = [
       makeStatus({ provider: "claude", label: "Claude", subscriptionConnected: true }),
