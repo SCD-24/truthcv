@@ -62,6 +62,8 @@ export interface DiscoveryOutcome {
   /** True when every composed entry had its coverage recorded. */
   coverageComplete: boolean;
   errors: string[];
+  /** Non-fatal problems (a partial feed failure); they never affect `coverageComplete`. */
+  warnings: string[];
 }
 
 /** Read a field that may be snake_case or camelCase. */
@@ -185,8 +187,11 @@ function enabledProfiles(cfg: Record<string, unknown>): string[] {
   return objs(cfg.profiles).filter((p) => p.enabled === true).map((p) => str(p.name) ?? '').filter(Boolean);
 }
 
-/** Feed postings: candidates plus one api-tier coverage entry per source (or a failed one on a feed error). */
-async function runFeed(cfg: Record<string, unknown>, mcp: McpCall, runId: string, map: Map<string, Candidate>, errors: string[]): Promise<void> {
+/**
+ * Feed postings: candidates plus one api-tier coverage entry per source (and a failed one on a feed error).
+ * A feed error is a warning when postings arrived or some were already screened, else an error.
+ */
+async function runFeed(cfg: Record<string, unknown>, mcp: McpCall, runId: string, map: Map<string, Candidate>, errors: string[], warnings: string[]): Promise<void> {
   const bySource = new Map<string, number>();
   const all = enabledProfiles(cfg);
   for (const p of objs(cfg.feedPostings)) {
@@ -199,8 +204,10 @@ async function runFeed(cfg: Record<string, unknown>, mcp: McpCall, runId: string
   }
   const feedError = str(cfg.feedError);
   if (feedError) {
-    // Also for a PARTIAL failure: surface it (run not complete) without dropping the postings that did arrive.
-    errors.push(`feed ${bySource.size === 0 ? 'failed' : 'partially failed'}: ${feedError}`);
+    // The server omits already-screened postings, so a healthy feed may deliver none.
+    const partial = bySource.size > 0 || (typeof cfg.feedAlreadyScreened === 'number' && cfg.feedAlreadyScreened > 0);
+    if (partial) warnings.push(`feed partially failed: ${feedError}`);
+    else errors.push(`feed failed: ${feedError}`);
     const err = await recordCoverage(mcp, runId, 'feed', FEED_BOARD, { status: 'extraction_failed', reason: feedError, tier: 'api', found: 0 });
     if (err) errors.push(err);
   }
@@ -334,7 +341,8 @@ export async function discover(jobConfig: Record<string, unknown>, runId: string
   const dorks = pendingFirst(dorkEntries(jobConfig), state.deferred);
   const map = new Map<string, Candidate>();
   const errors: string[] = [];
-  await runFeed(jobConfig, mcp, runId, map, errors);
+  const warnings: string[] = [];
+  await runFeed(jobConfig, mcp, runId, map, errors, warnings);
   await emit(new Map(map), options, errors);
   const directResults = await harvestDirects(directs, call, lock, errors);
   for (let i = 0; i < directs.length; i++) await ingest(directs[i], directResults[i].r, map, options, errors);
@@ -349,5 +357,5 @@ export async function discover(jobConfig: Record<string, unknown>, runId: string
     if (err) errors.push(err);
   }
   const filtered = options.onCandidates ? { candidates: [], dropped: [] } : await filterUnscreened(mcp, map);
-  return { ...filtered, allCandidates: [...map.values()], coverageComplete: errors.length === 0, errors };
+  return { ...filtered, allCandidates: [...map.values()], coverageComplete: errors.length === 0, errors, warnings };
 }

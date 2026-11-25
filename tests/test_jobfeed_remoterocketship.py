@@ -307,7 +307,7 @@ def test_a_request_never_outlives_the_remaining_budget(mock_http, monkeypatch):
     mock_http(handler)
     rr.fetch_postings([_profile(name="a"), _profile(name="b")], "k", now=NOW)
     assert timeouts[0] == rr.TIMEOUT_SECONDS
-    # 16s spent, 4s of budget left — the second request must not be allowed 8s.
+    # 16s spent, 4s of budget left — the second request must not be allowed 12s.
     assert timeouts[1] == pytest.approx(4.0)
 
 
@@ -362,13 +362,96 @@ def test_account_level_failures_stop_after_one_request(mock_http, status, messag
 
 
 def test_transport_failure_is_reported_not_raised(mock_http):
+    calls = []
+
     def handler(request):
+        calls.append(1)
         raise httpx.ConnectError("no route to host")
 
     mock_http(handler)
     result = rr.fetch_postings([_profile()], "k", now=NOW)
+    assert len(calls) == 1  # only a timeout earns a retry
     assert result.postings == []
     assert "Could not reach Remote Rocketship" in result.error
+
+
+# --- timeout retry ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("timeout_error", [httpx.ReadTimeout, httpx.ConnectTimeout])
+def test_a_timed_out_page_is_retried_once_and_can_succeed(mock_http, timeout_error):
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        if len(calls) == 1:
+            raise timeout_error("slow")
+        return httpx.Response(200, json={"jobOpenings": [_opening()]})
+
+    mock_http(handler)
+    result = rr.fetch_postings([_profile()], "k", now=NOW)
+
+    assert len(calls) == 2
+    assert result.error == ""
+    assert len(result.postings) == 1
+
+
+def test_a_second_timeout_reports_the_error_and_stops_the_fetch(mock_http):
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        raise httpx.ReadTimeout("slow")
+
+    mock_http(handler)
+    result = rr.fetch_postings([_profile(name="a"), _profile(name="b")], "k", now=NOW)
+
+    assert len(calls) == 2  # one retry, and profile b is never requested
+    assert result.error == "Could not reach Remote Rocketship: ReadTimeout."
+    assert result.postings == []
+
+
+def test_a_timeout_is_not_retried_once_the_deadline_has_passed(mock_http, monkeypatch):
+    clock = {"t": 0.0}
+    monkeypatch.setattr(rr.time, "monotonic", lambda: clock["t"])
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        clock["t"] += 5.0
+        raise httpx.ReadTimeout("slow")
+
+    mock_http(handler)
+    result = rr.fetch_postings([_profile()], "k", now=NOW, deadline=5.0)
+
+    assert len(calls) == 1
+    assert result.error == "Could not reach Remote Rocketship: ReadTimeout."
+
+
+@pytest.mark.parametrize(
+    "spent,retry_read,retry_connect",
+    [(12.0, 8.0, 3.0), (18.0, 2.0, 2.0)],
+)
+def test_the_retry_timeout_is_recomputed_from_the_deadline(
+    mock_http, monkeypatch, spent, retry_read, retry_connect
+):
+    clock = {"t": 0.0}
+    monkeypatch.setattr(rr.time, "monotonic", lambda: clock["t"])
+    timeouts = []
+
+    def handler(request):
+        timeouts.append(request.extensions["timeout"])
+        if len(timeouts) == 1:
+            clock["t"] += spent
+            raise httpx.ReadTimeout("slow")
+        return httpx.Response(200, json={"jobOpenings": []})
+
+    mock_http(handler)
+    rr.fetch_postings([_profile()], "k", now=NOW, deadline=20.0)
+
+    full = rr.TIMEOUT_SECONDS
+    assert timeouts[0] == {"connect": rr.CONNECT_TIMEOUT_SECONDS, "read": full, "write": full, "pool": full}
+    assert timeouts[1] == {"connect": retry_connect, "read": retry_read, "write": retry_read, "pool": retry_read}
 
 
 def test_unexpected_response_shape_is_reported_not_raised(mock_http):

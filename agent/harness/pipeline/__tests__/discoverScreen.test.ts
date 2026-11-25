@@ -20,11 +20,11 @@ const LONG = 'x'.repeat(500);
 
 const SRC = [{ source: 'g', channel: 'dork' }];
 
-function setup(found: { errors: string[]; coverageComplete: boolean }, funnelReply = '{"recorded":true,"mismatches":[],"truncated":false}') {
+function setup(found: { errors: string[]; coverageComplete: boolean; warnings?: string[] }, funnelReply = '{"recorded":true,"mismatches":[],"truncated":false}') {
   const cand = { url: 'https://a.test/1', title: 'T', channel: 'dork', sources: SRC, profiles: ['P'] };
   discoverMock.mockImplementation(async (_j: unknown, _r: unknown, _b: unknown, _m: unknown, opts?: { onCandidates?: (b: unknown[]) => Promise<void> }) => {
     await opts?.onCandidates?.([cand]);
-    return { candidates: [], allCandidates: [cand], dropped: [], ...found };
+    return { candidates: [], allCandidates: [cand], dropped: [], warnings: [], ...found };
   });
   const names = ['record_screening', 'record_source_funnel'];
   const pool = {
@@ -59,6 +59,31 @@ describe('discover-screen per-item errors', () => {
     expect(s.itemErrors[0]).toContain(LONG);
   });
 
+  it('a discovery warning alone: exit 0, ok true, warning first in itemErrors and counted', async () => {
+    const { d: base, out } = setup({ errors: [], warnings: ['feed partially failed: k-leak'], coverageComplete: true });
+    const logs: string[] = [];
+    const d = { ...base, stderr: (l: string) => void logs.push(l) };
+    expect(await runPipelineCli(ARGS, { ...ENV, AGENT_LLM_API_KEY: 'k-leak' }, d)).toBe(ExitCode.Success);
+    const s = JSON.parse(out['o.json']) as { ok: boolean; errors: string[]; itemErrors: string[] };
+    expect(s.ok).toBe(true);
+    expect(s.errors).toEqual([]);
+    expect(s.itemErrors).toHaveLength(2);
+    expect(s.itemErrors[0]).toMatch(/^feed partially failed: /);
+    expect(s.itemErrors[0]).not.toContain('k-leak');
+    expect(s.itemErrors[1].startsWith('https://a.test/1 [P]: ')).toBe(true);
+    const event = logs.find((l) => l.includes('"event":"discover-screen"'))!;
+    expect(JSON.parse(event)).toMatchObject({ ok: true, warnings: 1, itemErrors: 1, errors: 0 });
+  });
+
+  it('a warning does not mask a real error: exit 3, ok false', async () => {
+    const { d, out } = setup({ errors: ['discovery boom'], warnings: ['feed partially failed: x'], coverageComplete: false });
+    expect(await runPipelineCli(ARGS, ENV, d)).toBe(ExitCode.ProviderError);
+    const s = JSON.parse(out['o.json']) as { ok: boolean; errors: string[]; itemErrors: string[] };
+    expect(s.ok).toBe(false);
+    expect(s.errors).toEqual(['discovery boom']);
+    expect(s.itemErrors[0]).toBe('feed partially failed: x');
+  });
+
   it('records the funnel and flags the run on mismatches but not on truncation', async () => {
     const { d, out, pool } = setup({ errors: [], coverageComplete: true }, '{"recorded":true,"mismatches":["g: sum"],"truncated":false}');
     expect(await runPipelineCli(ARGS, ENV, d)).toBe(ExitCode.ProviderError);
@@ -85,7 +110,7 @@ describe('discover-screen per-item errors', () => {
       await o.onCandidates([c1, c1]);
       await firstScreened;
       await o.onCandidates([c2, c1]);
-      return { candidates: [], allCandidates: [c1, c2], dropped: [], errors: [], coverageComplete: true };
+      return { candidates: [], allCandidates: [c1, c2], dropped: [], errors: [], warnings: [], coverageComplete: true };
     });
     out['dork-state.json'] = JSON.stringify({ lastSearchAt: 7, consecutiveBlocks: 0, cooldownUntil: 0, deferred: [] });
     expect(await runPipelineCli([...ARGS, '--dork-state-file', 'dork-state.json'], ENV, d)).toBe(ExitCode.Success);
@@ -131,7 +156,7 @@ describe('discover-screen per-item errors', () => {
     const cands = [1, 2, 3, 4, 5].map((n) => ({ url: `https://a.test/${n}`, title: 'T', channel: 'dork', sources: SRC, profiles: ['P'] }));
     discoverMock.mockImplementation(async (_j: unknown, _r: unknown, _b: unknown, _m: unknown, o: { onCandidates: (b: unknown[]) => Promise<void> }) => {
       await o.onCandidates(cands);
-      return { candidates: [], allCandidates: cands, dropped: [], errors: [], coverageComplete: true };
+      return { candidates: [], allCandidates: cands, dropped: [], errors: [], warnings: [], coverageComplete: true };
     });
     expect(await runPipelineCli(ARGS, ENV, d)).toBe(ExitCode.ProviderError);
     const s = JSON.parse(out['o.json']) as { ok: boolean; errors: string[] };

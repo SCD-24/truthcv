@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, configure, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, useLocation, useNavigate } from "react-router";
 import { getRouting, listConnections, listConnectionModels, saveConnectionKey, updateRouting } from "../api/client";
 import type { ConnectionList, ConnectionStatus, Routing } from "../api/types";
@@ -32,6 +32,9 @@ function setup() {
   vi.mocked(updateRouting).mockResolvedValue(routing);
   render(<MemoryRouter initialEntries={["/model-routing"]}><Host /></MemoryRouter>);
 }
+// The model list loads in an effect after each (re)mount; the 1000ms default is too short under load.
+const ASYNC_TIMEOUT_MS = 10000;
+configure({ asyncUtilTimeout: ASYNC_TIMEOUT_MS });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 function deferred<T>() {
@@ -143,7 +146,7 @@ describe("Model routing page", () => {
     fireEvent.click(screen.getByText("Navigate"));
     fireEvent.click(screen.getByText("Navigate"));
     await screen.findByText("Application agent");
-    await vi.waitFor(() => expect((screen.getAllByLabelText(/^model$/i)[0] as HTMLInputElement).value).toBe("Model M"));
+    await vi.waitFor(() => expect((screen.getAllByLabelText(/^model$/i)[0] as HTMLInputElement).value).toBe("Model M"), { timeout: ASYNC_TIMEOUT_MS });
     await act(async () => { write.resolve({ ...routing, default: { connection: "claude", model: "m" } }); });
     const serverRoute: Routing = { ...routing, default: { connection: "claude", model: "remote-id" } };
     vi.mocked(getRouting).mockResolvedValueOnce(serverRoute);

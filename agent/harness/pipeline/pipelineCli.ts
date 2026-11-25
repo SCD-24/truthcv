@@ -171,7 +171,7 @@ export function makeRedactor(config: CliConfig, refreshed: readonly string[]): (
 function discoveryFailed(err: unknown, d: Resolved, redact: (t: string) => string, accepted: Candidate[]): DiscoveryOutcome {
   const message = redact(err instanceof Error ? err.message : String(err));
   d.stderr(JSON.stringify({ event: 'discover-failed', error: message }));
-  return { candidates: accepted, allCandidates: accepted, dropped: [], coverageComplete: false, errors: [`discovery failed: ${message}`] };
+  return { candidates: accepted, allCandidates: accepted, dropped: [], coverageComplete: false, errors: [`discovery failed: ${message}`], warnings: [] };
 }
 
 /** `discover-screen`: discovery, fetch, extract and screening. */
@@ -207,10 +207,10 @@ async function cmdDiscoverScreen(a: PipelineArgs, env: NodeJS.ProcessEnv, pool: 
   found.errors.unshift(...screened.systemicErrors.map(redact));
   const ok = found.coverageComplete && found.errors.length === 0;
   await d.writeOutput(out, JSON.stringify({
-    ok, coverageComplete: found.coverageComplete, errors: found.errors, itemErrors: screened.errors.map(redact),
+    ok, coverageComplete: found.coverageComplete, errors: found.errors, itemErrors: [...found.warnings, ...screened.errors].map(redact),
     blockers: screened.blockers, passes: screened.passes,
   }));
-  d.stderr(JSON.stringify({ event: 'discover-screen', ok, itemErrors: screened.errors.length, errors: found.errors.length }));
+  d.stderr(JSON.stringify({ event: 'discover-screen', ok, itemErrors: screened.errors.length, warnings: found.warnings.length, errors: found.errors.length }));
   return ok ? ExitCode.Success : ExitCode.ProviderError;
 }
 

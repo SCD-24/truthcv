@@ -198,6 +198,18 @@ describe('provider adapters', () => {
     expect(events).toContainEqual({ type: 'error', message: expect.any(String), retryable: true });
   });
 
+  it('yields a retryable error event on a 529 Anthropic overloaded response', async () => {
+    stubFetch(529, {});
+    const events = await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    expect(events).toContainEqual({ type: 'error', message: expect.any(String), retryable: true });
+  });
+
+  it('yields a non-retryable error event on a 400 Anthropic response', async () => {
+    stubFetch(400, {});
+    const events = await collect(createAnthropicMessagesAdapter({ apiKey: 'k', model: 'claude' }));
+    expect(events).toContainEqual({ type: 'error', message: expect.any(String), retryable: false });
+  });
+
   it('yields a non-retryable error event on a 4xx OpenAI response', async () => {
     stubFetch(400, {});
     const events = await collect(

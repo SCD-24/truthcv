@@ -40,7 +40,7 @@ export interface AnthropicMessagesOptions {
 }
 
 /** HTTP statuses worth retrying. */
-const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]);
 
 /**
  * Preamble a Claude subscription (OAuth) token requires as its FIRST system

@@ -46,10 +46,18 @@ MAX_POSTINGS = 60
 # The daily cap is 500 requests (UTC). Originally sized for one request per
 # enabled profile; pagination can need a second page per profile to clear
 # ITEMS_PER_PAGE (50) toward MAX_POSTINGS (60), so the cap is doubled to admit
-# that without meaningfully eating into the day's 500-request budget.
+# that without meaningfully eating into the day's 500-request budget. This
+# counts pages requested: the single retry after a timeout (``_post_page``) is
+# not counted against it.
 MAX_REQUESTS = 16
 
-TIMEOUT_SECONDS = 8.0
+# Per-request ceiling for the read, write and pool phases.
+TIMEOUT_SECONDS = 12.0
+
+# Ceiling on the connect phase of a page request. httpx applies a timeout to
+# each phase separately, so without a tighter connect bound a request starting
+# late could spend the remaining budget once connecting and again reading.
+CONNECT_TIMEOUT_SECONDS = 3.0
 
 # Wall-clock ceiling on a whole fetch, across every profile. This exists
 # because of the caller on the other side: the agent asks for the feed as part
@@ -260,8 +268,33 @@ def _page_is_stalled(openings: list, seen_urls: set[str]) -> bool:
     return bool(urls) and all(url in seen_urls for url in urls)
 
 
+def _post_page(client, headers: dict, body: dict, remaining: float, deadline: float):
+    """POST a page request, retrying exactly once on a timeout.
+
+    No attempt's phase timeouts exceed the time left: ``remaining`` bounds the
+    first, and the retry recomputes it from ``deadline`` (``time.monotonic()``).
+    The retry is immediate, and skipped once the deadline has passed. Any other
+    failure, or a second timeout, propagates to the caller.
+    """
+    import httpx
+
+    def post(seconds_left: float):
+        timeout = httpx.Timeout(
+            min(TIMEOUT_SECONDS, seconds_left), connect=min(CONNECT_TIMEOUT_SECONDS, seconds_left)
+        )
+        return client.post(API_URL, headers=headers, json=body, timeout=timeout)
+
+    try:
+        return post(remaining)
+    except httpx.TimeoutException:
+        seconds_left = deadline - time.monotonic()
+        if seconds_left <= 0:
+            raise
+        return post(seconds_left)
+
+
 def _request_page(
-    client, headers: dict, profile: JobProfile, page: int, remaining: float
+    client, headers: dict, profile: JobProfile, page: int, remaining: float, deadline: float
 ) -> tuple[list | None, str | None, bool]:
     """POST one page for a profile. Returns (openings, error, stop_all).
 
@@ -273,11 +306,9 @@ def _request_page(
 
     body = {"filters": filters_for_profile(profile, page=page), "includeJobDescription": False}
     try:
-        # Never let one request outlive the remaining budget: the per-request
+        # No phase may wait longer than the remaining budget: the per-request
         # timeout is a ceiling, not the bound that matters to the caller.
-        response = client.post(
-            API_URL, headers=headers, json=body, timeout=min(TIMEOUT_SECONDS, remaining)
-        )
+        response = _post_page(client, headers, body, remaining, deadline)
     except httpx.HTTPError as exc:
         return None, f"Could not reach Remote Rocketship: {type(exc).__name__}.", True
     try:
@@ -365,7 +396,7 @@ def _fetch_profile_pages(
             )
             return requests_made, True
         requests_made += 1
-        openings, error, stop = _request_page(client, headers, profile, page, remaining)
+        openings, error, stop = _request_page(client, headers, profile, page, remaining, deadline)
         if error is not None:
             errors.append(error)
             return requests_made, stop
