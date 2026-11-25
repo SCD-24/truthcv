@@ -57,11 +57,35 @@ describe('discover round 2', () => {
   it('records a partial feed failure without dropping postings', async () => {
     const mcp = okMcp();
     const out = await discover({ feedError: 'source X down', feedPostings: [{ url: 'https://f.test/1', title: 'T', source: 'rr', profile: 'A' }] }, 'r', recorder().call, mcp);
-    expect(out.coverageComplete).toBe(false);
-    expect(out.errors.join()).toContain('source X down');
+    expect(out.coverageComplete).toBe(true);
+    expect(out.errors).toEqual([]);
+    expect(out.warnings).toEqual(['feed partially failed: source X down']);
     expect(out.candidates.map((c) => c.url)).toContain('https://f.test/1');
     const feed = covCalls(mcp).filter((c) => c.channel === 'feed');
     expect(feed.map((c) => c.status).sort()).toEqual(['extraction_failed', 'searched']);
+  });
+
+  it('treats a feed error with only already-screened postings as a warning', async () => {
+    const mcp = okMcp();
+    const out = await discover({ feedError: 'source X down', feedAlreadyScreened: 5 }, 'r', recorder().call, mcp);
+    expect(out.coverageComplete).toBe(true);
+    expect(out.errors).toEqual([]);
+    expect(out.warnings).toEqual(['feed partially failed: source X down']);
+    expect(covCalls(mcp)).toContainEqual(expect.objectContaining({ channel: 'feed', status: 'extraction_failed' }));
+  });
+
+  it('treats a feed error with nothing delivered or already screened as an error', async () => {
+    const out = await discover({ feedError: 'source X down', feedAlreadyScreened: 0 }, 'r', recorder().call, okMcp());
+    expect(out.coverageComplete).toBe(false);
+    expect(out.errors).toEqual(['feed failed: source X down']);
+    expect(out.warnings).toEqual([]);
+  });
+
+  it('keeps a failure to record partial-feed coverage as an error', async () => {
+    const mcp = vi.fn(async (_t: string, _a: Record<string, unknown>) => ({ content: '{"recorded":false}', isError: false }));
+    const out = await discover({ feedError: 'source X down', feedAlreadyScreened: 5 }, 'r', recorder().call, mcp);
+    expect(out.errors).toEqual(['coverage not recorded for feed']);
+    expect(out.coverageComplete).toBe(false);
   });
 });
 

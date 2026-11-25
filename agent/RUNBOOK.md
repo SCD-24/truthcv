@@ -313,6 +313,15 @@ deliberately does not duplicate its values.
 
 **Pipeline mode (the only mode; any other `AGENT_SESSION_MODE` aborts).** Code, not you, runs discovery, coverage recording and screening; an apply session only applies the one posting handed to it and ends with `finish_application`.
 
+**Feed errors.** A feed error is a warning, not a run failure, when the feed
+delivered at least one usable posting or the server reports
+`feedAlreadyScreened` above 0 (it omits already-screened postings, so a healthy
+feed may deliver none). The warning, `feed partially failed: <error>`, leads the
+run's item errors and counts towards `items_failed`; on its own it leaves the
+run `completed`. With neither, `feed failed: <error>` fails the run. Both cases
+record `extraction_failed` coverage for the `feed` board, and a failure to
+record that coverage fails the run.
+
 Discovery works three channels, and they are worked in a fixed order:
 **feed**, then **direct boards**, then **dork queries**. Take one full pass
 over every board or query in a channel before starting a second pass on any
