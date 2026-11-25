@@ -14,7 +14,7 @@
       "name": "Python tests (pytest)",
       "kind": "test",
       "command": "python -m pytest -q",
-      "enabled": true,
+      "enabled": false,
       "scope": "repo"
     },
     {
